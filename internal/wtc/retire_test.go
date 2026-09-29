@@ -61,12 +61,35 @@ func TestRetireCollectionPreflightAndLeftovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixtureFile(t, filepath.Join(target, "keep.txt"), "unknown local state\n", 0644)
+	fixtureFile(t, filepath.Join(target, ".claude", "skills", "personal", "SKILL.md"), "local override\n", 0644)
+	fixtureFile(t, filepath.Join(target, ".codex", "config.toml"), "model = \"example\"\n", 0644)
 	retired, err := c.RetireCollection(RetireOptions{Name: "pending"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retired.FolderRemoved || len(retired.Leftovers) != 1 || retired.Leftovers[0] != "keep.txt" {
+	if retired.FolderRemoved || len(retired.Leftovers) != 3 {
 		t.Fatalf("unknown file did not remain visible: %+v", retired)
+	}
+	for _, rel := range []string{"keep.txt", ".claude/skills/personal/SKILL.md", ".codex/config.toml"} {
+		if _, err := os.Stat(filepath.Join(target, rel)); err != nil {
+			t.Fatalf("local file %s was removed: %v", rel, err)
+		}
+	}
+}
+
+func TestRetireCollectionHonorsHerdrSessionOverride(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	bin := filepath.Join(c.Workspace, "bin")
+	log := filepath.Join(c.Workspace, "herdr.log")
+	fixtureFile(t, filepath.Join(bin, "herdr"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \""+log+"\"\ncase \"$*\" in *'workspace list') printf '%s\\n' '{\"result\":{\"workspaces\":[{\"label\":\"finished\",\"workspace_id\":\"fixture-id\"}]}}';; esac\n", 0755)
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	t.Setenv("HARNESS_HERDR_SESSION", "other-session")
+	if closed, warning := c.closeRetiredWorkspace("finished"); !closed || warning != "" {
+		t.Fatalf("unexpected herdr result: %v %q", closed, warning)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil || string(data) != "--session other-session workspace list\n--session other-session workspace close fixture-id\n" {
+		t.Fatalf("herdr used wrong session: %q (%v)", data, err)
 	}
 }
 

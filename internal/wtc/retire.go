@@ -175,7 +175,10 @@ func (c *Context) closeRetiredWorkspace(name string) (bool, string) {
 	if err != nil {
 		return false, ""
 	}
-	session := c.Config.Herdr.Session
+	session := os.Getenv("HARNESS_HERDR_SESSION")
+	if session == "" {
+		session = c.Config.Herdr.Session
+	}
 	if session == "" {
 		session = strings.TrimSuffix(strings.TrimSuffix(filepath.Base(c.Workspace), "-harness"), "-wtc")
 	}
@@ -234,7 +237,7 @@ func stopRetiredStatusWatchers(target string) {
 func removeRetiredGeneratedFiles(target string) error {
 	files := []string{
 		"HANDOFF.md", ".env.collection", ".env.collection.local", "mise.toml", ".DS_Store",
-		"AGENTS.md", "WTC-SCOPE.md", ".mcp.json", ".envrc", ".env.toolchain",
+		"AGENTS.md", "WTC-SCOPE.md", ".envrc", ".env.toolchain",
 		".wtc-prs", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
 	}
 	for _, name := range files {
@@ -242,10 +245,8 @@ func removeRetiredGeneratedFiles(target string) error {
 			return err
 		}
 	}
-	for _, name := range []string{".claude", ".agents", ".cursor", ".codex", ".grok"} {
-		if err := os.RemoveAll(filepath.Join(target, name)); err != nil {
-			return err
-		}
+	if err := removeManagedAgentFiles(target); err != nil {
+		return err
 	}
 	wtcDir := filepath.Join(target, ".wtc")
 	if info, err := os.Lstat(wtcDir); err == nil && info.IsDir() {
@@ -257,4 +258,104 @@ func removeRetiredGeneratedFiles(target string) error {
 		return err
 	}
 	return nil
+}
+
+// Rendering preserves local agent overrides and merges MCP settings, so
+// retirement must remove only entries it can identify as generated.
+func removeManagedAgentFiles(target string) error {
+	harness := filepath.Base(filepath.Join(target, "harness"))
+	for _, root := range []string{".claude/skills", ".agents/skills"} {
+		dir := filepath.Join(target, root)
+		entries, err := os.ReadDir(dir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			path := filepath.Join(dir, entry.Name())
+			link, err := os.Readlink(path)
+			if err == nil && managedSkillTarget(link, harness) {
+				if err := os.Remove(path); err != nil {
+					return err
+				}
+			}
+		}
+		_ = os.Remove(dir)
+	}
+	for path, want := range map[string]string{
+		".grok/hooks/wtc-agent-env.json": "../../" + harness + "/hooks/agent-env.json",
+		".claude/settings.json":          "../" + harness + "/hooks/agent-env.json",
+		".cursor/hooks.json":             "../" + harness + "/hooks/agent-env.json",
+	} {
+		full := filepath.Join(target, path)
+		if link, err := os.Readlink(full); err == nil && link == want {
+			if err := os.Remove(full); err != nil {
+				return err
+			}
+		}
+	}
+	for _, path := range []string{".mcp.json", ".cursor/mcp.json", ".codex/config.toml"} {
+		full := filepath.Join(target, path)
+		data, err := os.ReadFile(full)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		managed := false
+		if strings.HasSuffix(path, ".json") {
+			managed = isOnlyGeneratedMCPJSON(data)
+		} else {
+			managed = isOnlyGeneratedMCPTOML(data)
+		}
+		if managed {
+			if err := os.Remove(full); err != nil {
+				return err
+			}
+		}
+	}
+	for _, name := range []string{".grok/hooks", ".grok", ".claude", ".agents", ".cursor", ".codex"} {
+		_ = os.Remove(filepath.Join(target, name))
+	}
+	return nil
+}
+
+func isOnlyGeneratedMCPJSON(data []byte) bool {
+	var file struct {
+		Generated string                     `json:"_generated"`
+		Names     []string                   `json:"_wtcGeneratedServers"`
+		Servers   map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &file); err != nil || !strings.HasPrefix(file.Generated, "wtc mcp render") {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return false
+	}
+	for key := range fields {
+		if key != "_generated" && key != "_wtcGeneratedServers" && key != "mcpServers" {
+			return false
+		}
+	}
+	if len(file.Names) != len(file.Servers) {
+		return false
+	}
+	for _, name := range file.Names {
+		if _, ok := file.Servers[name]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func isOnlyGeneratedMCPTOML(data []byte) bool {
+	const begin = "# BEGIN WTC MCP SERVERS"
+	const end = "# END WTC MCP SERVERS"
+	content := strings.TrimSpace(string(data))
+	return strings.HasPrefix(content, begin) && strings.HasSuffix(content, end) &&
+		strings.Count(content, begin) == 1 && strings.Count(content, end) == 1
 }
