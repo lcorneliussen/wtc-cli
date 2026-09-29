@@ -1,0 +1,24 @@
+---
+name: wtc-customize
+description: Customize worktree collection behavior through harness config and hooks or a repository's worktree lifecycle hooks. Use when adding tool pins, environment behavior, setup or teardown, or local agent guidance.
+---
+
+# Customize wtc behavior
+
+Read `wtc customize` for the installed CLI's current hook and config contract.
+Inspect the target harness or repository before editing: its existing hooks,
+`wtc.toml`, registry, and agent instructions determine where the change belongs.
+
+- Put shared collection config and CLI lifecycle hooks in the harness. Check in
+  an exact `.wtc-cli-version`; add other generated mise tools under
+  `[mise.tools]` in `wtc.toml`.
+- Put application setup and cleanup in that application's `harness:init` and
+  `harness:teardown` mise tasks or `.harness/init.sh` and
+  `.harness/teardown.sh`. Keep them safe to rerun.
+- Use `wtc env --dry-run` to inspect generated changes. Verify the hook in a
+  disposable collection, then run the relevant harness or repository tests.
+- For an embedded instruction or skill that needs local wording, run
+  `wtc eject <path>` and edit the copied file. Eject refuses overwrites.
+
+Keep credentials in the control root or `.env.collection.local`. Generated
+collection-root files are regenerated, so put durable customization in git.

@@ -43,6 +43,9 @@ type Config struct {
 	Compatibility struct {
 		Requires string `toml:"requires"`
 	} `toml:"compatibility"`
+	Mise struct {
+		Tools map[string]string `toml:"tools"`
+	} `toml:"mise"`
 }
 type Context struct {
 	Collection string   `json:"collection"`

@@ -133,6 +133,36 @@ func TestMisePinSurvivesEnvRegeneration(t *testing.T) {
 	}
 }
 
+func TestMiseKeepsHarnessToolsBesideCLIPin(t *testing.T) {
+	c := fixture(t)
+	config := "[mise.tools]\nbun = \"1.2.3\"\n\"npm:example-cli\" = \"4.5.6\"\n"
+	if err := os.WriteFile(filepath.Join(c.Harness, "wtc.toml"), []byte(config), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(c.Harness, ".wtc-cli-version"), []byte("0.1.2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := OpenCollection(c.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.EnsureEnvSupport(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.Collection, "mise.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"bun" = "1.2.3"`, `"npm:example-cli" = "4.5.6"`, `"github:lcorneliussen/wtc-cli" = "0.1.2"`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("missing %s in %s", want, data)
+		}
+	}
+	if strings.Count(string(data), "[tools]") != 1 {
+		t.Fatalf("expected one tools table: %s", data)
+	}
+}
+
 func TestInvalidMisePinDoesNotRewrite(t *testing.T) {
 	c := fixture(t)
 	path := filepath.Join(c.Collection, "mise.toml")

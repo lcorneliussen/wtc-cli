@@ -82,12 +82,18 @@ func run() error {
 			if err := c.ValidateEnvSupport(); err != nil {
 				return err
 			}
+			if err := c.RunHook("env.pre", nil); err != nil {
+				return err
+			}
 			if changed {
 				if err := c.WriteEnv(data); err != nil {
 					return err
 				}
 			}
 			if err := c.EnsureEnvSupport(); err != nil {
+				return err
+			}
+			if err := c.RunHook("env.post", nil); err != nil {
 				return err
 			}
 		}
@@ -187,6 +193,22 @@ func run() error {
 		return nil
 	}
 	root.AddCommand(eject)
+	customize := &cobra.Command{Use: "customize", Short: "Show harness and repository customization points", Args: cobra.NoArgs}
+	customize.RunE = func(cmd *cobra.Command, args []string) error {
+		guide, err := wtc.ReadDefault("instructions/customize.md")
+		if err != nil {
+			return err
+		}
+		if asJSON {
+			return emit(envelope{OK: true, Data: map[string]string{"guide": string(guide)}, Summary: "customization guide"}, true)
+		}
+		_, err = os.Stdout.Write(guide)
+		return err
+	}
+	root.AddCommand(customize)
+	addPRCommands(root, &asJSON)
+	addRegistryCommands(root, &asJSON)
+	addMCPCommands(root, &asJSON)
 	return root.Execute()
 }
 

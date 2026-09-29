@@ -12,6 +12,10 @@ import (
 //go:embed defaults/*.md defaults/skills/*/SKILL.md defaults/instructions/*.md
 var defaults embed.FS
 
+func ReadDefault(path string) ([]byte, error) {
+	return defaults.ReadFile("defaults/" + path)
+}
+
 func DefaultPaths() ([]string, error) {
 	var paths []string
 	err := fs.WalkDir(defaults, "defaults", func(path string, d fs.DirEntry, err error) error {

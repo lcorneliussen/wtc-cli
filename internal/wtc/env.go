@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -221,6 +222,13 @@ var cliVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`
 func (c *Context) RenderMise() ([]byte, error) {
 	var b bytes.Buffer
 	b.WriteString(miseHeader)
+	tools := make(map[string]string, len(c.Config.Mise.Tools)+1)
+	for name, version := range c.Config.Mise.Tools {
+		if strings.TrimSpace(name) == "" || strings.TrimSpace(version) == "" || strings.ContainsAny(name, "\r\n\x00") || strings.ContainsAny(version, "\r\n\x00") {
+			return nil, fmt.Errorf("invalid mise tool %q or version %q", name, version)
+		}
+		tools[name] = version
+	}
 	versionFile := filepath.Join(c.Harness, ".wtc-cli-version")
 	data, err := os.ReadFile(versionFile)
 	if err != nil && !os.IsNotExist(err) {
@@ -231,7 +239,22 @@ func (c *Context) RenderMise() ([]byte, error) {
 		if !cliVersionPattern.MatchString(version) {
 			return nil, fmt.Errorf("invalid CLI version in %s: %q", versionFile, version)
 		}
-		fmt.Fprintf(&b, "[tools]\n\"github:lcorneliussen/wtc-cli\" = %q\n\n", version)
+		if _, exists := tools["github:lcorneliussen/wtc-cli"]; exists {
+			return nil, fmt.Errorf("mise.tools must not override the committed CLI pin")
+		}
+		tools["github:lcorneliussen/wtc-cli"] = version
+	}
+	if len(tools) > 0 {
+		b.WriteString("[tools]\n")
+		names := make([]string, 0, len(tools))
+		for name := range tools {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Fprintf(&b, "%q = %q\n", name, tools[name])
+		}
+		b.WriteByte('\n')
 	}
 	b.WriteString(miseEnv)
 	return b.Bytes(), nil
