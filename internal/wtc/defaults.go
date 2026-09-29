@@ -68,10 +68,18 @@ func Eject(harness string, patterns []string) ([]string, error) {
 		seen[path] = true
 		dst := filepath.Join(harness, path)
 		if _, err := os.Lstat(dst); err == nil {
-			return written, fmt.Errorf("refusing to overwrite %s", dst)
+			return nil, fmt.Errorf("refusing to overwrite %s", dst)
 		} else if !os.IsNotExist(err) {
-			return written, err
+			return nil, err
 		}
+	}
+	seen = map[string]bool{}
+	for _, path := range selected {
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		dst := filepath.Join(harness, path)
 		data, err := defaults.ReadFile("defaults/" + path)
 		if err != nil {
 			return written, err
