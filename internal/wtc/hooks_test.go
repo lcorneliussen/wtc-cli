@@ -26,4 +26,10 @@ func TestHarnessHooksCanVetoAndPostFailuresDoNotUndo(t *testing.T) {
 	if err := c.RunHook("env.post", nil); err != nil {
 		t.Fatalf("post-hook blocked completed action: %v", err)
 	}
+	if err := os.Chmod(post, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RunHook("env.post", nil); err != nil {
+		t.Fatalf("non-executable post-hook blocked completed action: %v", err)
+	}
 }

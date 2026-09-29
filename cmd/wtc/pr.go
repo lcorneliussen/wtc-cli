@@ -62,6 +62,9 @@ func addPRCommands(root *cobra.Command, asJSON *bool) {
 	enlist.Flags().StringVar(&url, "url", "", "Pull request URL")
 	enlist.Flags().StringVar(&title, "title", "", "Pull request title")
 	enlist.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := wtc.ValidatePRIdentity(args[0], args[1]); err != nil {
+			return err
+		}
 		c, err := context()
 		if err != nil {
 			return err
@@ -87,6 +90,9 @@ func addPRCommands(root *cobra.Command, asJSON *bool) {
 	pr.AddCommand(enlist)
 	unlist := &cobra.Command{Use: "unlist <repo> <number>", Short: "Remove a collection PR link", Args: cobra.ExactArgs(2)}
 	unlist.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := wtc.ValidatePRIdentity(args[0], args[1]); err != nil {
+			return err
+		}
 		c, err := context()
 		if err != nil {
 			return err

@@ -6,6 +6,17 @@ import (
 	"testing"
 )
 
+func TestPRIdentityStaysInCollection(t *testing.T) {
+	for _, repo := range []string{"..", "../outside", "/tmp/outside", "nested/repo", "foo=bar", "foo\nbar"} {
+		if err := ValidatePRIdentity(repo, "7"); err == nil {
+			t.Fatalf("accepted repository path %q", repo)
+		}
+	}
+	if err := ValidatePRIdentity("ext.wtc-boilerplate", "50"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPRFileStaysReadableByShellTools(t *testing.T) {
 	c := fixture(t)
 	first, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "42", Branch: "feature", Title: "A title with spaces"})

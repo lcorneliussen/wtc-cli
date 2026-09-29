@@ -27,7 +27,8 @@ and credentials in `.env.collection.local`, which the generator preserves.
 Executable scripts in `harness/hooks/wtc/` run from the collection root. The
 CLI sends one JSON object on stdin with `event`, `collection`, `harness`,
 `workspace`, and `values`. It also sets `WTC_COLLECTION` and
-`WTC_CONFIG_ROOT`. Current events are:
+`WTC_CONFIG_ROOT`. `WTC_COLLECTION` is the collection name; the JSON
+`collection` field is its absolute directory. Current events are:
 
 | Action | Before | After |
 |---|---|---|

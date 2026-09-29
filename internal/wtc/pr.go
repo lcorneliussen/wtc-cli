@@ -24,6 +24,14 @@ type PRRecord struct {
 const prHeader = "# Local PR enlistment for this collection (not committed; dies with retire).\n# Format: repo  number  [branch]  [url]  [title…]\n# Manage: wtc pr enlist|unlist|list\n"
 
 var prNumber = regexp.MustCompile(`^[0-9]+$`)
+var prRepoName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+func ValidatePRIdentity(repo, number string) error {
+	if !prRepoName.MatchString(repo) || repo == "." || repo == ".." || strings.Contains(repo, "..") || !prNumber.MatchString(number) {
+		return fmt.Errorf("expected a single repository name and numeric PR number")
+	}
+	return nil
+}
 
 func (c *Context) PRFile() string { return filepath.Join(c.Collection, ".wtc-prs") }
 
@@ -169,8 +177,8 @@ func (c *Context) EnlistPR(r PRRecord) (PRRecord, error) {
 	r.Branch = cleanPRField(r.Branch)
 	r.URL = cleanPRField(r.URL)
 	r.Title = cleanPRField(r.Title)
-	if r.Repo == "" || strings.Contains(r.Repo, " ") || !prNumber.MatchString(r.Number) {
-		return r, fmt.Errorf("expected a repository name and numeric PR number")
+	if err := ValidatePRIdentity(r.Repo, r.Number); err != nil {
+		return r, err
 	}
 	if r.Branch == "" {
 		command := exec.Command("git", "-C", filepath.Join(c.Collection, r.Repo), "symbolic-ref", "-q", "--short", "HEAD")
@@ -188,8 +196,8 @@ func (c *Context) EnlistPR(r PRRecord) (PRRecord, error) {
 }
 
 func (c *Context) UnlistPR(repo, number string) error {
-	if repo == "" || !prNumber.MatchString(number) {
-		return fmt.Errorf("expected a repository name and numeric PR number")
+	if err := ValidatePRIdentity(repo, number); err != nil {
+		return err
 	}
 	return c.rewritePRs(repo, number, nil)
 }

@@ -31,11 +31,13 @@ func (c *Context) RefreshRegistry() (RegistryRefresh, error) {
 			continue
 		}
 		path := filepath.Join(bareDir, e.Name())
-		info, err := os.Stat(path)
-		if err != nil || !info.IsDir() {
+		if e.Type()&os.ModeSymlink != 0 || !e.IsDir() {
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), ".git")
+		if !validRepoName.MatchString(name) || strings.ContainsAny(path, "\r\n") {
+			return report, fmt.Errorf("unsafe bare-owner name or path: %q", path)
+		}
 		paths[name] = path
 		report.BareOwners = append(report.BareOwners, name)
 	}

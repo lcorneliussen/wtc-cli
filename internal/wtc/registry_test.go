@@ -29,3 +29,31 @@ func TestRefreshRegistryReportsMissingAndUnlistedOwners(t *testing.T) {
 		t.Fatalf("missing local mapping: %s", data)
 	}
 }
+
+func TestRefreshRegistryRejectsUnsafeBareOwner(t *testing.T) {
+	c := fixture(t)
+	if err := os.MkdirAll(filepath.Join(c.Workspace, ".bare", "bad=name.git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RefreshRegistry(); err == nil {
+		t.Fatal("accepted a bare owner that corrupts the generated map")
+	}
+}
+
+func TestRefreshRegistryIgnoresSymlinkedOwner(t *testing.T) {
+	c := fixture(t)
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(c.Workspace, ".bare"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(c.Workspace, ".bare", "linked.git")); err != nil {
+		t.Fatal(err)
+	}
+	report, err := c.RefreshRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.BareOwners) != 0 {
+		t.Fatalf("included symlinked owner: %v", report.BareOwners)
+	}
+}

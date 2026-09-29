@@ -90,3 +90,100 @@ func TestMCPRefusesSymlinkedConfigDirectory(t *testing.T) {
 		t.Fatal("wrote outside collection")
 	}
 }
+
+func TestMCPMergePreservesManualSettingsAndUsesAgentInterpolation(t *testing.T) {
+	c := fixture(t)
+	registry := `schema_version: 1
+servers:
+  - name: local
+    transport: stdio
+    command: example-server
+    args: '["arg with space", "--safe"]'
+    env: EXAMPLE_TOKEN
+  - name: remote
+    transport: http
+    url: https://example.invalid/mcp
+    token_env: EXAMPLE_TOKEN
+`
+	if err := os.WriteFile(filepath.Join(c.Harness, ".mcp-servers.yml"), []byte(registry), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for rel, body := range map[string]string{
+		".mcp.json":          `{"mcpServers":{"personal":{"command":"personal-server"}}}`,
+		".cursor/mcp.json":   `{"mcpServers":{"personal":{"command":"personal-server"}}}`,
+		".codex/config.toml": "model = \"example\"\n[features]\nsearch = true\n",
+	} {
+		path := filepath.Join(c.Collection, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	render, err := c.RenderMCP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.WriteMCP(render, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{".mcp.json", ".cursor/mcp.json"} {
+		data, err := os.ReadFile(filepath.Join(c.Collection, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var root struct {
+			MCPServers map[string]map[string]any `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &root); err != nil {
+			t.Fatal(err)
+		}
+		if len(root.MCPServers) != 3 || root.MCPServers["personal"] == nil {
+			t.Fatalf("%s lost manual server: %s", rel, data)
+		}
+		args := root.MCPServers["local"]["args"].([]any)
+		if args[0] != "arg with space" {
+			t.Fatalf("%s split one argument: %v", rel, args)
+		}
+		want := "${EXAMPLE_TOKEN}"
+		if rel == ".cursor/mcp.json" {
+			want = "${env:EXAMPLE_TOKEN}"
+			if root.MCPServers["remote"]["type"] != nil {
+				t.Fatalf("Cursor got Claude's remote type: %v", root.MCPServers["remote"])
+			}
+		}
+		if root.MCPServers["local"]["env"].(map[string]any)["EXAMPLE_TOKEN"] != want {
+			t.Fatalf("%s wrong env interpolation", rel)
+		}
+		if root.MCPServers["remote"]["headers"].(map[string]any)["Authorization"] != "Bearer "+want {
+			t.Fatalf("%s wrong header interpolation", rel)
+		}
+	}
+	codex, err := os.ReadFile(filepath.Join(c.Collection, ".codex/config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(codex), `model = "example"`) || !strings.Contains(string(codex), "search = true") || !strings.Contains(string(codex), `args = ["arg with space","--safe"]`) {
+		t.Fatalf("Codex settings or args lost: %s", codex)
+	}
+	if changed, err := c.WriteMCP(render, true); err != nil || len(changed) != 0 {
+		t.Fatalf("render is not stable: changed=%v err=%v", changed, err)
+	}
+}
+
+func TestMCPRegistryRejectsUnknownSchemaAndInvalidTokenName(t *testing.T) {
+	c := fixture(t)
+	path := filepath.Join(c.Harness, ".mcp-servers.yml")
+	for _, body := range []string{
+		"schema_version: 2\nservers: []\n",
+		"schema_version: 1\nservers:\n  - name: remote\n    transport: http\n    url: https://example.invalid\n    token_env: TOKEN_A TOKEN_B\n",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.RenderMCP(); err == nil {
+			t.Fatalf("accepted invalid registry: %s", body)
+		}
+	}
+}

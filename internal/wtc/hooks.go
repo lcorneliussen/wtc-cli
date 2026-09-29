@@ -17,15 +17,23 @@ func (c *Context) RunHook(event string, values map[string]string) error {
 		return fmt.Errorf("invalid hook event %q", event)
 	}
 	path := filepath.Join(c.Harness, "hooks", "wtc", event+".sh")
+	post := strings.HasSuffix(event, ".post")
+	fail := func(err error) error {
+		if post {
+			fmt.Fprintf(os.Stderr, "wtc: warning: hook %s failed: %v\n", event, err)
+			return nil
+		}
+		return fmt.Errorf("hook %s failed: %w", event, err)
+	}
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	if !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
-		return fmt.Errorf("hook must be an executable file: %s", path)
+		return fail(fmt.Errorf("hook must be an executable file: %s", path))
 	}
 	if values == nil {
 		values = map[string]string{}
@@ -35,7 +43,7 @@ func (c *Context) RunHook(event string, values map[string]string) error {
 		"workspace": c.Workspace, "values": values,
 	})
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	command := exec.Command(path)
 	command.Dir = c.Collection
@@ -44,11 +52,7 @@ func (c *Context) RunHook(event string, values map[string]string) error {
 	command.Stdout = os.Stderr
 	command.Stderr = os.Stderr
 	if err := command.Run(); err != nil {
-		if strings.HasSuffix(event, ".post") {
-			fmt.Fprintf(os.Stderr, "wtc: warning: hook %s failed: %v\n", event, err)
-			return nil
-		}
-		return fmt.Errorf("hook %s failed: %w", event, err)
+		return fail(err)
 	}
 	return nil
 }
