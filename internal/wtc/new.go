@@ -23,6 +23,8 @@ type NewOptions struct {
 type NewResult struct {
 	Collection     string   `json:"collection"`
 	IntendedBranch string   `json:"intended_branch"`
+	LocalBranch    string   `json:"local_branch,omitempty"`
+	PushRemote     string   `json:"push_remote,omitempty"`
 	Repositories   []string `json:"repositories"`
 	Source         string   `json:"source"`
 }
@@ -165,7 +167,11 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 			branch = primaryBranch
 		}
 		if name == primary && prID != "" {
-			err = c.AddPRWorktree(name, directory, result.Collection, branch, prID, prHead, prRemote)
+			var checkout PRWorktreeCheckout
+			checkout, err = c.AddPRWorktree(name, directory, result.Collection, branch, prID, prHead, prRemote)
+			if err == nil {
+				result.LocalBranch, result.PushRemote = checkout.LocalBranch, checkout.PushRemote
+			}
 		} else {
 			err = c.AddWorktree(name, directory, result.Collection, branch)
 		}
@@ -234,7 +240,11 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	_, _ = target.AgentToolchainPath(true) // A bare agent shell can fill this later.
 	branchNote := fmt.Sprintf("Worktrees start **detached at the development tip** — no branch exists yet.\nCreate one at your first commit:\n\n    git switch -c %s\n\n(that is the expected name; adjust it if the work turns out to be something else).", result.IntendedBranch)
 	if opt.PR != "" {
-		branchNote = fmt.Sprintf("The primary sibling is already on the PR head branch `%s` — push review work there. Other siblings start detached at the tip.", result.IntendedBranch)
+		primaryDir := primary
+		if primary == harnessRepo {
+			primaryDir = "harness"
+		}
+		branchNote = fmt.Sprintf("The primary sibling is on local branch `%s` at the PR head `%s`. Push review work with `git -C %s push %s HEAD:refs/heads/%s`. Other siblings start detached at the tip.", result.LocalBranch, result.IntendedBranch, primaryDir, result.PushRemote, result.IntendedBranch)
 	} else if opt.Branch != "" {
 		branchNote = fmt.Sprintf("All siblings are already on the explicitly requested branch `%s`. Commit on that branch; do not create it again.", result.IntendedBranch)
 	}

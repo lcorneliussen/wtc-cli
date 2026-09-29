@@ -147,78 +147,105 @@ func (c *Context) AddWorktree(name, directory, destination, branch string) error
 	return nil
 }
 
-// AddPRWorktree fetches GitHub's immutable view of the PR head and verifies
-// it against the forge response. A missing head must never turn into a new
-// branch at the development tip.
-func (c *Context) AddPRWorktree(name, directory, destination, branch, number, expectedSHA, headRemote string) error {
+type PRWorktreeCheckout struct {
+	LocalBranch string
+	PushRemote  string
+}
+
+// AddPRWorktree fetches GitHub's PR head and verifies its source branch.
+// A missing head must never turn into a branch at the development tip.
+func (c *Context) AddPRWorktree(name, directory, destination, branch, number, expectedSHA, headRemote string) (PRWorktreeCheckout, error) {
+	result := PRWorktreeCheckout{LocalBranch: branch, PushRemote: "origin"}
 	if !prNumber.MatchString(number) || !validRepoName.MatchString(directory) || branch == "" {
-		return fmt.Errorf("invalid PR worktree identity")
+		return result, fmt.Errorf("invalid PR worktree identity")
 	}
 	decoded, err := hex.DecodeString(expectedSHA)
 	if err != nil || (len(decoded) != 20 && len(decoded) != 32) {
-		return fmt.Errorf("invalid PR head commit")
+		return result, fmt.Errorf("invalid PR head commit")
 	}
 	if _, err := gitOutput("check-ref-format", "--branch", branch); err != nil {
-		return fmt.Errorf("invalid PR head branch %q: %w", branch, err)
+		return result, fmt.Errorf("invalid PR head branch %q: %w", branch, err)
 	}
 	repo, err := c.Repository(name)
 	if err != nil {
-		return err
+		return result, err
 	}
 	bare, err := c.ensureBare(repo)
 	if err != nil {
-		return err
+		return result, err
 	}
 	ref := "refs/remotes/wtc-pr/" + number
 	if _, err := gitOutput("--git-dir="+bare, "fetch", "origin", "+refs/pull/"+number+"/head:"+ref); err != nil {
-		return fmt.Errorf("fetch PR head #%s: %w", number, err)
+		return result, fmt.Errorf("fetch PR head #%s: %w", number, err)
 	}
 	head, err := gitOutput("--git-dir="+bare, "rev-parse", "--verify", ref)
 	if err != nil || !strings.EqualFold(head, expectedSHA) {
-		return fmt.Errorf("PR head changed while creating collection; expected %s, fetched %s", expectedSHA, head)
+		return result, fmt.Errorf("PR head changed while creating collection; expected %s, fetched %s", expectedSHA, head)
 	}
 	remote := "origin"
 	if headRemote != "" {
 		remote = "wtc-pr-" + number
+		result.PushRemote = remote
 		if existing, err := gitOutput("--git-dir="+bare, "remote", "get-url", remote); err == nil {
 			if existing != headRemote {
-				return fmt.Errorf("PR head remote %s already points elsewhere", remote)
+				return result, fmt.Errorf("PR head remote %s already points elsewhere", remote)
 			}
 		} else if _, err := gitOutput("--git-dir="+bare, "remote", "add", remote, headRemote); err != nil {
-			return err
+			return result, err
 		}
 	}
 	trackingRef := "refs/remotes/" + remote + "/" + branch
 	if _, err := gitOutput("--git-dir="+bare, "fetch", remote, "+refs/heads/"+branch+":"+trackingRef); err != nil {
-		return fmt.Errorf("fetch pushable PR branch from %s: %w", remote, err)
+		return result, fmt.Errorf("fetch pushable PR branch from %s: %w", remote, err)
 	}
 	trackingHead, err := gitOutput("--git-dir="+bare, "rev-parse", "--verify", trackingRef)
 	if err != nil || !strings.EqualFold(trackingHead, expectedSHA) {
-		return fmt.Errorf("PR source branch changed while creating collection; expected %s, fetched %s", expectedSHA, trackingHead)
+		return result, fmt.Errorf("PR source branch changed while creating collection; expected %s, fetched %s", expectedSHA, trackingHead)
 	}
 	path := filepath.Join(destination, directory)
 	if _, err := os.Lstat(path); err == nil {
-		return fmt.Errorf("worktree path already exists: %s", path)
+		return result, fmt.Errorf("worktree path already exists: %s", path)
 	} else if !os.IsNotExist(err) {
-		return err
+		return result, err
+	}
+	occupied, err := gitOutput("--git-dir="+bare, "worktree", "list", "--porcelain")
+	if err != nil {
+		return result, err
+	}
+	branchOccupied := strings.Contains("\n"+occupied+"\n", "\nbranch refs/heads/"+branch+"\n")
+	if branchOccupied {
+		// A branch may be checked out in only one worktree. Keep the review
+		// collection usable with a distinct local name and an explicit push
+		// target in its launch note.
+		base := "wtc-pr-" + number + "-review"
+		for suffix := 0; ; suffix++ {
+			candidate := base
+			if suffix > 0 {
+				candidate = fmt.Sprintf("%s-%d", base, suffix+1)
+			}
+			if _, err := gitOutput("--git-dir="+bare, "rev-parse", "--verify", "refs/heads/"+candidate); err != nil {
+				result.LocalBranch = candidate
+				break
+			}
+		}
 	}
 	args := []string{"--git-dir=" + bare, "worktree", "add"}
-	if localHead, err := gitOutput("--git-dir="+bare, "rev-parse", "--verify", "refs/heads/"+branch); err == nil {
+	if localHead, err := gitOutput("--git-dir="+bare, "rev-parse", "--verify", "refs/heads/"+branch); err == nil && !branchOccupied {
 		if !strings.EqualFold(localHead, expectedSHA) {
-			return fmt.Errorf("local branch %s differs from PR head %s", branch, expectedSHA)
+			return result, fmt.Errorf("local branch %s differs from PR head %s", branch, expectedSHA)
 		}
 		args = append(args, path, branch)
 	} else {
-		args = append(args, "-b", branch, path, remote+"/"+branch)
+		args = append(args, "-b", result.LocalBranch, path, remote+"/"+branch)
 	}
 	if _, err := gitOutput(args...); err != nil {
-		return err
+		return result, err
 	}
-	if _, err := gitOutput("-C", path, "branch", "--set-upstream-to", remote+"/"+branch, branch); err != nil {
-		return err
+	if _, err := gitOutput("-C", path, "branch", "--set-upstream-to", remote+"/"+branch, result.LocalBranch); err != nil {
+		return result, err
 	}
 	trustWorktreeMise(path)
-	return nil
+	return result, nil
 }
 
 func trustWorktreeMise(path string) {

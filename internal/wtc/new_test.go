@@ -187,14 +187,18 @@ func TestPRWorktreeFetchesExactHeadAndRefusesMissingHead(t *testing.T) {
 	if err := os.Mkdir(destination, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.AddPRWorktree("widget", "widget", destination, "fork-feature", "13", head, fork); err == nil {
+	if _, err := c.AddPRWorktree("widget", "widget", destination, "fork-feature", "13", head, fork); err == nil {
 		t.Fatal("missing PR ref was accepted")
 	}
 	if _, err := os.Stat(filepath.Join(destination, "widget")); !os.IsNotExist(err) {
 		t.Fatalf("missing PR ref created a worktree: %v", err)
 	}
-	if err := c.AddPRWorktree("widget", "widget", destination, "fork-feature", "12", head, fork); err != nil {
+	checkout, err := c.AddPRWorktree("widget", "widget", destination, "fork-feature", "12", head, fork)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if checkout.LocalBranch != "fork-feature" || checkout.PushRemote != "wtc-pr-12" {
+		t.Fatalf("unexpected first checkout: %+v", checkout)
 	}
 	if got := fixtureGit(t, "-C", filepath.Join(destination, "widget"), "rev-parse", "HEAD"); got != head {
 		t.Fatalf("PR worktree at %s, want %s", got, head)
@@ -204,6 +208,20 @@ func TestPRWorktreeFetchesExactHeadAndRefusesMissingHead(t *testing.T) {
 	}
 	if got := fixtureGit(t, "-C", filepath.Join(destination, "widget"), "rev-parse", "--abbrev-ref", "@{u}"); got != "wtc-pr-12/fork-feature" {
 		t.Fatalf("fork PR upstream = %q", got)
+	}
+	second := filepath.Join(c.Workspace, "review-again")
+	if err := os.Mkdir(second, 0755); err != nil {
+		t.Fatal(err)
+	}
+	checkout, err = c.AddPRWorktree("widget", "widget", second, "fork-feature", "12", head, fork)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checkout.LocalBranch != "wtc-pr-12-review" || checkout.PushRemote != "wtc-pr-12" {
+		t.Fatalf("unexpected second checkout: %+v", checkout)
+	}
+	if got := fixtureGit(t, "-C", filepath.Join(second, "widget"), "rev-parse", "HEAD"); got != head {
+		t.Fatalf("second checkout at %s, want %s", got, head)
 	}
 }
 
@@ -233,5 +251,9 @@ func TestNewCollectionCanReviewHarnessPR(t *testing.T) {
 	}
 	if got := fixtureGit(t, "-C", filepath.Join(r.Collection, "harness"), "rev-parse", "--abbrev-ref", "@{u}"); got != "origin/review-head" {
 		t.Fatalf("harness PR upstream = %q", got)
+	}
+	note, err := os.ReadFile(filepath.Join(r.Collection, "HANDOFF.md"))
+	if err != nil || !strings.Contains(string(note), "git -C harness push origin HEAD:refs/heads/review-head") {
+		t.Fatalf("review launch note lacks push target: %s (%v)", note, err)
 	}
 }
