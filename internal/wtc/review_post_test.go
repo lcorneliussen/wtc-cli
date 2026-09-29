@@ -38,7 +38,7 @@ func TestReviewPostReceiptsDedupAndResolve(t *testing.T) {
 	launcher := `#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_GH_LOG"
 case "$*" in
-  *'--json headRefOid'*) printf '{"headRefOid":"1234567890abcdef1234567890abcdef12345678"}\n' ;;
+  *'--json headRefOid'*) printf '{"headRefOid":"%s"}\n' "${FAKE_PR_HEAD:-1234567890abcdef1234567890abcdef12345678}" ;;
   *'--paginate --slurp'*) printf '[[]]\n' ;;
   *'api graphql'*'reviewThreads'*) printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"THREAD_1","isResolved":false,"comments":{"nodes":[{"databaseId":401}]}}]}}}}}\n' ;;
   *'api graphql'*'resolveReviewThread'*) printf '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}\n' ;;
@@ -67,6 +67,10 @@ esac
 	posted, err = c.PostReviewBundle(bundle, ReviewPostOptions{})
 	if err != nil || posted.InlinePosted != 0 {
 		t.Fatalf("duplicate inline post: %+v %v", posted, err)
+	}
+	t.Setenv("FAKE_PR_HEAD", "abcdef1234567890abcdef1234567890abcdef12")
+	if _, err := c.PostReviewBundle(bundle, ReviewPostOptions{}); err == nil || !strings.Contains(err.Error(), "stale bundle") {
+		t.Fatalf("posted a stale review: %v", err)
 	}
 	resolved, err := c.ResolveReviewBundle(bundle, ReviewResolveOptions{Reply: "Fixed in the next change."})
 	if err != nil || resolved.Resolved != 1 {
