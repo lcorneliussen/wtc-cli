@@ -2,8 +2,9 @@
 
 The recurring collection actions are packaged as **skills**: `SKILL.md`
 procedure files the agent CLIs discover on their own and load only when a task
-matches. They live in this repo under `skills/`, and are exposed at each
-collection root by symlink.
+matches. Generic skills ship inside the CLI; harness skills and overlays can
+replace or extend that set. They are exposed at each collection root by
+symlink.
 
 Design principle, as everywhere else here: **no tool is load-bearing.** A
 skill is a procedure written for a reader — an agent whose CLI never heard of
@@ -32,13 +33,14 @@ and the skill is the bug.
 | Cursor | `.agents/skills/`, `.cursor/skills/`, plus `.claude/skills/` and `.codex/skills/` for back-compat | each skills root recursively, plus nested project subdirs |
 
 So **two directory names cover all three**: `.claude/skills` and
-`.agents/skills`. `tools/link-skills.sh` creates both at the collection root,
-one symlink per skill:
+`.agents/skills`. `wtc skills render` creates both at the collection root,
+one symlink per skill; `tools/link-skills.sh` remains a bootstrap entry point:
 
 ```text
 <collection>/AGENTS.md              -> harness/collection-AGENTS.md
 <collection>/.claude/skills/wtc-pr  -> ../../harness/skills/wtc-pr
 <collection>/.agents/skills/wtc-pr  -> ../../harness/skills/wtc-pr
+<collection>/.agents/skills/wtc-customize -> ../../.wtc/skills/wtc-customize
 <collection>/.grok/hooks/wtc-agent-env.json -> ../../harness/hooks/agent-env.json
 <collection>/.claude/settings.json  -> ../harness/hooks/agent-env.json
 <collection>/.cursor/hooks.json     -> ../harness/hooks/agent-env.json
@@ -63,32 +65,31 @@ directories are invisible to git and no product repo needs an ignore rule for
 them. Why symlinks and not copies: one authored copy, versioned in this repo;
 collections stay disposable and carry no durable state.
 
-The tool runs at collection creation (`branch-off.sh`, `add-repo.sh`) and
+The renderer runs at collection creation (`branch-off.sh`, `add-repo.sh`) and
 again at catch-up, which is how a collection created before a skill existed
 picks it up.
 
 ### Across collections
 
-Every collection is linked against **its own** `harness/` worktree — the links
-are relative, so that is what they resolve against. This is deliberate: a
-collection working on the harness itself gets its own in-progress skills, and
-retiring one collection can never break another's.
+Every collection uses **its own** harness overrides and its pinned CLI's
+embedded defaults. Links are relative to that collection, so a collection
+working on the harness itself gets its own in-progress skills, and retiring
+one collection cannot break another's.
 
-The consequence is an ordering rule. A new skill reaches another collection
-only once that collection's harness worktree has it **in git** — so the
-sequence is merge → catch that worktree up → link, never the other way round.
-`link-skills.sh` reports `(none)` rather than inventing links a stale worktree
-cannot back.
+The consequence is an ordering rule. A new harness skill reaches another
+collection only once that collection's harness worktree has it **in git**.
+Embedded defaults change with the pinned CLI release. Catch the target up,
+then render it; never link a skill from a different collection's harness.
 
 ```sh
-tools/link-skills.sh                        # this collection
-tools/link-skills.sh --collection ../billing
-tools/link-skills.sh --all --dry-run        # what every collection would get
-tools/link-skills.sh --all                  # roll a landed skill out everywhere
+wtc skills render                          # this collection
+wtc skills render --collection ../example
+wtc skills render --all --dry-run          # what every collection would get
+wtc skills render --all                    # roll a landed skill out everywhere
 ```
 
-`--all` re-execs per collection, so one collection mid-rebase cannot take the
-sweep down with it; a nonzero exit means at least one collection failed.
+`--all` is an explicit workspace-wide action. Inspect its dry run before
+applying it, especially while another collection has in-progress harness work.
 
 ### The one gap
 

@@ -1,0 +1,114 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/lcorneliussen/wtc-cli/internal/wtc"
+	"github.com/spf13/cobra"
+)
+
+func addSkillsCommands(root *cobra.Command, asJSON *bool) {
+	var collection string
+	var all, dryRun, seedScope bool
+	skills := &cobra.Command{Use: "skills", Short: "Expose versioned skills to agent clients"}
+	render := &cobra.Command{Use: "render", Short: "Render skills, entry point, hooks, and agent shell setup", Args: cobra.NoArgs}
+	render.Flags().StringVar(&collection, "collection", "", "Collection directory (default: current)")
+	render.Flags().BoolVar(&all, "all", false, "Render every collection in this workspace")
+	render.Flags().BoolVar(&dryRun, "dry-run", false, "Show changes without writing")
+	render.Flags().BoolVar(&seedScope, "seed-scope", false, "Seed WTC-SCOPE.md when absent")
+	render.RunE = func(cmd *cobra.Command, args []string) error {
+		var c *wtc.Context
+		var err error
+		if collection == "" {
+			var cwd string
+			cwd, err = os.Getwd()
+			if err == nil {
+				c, err = wtc.Discover(cwd)
+			}
+		} else {
+			c, err = wtc.OpenCollection(collection)
+		}
+		if err != nil {
+			return err
+		}
+		collections := []*wtc.Context{c}
+		failures := []string{}
+		if all {
+			collections = nil
+			entries, err := os.ReadDir(c.Workspace)
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				candidate := filepath.Join(c.Workspace, entry.Name())
+				if _, err := os.Stat(filepath.Join(candidate, "harness", ".harness-repos.yml")); err != nil {
+					continue
+				}
+				target, err := wtc.OpenCollection(candidate)
+				if err != nil {
+					failures = append(failures, candidate+": "+err.Error())
+					continue
+				}
+				collections = append(collections, target)
+			}
+		}
+		reports := []wtc.SkillRenderResult{}
+		for _, target := range collections {
+			if !dryRun {
+				if err := target.RunHook("skills.render.pre", nil); err != nil {
+					if !all {
+						return err
+					}
+					failures = append(failures, target.Collection+": "+err.Error())
+					continue
+				}
+			}
+			report, err := target.RenderSkills(wtc.SkillRenderOptions{DryRun: dryRun, SeedScope: seedScope})
+			if err != nil {
+				if !all {
+					return err
+				}
+				failures = append(failures, target.Collection+": "+err.Error())
+				continue
+			}
+			if !dryRun {
+				if err := target.RunHook("skills.render.post", nil); err != nil {
+					if !all {
+						return err
+					}
+					failures = append(failures, target.Collection+": "+err.Error())
+				}
+			}
+			reports = append(reports, report)
+		}
+		if *asJSON {
+			if err := emit(envelope{OK: len(failures) == 0, Data: reports, Summary: fmt.Sprintf("rendered %d collection(s); %d failed", len(reports), len(failures)), Meta: map[string]any{"failures": failures}}, true); err != nil {
+				return err
+			}
+			if len(failures) > 0 {
+				return fmt.Errorf("%d collection(s) failed", len(failures))
+			}
+			return nil
+		}
+		for _, report := range reports {
+			fmt.Printf("%s: linked=%d current=%d pruned=%d skipped=%d\n", filepath.Base(report.Collection), report.Linked, report.Current, report.Pruned, report.Skipped)
+			for _, action := range report.Actions {
+				fmt.Println("  " + action)
+			}
+		}
+		for _, failure := range failures {
+			fmt.Fprintln(os.Stderr, "wtc: "+failure)
+		}
+		if len(failures) > 0 {
+			return fmt.Errorf("%d collection(s) failed", len(failures))
+		}
+		return nil
+	}
+	skills.AddCommand(render)
+	root.AddCommand(skills)
+}

@@ -48,6 +48,7 @@ CLI sends one JSON object on stdin with `event`, `collection`, `harness`,
 | `wtc registry refresh` | `registry.refresh.pre.sh` | `registry.refresh.post.sh` |
 | `wtc mcp render` | `mcp.render.pre.sh` | `mcp.render.post.sh` |
 | `wtc secrets link` | `secrets.link.pre.sh` | `secrets.link.post.sh` |
+| `wtc skills render` | `skills.render.pre.sh` | `skills.render.post.sh` |
 
 A pre-hook can stop the action by exiting nonzero. A post-hook failure is
 reported as a warning; the completed action remains complete. Dry runs and
@@ -94,8 +95,21 @@ prod_paths = ["api/.env.production"]
 
 ## Skills and instructions
 
-The CLI embeds generic `wtc-*` skills and instructions. A harness can run
-`wtc eject 'skills/wtc-customize'` or another selected path to copy a default
-into its own repository for editing. `eject` refuses to overwrite an existing
-file. Keep repository-specific agent instructions in that repository's
-`AGENTS.md` and hooks in its `.harness/` directory.
+The CLI embeds generic `wtc-*` skills and instructions. `wtc skills render`
+materializes embedded skills in the disposable collection, links them into
+`.claude/skills` and `.agents/skills`, and wires `AGENTS.md`, agent hooks,
+`.envrc`, and `.env.toolchain`. `--seed-scope` creates `WTC-SCOPE.md` from the
+harness template only when it is absent. `--dry-run` previews changes, and
+`--all` explicitly applies them to every collection in the workspace.
+
+For a skill with local wording, check in `harness/skills/<name>/SKILL.md`;
+it replaces the embedded default. A file at
+`harness/overlays/skills/<name>/SKILL.md` takes precedence over both. New
+skills in either directory are linked as well. A real directory already at an
+agent client's skill destination is a local override and is left alone. The
+renderer prunes only stale symlinks it owns.
+
+`wtc eject 'skills/wtc-customize'` or another selected path copies an
+embedded default into the harness for editing; eject refuses to overwrite an
+existing file. Keep repository-specific agent instructions in that
+repository's `AGENTS.md` and hooks in its `.harness/` directory.

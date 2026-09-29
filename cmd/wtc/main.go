@@ -211,6 +211,7 @@ func run() error {
 	addMCPCommands(root, &asJSON)
 	addSecretsCommands(root, &asJSON)
 	addAgentEnvCommand(root, &asJSON)
+	addSkillsCommands(root, &asJSON)
 	addReviewCommands(root, &asJSON)
 	return root.Execute()
 }
