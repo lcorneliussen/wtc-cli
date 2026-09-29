@@ -63,17 +63,40 @@ func TestRetireCollectionPreflightAndLeftovers(t *testing.T) {
 	fixtureFile(t, filepath.Join(target, "keep.txt"), "unknown local state\n", 0644)
 	fixtureFile(t, filepath.Join(target, ".claude", "skills", "personal", "SKILL.md"), "local override\n", 0644)
 	fixtureFile(t, filepath.Join(target, ".codex", "config.toml"), "model = \"example\"\n", 0644)
+	if err := os.Remove(filepath.Join(target, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(target, "AGENTS.md"), "local instructions\n", 0644)
+	fixtureFile(t, filepath.Join(target, ".envrc"), "export EXAMPLE=1\n", 0644)
 	retired, err := c.RetireCollection(RetireOptions{Name: "pending"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retired.FolderRemoved || len(retired.Leftovers) != 3 {
+	if retired.FolderRemoved || len(retired.Leftovers) != 5 {
 		t.Fatalf("unknown file did not remain visible: %+v", retired)
 	}
-	for _, rel := range []string{"keep.txt", ".claude/skills/personal/SKILL.md", ".codex/config.toml"} {
+	for _, rel := range []string{"keep.txt", ".claude/skills/personal/SKILL.md", ".codex/config.toml", "AGENTS.md", ".envrc"} {
 		if _, err := os.Stat(filepath.Join(target, rel)); err != nil {
 			t.Fatalf("local file %s was removed: %v", rel, err)
 		}
+	}
+}
+
+func TestRemoveManagedCollectionEntryFallback(t *testing.T) {
+	target := t.TempDir()
+	defaultBody, err := ReadDefault("collection-AGENTS.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(target, ".wtc", "collection-AGENTS.md"), string(defaultBody), 0644)
+	if err := os.Symlink(".wtc/collection-AGENTS.md", filepath.Join(target, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeManagedCollectionEntry(target); err != nil {
+		t.Fatal(err)
+	}
+	if entries, err := os.ReadDir(target); err != nil || len(entries) != 0 {
+		t.Fatalf("generated entry remains: %v %v", entries, err)
 	}
 }
 
