@@ -22,7 +22,7 @@ type envSweepResult struct {
 	Error string `json:"error,omitempty"`
 }
 
-func refreshEnvCollection(c *wtc.Context, dryRun bool) (envResult, error) {
+func refreshEnvCollection(c *wtc.Context, dryRun, invokeHooks bool) (envResult, error) {
 	data, err := c.RenderEnv()
 	if err != nil {
 		return envResult{}, err
@@ -38,8 +38,10 @@ func refreshEnvCollection(c *wtc.Context, dryRun bool) (envResult, error) {
 		if err := c.ValidateEnvSupport(); err != nil {
 			return envResult{}, err
 		}
-		if err := c.RunHook("env.pre", nil); err != nil {
-			return envResult{}, err
+		if invokeHooks {
+			if err := c.RunHook("env.pre", nil); err != nil {
+				return envResult{}, err
+			}
 		}
 		if changed {
 			if err := c.WriteEnv(data); err != nil {
@@ -52,8 +54,10 @@ func refreshEnvCollection(c *wtc.Context, dryRun bool) (envResult, error) {
 		if err := c.TrustMise(); err != nil {
 			return envResult{}, err
 		}
-		if err := c.RunHook("env.post", nil); err != nil {
-			return envResult{}, err
+		if invokeHooks {
+			if err := c.RunHook("env.post", nil); err != nil {
+				return envResult{}, err
+			}
 		}
 	}
 	return envResult{Collection: c.Collection, Changed: changed, DryRun: dryRun, Env: string(data), Mise: string(mise)}, nil

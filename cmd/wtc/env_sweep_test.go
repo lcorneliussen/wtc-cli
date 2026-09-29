@@ -48,10 +48,13 @@ func TestEnvSweepUsesTargetRegistriesAndKeepsGoing(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	run := func(dry bool) map[string]any {
+	run := func(dry, withHooks bool) map[string]any {
 		args := []string{"--json", "env", "--all", "--collection", filepath.Join(workspace, "alpha")}
 		if dry {
 			args = append(args, "--dry-run")
+		}
+		if withHooks {
+			args = append(args, "--run-hooks")
 		}
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), "PATH=/usr/bin:/bin", "WTC_CONFIG_ROOT="+filepath.Join(workspace, "control"))
@@ -69,10 +72,13 @@ func TestEnvSweepUsesTargetRegistriesAndKeepsGoing(t *testing.T) {
 		return payload
 	}
 	for _, dry := range []bool{true, false} {
-		payload := run(dry)
+		payload := run(dry, false)
 		data := payload["data"].(map[string]any)
 		if data["failed"] != float64(1) || len(data["results"].([]any)) != 3 {
 			t.Fatalf("wrong sweep: %v", data)
+		}
+		if data["hooks_run"] != false {
+			t.Fatalf("default sweep ran target hooks: %v", data)
 		}
 		byName := map[string]map[string]any{}
 		for _, raw := range data["results"].([]any) {
@@ -96,13 +102,15 @@ func TestEnvSweepUsesTargetRegistriesAndKeepsGoing(t *testing.T) {
 				t.Fatalf("%s did not use its registry: %s", name, env)
 			}
 		}
-		if dry {
-			if _, err := os.Stat(marker); !os.IsNotExist(err) {
-				t.Fatal("dry run invoked hook")
-			}
-		} else if _, err := os.Stat(marker); err != nil {
-			t.Fatalf("target hook did not run: %v", err)
+		if _, err := os.Stat(marker); !os.IsNotExist(err) {
+			t.Fatal("default sweep invoked target hook")
 		}
+	}
+	if data := run(false, true)["data"].(map[string]any); data["hooks_run"] != true {
+		t.Fatalf("explicit hook opt-in was ignored: %v", data)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("opted-in target hook did not run: %v", err)
 	}
 	if data, err := os.ReadFile(alphaLocal); err != nil || string(data) != "LOCAL_ONLY=kept\n" {
 		t.Fatalf("local environment changed: %s, %v", data, err)

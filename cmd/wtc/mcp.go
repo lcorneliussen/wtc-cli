@@ -14,12 +14,20 @@ func addMCPCommands(root *cobra.Command, asJSON *bool) {
 	var collection string
 	var dryRun bool
 	var all bool
+	var skipHooks bool
+	var runHooks bool
 	mcp := &cobra.Command{Use: "mcp", Short: "Render agent MCP configuration"}
 	mcp.PersistentFlags().StringVar(&collection, "collection", "", "Collection directory (default: current)")
 	render := &cobra.Command{Use: "render", Short: "Render the harness MCP registry into agent configs", Args: cobra.NoArgs}
 	render.Flags().BoolVar(&dryRun, "dry-run", false, "Report changes without writing")
 	render.Flags().BoolVar(&all, "all", false, "Render every collection in the workspace (omit per-collection credential diagnostics)")
+	render.Flags().BoolVar(&skipHooks, "skip-hooks", false, "Do not run MCP lifecycle hooks")
+	render.Flags().BoolVar(&runHooks, "run-hooks", false, "Run each target's hooks during --all (requires trusted collections)")
 	render.RunE = func(cmd *cobra.Command, args []string) error {
+		if runHooks && (!all || skipHooks) {
+			return fmt.Errorf("--run-hooks requires --all and cannot be combined with --skip-hooks")
+		}
+		invokeHooks := !skipHooks && (!all || runHooks)
 		var c *wtc.Context
 		var err error
 		if collection == "" {
@@ -35,7 +43,7 @@ func addMCPCommands(root *cobra.Command, asJSON *bool) {
 			return err
 		}
 		if !all {
-			result, err := renderMCPCollection(c, dryRun)
+			result, err := renderMCPCollection(c, dryRun, invokeHooks)
 			if err != nil {
 				return err
 			}
@@ -67,7 +75,7 @@ func addMCPCommands(root *cobra.Command, asJSON *bool) {
 				if openErr != nil {
 					item.Error = openErr.Error()
 				} else {
-					item.mcpResult, openErr = renderMCPCollection(target, dryRun)
+					item.mcpResult, openErr = renderMCPCollection(target, dryRun, invokeHooks)
 					if openErr != nil {
 						item.Error = openErr.Error()
 					} else {
@@ -93,11 +101,14 @@ func addMCPCommands(root *cobra.Command, asJSON *bool) {
 		}
 		summary := fmt.Sprintf("swept %d collection(s), %d failed", len(results), failures)
 		if *asJSON {
-			if err := emit(envelope{OK: failures == 0, Data: map[string]any{"results": results, "dry_run": dryRun, "failed": failures, "missing_env_diagnostics": false}, Summary: summary}, true); err != nil {
+			if err := emit(envelope{OK: failures == 0, Data: map[string]any{"results": results, "dry_run": dryRun, "failed": failures, "hooks_run": invokeHooks && !dryRun, "missing_env_diagnostics": false}, Summary: summary}, true); err != nil {
 				return err
 			}
 		} else {
 			fmt.Println(summary)
+			if !invokeHooks {
+				fmt.Println("note: target lifecycle hooks were not run")
+			}
 			fmt.Println("note: per-collection credential diagnostics are omitted from workspace sweeps")
 		}
 		if failures > 0 {
@@ -121,7 +132,7 @@ type mcpSweepResult struct {
 	Error      string `json:"error,omitempty"`
 }
 
-func renderMCPCollection(c *wtc.Context, dryRun bool) (mcpResult, error) {
+func renderMCPCollection(c *wtc.Context, dryRun, invokeHooks bool) (mcpResult, error) {
 	if _, err := os.Stat(filepath.Join(c.Harness, ".mcp-servers.yml")); os.IsNotExist(err) {
 		return mcpResult{Absent: true}, nil
 	} else if err != nil {
@@ -131,7 +142,7 @@ func renderMCPCollection(c *wtc.Context, dryRun bool) (mcpResult, error) {
 	if err != nil {
 		return mcpResult{}, err
 	}
-	if !dryRun {
+	if !dryRun && invokeHooks {
 		if err := c.RunHook("mcp.render.pre", nil); err != nil {
 			return mcpResult{}, err
 		}
@@ -140,7 +151,7 @@ func renderMCPCollection(c *wtc.Context, dryRun bool) (mcpResult, error) {
 	if err != nil {
 		return mcpResult{}, err
 	}
-	if !dryRun {
+	if !dryRun && invokeHooks {
 		if err := c.RunHook("mcp.render.post", nil); err != nil {
 			return mcpResult{}, err
 		}

@@ -54,10 +54,18 @@ func run() error {
 	var collection string
 	var dryRun bool
 	var envAll bool
+	var envSkipHooks bool
+	var envRunHooks bool
 	envCmd.Flags().StringVar(&collection, "collection", "", "Collection directory (default: current)")
 	envCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show generated environment without writing")
 	envCmd.Flags().BoolVar(&envAll, "all", false, "Refresh every collection in the workspace")
+	envCmd.Flags().BoolVar(&envSkipHooks, "skip-hooks", false, "Do not run environment lifecycle hooks")
+	envCmd.Flags().BoolVar(&envRunHooks, "run-hooks", false, "Run each target's hooks during --all (requires trusted collections)")
 	envCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if envRunHooks && (!envAll || envSkipHooks) {
+			return fmt.Errorf("--run-hooks requires --all and cannot be combined with --skip-hooks")
+		}
+		invokeHooks := !envSkipHooks && (!envAll || envRunHooks)
 		var c *wtc.Context
 		var err error
 		if collection == "" {
@@ -69,7 +77,7 @@ func run() error {
 			return err
 		}
 		if !envAll {
-			result, err := refreshEnvCollection(c, dryRun)
+			result, err := refreshEnvCollection(c, dryRun, invokeHooks)
 			if err != nil {
 				return err
 			}
@@ -91,7 +99,7 @@ func run() error {
 			if openErr != nil {
 				item.Error = openErr.Error()
 			} else {
-				item.envResult, openErr = refreshEnvCollection(target, dryRun)
+				item.envResult, openErr = refreshEnvCollection(target, dryRun, invokeHooks)
 				if openErr != nil {
 					item.Error = openErr.Error()
 				}
@@ -113,11 +121,14 @@ func run() error {
 		}
 		summary := fmt.Sprintf("swept %d collection(s), %d failed", len(results), failures)
 		if asJSON {
-			if err := emit(envelope{OK: failures == 0, Data: map[string]any{"results": results, "dry_run": dryRun, "failed": failures}, Summary: summary}, true); err != nil {
+			if err := emit(envelope{OK: failures == 0, Data: map[string]any{"results": results, "dry_run": dryRun, "failed": failures, "hooks_run": invokeHooks && !dryRun}, Summary: summary}, true); err != nil {
 				return err
 			}
 		} else {
 			fmt.Println(summary)
+			if !invokeHooks {
+				fmt.Println("note: target lifecycle hooks were not run")
+			}
 		}
 		if failures > 0 {
 			return fmt.Errorf("%d collection(s) failed environment refresh", failures)
