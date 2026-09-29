@@ -112,6 +112,45 @@ func TestExistingLocalEnvStillRefreshesMise(t *testing.T) {
 	}
 }
 
+func TestMisePinSurvivesEnvRegeneration(t *testing.T) {
+	c := fixture(t)
+	if err := os.WriteFile(filepath.Join(c.Harness, ".wtc-cli-version"), []byte("0.1.1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := c.EnsureEnvSupport(); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(c.Collection, "mise.toml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"[tools]", `"github:lcorneliussen/wtc-cli" = "0.1.1"`, "[env]"} {
+			if !strings.Contains(string(data), want) {
+				t.Fatalf("mise.toml missing %q: %s", want, data)
+			}
+		}
+	}
+}
+
+func TestInvalidMisePinDoesNotRewrite(t *testing.T) {
+	c := fixture(t)
+	path := filepath.Join(c.Collection, "mise.toml")
+	if err := os.WriteFile(path, []byte("keep\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(c.Harness, ".wtc-cli-version"), []byte("latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.EnsureEnvSupport(); err == nil {
+		t.Fatal("accepted non-exact pin")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "keep\n" {
+		t.Fatalf("changed mise.toml on invalid pin: %q, %v", data, err)
+	}
+}
+
 func TestRenderedEnvCanBeSourcedWithSpaces(t *testing.T) {
 	c := fixture(t)
 	c.ConfigRoot = filepath.Join(t.TempDir(), "control root")

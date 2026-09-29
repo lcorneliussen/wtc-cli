@@ -71,8 +71,13 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		mise, err := c.RenderMise()
+		if err != nil {
+			return err
+		}
 		old, _ := os.ReadFile(filepath.Join(c.Collection, ".env.collection"))
-		changed := !bytes.Equal(old, data)
+		oldMise, _ := os.ReadFile(filepath.Join(c.Collection, "mise.toml"))
+		changed := !bytes.Equal(old, data) || !bytes.Equal(oldMise, mise)
 		if !dryRun {
 			if err := c.ValidateEnvSupport(); err != nil {
 				return err
@@ -88,6 +93,8 @@ func run() error {
 		}
 		if dryRun && !asJSON {
 			fmt.Print(string(data))
+			fmt.Print("\n# mise.toml\n")
+			fmt.Print(string(mise))
 			return nil
 		}
 		state := "already current"
@@ -98,7 +105,7 @@ func run() error {
 				state = "updated"
 			}
 		}
-		return emit(envelope{OK: true, Data: map[string]any{"collection": c.Collection, "changed": changed, "dry_run": dryRun, "env": string(data)}, Summary: filepath.Base(c.Collection) + ": " + state}, asJSON)
+		return emit(envelope{OK: true, Data: map[string]any{"collection": c.Collection, "changed": changed, "dry_run": dryRun, "env": string(data), "mise": string(mise)}, Summary: filepath.Base(c.Collection) + ": " + state}, asJSON)
 	}
 	root.AddCommand(envCmd)
 	commands := &cobra.Command{Use: "commands", Short: "List commands and machine-readable metadata", Args: cobra.NoArgs}
