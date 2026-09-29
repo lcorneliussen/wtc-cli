@@ -154,12 +154,13 @@ func TestNewCollectionRejectsInvalidNameBeforeWriting(t *testing.T) {
 
 func TestNewCollectionExplicitBranchLaunchNote(t *testing.T) {
 	c := newWorkspaceFixture(t)
-	r, err := c.NewCollection(NewOptions{Slug: "assigned", Repos: []string{"widget"}, Branch: "chosen-branch"})
+	branch := "x;echo${IFS}pwned"
+	r, err := c.NewCollection(NewOptions{Slug: "assigned", Repos: []string{"widget"}, Branch: branch})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"harness", "widget"} {
-		if got := fixtureGit(t, "-C", filepath.Join(r.Collection, name), "branch", "--show-current"); got != "chosen-branch" {
+		if got := fixtureGit(t, "-C", filepath.Join(r.Collection, name), "branch", "--show-current"); got != branch {
 			t.Errorf("%s branch = %q", name, got)
 		}
 	}

@@ -238,15 +238,18 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 		RunRepoInit(path)
 	}
 	_, _ = target.AgentToolchainPath(true) // A bare agent shell can fill this later.
-	branchNote := fmt.Sprintf("Worktrees start **detached at the development tip** — no branch exists yet.\nCreate one at your first commit:\n\n    git switch -c %s\n\n(that is the expected name; adjust it if the work turns out to be something else).", result.IntendedBranch)
-	if opt.PR != "" {
+	var branchNote string
+	switch {
+	case opt.PR != "":
 		primaryDir := primary
 		if primary == harnessRepo {
 			primaryDir = "harness"
 		}
 		branchNote = fmt.Sprintf("The primary sibling is on a local branch at the exact PR head. Push review work with:\n\n    git -C %s push %s %s\n\nOther siblings start detached at the tip.", shellQuote(primaryDir), shellQuote(result.PushRemote), shellQuote("HEAD:refs/heads/"+result.IntendedBranch))
-	} else if opt.Branch != "" {
+	case opt.Branch != "":
 		branchNote = "All siblings are already on the explicitly requested branch. Commit on that branch; do not create it again."
+	default:
+		branchNote = fmt.Sprintf("Worktrees start **detached at the development tip** — no branch exists yet.\nCreate one at your first commit:\n\n    git switch -c %s\n\n(that is the expected name; adjust it if the work turns out to be something else).", result.IntendedBranch)
 	}
 	handoff := fmt.Sprintf("# wtc: %s — launch note (EPHEMERAL)\n\n**Goal:** %s\n\nFirst agent on this wtc: read this, turn anything durable into issues /\ncommits / PRs, then **delete this file as your very first action**\n(harness/AGENTS.md → \"State lives in git\").\n\n%s Collection env: `.env.collection` (inherited via `mise.toml`).\nRetire with `harness/tools/retire.sh`.\n", filepath.Base(result.Collection), defaultSource(result.Source), branchNote)
 	if err := os.WriteFile(filepath.Join(result.Collection, "HANDOFF.md"), []byte(handoff), 0644); err != nil {
