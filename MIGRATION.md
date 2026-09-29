@@ -7,7 +7,7 @@ command and its contract checks cover their behavior.
 
 | Shell entry point | Provisional CLI | State |
 |---|---|---|
-| `refresh-env.sh` | `wtc env` | Native in v0.1.3; shell shim and `--all` parity pending |
+| `refresh-env.sh` | `wtc env` | Native in v0.1.3; trust fix and target-aware shell shim released in v0.1.9; native `--all` parity pending |
 | `wtc-pr.sh` | `wtc pr path/list/enlist/unlist` | Native in v0.1.3; shell shim pending |
 | `refresh-configs.sh` | `wtc registry refresh` | Native in v0.1.3; generic shell shim released in v0.1.6 |
 | `link-mcp.sh` | `wtc mcp render` | Native for one collection in v0.1.3; `--all` shim parity pending |
