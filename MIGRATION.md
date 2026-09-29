@@ -7,12 +7,12 @@ command and its contract checks cover their behavior.
 
 | Shell entry point | Provisional CLI | State |
 |---|---|---|
-| `refresh-env.sh` | `wtc env` | Native; additional generated mise tools in this branch |
-| `wtc-pr.sh` | `wtc pr path/list/enlist/unlist` | Native in this branch; shim pending release |
-| `refresh-configs.sh` | `wtc registry refresh` | Native in this branch; shim pending release |
-| `link-mcp.sh` | `wtc mcp render` | Native for one collection in this branch; `--all` shim parity pending |
+| `refresh-env.sh` | `wtc env` | Native in v0.1.3; shell shim and `--all` parity pending |
+| `wtc-pr.sh` | `wtc pr path/list/enlist/unlist` | Native in v0.1.3; shell shim pending |
+| `refresh-configs.sh` | `wtc registry refresh` | Native in v0.1.3; shell shim pending |
+| `link-mcp.sh` | `wtc mcp render` | Native for one collection in v0.1.3; `--all` shim parity pending |
 | `link-skills.sh` | `wtc skills render` | Pending |
-| `link-secrets.sh` | `wtc secrets link` | Pending |
+| `link-secrets.sh` | `wtc secrets link` | Native in this branch; release, shim, and harness contract parity pending |
 | `agent-env.sh` | `wtc agent-env` | Pending |
 | `branch-off.sh` | `wtc new` | Pending |
 | `add-repo.sh` | `wtc add-repo` | Pending |
@@ -21,12 +21,12 @@ command and its contract checks cover their behavior.
 | `wtc-status.sh`, `wtc-status-tui.sh` | `wtc status` | Pending data layer and TUI |
 | `wtc-open.sh` | `wtc open` | Pending |
 | `wtc-browse.sh` | `wtc browse` | Pending |
-| `review-bundle.sh` | `wtc review bundle` | Native public bundle subset in the review branch; catch-up, private snapshots, overlays, and prior-round context pending |
-| `review-run.sh` | `wtc review run` | Native local runner subset in the review branch; posting lifecycle and rich stats pending |
-| `review-post.sh` | `wtc review post` | Native summary lifecycle, inline dedup, and local receipt in the review branch; forge parity tests pending |
-| `review-status.sh` | `wtc review status` | Native GitHub and Bitbucket status and trusted-local check in the review branch |
-| `review-resolve.sh` | `wtc review resolve` | Native selected reply/resolve in the review branch; forge parity tests pending |
-| `bb-pr-ready.sh` | `wtc review ready` | Native guarded promotion in the review branch |
+| `review-bundle.sh` | `wtc review bundle` | Native public no-catch-up subset in v0.1.4; private snapshots, overlays, catch-up, and prior-round context pending |
+| `review-run.sh` | `wtc review run` | Native local runner subset in v0.1.4; integrated posting lifecycle and rich stats pending |
+| `review-post.sh` | `wtc review post` | Native summary lifecycle, inline dedup, and local receipt in v0.1.4; forge parity tests pending |
+| `review-status.sh` | `wtc review status` | Native GitHub and Bitbucket status and trusted-local check in v0.1.4 |
+| `review-resolve.sh` | `wtc review resolve` | Native reply/resolve in v0.1.4; forge parity tests pending |
+| `bb-pr-ready.sh` | `wtc review ready` | Native guarded promotion in v0.1.4 |
 
 `wtc-status-legacy.sh`, `wtc-status-legacy-tui.sh`, `lib.sh`, and
 `wtc-status-common.sh` are implementation support for those entry points.
