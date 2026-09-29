@@ -216,6 +216,7 @@ func run() error {
 	addAgentEnvCommand(root, &asJSON)
 	addSkillsCommands(root, &asJSON)
 	addReviewCommands(root, &asJSON)
+	addNewCommand(root, &asJSON)
 	return root.Execute()
 }
 
