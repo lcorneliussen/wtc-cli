@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -40,6 +41,7 @@ func main() {
 func run() error {
 	var asJSON bool
 	root := &cobra.Command{Use: "wtc", Short: "Worktree collection tools", SilenceUsage: true, SilenceErrors: true}
+	root.CompletionOptions.DisableDefaultCmd = true
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "Emit a JSON result")
 	root.Version = version
 	cwd := func() (*wtc.Context, error) {
@@ -103,7 +105,7 @@ func run() error {
 	commands.RunE = func(cmd *cobra.Command, args []string) error {
 		items := []map[string]string{}
 		for _, c := range root.Commands() {
-			if c.Hidden {
+			if c.Hidden || c.Name() == "help" {
 				continue
 			}
 			items = append(items, map[string]string{"name": c.Name(), "description": c.Short})
@@ -129,18 +131,24 @@ func run() error {
 			checks = append(checks, map[string]any{"name": name, "ok": err == nil, "detail": path})
 		}
 		if c.Config.Compatibility.Requires != "" {
-			checks = append(checks, map[string]any{"name": "compatibility", "ok": true, "detail": c.Config.Compatibility.Requires})
+			checks = append(checks, map[string]any{"name": "compatibility", "ok": compatible(c.Config.Compatibility.Requires, version), "detail": fmt.Sprintf("requires %s; running %s", c.Config.Compatibility.Requires, version)})
 		}
 		okay := true
 		for _, check := range checks {
-			if check["name"] == "git" || check["name"] == "registry" {
+			if check["name"] == "git" || check["name"] == "registry" || check["name"] == "compatibility" {
 				if !check["ok"].(bool) {
 					okay = false
 				}
 			}
 		}
 		if asJSON {
-			return emit(envelope{OK: okay, Data: checks, Summary: "collection diagnostics"}, true)
+			if err := emit(envelope{OK: okay, Data: checks, Summary: "collection diagnostics"}, true); err != nil {
+				return err
+			}
+			if !okay {
+				return fmt.Errorf("required checks failed")
+			}
+			return nil
 		}
 		for _, check := range checks {
 			state := "ok"
@@ -173,4 +181,16 @@ func run() error {
 	}
 	root.AddCommand(eject)
 	return root.Execute()
+}
+
+func compatible(requirement, actual string) bool {
+	constraint, err := semver.NewConstraint(requirement)
+	if err != nil {
+		return false
+	}
+	v, err := semver.NewVersion(actual)
+	if err != nil {
+		return false
+	}
+	return constraint.Check(v)
 }

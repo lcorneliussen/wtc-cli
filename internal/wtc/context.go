@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -49,6 +50,8 @@ type Context struct {
 	Config     Config   `json:"-"`
 	ConfigRoot string   `json:"config_root"`
 }
+
+var validRepoName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
 func Discover(start string) (*Context, error) {
 	abs, err := filepath.Abs(start)
@@ -103,11 +106,22 @@ func (c *Context) load() error {
 		return errors.New("registry contains no repositories")
 	}
 	seen := map[string]bool{}
+	portKeys := map[string]bool{}
 	for _, r := range c.Registry.Repos {
-		if r.Name == "" || seen[r.Name] {
+		if !validRepoName.MatchString(r.Name) || seen[r.Name] {
 			return fmt.Errorf("invalid or repeated repository name %q", r.Name)
 		}
 		seen[r.Name] = true
+		if r.PortOffset != nil {
+			if *r.PortOffset < 0 || *r.PortOffset >= 100 {
+				return fmt.Errorf("port_offset outside collection block for %s", r.Name)
+			}
+			key := portKey(r.Name)
+			if portKeys[key] {
+				return fmt.Errorf("duplicate port variable %s", key)
+			}
+			portKeys[key] = true
+		}
 		for key := range r.Extra {
 			if !strings.HasPrefix(key, "x-") {
 				return fmt.Errorf("unsupported registry field %q in %s", key, r.Name)
@@ -119,6 +133,8 @@ func (c *Context) load() error {
 		if _, err := toml.DecodeFile(cfg, &c.Config); err != nil {
 			return fmt.Errorf("config: %w", err)
 		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("config: %w", err)
 	}
 	c.ConfigRoot = os.Getenv("WTC_CONFIG_ROOT")
 	if c.ConfigRoot == "" {
