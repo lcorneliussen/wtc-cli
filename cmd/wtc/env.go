@@ -51,8 +51,10 @@ func refreshEnvCollection(c *wtc.Context, dryRun, invokeHooks bool) (envResult, 
 		if err := c.EnsureEnvSupport(); err != nil {
 			return envResult{}, err
 		}
-		if err := c.TrustMise(); err != nil {
-			return envResult{}, err
+		if invokeHooks {
+			if err := c.TrustMise(); err != nil {
+				return envResult{}, err
+			}
 		}
 		if invokeHooks {
 			if err := c.RunHook("env.post", nil); err != nil {

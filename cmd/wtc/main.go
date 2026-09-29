@@ -59,8 +59,8 @@ func run() error {
 	envCmd.Flags().StringVar(&collection, "collection", "", "Collection directory (default: current)")
 	envCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show generated environment without writing")
 	envCmd.Flags().BoolVar(&envAll, "all", false, "Refresh every collection in the workspace")
-	envCmd.Flags().BoolVar(&envSkipHooks, "skip-hooks", false, "Do not run environment lifecycle hooks")
-	envCmd.Flags().BoolVar(&envRunHooks, "run-hooks", false, "Run each target's hooks during --all (requires trusted collections)")
+	envCmd.Flags().BoolVar(&envSkipHooks, "skip-hooks", false, "Do not run environment lifecycle hooks or trust mise")
+	envCmd.Flags().BoolVar(&envRunHooks, "run-hooks", false, "Run each target's hooks and trust mise during --all (requires trusted collections)")
 	envCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if envRunHooks && (!envAll || envSkipHooks) {
 			return fmt.Errorf("--run-hooks requires --all and cannot be combined with --skip-hooks")
@@ -93,13 +93,23 @@ func run() error {
 		}
 		results := make([]envSweepResult, 0, len(collections))
 		failures := 0
+		reservedPorts := map[int]bool{}
 		for _, dir := range collections {
 			item := envSweepResult{Collection: dir}
 			target, openErr := wtc.OpenCollection(dir)
 			if openErr != nil {
 				item.Error = openErr.Error()
 			} else {
-				item.envResult, openErr = refreshEnvCollection(target, dryRun, invokeHooks)
+				previewBase := 0
+				if dryRun {
+					previewBase, openErr = target.PreviewPortBase(reservedPorts)
+				}
+				if openErr == nil {
+					item.envResult, openErr = refreshEnvCollection(target, dryRun, invokeHooks)
+					if openErr == nil && dryRun {
+						reservedPorts[previewBase] = true
+					}
+				}
 				item.Collection = dir // A failed render returns a zero-value result.
 				if openErr != nil {
 					item.Error = openErr.Error()
@@ -128,7 +138,7 @@ func run() error {
 		} else {
 			fmt.Println(summary)
 			if !invokeHooks {
-				fmt.Println("note: target lifecycle hooks were not run")
+				fmt.Println("note: target lifecycle hooks were not run and mise was not trusted")
 			}
 		}
 		if failures > 0 {
