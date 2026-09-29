@@ -29,6 +29,10 @@ type SecretLinkResult struct {
 
 func (c *Context) LinkSecrets(opt SecretLinkOptions) (SecretLinkResult, error) {
 	result := SecretLinkResult{DryRun: opt.DryRun}
+	harnessRepo, _ := c.HarnessRepoName()
+	if opt.Repo == "harness" && harnessRepo != "" {
+		opt.Repo = harnessRepo
+	}
 	if opt.Repo != "" && !validRepoName.MatchString(opt.Repo) {
 		return result, fmt.Errorf("invalid repository name %q", opt.Repo)
 	}
@@ -65,7 +69,11 @@ func (c *Context) LinkSecrets(opt SecretLinkOptions) (SecretLinkResult, error) {
 		if !entry.IsDir() || !validRepoName.MatchString(name) || opt.Repo != "" && opt.Repo != name {
 			continue
 		}
-		worktree := filepath.Join(c.Collection, name)
+		worktreeName := name
+		if name == harnessRepo {
+			worktreeName = "harness"
+		}
+		worktree := filepath.Join(c.Collection, worktreeName)
 		info, err := os.Stat(worktree)
 		if os.IsNotExist(err) {
 			continue

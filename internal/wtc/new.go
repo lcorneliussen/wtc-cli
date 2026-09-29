@@ -76,7 +76,7 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 		}
 		result.Collection = parts[0] + "-pr" + parts[1]
 		result.IntendedBranch = details.HeadRefName
-		result.Source = fmt.Sprintf("Review wtc for %s#%s (head branch `%s`).", slug, parts[1], details.HeadRefName)
+		result.Source = fmt.Sprintf("Review wtc for %s#%s.", slug, parts[1])
 		primary, primaryBranch, prID, prHead = parts[0], details.HeadRefName, parts[1], details.HeadRefOID
 		if details.IsCrossRepository {
 			if !githubSlugPattern.MatchString(details.HeadRepository.NameWithOwner) {
@@ -244,9 +244,9 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 		if primary == harnessRepo {
 			primaryDir = "harness"
 		}
-		branchNote = fmt.Sprintf("The primary sibling is on local branch `%s` at the PR head `%s`. Push review work with `git -C %s push %s HEAD:refs/heads/%s`. Other siblings start detached at the tip.", result.LocalBranch, result.IntendedBranch, primaryDir, result.PushRemote, result.IntendedBranch)
+		branchNote = fmt.Sprintf("The primary sibling is on a local branch at the exact PR head. Push review work with:\n\n    git -C %s push %s %s\n\nOther siblings start detached at the tip.", shellQuote(primaryDir), shellQuote(result.PushRemote), shellQuote("HEAD:refs/heads/"+result.IntendedBranch))
 	} else if opt.Branch != "" {
-		branchNote = fmt.Sprintf("All siblings are already on the explicitly requested branch `%s`. Commit on that branch; do not create it again.", result.IntendedBranch)
+		branchNote = "All siblings are already on the explicitly requested branch. Commit on that branch; do not create it again."
 	}
 	handoff := fmt.Sprintf("# wtc: %s — launch note (EPHEMERAL)\n\n**Goal:** %s\n\nFirst agent on this wtc: read this, turn anything durable into issues /\ncommits / PRs, then **delete this file as your very first action**\n(harness/AGENTS.md → \"State lives in git\").\n\n%s Collection env: `.env.collection` (inherited via `mise.toml`).\nRetire with `harness/tools/retire.sh`.\n", filepath.Base(result.Collection), defaultSource(result.Source), branchNote)
 	if err := os.WriteFile(filepath.Join(result.Collection, "HANDOFF.md"), []byte(handoff), 0644); err != nil {
@@ -263,4 +263,8 @@ func defaultSource(source string) string {
 		return "(fill in — what this wtc exists for)"
 	}
 	return source
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
