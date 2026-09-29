@@ -1,6 +1,7 @@
 package wtc
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -94,20 +95,28 @@ func (c *Context) AddRepositories(opt AddRepoOptions) (AddRepoResult, error) {
 			continue
 		}
 		if err := target.AddWorktree(name, name, target.Collection, opt.Branch); err != nil {
-			return result, fmt.Errorf("add %s: %w", name, err)
+			if rollbackErr := target.removeAddedWorktrees(result.Added); rollbackErr != nil {
+				return result, fmt.Errorf("add %s: %w; rollback failed: %v", name, err, rollbackErr)
+			}
+			result.Added = []string{}
+			return result, fmt.Errorf("add %s: %w (earlier worktrees rolled back)", name, err)
 		}
 		result.Added = append(result.Added, name)
 	}
-	if _, err := os.Stat(filepath.Join(target.Collection, ".env.collection")); os.IsNotExist(err) {
-		env, err := target.RenderEnv()
-		if err != nil {
-			return result, err
-		}
+	// A repository may have been added to the registry after this collection
+	// was created. Refresh the environment before its init hook needs its port.
+	env, err := target.RenderEnv()
+	if err != nil {
+		return result, err
+	}
+	oldEnv, err := os.ReadFile(filepath.Join(target.Collection, ".env.collection"))
+	if err != nil && !os.IsNotExist(err) {
+		return result, err
+	}
+	if !bytes.Equal(oldEnv, env) {
 		if err := target.WriteEnv(env); err != nil {
 			return result, err
 		}
-	} else if err != nil {
-		return result, err
 	}
 	if err := target.EnsureEnvSupport(); err != nil {
 		return result, err
@@ -148,4 +157,22 @@ func (c *Context) AddRepositories(opt AddRepoOptions) (AddRepoResult, error) {
 		return result, err
 	}
 	return result, nil
+}
+
+// removeAddedWorktrees only rolls back checkouts made by the current call,
+// before any repository init hook has run. Git refuses removal if a worktree
+// has acquired uncommitted files, so a failed rollback never silently drops
+// data and its path is reported to the caller.
+func (c *Context) removeAddedWorktrees(names []string) error {
+	for i := len(names) - 1; i >= 0; i-- {
+		bare, err := c.bareFor(names[i])
+		if err != nil {
+			return err
+		}
+		path := filepath.Join(c.Collection, names[i])
+		if _, err := gitOutput("--git-dir="+bare, "worktree", "remove", path); err != nil {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+	}
+	return nil
 }

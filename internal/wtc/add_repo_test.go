@@ -109,3 +109,60 @@ func TestAddRepositoriesRegeneratesMissingEnvironmentWithCreatingControlRoot(t *
 		t.Fatalf("control root was not inherited: %q (%v)", env, err)
 	}
 }
+
+func TestAddRepositoriesRefreshesChangedRegistryPortsBeforeInit(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	base, err := c.NewCollection(NewOptions{Slug: "existing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := filepath.Join(base.Collection, "harness", ".harness-repos.yml")
+	data, err := os.ReadFile(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, registry, strings.Replace(string(data), "port_offset: 1", "port_offset: 2", 1), 0644)
+	target, err := OpenCollection(base.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.AddRepositories(AddRepoOptions{Repos: []string{"widget"}}); err != nil {
+		t.Fatal(err)
+	}
+	init, err := os.ReadFile(filepath.Join(base.Collection, "widget", "init-ran"))
+	if err != nil || !strings.HasSuffix(string(init), "|42002") {
+		t.Fatalf("init used stale port: %q (%v)", init, err)
+	}
+}
+
+func TestAddRepositoriesRollsBackEarlierCheckoutOnLaterFailure(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	base, err := c.NewCollection(NewOptions{Slug: "existing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := filepath.Join(base.Collection, "harness", ".harness-repos.yml")
+	file, err := os.OpenFile(registry, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("  - name: broken\n    remote: /nonexistent/wtc-fixture.git\n    default_ref: origin/main\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	target, err := OpenCollection(base.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.AddRepositories(AddRepoOptions{Repos: []string{"widget", "broken"}}); err == nil || !strings.Contains(err.Error(), "rolled back") {
+		t.Fatalf("later checkout did not report rollback: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base.Collection, "widget")); !os.IsNotExist(err) {
+		t.Fatalf("earlier worktree was left behind: %v", err)
+	}
+	if _, err := target.AddRepositories(AddRepoOptions{Repos: []string{"widget"}}); err != nil {
+		t.Fatalf("retry after rollback failed: %v", err)
+	}
+}
