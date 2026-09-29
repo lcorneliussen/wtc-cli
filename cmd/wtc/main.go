@@ -209,6 +209,7 @@ func run() error {
 	addPRCommands(root, &asJSON)
 	addRegistryCommands(root, &asJSON)
 	addMCPCommands(root, &asJSON)
+	addReviewCommands(root, &asJSON)
 	return root.Execute()
 }
 
