@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
+	"sort"
 
 	"github.com/BurntSushi/toml"
 	"gopkg.in/yaml.v3"
@@ -27,9 +27,11 @@ type Repo struct {
 	Extra         map[string]any `yaml:",inline" json:"extra,omitempty"`
 }
 type Registry struct {
-	SchemaVersion int    `yaml:"schema_version" json:"schema_version"`
-	Repos         []Repo `yaml:"repos" json:"repos"`
-	Repositories  []Repo `yaml:"repositories" json:"-"`
+	SchemaVersion int               `yaml:"schema_version" json:"schema_version"`
+	Repos         []Repo            `yaml:"repos" json:"repos"`
+	Repositories  []Repo            `yaml:"repositories" json:"-"`
+	Selected      []Repo            `yaml:"selected" json:"-"`
+	NonDefault    map[string][]Repo `yaml:"non_default" json:"-"`
 }
 type Config struct {
 	Harness struct {
@@ -103,6 +105,17 @@ func (c *Context) load() error {
 		c.Registry.Repos = c.Registry.Repositories
 	}
 	if len(c.Registry.Repos) == 0 {
+		c.Registry.Repos = append(c.Registry.Repos, c.Registry.Selected...)
+		categories := make([]string, 0, len(c.Registry.NonDefault))
+		for name := range c.Registry.NonDefault {
+			categories = append(categories, name)
+		}
+		sort.Strings(categories)
+		for _, name := range categories {
+			c.Registry.Repos = append(c.Registry.Repos, c.Registry.NonDefault[name]...)
+		}
+	}
+	if len(c.Registry.Repos) == 0 {
 		return errors.New("registry contains no repositories")
 	}
 	seen := map[string]bool{}
@@ -122,11 +135,8 @@ func (c *Context) load() error {
 			}
 			portKeys[key] = true
 		}
-		for key := range r.Extra {
-			if !strings.HasPrefix(key, "x-") {
-				return fmt.Errorf("unsupported registry field %q in %s", key, r.Name)
-			}
-		}
+		// Preserve harness-specific metadata for commands that understand it.
+		// Unrecognized fields do not make basic env/doctor operations unusable.
 	}
 	cfg := filepath.Join(c.Harness, "wtc.toml")
 	if _, err := os.Stat(cfg); err == nil {

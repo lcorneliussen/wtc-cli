@@ -17,3 +17,8 @@ Run locally with `go run ./cmd/wtc`. Commands that have not migrated remain in t
 ```
 
 The pin shown here is an example; use a published release version. The shell environment generator in a harness must also preserve the same pin during migration.
+
+`wtc` reads registries using `repos`, `repositories`, or `selected` plus
+categorized `non_default` entries. Harness-specific per-repository metadata is
+preserved for commands that understand it; basic commands such as `doctor`
+do not reject unknown metadata fields.
