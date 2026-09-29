@@ -213,7 +213,9 @@ func (c *Context) AddPRWorktree(name, directory, destination, branch, number, ex
 		return result, err
 	}
 	branchOccupied := strings.Contains("\n"+occupied+"\n", "\nbranch refs/heads/"+branch+"\n")
-	if branchOccupied {
+	localHead, localErr := gitOutput("--git-dir="+bare, "rev-parse", "--verify", "refs/heads/"+branch)
+	useAlternate := branchOccupied || localErr == nil && !strings.EqualFold(localHead, expectedSHA)
+	if useAlternate {
 		// A branch may be checked out in only one worktree. Keep the review
 		// collection usable with a distinct local name and an explicit push
 		// target in its launch note.
@@ -230,10 +232,7 @@ func (c *Context) AddPRWorktree(name, directory, destination, branch, number, ex
 		}
 	}
 	args := []string{"--git-dir=" + bare, "worktree", "add"}
-	if localHead, err := gitOutput("--git-dir="+bare, "rev-parse", "--verify", "refs/heads/"+branch); err == nil && !branchOccupied {
-		if !strings.EqualFold(localHead, expectedSHA) {
-			return result, fmt.Errorf("local branch %s differs from PR head %s", branch, expectedSHA)
-		}
+	if localErr == nil && !useAlternate {
 		args = append(args, path, branch)
 	} else {
 		args = append(args, "-b", result.LocalBranch, path, remote+"/"+branch)

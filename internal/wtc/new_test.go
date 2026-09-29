@@ -237,6 +237,20 @@ func TestPRWorktreeFetchesExactHeadAndRefusesMissingHead(t *testing.T) {
 	if got := fixtureGit(t, "-C", filepath.Join(second, "widget"), "rev-parse", "HEAD"); got != head {
 		t.Fatalf("second checkout at %s, want %s", got, head)
 	}
+	bare := filepath.Join(c.Workspace, ".bare", "widget.git")
+	fixtureGit(t, "--git-dir="+bare, "worktree", "remove", filepath.Join(destination, "widget"))
+	fixtureGit(t, "--git-dir="+bare, "branch", "-f", "fork-feature", "origin/main")
+	third := filepath.Join(c.Workspace, "review-after-stale")
+	if err := os.Mkdir(third, 0755); err != nil {
+		t.Fatal(err)
+	}
+	checkout, err = c.AddPRWorktree("widget", "widget", third, "fork-feature", "12", head, fork)
+	if err != nil || checkout.LocalBranch != "wtc-pr-12-review-2" {
+		t.Fatalf("stale local branch prevented exact checkout: %+v %v", checkout, err)
+	}
+	if got := fixtureGit(t, "-C", filepath.Join(third, "widget"), "rev-parse", "HEAD"); got != head {
+		t.Fatalf("checkout after stale branch at %s, want %s", got, head)
+	}
 }
 
 func TestNewCollectionCanReviewHarnessPR(t *testing.T) {
@@ -252,7 +266,7 @@ func TestNewCollectionCanReviewHarnessPR(t *testing.T) {
 	fixtureGit(t, "-C", source, "checkout", "-q", "main")
 	c.Registry.Repos[0].Remote = "https://github.com/example/agent-harness.git"
 	bin := filepath.Join(c.Workspace, "bin")
-	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' '{\"headRefName\":\""+branch+"\",\"headRefOid\":\""+head+"\"}'\n", 0755)
+	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' '{\"headRefName\":\""+branch+"\",\"headRefOid\":\""+head+"\",\"title\":\"Review fixture\"}'\n", 0755)
 	t.Setenv("PATH", bin+":/usr/bin:/bin")
 	r, err := c.NewCollection(NewOptions{PR: "agent-harness#14"})
 	if err != nil {
@@ -270,5 +284,13 @@ func TestNewCollectionCanReviewHarnessPR(t *testing.T) {
 	note, err := os.ReadFile(filepath.Join(r.Collection, "HANDOFF.md"))
 	if err != nil || !strings.Contains(string(note), "git -C 'harness' push 'origin' 'HEAD:refs/heads/"+branch+"'") {
 		t.Fatalf("review launch note lacks push target: %s (%v)", note, err)
+	}
+	target, err := OpenCollection(r.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prs, err := target.ListPRs()
+	if err != nil || len(prs) != 1 || prs[0].Number != "14" || prs[0].Branch != branch || prs[0].Title != "Review fixture" {
+		t.Fatalf("review PR was not enlisted: %+v %v", prs, err)
 	}
 }

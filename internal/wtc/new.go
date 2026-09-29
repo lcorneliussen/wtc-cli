@@ -44,7 +44,7 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	if err != nil {
 		return result, err
 	}
-	primary, primaryBranch, prID, prHead, prRemote := "", opt.Branch, "", "", ""
+	primary, primaryBranch, prID, prHead, prRemote, prTitle, prWebURL := "", opt.Branch, "", "", "", "", ""
 	if opt.PR != "" {
 		parts := strings.Split(opt.PR, "#")
 		if len(parts) != 2 || !prNumber.MatchString(parts[1]) {
@@ -59,7 +59,7 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 			return result, fmt.Errorf("PR collection requires a GitHub repository remote")
 		}
 		slug := strings.TrimSuffix(strings.TrimPrefix(url, "https://github.com/"), "/pull/"+parts[1])
-		output, err := exec.Command("gh", "pr", "view", parts[1], "--repo", slug, "--json", "headRefName,headRefOid,headRepository,isCrossRepository").Output()
+		output, err := exec.Command("gh", "pr", "view", parts[1], "--repo", slug, "--json", "headRefName,headRefOid,headRepository,isCrossRepository,title").Output()
 		if err != nil {
 			return result, fmt.Errorf("resolve PR head: %w", err)
 		}
@@ -69,7 +69,8 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 			HeadRepository struct {
 				NameWithOwner string `json:"nameWithOwner"`
 			} `json:"headRepository"`
-			IsCrossRepository bool `json:"isCrossRepository"`
+			IsCrossRepository bool   `json:"isCrossRepository"`
+			Title             string `json:"title"`
 		}
 		if err := json.Unmarshal(output, &details); err != nil || details.HeadRefName == "" || details.HeadRefOID == "" {
 			return result, fmt.Errorf("could not read PR head for %s", opt.PR)
@@ -78,6 +79,7 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 		result.IntendedBranch = details.HeadRefName
 		result.Source = fmt.Sprintf("Review wtc for %s#%s.", slug, parts[1])
 		primary, primaryBranch, prID, prHead = parts[0], details.HeadRefName, parts[1], details.HeadRefOID
+		prTitle, prWebURL = details.Title, url
 		if details.IsCrossRepository {
 			if !githubSlugPattern.MatchString(details.HeadRepository.NameWithOwner) {
 				return result, fmt.Errorf("PR head repository is unavailable")
@@ -254,6 +256,11 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	handoff := fmt.Sprintf("# wtc: %s — launch note (EPHEMERAL)\n\n**Goal:** %s\n\nFirst agent on this wtc: read this, turn anything durable into issues /\ncommits / PRs, then **delete this file as your very first action**\n(harness/AGENTS.md → \"State lives in git\").\n\n%s Collection env: `.env.collection` (inherited via `mise.toml`).\nRetire with `harness/tools/retire.sh`.\n", filepath.Base(result.Collection), defaultSource(result.Source), branchNote)
 	if err := os.WriteFile(filepath.Join(result.Collection, "HANDOFF.md"), []byte(handoff), 0644); err != nil {
 		return result, err
+	}
+	if prID != "" {
+		if _, err := target.EnlistPR(PRRecord{Repo: primary, Number: prID, Branch: result.LocalBranch, URL: prWebURL, Title: prTitle}); err != nil {
+			return result, err
+		}
 	}
 	if err := c.RunHook("new.post", values); err != nil {
 		return result, err
