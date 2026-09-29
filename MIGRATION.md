@@ -8,7 +8,7 @@ command and its contract checks cover their behavior.
 | Shell entry point | Provisional CLI | State |
 |---|---|---|
 | `refresh-env.sh` | `wtc env` | Native in v0.1.3; trust fix and target-aware shell shim released in v0.1.9; native `--all` parity pending |
-| `wtc-pr.sh` | `wtc pr path/list/enlist/unlist` | Native in v0.1.3; shell shim pending |
+| `wtc-pr.sh` | `wtc pr path/list/enlist/unlist` | Native in v0.1.3; released target-aware shell shim and binary contract tests |
 | `refresh-configs.sh` | `wtc registry refresh` | Native in v0.1.3; generic shell shim released in v0.1.6 |
 | `link-mcp.sh` | `wtc mcp render` | Native for one collection in v0.1.3; `--all` shim parity pending |
 | `link-skills.sh` | `wtc skills render` | Native in v0.1.8; released target-aware shell shim and contract tests |
@@ -17,7 +17,7 @@ command and its contract checks cover their behavior.
 | `agent-env.sh` | `wtc agent-env` | Native in v0.1.6; generic shim released; configurable collection-local bins in v0.1.7 |
 | `branch-off.sh` | `wtc new` | Native in v0.1.10; reference shim released with matching-pin dispatch and bootstrap fallback |
 | `add-repo.sh` | `wtc add-repo` | Native in v0.1.11; target-aware shim and released-binary contract tests |
-| `retire.sh` | `wtc retire` | Native implementation in progress; shim and release pending |
+| `retire.sh` | `wtc retire` | Native in v0.1.12; released target-aware shell shim and binary contract tests |
 | `catch-up.sh` | `wtc catch-up` | Pending |
 | `wtc-status.sh`, `wtc-status-tui.sh` | `wtc status` | Pending data layer and TUI |
 | `wtc-open.sh` | `wtc open` | Pending |
