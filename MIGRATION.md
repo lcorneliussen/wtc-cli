@@ -13,7 +13,7 @@ command and its contract checks cover their behavior.
 | `link-mcp.sh` | `wtc mcp render` | Native for one collection in v0.1.3; `--all` shim parity pending |
 | `link-skills.sh` | `wtc skills render` | Pending |
 | `link-secrets.sh` | `wtc secrets link` | Native in v0.1.5; released shims and harness tests in upstream and derivatives |
-| `agent-env.sh` | `wtc agent-env` | Native in this branch; release and shell shim pending |
+| `agent-env.sh` | `wtc agent-env` | Native in v0.1.6; released generic shim; configurable collection-local bins in this branch |
 | `branch-off.sh` | `wtc new` | Pending |
 | `add-repo.sh` | `wtc add-repo` | Pending |
 | `retire.sh` | `wtc retire` | Pending |

@@ -47,6 +47,9 @@ type Config struct {
 	Mise struct {
 		Tools map[string]string `toml:"tools"`
 	} `toml:"mise"`
+	AgentEnv struct {
+		PrependPaths []string `toml:"prepend_paths"`
+	} `toml:"agent_env"`
 	Secrets struct {
 		ProdPaths []string `toml:"prod_paths"`
 	} `toml:"secrets"`

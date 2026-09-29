@@ -17,6 +17,16 @@ bun = "1.2.3"
 "npm:example-cli" = "4.5.6"
 ```
 
+For collection-local commands outside mise, list existing directories relative
+to the collection root. `wtc agent-env` puts these paths before sibling mise
+bins, skips absent directories, and refreshes `.env.toolchain` when `wtc.toml`
+changes:
+
+```toml
+[agent_env]
+prepend_paths = ["tools/bin"]
+```
+
 The committed `.wtc-cli-version` supplies the exact `wtc` version. Do not add
 `github:lcorneliussen/wtc-cli` to `[mise.tools]`. `wtc env --dry-run` previews
 `.env.collection` and `mise.toml`; `wtc env` regenerates them. Put local values

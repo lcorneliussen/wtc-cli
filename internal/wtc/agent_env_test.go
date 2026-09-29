@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAgentToolchainPathOrdersSiblingPinsAndKeepsCache(t *testing.T) {
@@ -59,6 +60,60 @@ func TestAgentToolchainPathOrdersSiblingPinsAndKeepsCache(t *testing.T) {
 	again, err = c.AgentToolchainPath(false)
 	if err != nil || again != want {
 		t.Fatalf("bare shell erased stale cache: %q, %v", again, err)
+	}
+}
+
+func TestAgentToolchainPathConfiguredBinsAndConfigRefresh(t *testing.T) {
+	c := fixture(t)
+	first := filepath.Join(c.Collection, "tools", "bin")
+	second := filepath.Join(c.Collection, "more", "bin")
+	for _, dir := range []string{first, second} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config := filepath.Join(c.Harness, "wtc.toml")
+	if err := os.WriteFile(config, []byte("[agent_env]\nprepend_paths = [\"tools/bin\", \"missing/bin\"]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := OpenCollection(c.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir()) // no mise: local bins still work
+	got, err := c.AgentToolchainPath(true)
+	if err != nil || got != first {
+		t.Fatalf("configured bins = %q, %v", got, err)
+	}
+	cache := filepath.Join(c.Collection, ".env.toolchain")
+	old := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(cache, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, []byte("[agent_env]\nprepend_paths = [\"more/bin\", \"tools/bin\", \"missing/bin\"]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c, err = OpenCollection(c.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = c.AgentToolchainPath(false)
+	want := second + string(os.PathListSeparator) + first
+	if err != nil || got != want {
+		t.Fatalf("stale config cache = %q, want %q, %v", got, want, err)
+	}
+	if err := os.WriteFile(config, []byte("[agent_env]\nprepend_paths = [\"../outside\"]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c, err = OpenCollection(c.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AgentToolchainPath(true); err == nil {
+		t.Fatal("accepted a path outside the collection")
+	}
+	if readToolchainCache(cache) != want {
+		t.Fatal("invalid configuration replaced a valid cache")
 	}
 }
 
