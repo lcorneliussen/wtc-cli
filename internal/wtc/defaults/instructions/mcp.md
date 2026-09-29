@@ -7,7 +7,7 @@ split the repo registry uses.
 
 ```text
 harness/.mcp-servers.yml          # tracked: WHAT servers exist
-      │  tools/link-mcp.sh
+      │  wtc mcp render
       ├─> <collection>/.mcp.json              (Claude Code, project scope)
       ├─> <collection>/.cursor/mcp.json       (Cursor)
       └─> <collection>/.codex/config.toml     (Codex, trusted projects only)
@@ -15,7 +15,10 @@ harness/.mcp-servers.yml          # tracked: WHAT servers exist
 
 Rendered rather than symlinked, unlike skills: the three CLIs want two
 serialisations (JSON and TOML) of the same facts, so one file cannot serve
-all three. They sit at the **collection root** because it is not a git repo —
+all three. The renderer updates only its recorded server entries in JSON and
+its marked block in TOML; other agent settings and manually added servers stay
+in place. It validates every output before writing and replaces each changed
+file atomically. They sit at the **collection root** because it is not a git repo —
 the files are invisible to git and no repo needs an ignore rule for them
 (same reasoning as `tools/link-skills.sh`), and it is where `AGENTS.md` says
 to start an agent.
@@ -28,7 +31,8 @@ references, not values:
 
 | Agent | Rendered as | Value arrives from |
 |---|---|---|
-| Claude Code, Cursor | `"JIRA_API_TOKEN": "${JIRA_API_TOKEN}"` | shell env at launch |
+| Claude Code | `"JIRA_API_TOKEN": "${JIRA_API_TOKEN}"` | shell env at launch |
+| Cursor | `"JIRA_API_TOKEN": "${env:JIRA_API_TOKEN}"` | shell env at launch |
 | Codex | `env_vars = ["JIRA_API_TOKEN"]` | forwarded from ambient env |
 
 The environment is the collection's own, which `mise.toml` composes from
@@ -41,7 +45,7 @@ two collections can point the same server at two different accounts, and
 neither can read the other's. A server configured in a machine-global agent
 config cannot do that, which is the reason this file exists at all.
 
-`link-mcp.sh` prints `note: unset in this shell: …` for any named variable the
+`wtc mcp render` prints a note for any named variable the
 environment lacks. Rendering config before creating the credential is a normal
 ordering — the note exists so the failure surfaces there rather than as an
 opaque auth error inside an agent later.
@@ -52,7 +56,7 @@ opaque auth error inside an agent later.
   - name: <key the agent sees>
     transport: stdio          # or http
     command: uvx              # stdio only
-    args: some-server --flag  # stdio only, whitespace-separated
+    args: some-server --flag  # stdio only; whitespace-separated
     url: https://…            # http only
     env: VAR_A VAR_B          # variable NAMES, never values
     token_env: SOME_TOKEN     # http only — bearer token variable NAME
@@ -61,18 +65,11 @@ opaque auth error inside an agent later.
     role: one line, for humans reading the file
 ```
 
-Then `tools/link-mcp.sh` (this collection) or `--all` (every caught-up
-collection). The schema is deliberately flat because the renderer parses it
-with `awk` and emits JSON and TOML by hand — `lib.sh` holds the line that no
-tool is load-bearing, so there is no `jq` dependency.
-
-**Values must be quote- and backslash-free.** Both output formats quote them
-and there is nothing here to escape them with, so a `"` would produce JSON and
-TOML that no agent can parse — and it would fail inside the agent, far from
-the cause. `link-mcp.sh` validates the whole registry *before* writing
-anything and refuses with the offending server and field named, leaving the
-previously rendered files intact. A server that genuinely needs a quoted
-argument wants a wrapper script as its `command`.
+Then run `wtc mcp render` in this collection. For an argument containing
+spaces, set `args` to a quoted JSON string array, for example
+`args: '["one argument", "--flag"]'`. The renderer validates the registry
+schema and arguments before writing any files. The shell wrapper remains for
+collections that have not adopted the CLI.
 
 ## What is deliberately not an MCP server
 
@@ -115,7 +112,7 @@ from the registry gets pruned out of every collection.
   stdio server with `env:` over an http server with `token_env:` where both
   are on offer — Codex's `bearer_token_env_var` has no such gap, but Claude's
   header path does.
-- **Cursor** reads `.cursor/mcp.json`; it is rendered identically to Claude's.
+- **Cursor** reads `.cursor/mcp.json` and uses `${env:VAR}` interpolation.
 
 ## Where this is wired in
 
