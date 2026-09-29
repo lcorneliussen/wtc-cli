@@ -112,6 +112,34 @@ func TestExistingLocalEnvStillRefreshesMise(t *testing.T) {
 	}
 }
 
+func TestTrustGeneratedMiseConfig(t *testing.T) {
+	c := fixture(t)
+	if err := c.EnsureEnvSupport(); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	log := filepath.Join(bin, "calls")
+	t.Setenv("MISE_TEST_LOG", log)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	script := filepath.Join(bin, "mise")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MISE_TEST_LOG\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.TrustMise(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(log)
+	if err != nil || string(got) != "trust "+filepath.Join(c.Collection, "mise.toml")+"\n" {
+		t.Fatalf("mise invocation = %q, %v", got, err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 7\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.TrustMise(); err == nil {
+		t.Fatal("ignored mise trust failure")
+	}
+}
+
 func TestMisePinSurvivesEnvRegeneration(t *testing.T) {
 	c := fixture(t)
 	if err := os.WriteFile(filepath.Join(c.Harness, ".wtc-cli-version"), []byte("0.1.1\n"), 0644); err != nil {

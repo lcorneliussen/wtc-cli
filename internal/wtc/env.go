@@ -2,8 +2,10 @@ package wtc
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -288,6 +290,25 @@ func (c *Context) EnsureEnvSupport() error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(c.Collection, "mise.toml"), mise, 0644)
+}
+
+// TrustMise makes a freshly generated collection config usable by subsequent
+// mise commands. A machine without mise can still generate the environment.
+func (c *Context) TrustMise() error {
+	mise, err := exec.LookPath("mise")
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	config := filepath.Join(c.Collection, "mise.toml")
+	cmd := exec.Command(mise, "trust", config)
+	cmd.Dir = c.Collection
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("mise trust failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func (c *Context) ValidateEnvSupport() error {
