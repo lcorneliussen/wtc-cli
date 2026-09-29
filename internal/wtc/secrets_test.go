@@ -18,7 +18,7 @@ func TestSecretLinksRespectIgnoreBackupProdAndDryRun(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(harness, ".harness-repos.yml"), []byte("repos:\n  - name: app\n    remote: https://github.com/example/app.git\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(harness, ".harness-repos.yml"), []byte("repos:\n  - name: app\n    remote: https://github.com/example/app.git\n    prod_paths: [separate.prod]\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(harness, "wtc.toml"), []byte("[secrets]\nprod_paths = ['app/.env.prod']\n"), 0644); err != nil {
@@ -30,10 +30,10 @@ func TestSecretLinksRespectIgnoreBackupProdAndDryRun(t *testing.T) {
 	if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %s %v", out, err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".env*\nconfig/credentials.json\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".env*\n*.prod\nconfig/credentials.json\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	for path, value := range map[string]string{".env": "new", ".env.prod": "production", "config/credentials.json": "config", "public.txt": "refuse"} {
+	for path, value := range map[string]string{".env": "new", ".env.prod": "production", "separate.prod": "production", "config/credentials.json": "config", "public.txt": "refuse"} {
 		if err := os.WriteFile(filepath.Join(control, "app", path), []byte(value), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -47,14 +47,14 @@ func TestSecretLinksRespectIgnoreBackupProdAndDryRun(t *testing.T) {
 		t.Fatalf("generated collection control root: %q %v", c.ConfigRoot, err)
 	}
 	dry, err := c.LinkSecrets(SecretLinkOptions{DryRun: true})
-	if err == nil || dry.Linked != 2 || dry.Refused != 1 || dry.ProdSkipped != 1 || dry.BackedUp != 0 {
+	if err == nil || dry.Linked != 2 || dry.Refused != 1 || dry.ProdSkipped != 2 || dry.BackedUp != 0 {
 		t.Fatalf("dry run: %+v %v", dry, err)
 	}
 	if body, err := os.ReadFile(filepath.Join(repo, ".env")); err != nil || string(body) != "old" {
 		t.Fatalf("dry run changed existing file: %q %v", body, err)
 	}
 	linked, err := c.LinkSecrets(SecretLinkOptions{})
-	if err == nil || linked.Linked != 2 || linked.Refused != 1 || linked.ProdSkipped != 1 || linked.BackedUp != 1 {
+	if err == nil || linked.Linked != 2 || linked.Refused != 1 || linked.ProdSkipped != 2 || linked.BackedUp != 1 {
 		t.Fatalf("link: %+v %v", linked, err)
 	}
 	if target, err := os.Readlink(filepath.Join(repo, ".env")); err != nil || target != filepath.Join(control, "app", ".env") {
@@ -68,10 +68,13 @@ func TestSecretLinksRespectIgnoreBackupProdAndDryRun(t *testing.T) {
 		t.Fatalf("backup content: %q %v", body, err)
 	}
 	again, err := c.LinkSecrets(SecretLinkOptions{IncludeProd: true})
-	if err == nil || again.Current != 2 || again.Linked != 1 || again.ProdSkipped != 0 {
+	if err == nil || again.Current != 2 || again.Linked != 2 || again.ProdSkipped != 0 {
 		t.Fatalf("idempotence and prod opt-in: %+v %v", again, err)
 	}
 	if _, err := os.Readlink(filepath.Join(repo, ".env.prod")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Readlink(filepath.Join(repo, "separate.prod")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(repo, "public.txt")); !os.IsNotExist(err) {
