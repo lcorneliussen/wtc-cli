@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-//go:embed defaults/*.md defaults/skills/*/SKILL.md defaults/instructions/*.md
+//go:embed defaults/*.md defaults/skills/*/SKILL.md defaults/instructions/*.md defaults/review/concerns/*.md defaults/review/prompts/*.md
 var defaults embed.FS
 
 func ReadDefault(path string) ([]byte, error) {

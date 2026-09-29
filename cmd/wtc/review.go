@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -25,6 +26,137 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 		}
 		return wtc.Discover(cwd)
 	}
+	var base, head, dir string
+	var round int
+	var public, noCatchUp bool
+	bundle := &cobra.Command{Use: "bundle <repo> [pr-number]", Short: "Build a public-safe local review bundle", Args: cobra.RangeArgs(1, 2)}
+	bundle.Flags().StringVar(&base, "base", "", "Base ref (default: PR destination or repository default)")
+	bundle.Flags().StringVar(&head, "head", "HEAD", "Head commit ref")
+	bundle.Flags().StringVar(&dir, "dir", "", "Bundle directory")
+	bundle.Flags().IntVar(&round, "round", 0, "Review round (default: next)")
+	bundle.Flags().BoolVar(&public, "public", false, "Exclude local overlays and related repository snapshots")
+	bundle.Flags().BoolVar(&noCatchUp, "no-catch-up", false, "Use current local refs without updating worktrees")
+	bundle.RunE = func(cmd *cobra.Command, args []string) error {
+		if !public || !noCatchUp {
+			return fmt.Errorf("this native bundle command currently requires --public --no-catch-up")
+		}
+		c, err := context()
+		if err != nil {
+			return err
+		}
+		pr := ""
+		if len(args) == 2 {
+			pr = args[1]
+		}
+		result, err := c.BuildPublicReviewBundle(wtc.ReviewBundleOptions{Repo: args[0], PR: pr, Base: base, Head: head, Dir: dir, Round: round})
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return emit(envelope{OK: true, Data: result, Summary: result.Dir}, true)
+		}
+		fmt.Println(result.Dir)
+		return nil
+	}
+	review.AddCommand(bundle)
+	var strong, standard, fast, lead, only string
+	var parallel, timeout int
+	run := &cobra.Command{Use: "run <bundle-dir>", Short: "Run separate headless reviewers and aggregate their findings", Args: cobra.ExactArgs(1)}
+	run.Flags().StringVar(&strong, "strong", "", "Agent:model chain for strong concerns")
+	run.Flags().StringVar(&standard, "standard", "", "Agent:model chain for standard concerns")
+	run.Flags().StringVar(&fast, "fast", "", "Agent:model chain for fast concerns")
+	run.Flags().StringVar(&lead, "lead", "", "Agent:model chain for the lead")
+	run.Flags().StringVar(&only, "only", "", "Comma-separated concern IDs")
+	run.Flags().IntVar(&parallel, "parallel", 0, "Maximum concurrent concern runs")
+	run.Flags().IntVar(&timeout, "timeout", 0, "Seconds allowed per agent run")
+	run.RunE = func(cmd *cobra.Command, args []string) error {
+		c, err := context()
+		if err != nil {
+			return err
+		}
+		if timeout < 0 {
+			return fmt.Errorf("timeout must be nonnegative")
+		}
+		var ids []string
+		if only != "" {
+			for _, id := range strings.Split(only, ",") {
+				ids = append(ids, strings.TrimSpace(id))
+			}
+		}
+		result, err := c.RunReviewBundle(args[0], wtc.ReviewRunOptions{Strong: strong, Standard: standard, Fast: fast, Lead: lead, Parallel: parallel, Timeout: time.Duration(timeout) * time.Second, Only: ids})
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return emit(envelope{OK: true, Data: result, Summary: result.Verdict}, true)
+		}
+		fmt.Printf("%s: %s (%d blockers)\n", result.Bundle, result.Verdict, result.Blockers)
+		return nil
+	}
+	review.AddCommand(run)
+	var force, progress, failed bool
+	var postBody, reason string
+	post := &cobra.Command{Use: "post <bundle-dir>", Short: "Post or update a review summary and inline findings", Args: cobra.ExactArgs(1)}
+	post.Flags().BoolVar(&force, "force", false, "Post even when the reviewed head is stale")
+	post.Flags().BoolVar(&progress, "progress", false, "Post an in-progress status")
+	post.Flags().BoolVar(&failed, "failed", false, "Mark the run as failed")
+	post.Flags().StringVar(&postBody, "body", "", "Custom in-progress body file")
+	post.Flags().StringVar(&reason, "reason", "", "Reason for failed status")
+	post.RunE = func(cmd *cobra.Command, args []string) error {
+		if progress && failed {
+			return fmt.Errorf("choose either --progress or --failed")
+		}
+		c, err := context()
+		if err != nil {
+			return err
+		}
+		mode := "summary"
+		if progress {
+			mode = "progress"
+		} else if failed {
+			mode = "failed"
+		}
+		result, err := c.PostReviewBundle(args[0], wtc.ReviewPostOptions{Mode: mode, Body: postBody, Reason: reason, Force: force})
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return emit(envelope{OK: true, Data: result, Summary: result.URL}, true)
+		}
+		fmt.Println(result.URL)
+		if result.InlineFailed > 0 {
+			fmt.Fprintf(os.Stderr, "wtc: warning: %d inline comments failed to post\n", result.InlineFailed)
+		}
+		return nil
+	}
+	review.AddCommand(post)
+	var reply, file, concern, key string
+	var line int
+	resolve := &cobra.Command{Use: "resolve <bundle-dir>", Short: "Reply to and resolve posted inline review threads", Args: cobra.ExactArgs(1)}
+	resolve.Flags().StringVar(&reply, "reply", "", "Reply before resolving each selected thread")
+	resolve.Flags().StringVar(&file, "file", "", "Select findings in this repo-relative file")
+	resolve.Flags().IntVar(&line, "line", 0, "Select a new-file line")
+	resolve.Flags().StringVar(&concern, "concern", "", "Select a concern ID")
+	resolve.Flags().StringVar(&key, "key", "", "Select one inline finding key")
+	resolve.RunE = func(cmd *cobra.Command, args []string) error {
+		if line < 0 {
+			return fmt.Errorf("line must be nonnegative")
+		}
+		c, err := context()
+		if err != nil {
+			return err
+		}
+		result, err := c.ResolveReviewBundle(args[0], wtc.ReviewResolveOptions{Reply: reply, File: file, Line: line, Concern: concern, Key: key})
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return emit(envelope{OK: true, Data: result, Summary: fmt.Sprintf("resolved %d threads", result.Resolved)}, true)
+		}
+		fmt.Printf("resolved %d threads\n", result.Resolved)
+		return nil
+	}
+	review.AddCommand(resolve)
 	var trusted bool
 	status := &cobra.Command{Use: "status <repo> [pr-number]", Short: "Read the latest review comment and compare it with the PR head", Args: cobra.RangeArgs(1, 2)}
 	status.Flags().BoolVar(&trusted, "trusted-local", false, "Require a local receipt from the review posting tool")
