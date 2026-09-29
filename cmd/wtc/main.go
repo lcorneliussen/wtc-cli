@@ -210,6 +210,7 @@ func run() error {
 	addRegistryCommands(root, &asJSON)
 	addMCPCommands(root, &asJSON)
 	addSecretsCommands(root, &asJSON)
+	addAgentEnvCommand(root, &asJSON)
 	addReviewCommands(root, &asJSON)
 	return root.Execute()
 }
