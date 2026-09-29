@@ -12,6 +12,7 @@ A CLI for worktree collections. This repository is the beginning of the migratio
 - `wtc registry refresh` regenerates the local bare-owner map and reports registry mismatches.
 - `wtc mcp render [--dry-run]` renders the harness MCP registry into Claude, Cursor, and Codex config files for this collection.
 - `wtc secrets link [--repo <name>] [--dry-run] [--include-prod]` links gitignored control-root files into checked-out worktrees, preserving displaced local files in collection backups.
+- `wtc agent-env` prints shell exports for sibling mise toolchains; `--write` refreshes `.env.toolchain`, `--print-path` prints its bin list, and `--wrap` handles PreToolUse JSON from stdin.
 - `wtc customize` prints the versioned customization guide, including harness hooks and application repository init/teardown hooks.
 - `wtc review status <repo> [pr-number] [--trusted-local]` reads the newest local review status comment and checks whether it covers the current PR head.
 - `wtc review bundle <repo> [pr-number] --public --no-catch-up` builds a public-safe review bundle from current local refs and generic concerns at the base commit, using versioned CLI defaults for a bootstrap review.
