@@ -100,6 +100,7 @@ func run() error {
 				item.Error = openErr.Error()
 			} else {
 				item.envResult, openErr = refreshEnvCollection(target, dryRun, invokeHooks)
+				item.Collection = dir // A failed render returns a zero-value result.
 				if openErr != nil {
 					item.Error = openErr.Error()
 				}

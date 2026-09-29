@@ -44,6 +44,16 @@ func TestEnvSweepUsesTargetRegistriesAndKeepsGoing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(brokenHarness, ".harness-repos.yml"), []byte("repos: []\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	renderBroken := filepath.Join(workspace, "render-broken", "harness")
+	if err := os.MkdirAll(renderBroken, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(renderBroken, ".harness-repos.yml"), []byte("repos:\n  - name: fixture\n    remote: https://example.invalid/fixture.git\n    default_ref: origin/main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(renderBroken, ".wtc-cli-version"), []byte("invalid\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	bin := filepath.Join(t.TempDir(), "wtc")
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
@@ -74,7 +84,7 @@ func TestEnvSweepUsesTargetRegistriesAndKeepsGoing(t *testing.T) {
 	for _, dry := range []bool{true, false} {
 		payload := run(dry, false)
 		data := payload["data"].(map[string]any)
-		if data["failed"] != float64(1) || len(data["results"].([]any)) != 3 {
+		if data["failed"] != float64(2) || len(data["results"].([]any)) != 4 {
 			t.Fatalf("wrong sweep: %v", data)
 		}
 		if data["hooks_run"] != false {
@@ -85,7 +95,7 @@ func TestEnvSweepUsesTargetRegistriesAndKeepsGoing(t *testing.T) {
 			item := raw.(map[string]any)
 			byName[filepath.Base(item["collection"].(string))] = item
 		}
-		if byName["broken"]["error"] == nil || byName["alpha"]["error"] != nil || byName["beta"]["error"] != nil {
+		if byName["broken"]["error"] == nil || byName["render-broken"]["error"] == nil || byName["alpha"]["error"] != nil || byName["beta"]["error"] != nil {
 			t.Fatalf("lost per-target failure status: %v", byName)
 		}
 		for _, name := range []string{"alpha", "beta"} {
