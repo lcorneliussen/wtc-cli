@@ -51,6 +51,7 @@ CLI sends one JSON object on stdin with `event`, `collection`, `harness`,
 | `wtc skills render` | `skills.render.pre.sh` | `skills.render.post.sh` |
 | `wtc new` | `new.pre.sh` | `new.post.sh` |
 | `wtc add-repo` | `add-repo.pre.sh` | `add-repo.post.sh` |
+| `wtc retire` | `retire.pre.sh` | `retire.post.sh` |
 
 A pre-hook can stop the action by exiting nonzero. A post-hook failure is
 reported as a warning; the completed action remains complete. Dry runs and

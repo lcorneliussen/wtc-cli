@@ -218,6 +218,7 @@ func run() error {
 	addReviewCommands(root, &asJSON)
 	addNewCommand(root, &asJSON)
 	addAddRepoCommand(root, &asJSON)
+	addRetireCommand(root, &asJSON)
 	return root.Execute()
 }
 

@@ -16,8 +16,8 @@ command and its contract checks cover their behavior.
 | `link-secrets.sh` | `wtc secrets link` | Native in v0.1.5; released shims and harness tests in upstream and derivatives |
 | `agent-env.sh` | `wtc agent-env` | Native in v0.1.6; generic shim released; configurable collection-local bins in v0.1.7 |
 | `branch-off.sh` | `wtc new` | Native in v0.1.10; reference shim released with matching-pin dispatch and bootstrap fallback |
-| `add-repo.sh` | `wtc add-repo` | Native implementation in progress; shim and release pending |
-| `retire.sh` | `wtc retire` | Pending |
+| `add-repo.sh` | `wtc add-repo` | Native in v0.1.11; target-aware shim and released-binary contract tests |
+| `retire.sh` | `wtc retire` | Native implementation in progress; shim and release pending |
 | `catch-up.sh` | `wtc catch-up` | Pending |
 | `wtc-status.sh`, `wtc-status-tui.sh` | `wtc status` | Pending data layer and TUI |
 | `wtc-open.sh` | `wtc open` | Pending |
