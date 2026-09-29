@@ -238,7 +238,12 @@ func RunRepoInit(worktree string) {
 }
 
 func runRepoCommand(worktree, program string, args ...string) {
-	cmd := exec.Command(program, args...)
+	collection := filepath.Dir(worktree)
+	// mise loads the parent config itself, but direct script hooks need the same
+	// generated and local collection env when mise is absent. Source the files
+	// as data in a child shell, then replace it with the actual hook process.
+	argv := append([]string{"-c", `set -a; . "$1"; . "$2"; shift 2; exec "$@"`, "wtc-init", filepath.Join(collection, ".env.collection"), filepath.Join(collection, ".env.collection.local"), program}, args...)
+	cmd := exec.Command("/bin/sh", argv...)
 	cmd.Dir = worktree
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {

@@ -146,7 +146,8 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 		directory, branch := name, opt.Branch
 		if name == harnessRepo {
 			directory = "harness"
-		} else if name == primary {
+		}
+		if name == primary {
 			branch = primaryBranch
 		}
 		if name == primary && prID != "" {
@@ -211,6 +212,8 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	branchNote := fmt.Sprintf("Worktrees start **detached at the development tip** — no branch exists yet.\nCreate one at your first commit:\n\n    git switch -c %s\n\n(that is the expected name; adjust it if the work turns out to be something else).", result.IntendedBranch)
 	if opt.PR != "" {
 		branchNote = fmt.Sprintf("The primary sibling is already on the PR head branch `%s` — push review work there. Other siblings start detached at the tip.", result.IntendedBranch)
+	} else if opt.Branch != "" {
+		branchNote = fmt.Sprintf("All siblings are already on the explicitly requested branch `%s`. Commit on that branch; do not create it again.", result.IntendedBranch)
 	}
 	handoff := fmt.Sprintf("# wtc: %s — launch note (EPHEMERAL)\n\n**Goal:** %s\n\nFirst agent on this wtc: read this, turn anything durable into issues /\ncommits / PRs, then **delete this file as your very first action**\n(harness/AGENTS.md → \"State lives in git\").\n\n%s Collection env: `.env.collection` (inherited via `mise.toml`).\nRetire with `harness/tools/retire.sh`.\n", filepath.Base(result.Collection), defaultSource(result.Source), branchNote)
 	if err := os.WriteFile(filepath.Join(result.Collection, "HANDOFF.md"), []byte(handoff), 0644); err != nil {

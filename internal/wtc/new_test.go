@@ -53,7 +53,7 @@ func newWorkspaceFixture(t *testing.T) *Context {
 	fixtureFile(t, filepath.Join(harness, ".harness-repos.yml"), registry, 0644)
 	fixtureFile(t, filepath.Join(harness, ".wtc-cli-version"), "0.1.9\n", 0644)
 	fixtureFile(t, filepath.Join(harness, "collection-AGENTS.md"), "# Fixture\n", 0644)
-	fixtureFile(t, filepath.Join(sources["widget"], ".harness", "init.sh"), "#!/bin/sh\nprintf ready > init-ran\n", 0755)
+	fixtureFile(t, filepath.Join(sources["widget"], ".harness", "init.sh"), "#!/bin/sh\nprintf '%s|%s|%s' \"$WTC_COLLECTION\" \"$WTC_CONFIG_ROOT\" \"$WIDGET_PORT\" > init-ran\n", 0755)
 	for name, source := range sources {
 		fixtureGit(t, "-C", source, "add", "-A")
 		fixtureGit(t, "-C", source, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture")
@@ -95,6 +95,10 @@ func TestNewCollectionCreatesDetachedSiblingsAndGeneratedSurfaces(t *testing.T) 
 			t.Errorf("missing %s: %v", path, err)
 		}
 	}
+	init, err := os.ReadFile(filepath.Join(r.Collection, "widget", "init-ran"))
+	if err != nil || string(init) != "demo|"+c.ConfigRoot+"|42001" {
+		t.Errorf("init hook received %q, error %v", init, err)
+	}
 	env, err := os.ReadFile(filepath.Join(r.Collection, ".env.collection"))
 	if err != nil {
 		t.Fatal(err)
@@ -124,6 +128,26 @@ func TestNewCollectionRejectsInvalidNameBeforeWriting(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(c.Workspace, "escape")); !os.IsNotExist(err) {
 		t.Fatalf("unexpected destination created: %v", err)
+	}
+}
+
+func TestNewCollectionExplicitBranchLaunchNote(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	r, err := c.NewCollection(NewOptions{Slug: "assigned", Repos: []string{"widget"}, Branch: "chosen-branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"harness", "widget"} {
+		if got := fixtureGit(t, "-C", filepath.Join(r.Collection, name), "branch", "--show-current"); got != "chosen-branch" {
+			t.Errorf("%s branch = %q", name, got)
+		}
+	}
+	note, err := os.ReadFile(filepath.Join(r.Collection, "HANDOFF.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(note), "git switch -c") || !strings.Contains(string(note), "already on the explicitly requested branch") {
+		t.Fatalf("incorrect launch note: %s", note)
 	}
 }
 
@@ -167,5 +191,32 @@ func TestPRWorktreeFetchesExactHeadAndRefusesMissingHead(t *testing.T) {
 	}
 	if got := fixtureGit(t, "-C", filepath.Join(destination, "widget"), "branch", "--show-current"); got != "fork-feature" {
 		t.Fatalf("PR head branch = %q", got)
+	}
+}
+
+func TestNewCollectionCanReviewHarnessPR(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	source := filepath.Join(c.Workspace, "source-agent-harness")
+	fixtureGit(t, "-C", source, "checkout", "-qb", "review-head")
+	fixtureFile(t, filepath.Join(source, "review.txt"), "review change\n", 0644)
+	fixtureGit(t, "-C", source, "add", "review.txt")
+	fixtureGit(t, "-C", source, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "PR head")
+	head := fixtureGit(t, "-C", source, "rev-parse", "HEAD")
+	fixtureGit(t, "-C", source, "update-ref", "refs/pull/14/head", head)
+	fixtureGit(t, "-C", source, "checkout", "-q", "main")
+	fixtureGit(t, "-C", source, "branch", "-D", "review-head")
+	c.Registry.Repos[0].Remote = "https://github.com/example/agent-harness.git"
+	bin := filepath.Join(c.Workspace, "bin")
+	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' '{\"headRefName\":\"review-head\",\"headRefOid\":\""+head+"\"}'\n", 0755)
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	r, err := c.NewCollection(NewOptions{PR: "agent-harness#14"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fixtureGit(t, "-C", filepath.Join(r.Collection, "harness"), "rev-parse", "HEAD"); got != head {
+		t.Fatalf("harness PR at %s, want %s", got, head)
+	}
+	if got := fixtureGit(t, "-C", filepath.Join(r.Collection, "harness"), "branch", "--show-current"); got != "review-head" {
+		t.Fatalf("harness PR branch = %q", got)
 	}
 }
