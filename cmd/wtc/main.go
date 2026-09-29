@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -54,8 +53,10 @@ func run() error {
 	envCmd := &cobra.Command{Use: "env", Short: "Regenerate this collection's environment", Args: cobra.NoArgs}
 	var collection string
 	var dryRun bool
+	var envAll bool
 	envCmd.Flags().StringVar(&collection, "collection", "", "Collection directory (default: current)")
 	envCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show generated environment without writing")
+	envCmd.Flags().BoolVar(&envAll, "all", false, "Refresh every collection in the workspace")
 	envCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		var c *wtc.Context
 		var err error
@@ -67,54 +68,61 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		data, err := c.RenderEnv()
+		if !envAll {
+			result, err := refreshEnvCollection(c, dryRun)
+			if err != nil {
+				return err
+			}
+			if dryRun && !asJSON {
+				printEnvPreview(result)
+				return nil
+			}
+			return emit(envelope{OK: true, Data: result, Summary: envSummary(result)}, asJSON)
+		}
+		collections, err := wtc.WorkspaceCollections(c.Workspace)
 		if err != nil {
 			return err
 		}
-		mise, err := c.RenderMise()
-		if err != nil {
-			return err
-		}
-		old, _ := os.ReadFile(filepath.Join(c.Collection, ".env.collection"))
-		oldMise, _ := os.ReadFile(filepath.Join(c.Collection, "mise.toml"))
-		changed := !bytes.Equal(old, data) || !bytes.Equal(oldMise, mise)
-		if !dryRun {
-			if err := c.ValidateEnvSupport(); err != nil {
-				return err
-			}
-			if err := c.RunHook("env.pre", nil); err != nil {
-				return err
-			}
-			if changed {
-				if err := c.WriteEnv(data); err != nil {
-					return err
+		results := make([]envSweepResult, 0, len(collections))
+		failures := 0
+		for _, dir := range collections {
+			item := envSweepResult{Collection: dir}
+			target, openErr := wtc.OpenCollection(dir)
+			if openErr != nil {
+				item.Error = openErr.Error()
+			} else {
+				item.envResult, openErr = refreshEnvCollection(target, dryRun)
+				if openErr != nil {
+					item.Error = openErr.Error()
 				}
 			}
-			if err := c.EnsureEnvSupport(); err != nil {
-				return err
+			if item.Error != "" {
+				failures++
 			}
-			if err := c.TrustMise(); err != nil {
-				return err
-			}
-			if err := c.RunHook("env.post", nil); err != nil {
-				return err
-			}
-		}
-		if dryRun && !asJSON {
-			fmt.Print(string(data))
-			fmt.Print("\n# mise.toml\n")
-			fmt.Print(string(mise))
-			return nil
-		}
-		state := "already current"
-		if changed {
-			if dryRun {
-				state = "would update"
-			} else {
-				state = "updated"
+			results = append(results, item)
+			if !asJSON {
+				fmt.Printf("=== %s\n", filepath.Base(dir))
+				if item.Error != "" {
+					fmt.Fprintln(os.Stderr, "error:", item.Error)
+				} else if dryRun {
+					printEnvPreview(item.envResult)
+				} else {
+					fmt.Println(envSummary(item.envResult))
+				}
 			}
 		}
-		return emit(envelope{OK: true, Data: map[string]any{"collection": c.Collection, "changed": changed, "dry_run": dryRun, "env": string(data), "mise": string(mise)}, Summary: filepath.Base(c.Collection) + ": " + state}, asJSON)
+		summary := fmt.Sprintf("swept %d collection(s), %d failed", len(results), failures)
+		if asJSON {
+			if err := emit(envelope{OK: failures == 0, Data: map[string]any{"results": results, "dry_run": dryRun, "failed": failures}, Summary: summary}, true); err != nil {
+				return err
+			}
+		} else {
+			fmt.Println(summary)
+		}
+		if failures > 0 {
+			return fmt.Errorf("%d collection(s) failed environment refresh", failures)
+		}
+		return nil
 	}
 	root.AddCommand(envCmd)
 	commands := &cobra.Command{Use: "commands", Short: "List commands and machine-readable metadata", Args: cobra.NoArgs}

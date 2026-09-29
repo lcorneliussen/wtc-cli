@@ -1,0 +1,110 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestEnvSweepUsesTargetRegistriesAndKeepsGoing(t *testing.T) {
+	workspace := t.TempDir()
+	for name, offset := range map[string]string{"alpha": "1", "beta": "2"} {
+		dir := filepath.Join(workspace, name)
+		harness := filepath.Join(dir, "harness")
+		if err := os.MkdirAll(harness, 0755); err != nil {
+			t.Fatal(err)
+		}
+		registry := "repos:\n  - name: " + name + "\n    remote: https://example.invalid/fixture.git\n    default_ref: origin/main\n    port_offset: " + offset + "\n"
+		if err := os.WriteFile(filepath.Join(harness, ".harness-repos.yml"), []byte(registry), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".env.collection"), []byte("COLLECTION_PORT_BASE=42000\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alphaLocal := filepath.Join(workspace, "alpha", ".env.collection.local")
+	if err := os.WriteFile(alphaLocal, []byte("LOCAL_ONLY=kept\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(workspace, "alpha", "hook-ran")
+	hookDir := filepath.Join(workspace, "alpha", "harness", "hooks", "wtc")
+	if err := os.MkdirAll(hookDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hookDir, "env.pre.sh"), []byte("#!/bin/sh\nprintf 'yes\\n' > '"+marker+"'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	brokenHarness := filepath.Join(workspace, "broken", "harness")
+	if err := os.MkdirAll(brokenHarness, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(brokenHarness, ".harness-repos.yml"), []byte("repos: []\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "wtc")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	run := func(dry bool) map[string]any {
+		args := []string{"--json", "env", "--all", "--collection", filepath.Join(workspace, "alpha")}
+		if dry {
+			args = append(args, "--dry-run")
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), "PATH=/usr/bin:/bin", "WTC_CONFIG_ROOT="+filepath.Join(workspace, "control"))
+		out, err := cmd.Output()
+		if err == nil {
+			t.Fatalf("sweep accepted broken target: %s", out)
+		}
+		var payload map[string]any
+		if jsonErr := json.Unmarshal(out, &payload); jsonErr != nil {
+			t.Fatalf("JSON: %v\n%s", jsonErr, out)
+		}
+		if payload["ok"] != false {
+			t.Fatalf("failure not reported: %v", payload)
+		}
+		return payload
+	}
+	for _, dry := range []bool{true, false} {
+		payload := run(dry)
+		data := payload["data"].(map[string]any)
+		if data["failed"] != float64(1) || len(data["results"].([]any)) != 3 {
+			t.Fatalf("wrong sweep: %v", data)
+		}
+		byName := map[string]map[string]any{}
+		for _, raw := range data["results"].([]any) {
+			item := raw.(map[string]any)
+			byName[filepath.Base(item["collection"].(string))] = item
+		}
+		if byName["broken"]["error"] == nil || byName["alpha"]["error"] != nil || byName["beta"]["error"] != nil {
+			t.Fatalf("lost per-target failure status: %v", byName)
+		}
+		for _, name := range []string{"alpha", "beta"} {
+			dir := filepath.Join(workspace, name)
+			env, err := os.ReadFile(filepath.Join(dir, ".env.collection"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if dry {
+				if string(env) != "COLLECTION_PORT_BASE=42000\n" {
+					t.Fatalf("dry run wrote %s: %s", name, env)
+				}
+			} else if !strings.Contains(string(env), strings.ToUpper(name)+"_PORT=4200"+map[string]string{"alpha": "1", "beta": "2"}[name]) {
+				t.Fatalf("%s did not use its registry: %s", name, env)
+			}
+		}
+		if dry {
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatal("dry run invoked hook")
+			}
+		} else if _, err := os.Stat(marker); err != nil {
+			t.Fatalf("target hook did not run: %v", err)
+		}
+	}
+	if data, err := os.ReadFile(alphaLocal); err != nil || string(data) != "LOCAL_ONLY=kept\n" {
+		t.Fatalf("local environment changed: %s, %v", data, err)
+	}
+}
