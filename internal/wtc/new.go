@@ -28,17 +28,21 @@ type NewResult struct {
 }
 
 var collectionNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+var githubSlugPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	result := NewResult{}
 	if (opt.Issue != "" && opt.Tracker != "") || (opt.PR != "" && (opt.Issue != "" || opt.Tracker != "")) {
 		return result, fmt.Errorf("choose one source: issue, tracker, or PR")
 	}
+	if opt.PR != "" && opt.Branch != "" {
+		return result, fmt.Errorf("--branch cannot override a PR head branch")
+	}
 	harnessRepo, err := c.HarnessRepoName()
 	if err != nil {
 		return result, err
 	}
-	primary, primaryBranch, prID, prHead := "", opt.Branch, "", ""
+	primary, primaryBranch, prID, prHead, prRemote := "", opt.Branch, "", "", ""
 	if opt.PR != "" {
 		parts := strings.Split(opt.PR, "#")
 		if len(parts) != 2 || !prNumber.MatchString(parts[1]) {
@@ -53,13 +57,17 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 			return result, fmt.Errorf("PR collection requires a GitHub repository remote")
 		}
 		slug := strings.TrimSuffix(strings.TrimPrefix(url, "https://github.com/"), "/pull/"+parts[1])
-		output, err := exec.Command("gh", "pr", "view", parts[1], "--repo", slug, "--json", "headRefName,headRefOid").Output()
+		output, err := exec.Command("gh", "pr", "view", parts[1], "--repo", slug, "--json", "headRefName,headRefOid,headRepository,isCrossRepository").Output()
 		if err != nil {
 			return result, fmt.Errorf("resolve PR head: %w", err)
 		}
 		var details struct {
-			HeadRefName string `json:"headRefName"`
-			HeadRefOID  string `json:"headRefOid"`
+			HeadRefName    string `json:"headRefName"`
+			HeadRefOID     string `json:"headRefOid"`
+			HeadRepository struct {
+				NameWithOwner string `json:"nameWithOwner"`
+			} `json:"headRepository"`
+			IsCrossRepository bool `json:"isCrossRepository"`
 		}
 		if err := json.Unmarshal(output, &details); err != nil || details.HeadRefName == "" || details.HeadRefOID == "" {
 			return result, fmt.Errorf("could not read PR head for %s", opt.PR)
@@ -68,6 +76,12 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 		result.IntendedBranch = details.HeadRefName
 		result.Source = fmt.Sprintf("Review wtc for %s#%s (head branch `%s`).", slug, parts[1], details.HeadRefName)
 		primary, primaryBranch, prID, prHead = parts[0], details.HeadRefName, parts[1], details.HeadRefOID
+		if details.IsCrossRepository {
+			if !githubSlugPattern.MatchString(details.HeadRepository.NameWithOwner) {
+				return result, fmt.Errorf("PR head repository is unavailable")
+			}
+			prRemote = "https://github.com/" + details.HeadRepository.NameWithOwner + ".git"
+		}
 	} else if opt.Issue != "" {
 		if !collectionNamePattern.MatchString(opt.Issue) || !collectionNamePattern.MatchString(opt.Slug) {
 			return result, fmt.Errorf("invalid issue ID or collection slug")
@@ -151,7 +165,7 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 			branch = primaryBranch
 		}
 		if name == primary && prID != "" {
-			err = c.AddPRWorktree(name, directory, result.Collection, branch, prID, prHead)
+			err = c.AddPRWorktree(name, directory, result.Collection, branch, prID, prHead, prRemote)
 		} else {
 			err = c.AddWorktree(name, directory, result.Collection, branch)
 		}
@@ -180,6 +194,15 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 		return result, err
 	}
 	if err := target.TrustMise(); err != nil {
+		return result, err
+	}
+	if err := target.RunHook("secrets.link.pre", nil); err != nil {
+		return result, err
+	}
+	if _, err := target.LinkSecrets(SecretLinkOptions{}); err != nil {
+		return result, err
+	}
+	if err := target.RunHook("secrets.link.post", nil); err != nil {
 		return result, err
 	}
 	if _, err := target.RenderSkills(SkillRenderOptions{SeedScope: true}); err != nil {

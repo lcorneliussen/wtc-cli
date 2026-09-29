@@ -150,7 +150,7 @@ func (c *Context) AddWorktree(name, directory, destination, branch string) error
 // AddPRWorktree fetches GitHub's immutable view of the PR head and verifies
 // it against the forge response. A missing head must never turn into a new
 // branch at the development tip.
-func (c *Context) AddPRWorktree(name, directory, destination, branch, number, expectedSHA string) error {
+func (c *Context) AddPRWorktree(name, directory, destination, branch, number, expectedSHA, headRemote string) error {
 	if !prNumber.MatchString(number) || !validRepoName.MatchString(directory) || branch == "" {
 		return fmt.Errorf("invalid PR worktree identity")
 	}
@@ -177,6 +177,25 @@ func (c *Context) AddPRWorktree(name, directory, destination, branch, number, ex
 	if err != nil || !strings.EqualFold(head, expectedSHA) {
 		return fmt.Errorf("PR head changed while creating collection; expected %s, fetched %s", expectedSHA, head)
 	}
+	remote := "origin"
+	if headRemote != "" {
+		remote = "wtc-pr-" + number
+		if existing, err := gitOutput("--git-dir="+bare, "remote", "get-url", remote); err == nil {
+			if existing != headRemote {
+				return fmt.Errorf("PR head remote %s already points elsewhere", remote)
+			}
+		} else if _, err := gitOutput("--git-dir="+bare, "remote", "add", remote, headRemote); err != nil {
+			return err
+		}
+	}
+	trackingRef := "refs/remotes/" + remote + "/" + branch
+	if _, err := gitOutput("--git-dir="+bare, "fetch", remote, "+refs/heads/"+branch+":"+trackingRef); err != nil {
+		return fmt.Errorf("fetch pushable PR branch from %s: %w", remote, err)
+	}
+	trackingHead, err := gitOutput("--git-dir="+bare, "rev-parse", "--verify", trackingRef)
+	if err != nil || !strings.EqualFold(trackingHead, expectedSHA) {
+		return fmt.Errorf("PR source branch changed while creating collection; expected %s, fetched %s", expectedSHA, trackingHead)
+	}
 	path := filepath.Join(destination, directory)
 	if _, err := os.Lstat(path); err == nil {
 		return fmt.Errorf("worktree path already exists: %s", path)
@@ -190,13 +209,12 @@ func (c *Context) AddPRWorktree(name, directory, destination, branch, number, ex
 		}
 		args = append(args, path, branch)
 	} else {
-		start := ref
-		if originHead, err := gitOutput("--git-dir="+bare, "rev-parse", "--verify", "refs/remotes/origin/"+branch); err == nil && strings.EqualFold(originHead, expectedSHA) {
-			start = "origin/" + branch
-		}
-		args = append(args, "-b", branch, path, start)
+		args = append(args, "-b", branch, path, remote+"/"+branch)
 	}
 	if _, err := gitOutput(args...); err != nil {
+		return err
+	}
+	if _, err := gitOutput("-C", path, "branch", "--set-upstream-to", remote+"/"+branch, branch); err != nil {
 		return err
 	}
 	trustWorktreeMise(path)
