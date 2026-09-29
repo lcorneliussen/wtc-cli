@@ -42,7 +42,9 @@ case "$*" in
   *'--paginate --slurp'*) printf '[[]]\n' ;;
   *'api graphql'*'reviewThreads'*) printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"THREAD_1","isResolved":false,"comments":{"nodes":[{"databaseId":401}]}}]}}}}}\n' ;;
   *'api graphql'*'resolveReviewThread'*) printf '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}\n' ;;
-  *'pulls/7/comments'*) printf '{"id":401,"html_url":"https://github.com/example/app/pull/7#discussion_r401"}\n' ;;
+  *'api -X POST repos/example/app/pulls/7/comments'*)
+    if [ "${FAIL_INLINE:-}" = 1 ]; then exit 5; fi
+    printf '{"id":401,"html_url":"https://github.com/example/app/pull/7#discussion_r401"}\n' ;;
   *'issues/comments/301'*) printf '{"id":301,"html_url":"https://github.com/example/app/pull/7#issuecomment-301"}\n' ;;
   *'issues/7/comments'*) printf '{"id":301,"html_url":"https://github.com/example/app/pull/7#issuecomment-301"}\n' ;;
   *) printf 'unexpected args: %s\n' "$*" >&2; exit 4 ;;
@@ -80,8 +82,39 @@ esac
 	if len(rows) != 1 || !rows[0].Resolved {
 		t.Fatalf("inline record not resolved: %+v", rows)
 	}
+	secondFinding := `{"concern":"code","status":"issues","findings":[{"severity":"blocker","file":"feature.go","line":5,"title":"Another defect","detail":"Fails on retry"}]}`
+	if err := os.WriteFile(filepath.Join(bundle, "findings", "code.json"), []byte(secondFinding), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_PR_HEAD", "")
+	t.Setenv("FAIL_INLINE", "1")
+	if _, err := c.PostReviewBundle(bundle, ReviewPostOptions{}); err == nil || !strings.Contains(err.Error(), "inline comments failed") {
+		t.Fatalf("inline failure did not fail the post: %v", err)
+	}
+	if _, err := os.Stat(reviewReceiptPath(collection, "github", "example/app", "7", head, "301", "pass")); !os.IsNotExist(err) {
+		t.Fatal("failed inline post left a trusted receipt")
+	}
 	requests, err := os.ReadFile(log)
-	if err != nil || strings.Count(string(requests), "api -X POST repos/example/app/pulls/7/comments") != 2 || !strings.Contains(string(requests), "resolveReviewThread") {
+	if err != nil || strings.Count(string(requests), "api -X POST repos/example/app/pulls/7/comments") != 3 || !strings.Contains(string(requests), "resolveReviewThread") {
 		t.Fatalf("unexpected forge requests: %s %v", requests, err)
+	}
+}
+
+func TestReviewThreadIDPaginates(t *testing.T) {
+	repo := t.TempDir()
+	bin := t.TempDir()
+	launcher := `#!/bin/sh
+case "$*" in
+  *'after=NEXT'*) printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"id":"SECOND","isResolved":false,"comments":{"nodes":[{"databaseId":401}]}}]}}}}}\n' ;;
+  *) printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":"NEXT"},"nodes":[]}}}}}\n' ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(launcher), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	id, resolved, err := reviewThreadID(ReviewManifest{RepoDir: repo, Slug: "example/app", PR: "7"}, "401")
+	if err != nil || id != "SECOND" || resolved {
+		t.Fatalf("second-page review thread: %q %v %v", id, resolved, err)
 	}
 }

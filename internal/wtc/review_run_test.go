@@ -12,7 +12,7 @@ func TestReviewRunnerUsesSeparateProcessResultsAndDowngradesErrors(t *testing.T)
 	collection := filepath.Join(t.TempDir(), "sample")
 	harness := filepath.Join(collection, "harness")
 	bundle := filepath.Join(collection, "bundle")
-	for _, dir := range []string{harness, filepath.Join(harness, "review", "prompts"), filepath.Join(bundle, "concerns")} {
+	for _, dir := range []string{harness, filepath.Join(harness, "review", "prompts"), filepath.Join(bundle, "concerns"), filepath.Join(collection, "app", ".git")} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -20,7 +20,7 @@ func TestReviewRunnerUsesSeparateProcessResultsAndDowngradesErrors(t *testing.T)
 	if err := os.WriteFile(filepath.Join(harness, ".harness-repos.yml"), []byte("repos:\n  - name: app\n    remote: https://github.com/example/app.git\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	manifest := ReviewManifest{Repo: "app", HeadSHA: "1234567890abcdef1234567890abcdef12345678", Round: 1, RepoDir: filepath.Join(collection, "app")}
+	manifest := ReviewManifest{Repo: "app", Forge: "github", Slug: "example/app", HeadSHA: "1234567890abcdef1234567890abcdef12345678", Round: 1, RepoDir: filepath.Join(collection, "app")}
 	if err := writeReviewManifest(bundle, manifest); err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +45,10 @@ if [ "$(basename "$3")" = lead.md ]; then
 fi
 findings=$(sed -n '1p' "$3")
 id=$(sed -n '2p' "$3")
+if [ "${BLOCKER_CONCERN:-}" = "$id" ]; then
+  printf '{"concern":"%s","status":"issues","findings":[{"severity":"blocker","title":"Breaks execution"}]}\n' "$id" > "$findings"
+  exit 0
+fi
 printf '{"concern":"%s","status":"ok","findings":[]}\n' "$id" > "$findings"
 if [ "${FAIL_CONCERN:-}" = "$id" ]; then exit 3; fi
 `
@@ -78,5 +82,11 @@ if [ "${FAIL_CONCERN:-}" = "$id" ]; then exit 3; fi
 	summary, err := os.ReadFile(filepath.Join(bundle, "summary.md"))
 	if err != nil || strings.Count(string(summary), "wtc-review v1 head=") != 1 {
 		t.Fatalf("status line missing or duplicated: %s %v", summary, err)
+	}
+	t.Setenv("FAIL_CONCERN", "")
+	t.Setenv("BLOCKER_CONCERN", "code")
+	got, err = c.RunReviewBundle(bundle, opt)
+	if err != nil || got.Verdict != "changes-requested" || got.Blockers != 1 {
+		t.Fatalf("open blocker did not close gate: %+v %v", got, err)
 	}
 }

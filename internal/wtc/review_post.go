@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type ReviewPostOptions struct {
@@ -174,6 +178,15 @@ func (c *Context) PostReviewBundle(bundle string, opt ReviewPostOptions) (Review
 	if cid != "" && !prNumber.MatchString(cid) {
 		return ReviewPostResult{}, fmt.Errorf("invalid saved comment id")
 	}
+	if cid != "" {
+		for _, verdict := range []string{"pass", "pass-with-notes", "changes-requested", "error", "pending"} {
+			_ = os.Remove(reviewReceiptPath(c.Collection, manifest.Forge, manifest.Slug, manifest.PR, manifest.HeadSHA, cid, verdict))
+		}
+	}
+	finalBody := body
+	if mode == "summary" {
+		body = fmt.Sprintf("⏳ **Local review: posting findings**\n\nRound %d, head `%s`.\n\n`wtc-review v1 head=%s verdict=pending blockers=0 round=%d lead=pending`\n", manifest.Round, manifest.HeadSHA[:7], manifest.HeadSHA, manifest.Round)
+	}
 	var posted ReviewPostResult
 	if cid != "" {
 		posted, err = postReviewComment(manifest, cid, body)
@@ -193,8 +206,17 @@ func (c *Context) PostReviewBundle(bundle string, opt ReviewPostOptions) (Review
 		}
 	}
 	if mode == "summary" {
+		posted.InlinePosted, posted.InlineFailed = postReviewInline(manifest, bundle)
+		if posted.InlineFailed != 0 {
+			return posted, fmt.Errorf("%d inline comments failed to post; review remains pending at %s", posted.InlineFailed, posted.URL)
+		}
+		finalPost, err := postReviewComment(manifest, posted.CommentID, finalBody)
+		if err != nil {
+			return posted, err
+		}
+		posted.CommentID, posted.URL = finalPost.CommentID, finalPost.URL
 		if posted.CommentID != "" {
-			receipt := reviewReceiptPath(c.Collection, manifest.Forge, manifest.Slug, manifest.PR, manifest.HeadSHA, posted.CommentID, reviewStatusLine.FindStringSubmatch(body)[2])
+			receipt := reviewReceiptPath(c.Collection, manifest.Forge, manifest.Slug, manifest.PR, manifest.HeadSHA, posted.CommentID, reviewStatusLine.FindStringSubmatch(finalBody)[2])
 			if err := os.MkdirAll(filepath.Dir(receipt), 0755); err != nil {
 				return posted, err
 			}
@@ -202,7 +224,6 @@ func (c *Context) PostReviewBundle(bundle string, opt ReviewPostOptions) (Review
 				return posted, err
 			}
 		}
-		posted.InlinePosted, posted.InlineFailed = postReviewInline(manifest, bundle)
 	}
 	return posted, nil
 }
@@ -228,6 +249,12 @@ func postReviewComment(m ReviewManifest, cid, body string) (ReviewPostResult, er
 			return ReviewPostResult{}, fmt.Errorf("GitHub comment response has no id: %v", err)
 		}
 		return ReviewPostResult{CommentID: strconv.FormatInt(result.ID, 10), URL: result.HTMLURL}, nil
+	}
+	if result, ok, err := bitbucketReviewCommentAPI(m, cid, body, "", 0, ""); ok {
+		return result, err
+	}
+	if len(body) > 8192 || strings.HasPrefix(body, "-") {
+		return ReviewPostResult{}, fmt.Errorf("Bitbucket comment requires API credentials for a long or flag-like body")
 	}
 	var args []string
 	if cid == "" {
@@ -257,6 +284,72 @@ func postReviewComment(m ReviewManifest, cid, body string) (ReviewPostResult, er
 		return ReviewPostResult{}, fmt.Errorf("Bitbucket comment response has no id")
 	}
 	return ReviewPostResult{CommentID: strconv.FormatInt(result.ID, 10), URL: result.Links.HTML.Href}, nil
+}
+
+func bitbucketReviewCommentAPI(m ReviewManifest, cid, body, inlineFile string, inlineLine int, parent string) (ReviewPostResult, bool, error) {
+	user, pass := os.Getenv("BB_API_USER"), os.Getenv("BB_API_PASS")
+	if user == "" || pass == "" {
+		user, pass = os.Getenv("BB_USERNAME"), os.Getenv("BB_API_TOKEN")
+	}
+	if user == "" || pass == "" {
+		return ReviewPostResult{}, false, nil
+	}
+	parts := splitReviewSlug(m.Slug)
+	if len(parts) != 2 {
+		return ReviewPostResult{}, true, fmt.Errorf("invalid Bitbucket repository slug")
+	}
+	endpoint := "https://api.bitbucket.org/2.0/repositories/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]) + "/pullrequests/" + m.PR + "/comments"
+	method := http.MethodPost
+	if cid != "" {
+		endpoint += "/" + cid
+		method = http.MethodPut
+	}
+	payload := map[string]any{"content": map[string]string{"raw": body}}
+	if inlineFile != "" {
+		payload["inline"] = map[string]any{"path": inlineFile, "to": inlineLine}
+	}
+	if parent != "" {
+		parentID, err := strconv.Atoi(parent)
+		if err != nil {
+			return ReviewPostResult{}, true, err
+		}
+		payload["parent"] = map[string]int{"id": parentID}
+	}
+	encoded, _ := json.Marshal(payload)
+	request, err := http.NewRequest(method, endpoint, bytes.NewReader(encoded))
+	if err != nil {
+		return ReviewPostResult{}, true, err
+	}
+	request.SetBasicAuth(user, pass)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	response, err := (&http.Client{Timeout: 60 * time.Second}).Do(request)
+	if err != nil {
+		return ReviewPostResult{}, true, err
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return ReviewPostResult{}, true, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return ReviewPostResult{}, true, fmt.Errorf("Bitbucket comment API returned %s: %s", response.Status, strings.TrimSpace(string(raw[:min(400, len(raw))])))
+	}
+	var result struct {
+		ID    int64 `json:"id"`
+		Links struct {
+			HTML struct {
+				Href string `json:"href"`
+			} `json:"html"`
+		} `json:"links"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return ReviewPostResult{}, true, err
+	}
+	if result.ID == 0 {
+		return ReviewPostResult{}, true, fmt.Errorf("Bitbucket comment response has no id")
+	}
+	return ReviewPostResult{CommentID: strconv.FormatInt(result.ID, 10), URL: result.Links.HTML.Href}, true, nil
 }
 
 func inlineReviewKey(concern, path string, line int, title string) string {
@@ -295,17 +388,19 @@ func priorReviewInlineKeys(m ReviewManifest, bundle string) map[string]bool {
 	}
 	if m.Forge == "github" {
 		out, err := reviewForgeCommand(m.RepoDir, "gh", []string{"api", fmt.Sprintf("repos/%s/pulls/%s/comments?per_page=100", m.Slug, m.PR), "--paginate", "--slurp"}, nil)
-		if err == nil {
-			for _, match := range reviewInlineMarker.FindAllStringSubmatch(string(out), -1) {
-				keys[match[1]] = true
-			}
+		if err != nil {
+			return nil
+		}
+		for _, match := range reviewInlineMarker.FindAllStringSubmatch(string(out), -1) {
+			keys[match[1]] = true
 		}
 	} else {
 		out, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "list", m.PR, "--all", "--json"}, nil)
-		if err == nil {
-			for _, match := range reviewInlineMarker.FindAllStringSubmatch(string(out), -1) {
-				keys[match[1]] = true
-			}
+		if err != nil {
+			return nil
+		}
+		for _, match := range reviewInlineMarker.FindAllStringSubmatch(string(out), -1) {
+			keys[match[1]] = true
 		}
 	}
 	return keys
@@ -313,6 +408,9 @@ func priorReviewInlineKeys(m ReviewManifest, bundle string) map[string]bool {
 
 func postReviewInline(m ReviewManifest, bundle string) (posted, failed int) {
 	prior := priorReviewInlineKeys(m, bundle)
+	if prior == nil {
+		return 0, 1
+	}
 	rows := readInlineRecords(bundle)
 	for _, row := range rows {
 		if row.ID != "" {
@@ -375,13 +473,19 @@ func postReviewInline(m ReviewManifest, bundle string) (posted, failed int) {
 					row.Error = "post failed"
 				}
 			} else {
-				out, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "add", m.PR, body, "--file", f.File, "--line-to", strconv.Itoa(f.Line), "--json"}, nil)
-				if err == nil {
-					var result struct {
-						ID int64 `json:"id"`
+				if result, ok, err := bitbucketReviewCommentAPI(m, "", body, f.File, f.Line, ""); ok {
+					if err == nil {
+						row.ID, row.URL = result.CommentID, result.URL
 					}
-					if json.Unmarshal(out, &result) == nil && result.ID != 0 {
-						row.ID = strconv.FormatInt(result.ID, 10)
+				} else if len(body) <= 8192 && !strings.HasPrefix(body, "-") {
+					out, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "add", m.PR, body, "--file", f.File, "--line-to", strconv.Itoa(f.Line), "--json"}, nil)
+					if err == nil {
+						var result struct {
+							ID int64 `json:"id"`
+						}
+						if json.Unmarshal(out, &result) == nil && result.ID != 0 {
+							row.ID = strconv.FormatInt(result.ID, 10)
+						}
 					}
 				}
 				if row.ID == "" {
@@ -394,7 +498,9 @@ func postReviewInline(m ReviewManifest, bundle string) (posted, failed int) {
 				posted++
 			}
 			rows = append(rows, row)
-			_ = writeInlineRecords(bundle, rows)
+			if err := writeInlineRecords(bundle, rows); err != nil {
+				failed++
+			}
 		}
 	}
 	return posted, failed

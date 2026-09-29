@@ -34,6 +34,7 @@ type ReviewManifest struct {
 	Round      int    `json:"round"`
 	RepoDir    string `json:"repo_dir"`
 	Collection string `json:"collection"`
+	Public     bool   `json:"public"`
 }
 
 type ReviewBundle struct {
@@ -137,7 +138,7 @@ func (c *Context) BuildPublicReviewBundle(opt ReviewBundleOptions) (ReviewBundle
 		if prURL == "" {
 			prURL = p.Links.HTML.Href
 		}
-		if opt.Head == "HEAD" && prBranch != "" && branch != prBranch {
+		if opt.Head == "HEAD" && prBranch != "" && branch != "" && branch != prBranch {
 			return ReviewBundle{}, fmt.Errorf("worktree is on %q, PR #%s is on %q; check out the PR branch first", branch, opt.PR, prBranch)
 		}
 	}
@@ -178,9 +179,19 @@ func (c *Context) BuildPublicReviewBundle(opt ReviewBundleOptions) (ReviewBundle
 	if err != nil {
 		return ReviewBundle{}, err
 	}
-	changed, err := reviewGit(worktree, "diff", "--name-only", baseSHA, headSHA)
+	changedZ, err := reviewGit(worktree, "diff", "--name-only", "-z", baseSHA, headSHA)
 	if err != nil {
 		return ReviewBundle{}, err
+	}
+	var changedPaths []string
+	for _, path := range strings.Split(string(changedZ), "\x00") {
+		if path != "" {
+			changedPaths = append(changedPaths, path)
+		}
+	}
+	changed := []byte(strings.Join(changedPaths, "\n"))
+	if len(changedPaths) > 0 {
+		changed = append(changed, '\n')
 	}
 	log, err := reviewGit(worktree, "log", "--oneline", baseSHA+".."+headSHA)
 	if err != nil {
@@ -214,7 +225,7 @@ func (c *Context) BuildPublicReviewBundle(opt ReviewBundleOptions) (ReviewBundle
 	if err := os.MkdirAll(filepath.Join(dir, "concerns"), 0755); err != nil {
 		return ReviewBundle{}, err
 	}
-	manifest := ReviewManifest{Repo: opt.Repo, PR: opt.PR, Forge: forge, Slug: slug, URL: prURL, BaseRef: baseRef, BaseSHA: baseSHA, HeadSHA: headSHA, HeadBranch: branch, Round: round, RepoDir: worktree, Collection: filepath.Base(c.Collection)}
+	manifest := ReviewManifest{Repo: opt.Repo, PR: opt.PR, Forge: forge, Slug: slug, URL: prURL, BaseRef: baseRef, BaseSHA: baseSHA, HeadSHA: headSHA, HeadBranch: branch, Round: round, RepoDir: worktree, Collection: filepath.Base(c.Collection), Public: true}
 	prText := fmt.Sprintf("# %s\n\n%s\n", prTitle, prBody)
 	if opt.PR == "" {
 		prText = fmt.Sprintf("# %s\n\n(branch-only review)\n", branch)
@@ -227,16 +238,11 @@ func (c *Context) BuildPublicReviewBundle(opt ReviewBundleOptions) (ReviewBundle
 	if err := writeReviewManifest(dir, manifest); err != nil {
 		return ReviewBundle{}, err
 	}
-	concerns, err := c.copyPublicReviewConcerns(dir, worktree, baseSHA, headSHA, string(changed))
+	concerns, err := c.copyPublicReviewConcerns(dir, worktree, baseSHA, string(changed))
 	if err != nil {
 		return ReviewBundle{}, err
 	}
-	files := 0
-	for _, path := range strings.Split(strings.TrimSuffix(string(changed), "\n"), "\n") {
-		if path != "" {
-			files++
-		}
-	}
+	files := len(changedPaths)
 	return ReviewBundle{Dir: dir, Manifest: manifest, Files: files, Concerns: concerns}, nil
 }
 
@@ -278,7 +284,7 @@ func writeReviewManifest(dir string, m ReviewManifest) error {
 
 var reviewConcernID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-func (c *Context) copyPublicReviewConcerns(dir, worktree, baseSHA, headSHA, changed string) (int, error) {
+func (c *Context) copyPublicReviewConcerns(dir, worktree, baseSHA, changed string) (int, error) {
 	// A public bundle reads only generic concerns from the review base. Local
 	// overlays and other repository snapshots may contain private identities.
 	sourceSHA := baseSHA
@@ -287,12 +293,19 @@ func (c *Context) copyPublicReviewConcerns(dir, worktree, baseSHA, headSHA, chan
 		return 0, err
 	}
 	if len(strings.TrimSpace(string(paths))) == 0 {
-		sourceSHA = headSHA
-		paths, err = reviewGit(worktree, "ls-tree", "-r", "--name-only", sourceSHA, "review/concerns")
+		sourceSHA = ""
+		defaults, err := DefaultPaths()
 		if err != nil {
 			return 0, err
 		}
-		fmt.Fprintln(os.Stderr, "wtc: warning: review base has no generic concerns; using head concerns for bootstrap")
+		var embedded []string
+		for _, path := range defaults {
+			if strings.HasPrefix(path, "review/concerns/") && strings.HasSuffix(path, ".md") {
+				embedded = append(embedded, path)
+			}
+		}
+		paths = []byte(strings.Join(embedded, "\n"))
+		fmt.Fprintln(os.Stderr, "wtc: review base has no generic concerns; using versioned CLI defaults")
 	}
 	var names []string
 	for _, path := range strings.Split(strings.TrimSpace(string(paths)), "\n") {
@@ -305,8 +318,14 @@ func (c *Context) copyPublicReviewConcerns(dir, worktree, baseSHA, headSHA, chan
 	}
 	sort.Strings(names)
 	count := 0
+	seen := map[string]bool{}
 	for _, path := range names {
-		body, err := reviewGit(worktree, "show", sourceSHA+":"+path)
+		var body []byte
+		if sourceSHA == "" {
+			body, err = ReadDefault(path)
+		} else {
+			body, err = reviewGit(worktree, "show", sourceSHA+":"+path)
+		}
 		if err != nil {
 			return count, err
 		}
@@ -320,6 +339,10 @@ func (c *Context) copyPublicReviewConcerns(dir, worktree, baseSHA, headSHA, chan
 		if !reviewConcernID.MatchString(id) {
 			return count, fmt.Errorf("invalid concern id in %s", path)
 		}
+		if seen[id] {
+			return count, fmt.Errorf("duplicate concern id %q", id)
+		}
+		seen[id] = true
 		if !reviewConcernApplies(string(body), changed) {
 			continue
 		}
@@ -347,7 +370,7 @@ func reviewConcernApplies(body, changed string) bool {
 	}
 	for _, pattern := range strings.Fields(applies) {
 		pattern = strings.TrimPrefix(pattern, "/")
-		for _, file := range strings.Fields(changed) {
+		for _, file := range strings.Split(strings.TrimSuffix(changed, "\n"), "\n") {
 			if matchReviewGlob(pattern, file) || !strings.Contains(pattern, "/") && matchReviewGlob(pattern, filepath.Base(file)) {
 				return true
 			}

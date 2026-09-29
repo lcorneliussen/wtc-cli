@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 type ReviewResolveOptions struct {
@@ -45,12 +46,29 @@ func (c *Context) ResolveReviewBundle(bundle string, opt ReviewResolveOptions) (
 		if !prNumber.MatchString(row.ID) {
 			return result, fmt.Errorf("invalid inline comment id for %s", row.Key)
 		}
+		threadID := ""
+		if forge == "github" {
+			var already bool
+			threadID, already, err = reviewThreadID(manifest, row.ID)
+			if err != nil {
+				return result, err
+			}
+			if already {
+				row.Resolved = true
+				row.Error = ""
+				if err := writeInlineRecords(bundle, rows); err != nil {
+					return result, err
+				}
+				result.Resolved++
+				continue
+			}
+		}
 		if opt.Reply != "" {
 			if err := replyReviewInline(manifest, row.ID, opt.Reply); err != nil {
 				return result, err
 			}
 		}
-		if err := resolveReviewInline(manifest, row.ID); err != nil {
+		if err := resolveReviewInline(manifest, row.ID, threadID); err != nil {
 			return result, err
 		}
 		row.Resolved = true
@@ -70,61 +88,83 @@ func replyReviewInline(m ReviewManifest, id, body string) error {
 		_, err := reviewForgeCommand(m.RepoDir, "gh", []string{"api", "-X", "POST", fmt.Sprintf("repos/%s/pulls/%s/comments", m.Slug, m.PR), "--input", "-"}, payload)
 		return err
 	}
+	if _, ok, err := bitbucketReviewCommentAPI(m, "", body, "", 0, id); ok {
+		return err
+	}
+	if len(body) > 8192 || strings.HasPrefix(body, "-") {
+		return fmt.Errorf("Bitbucket reply requires API credentials for a long or flag-like body")
+	}
 	_, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "reply", m.PR, id, body}, nil)
 	return err
 }
 
-func resolveReviewInline(m ReviewManifest, id string) error {
+func resolveReviewInline(m ReviewManifest, id, threadID string) error {
 	if m.Forge == "bitbucket" {
 		_, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "resolve", m.PR, id}, nil)
 		return err
 	}
+	mutation := `mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}`
+	_, err := reviewForgeCommand(m.RepoDir, "gh", []string{"api", "graphql", "-f", "query=" + mutation, "-f", "id=" + threadID}, nil)
+	return err
+}
+
+func reviewThreadID(m ReviewManifest, id string) (string, bool, error) {
 	parts := splitReviewSlug(m.Slug)
 	if len(parts) != 2 {
-		return fmt.Errorf("invalid GitHub repository slug")
+		return "", false, fmt.Errorf("invalid GitHub repository slug")
 	}
-	query := `query($o:String!,$n:String!,$num:Int!){repository(owner:$o,name:$n){pullRequest(number:$num){reviewThreads(first:100){nodes{id isResolved comments(first:50){nodes{databaseId}}}}}}}`
-	out, err := reviewForgeCommand(m.RepoDir, "gh", []string{"api", "graphql", "-f", "query=" + query, "-f", "o=" + parts[0], "-f", "n=" + parts[1], "-F", "num=" + m.PR}, nil)
-	if err != nil {
-		return err
-	}
-	var graph struct {
-		Data struct {
-			Repository struct {
-				PullRequest struct {
-					ReviewThreads struct {
-						Nodes []struct {
-							ID         string `json:"id"`
-							IsResolved bool   `json:"isResolved"`
-							Comments   struct {
-								Nodes []struct {
-									DatabaseID int64 `json:"databaseId"`
-								} `json:"nodes"`
-							} `json:"comments"`
-						} `json:"nodes"`
-					} `json:"reviewThreads"`
-				} `json:"pullRequest"`
-			} `json:"repository"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(out, &graph); err != nil {
-		return err
-	}
+	query := `query($o:String!,$n:String!,$num:Int!,$after:String){repository(owner:$o,name:$n){pullRequest(number:$num){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{databaseId}}}}}}}`
 	target, _ := strconv.ParseInt(id, 10, 64)
-	for _, thread := range graph.Data.Repository.PullRequest.ReviewThreads.Nodes {
-		for _, comment := range thread.Comments.Nodes {
-			if comment.DatabaseID != target {
-				continue
-			}
-			if thread.IsResolved {
-				return nil
-			}
-			mutation := `mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}`
-			_, err := reviewForgeCommand(m.RepoDir, "gh", []string{"api", "graphql", "-f", "query=" + mutation, "-f", "id=" + thread.ID}, nil)
-			return err
+	cursor := ""
+	for page := 0; page < 100; page++ {
+		args := []string{"api", "graphql", "-f", "query=" + query, "-f", "o=" + parts[0], "-f", "n=" + parts[1], "-F", "num=" + m.PR}
+		if cursor != "" {
+			args = append(args, "-f", "after="+cursor)
 		}
+		out, err := reviewForgeCommand(m.RepoDir, "gh", args, nil)
+		if err != nil {
+			return "", false, err
+		}
+		var graph struct {
+			Data struct {
+				Repository struct {
+					PullRequest struct {
+						ReviewThreads struct {
+							PageInfo struct {
+								HasNextPage bool   `json:"hasNextPage"`
+								EndCursor   string `json:"endCursor"`
+							} `json:"pageInfo"`
+							Nodes []struct {
+								ID         string `json:"id"`
+								IsResolved bool   `json:"isResolved"`
+								Comments   struct {
+									Nodes []struct {
+										DatabaseID int64 `json:"databaseId"`
+									} `json:"nodes"`
+								} `json:"comments"`
+							} `json:"nodes"`
+						} `json:"reviewThreads"`
+					} `json:"pullRequest"`
+				} `json:"repository"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(out, &graph); err != nil {
+			return "", false, err
+		}
+		threads := graph.Data.Repository.PullRequest.ReviewThreads
+		for _, thread := range threads.Nodes {
+			for _, comment := range thread.Comments.Nodes {
+				if comment.DatabaseID == target {
+					return thread.ID, thread.IsResolved, nil
+				}
+			}
+		}
+		if !threads.PageInfo.HasNextPage || threads.PageInfo.EndCursor == "" || threads.PageInfo.EndCursor == cursor {
+			break
+		}
+		cursor = threads.PageInfo.EndCursor
 	}
-	return fmt.Errorf("GitHub review thread for comment %s not found", id)
+	return "", false, fmt.Errorf("GitHub review thread for comment %s not found", id)
 }
 
 func splitReviewSlug(slug string) []string {

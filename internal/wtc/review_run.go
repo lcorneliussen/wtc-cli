@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -75,6 +76,13 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	if len(manifest.HeadSHA) < 12 || manifest.Round < 1 || manifest.RepoDir == "" {
 		return ReviewRunResult{}, fmt.Errorf("incomplete review manifest")
 	}
+	worktree, slug, forge, err := c.ReviewRepo(manifest.Repo)
+	if err != nil {
+		return ReviewRunResult{}, err
+	}
+	if manifest.RepoDir != worktree || manifest.Slug != slug || manifest.Forge != forge {
+		return ReviewRunResult{}, fmt.Errorf("bundle repository does not match this collection")
+	}
 	if opt.Strong == "" {
 		opt.Strong = reviewEnv("HARNESS_REVIEW_STRONG", "claude:opus")
 	}
@@ -100,15 +108,20 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 		}
 		opt.Timeout = time.Duration(seconds) * time.Second
 	}
-	prompts := filepath.Join(c.Harness, "review", "prompts")
-	if _, err := os.Stat(filepath.Join(prompts, "concern.md")); os.IsNotExist(err) {
-		prompts = filepath.Join(manifest.RepoDir, "review", "prompts")
+	var concernTemplate, leadTemplate []byte
+	if manifest.Public {
+		concernTemplate, err = ReadDefault("review/prompts/concern.md")
+		if err != nil {
+			return ReviewRunResult{}, err
+		}
+		leadTemplate, err = ReadDefault("review/prompts/lead.md")
+	} else {
+		prompts := filepath.Join(c.Harness, "review", "prompts")
+		concernTemplate, err = os.ReadFile(filepath.Join(prompts, "concern.md"))
+		if err == nil {
+			leadTemplate, err = os.ReadFile(filepath.Join(prompts, "lead.md"))
+		}
 	}
-	concernTemplate, err := os.ReadFile(filepath.Join(prompts, "concern.md"))
-	if err != nil {
-		return ReviewRunResult{}, err
-	}
-	leadTemplate, err := os.ReadFile(filepath.Join(prompts, "lead.md"))
 	if err != nil {
 		return ReviewRunResult{}, err
 	}
@@ -193,11 +206,13 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	if err != nil {
 		return ReviewRunResult{}, err
 	}
-	if errors > 0 && verdict == "pass" {
+	if blockers > 0 {
+		verdict = "changes-requested"
+	} else if errors > 0 && verdict == "pass" {
 		verdict = "pass-with-notes"
-		if err := os.WriteFile(filepath.Join(bundle, "verdict"), []byte(verdict+"\n"), 0644); err != nil {
-			return ReviewRunResult{}, err
-		}
+	}
+	if err := os.WriteFile(filepath.Join(bundle, "verdict"), []byte(verdict+"\n"), 0644); err != nil {
+		return ReviewRunResult{}, err
 	}
 	statusLine := fmt.Sprintf("`wtc-review v1 head=%s verdict=%s blockers=%d round=%d lead=%s:%s`", manifest.HeadSHA, verdict, blockers, manifest.Round, leadAgent, leadModel)
 	var clean []string
@@ -422,6 +437,7 @@ func launchReviewAgent(bundle, repoDir, prompt, agent, model string, timeout tim
 		}
 	}
 	cmd.Dir = bundle
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "WTC_REVIEW_STATS_FILE="+statsPath)
 	promptBody, err := os.ReadFile(prompt)
 	if err != nil {
@@ -432,6 +448,9 @@ func launchReviewAgent(bundle, repoDir, prompt, agent, model string, timeout tim
 	output, err := cmd.CombinedOutput()
 	elapsed := time.Since(start)
 	if ctx.Err() == context.DeadlineExceeded {
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
 		return output, elapsed, fmt.Errorf("review agent timed out after %s", timeout)
 	}
 	return output, elapsed, err

@@ -44,7 +44,7 @@ func TestPublicReviewBundleUsesBaseConcernsAndExcludesLocalOverlays(t *testing.T
 	git("add", ".")
 	git("commit", "-m", "base")
 	git("switch", "-c", "feature")
-	if err := os.WriteFile(filepath.Join(repo, "feature.go"), []byte("package feature\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "feature file.go"), []byte("package feature\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	git("add", ".")
@@ -68,6 +68,10 @@ func TestPublicReviewBundleUsesBaseConcernsAndExcludesLocalOverlays(t *testing.T
 	}
 	if _, err := os.Stat(filepath.Join(first.Dir, "concerns", "code.md")); err != nil {
 		t.Fatal(err)
+	}
+	changed, err := os.ReadFile(filepath.Join(first.Dir, "changed-files.txt"))
+	if err != nil || string(changed) != "feature file.go\n" {
+		t.Fatalf("changed path with space was lost: %q %v", changed, err)
 	}
 	for _, path := range []string{"concerns/docs.md", "concerns/private.md", "related", "downstream", "upstream"} {
 		if _, err := os.Stat(filepath.Join(first.Dir, path)); !os.IsNotExist(err) {
