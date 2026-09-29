@@ -13,6 +13,10 @@ A CLI for worktree collections. This repository is the beginning of the migratio
 - `wtc mcp render [--dry-run]` renders the harness MCP registry into Claude, Cursor, and Codex config files for this collection.
 - `wtc customize` prints the versioned customization guide, including harness hooks and application repository init/teardown hooks.
 - `wtc review status <repo> [pr-number] [--trusted-local]` reads the newest local review status comment and checks whether it covers the current PR head.
+- `wtc review bundle <repo> [pr-number] --public --no-catch-up` builds a public-safe review bundle from current local refs and generic concerns at the base commit.
+- `wtc review run <bundle-dir>` launches separate concern agents, runs a lead agent, and writes a verdict and summary into the bundle.
+- `wtc review post <bundle-dir>` posts or updates the review comment, records a local receipt, and adds deduplicated inline findings.
+- `wtc review resolve <bundle-dir>` replies to and resolves selected inline review threads.
 - `wtc review ready <pr-number> [--repo NAME]` promotes a draft only after a current, locally posted passing review (or an explicit user override).
 
 Run locally with `go run ./cmd/wtc`. Commands that have not migrated remain in the reference harness. Tagged releases build macOS and Linux binaries through GoReleaser. A harness pins an exact release in its checked-in `.wtc-cli-version` file (for example, `0.1.3`). `wtc env` reads that file and writes the tool entry into the generated collection-root `mise.toml`, which every sibling inherits. Then run `mise install` in the collection. No global installation is required.
