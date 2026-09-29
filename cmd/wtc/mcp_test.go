@@ -31,14 +31,25 @@ func TestMCPSweepUsesEachRegistryAndContinuesAfterFailure(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(workspace, "older", "harness"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	marker := filepath.Join(workspace, "alpha", "hook-ran")
+	hookDir := filepath.Join(workspace, "alpha", "harness", "hooks", "wtc")
+	if err := os.MkdirAll(hookDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hookDir, "mcp.render.pre.sh"), []byte("#!/bin/sh\nprintf 'yes\\n' > '"+marker+"'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	bin := filepath.Join(t.TempDir(), "wtc")
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	run := func(dry bool) (map[string]any, error) {
+	run := func(dry, withHooks bool) (map[string]any, error) {
 		args := []string{"--json", "mcp", "render", "--all", "--collection", filepath.Join(workspace, "alpha")}
 		if dry {
 			args = append(args, "--dry-run")
+		}
+		if withHooks {
+			args = append(args, "--run-hooks")
 		}
 		cmd := exec.Command(bin, args...)
 		out, err := cmd.Output()
@@ -52,7 +63,7 @@ func TestMCPSweepUsesEachRegistryAndContinuesAfterFailure(t *testing.T) {
 		return payload, err
 	}
 	for _, dry := range []bool{true, false} {
-		payload, err := run(dry)
+		payload, err := run(dry, false)
 		if err == nil || payload["ok"] != false {
 			t.Fatalf("failed target was not reported: dry=%v payload=%v err=%v", dry, payload, err)
 		}
@@ -62,6 +73,9 @@ func TestMCPSweepUsesEachRegistryAndContinuesAfterFailure(t *testing.T) {
 		}
 		if data["missing_env_diagnostics"] != false {
 			t.Fatalf("sweep claimed target credential diagnostics: %v", data)
+		}
+		if data["hooks_run"] != false {
+			t.Fatalf("default sweep ran target hooks: %v", data)
 		}
 		byName := map[string]map[string]any{}
 		for _, raw := range data["results"].([]any) {
@@ -88,13 +102,23 @@ func TestMCPSweepUsesEachRegistryAndContinuesAfterFailure(t *testing.T) {
 				t.Fatalf("%s was written: %v", name, err)
 			}
 		}
+		if _, err := os.Stat(marker); !os.IsNotExist(err) {
+			t.Fatal("default sweep invoked target hook")
+		}
 	}
 	if err := os.WriteFile(filepath.Join(workspace, "broken", "harness", ".mcp-servers.yml"), []byte("schema_version: 1\nservers: []\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := run(false)
+	payload, err := run(false, false)
 	if err != nil || payload["ok"] != true {
 		t.Fatalf("recovered sweep failed: %v, %v", payload, err)
+	}
+	payload, err = run(false, true)
+	if err != nil || payload["ok"] != true {
+		t.Fatalf("opted-in hook sweep failed: %v, %v", payload, err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("opted-in target hook did not run: %v", err)
 	}
 }
 

@@ -42,6 +42,24 @@ func (c *Context) session() string {
 	return strings.TrimSuffix(name, "-wtc")
 }
 func (c *Context) portBase() (int, error) {
+	if c.previewPortBase != nil {
+		return *c.previewPortBase, nil
+	}
+	return c.portBaseWithReserved(nil)
+}
+
+// PreviewPortBase reserves an allocation in memory for a dry-run sweep.
+// The caller adds a successful result to reserved before previewing the next
+// collection; no collection file is written during the preview.
+func (c *Context) PreviewPortBase(reserved map[int]bool) (int, error) {
+	base, err := c.portBaseWithReserved(reserved)
+	if err == nil {
+		c.previewPortBase = &base
+	}
+	return base, err
+}
+
+func (c *Context) portBaseWithReserved(reserved map[int]bool) (int, error) {
 	old, err := os.ReadFile(filepath.Join(c.Collection, ".env.collection"))
 	if err != nil && !os.IsNotExist(err) {
 		return 0, err
@@ -52,6 +70,9 @@ func (c *Context) portBase() (int, error) {
 		}
 	}
 	used := map[int]bool{}
+	for base := range reserved {
+		used[base] = true
+	}
 	dirs, err := os.ReadDir(c.Workspace)
 	if err != nil {
 		return 0, err
