@@ -21,10 +21,16 @@ command and its contract checks cover their behavior.
 | `wtc-status.sh`, `wtc-status-tui.sh` | `wtc status` | Pending data layer and TUI |
 | `wtc-open.sh` | `wtc open` | Pending |
 | `wtc-browse.sh` | `wtc browse` | Pending |
+| `review-bundle.sh` | `wtc review bundle` | Pending; preserve public bundle isolation and concern layering |
+| `review-run.sh` | `wtc review run` | Pending; separate headless processes, bounded parallelism, and run stats |
+| `review-post.sh` | `wtc review post` | Pending; summary lifecycle, inline dedup, and local posting receipt |
+| `review-status.sh` | `wtc review status` | Native GitHub and Bitbucket status and trusted-local check in the review branch |
+| `review-resolve.sh` | `wtc review resolve` | Pending; reply and resolve selected inline threads |
+| `bb-pr-ready.sh` | `wtc review ready` | Native guarded promotion in the review branch |
 
 `wtc-status-legacy.sh`, `wtc-status-legacy-tui.sh`, `lib.sh`, and
 `wtc-status-common.sh` are implementation support for those entry points.
-The status and PR-facts Python helpers and browse Lua integration also need
+The status, PR-facts, and review Python helpers and browse Lua integration also need
 native replacements or retirement once their callers move.
 
 The completion gate is behavior, not a command name: run the relevant
