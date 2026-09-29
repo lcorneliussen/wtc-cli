@@ -17,6 +17,7 @@ A CLI for worktree collections. This repository is the beginning of the migratio
 - `wtc customize` prints the versioned customization guide, including harness hooks and application repository init/teardown hooks.
 - `wtc new [slug] [repo ...]` creates a collection from a slug, issue, tracker key, or GitHub PR head, then prepares its environment and runs repository init hooks.
 - `wtc add-repo <repo> [repo ...]` adds detached worktrees to the current collection, prepares secrets and generated files, and runs each new repository's init hook. `--collection NAME` explicitly selects another collection.
+- `wtc retire <collection>` checks for dirty or unpushed work, runs repository teardown hooks, removes the collection's worktrees and generated files, and leaves remote branches intact. Run it from a different collection; use `--force` only after checking that local work is disposable.
 - `wtc review status <repo> [pr-number] [--trusted-local]` reads the newest local review status comment and checks whether it covers the current PR head.
 - `wtc review bundle <repo> [pr-number] --public --no-catch-up` builds a public-safe review bundle from current local refs and generic concerns at the base commit, using versioned CLI defaults for a bootstrap review.
 - `wtc review run <bundle-dir>` launches separate concern agents, runs a lead agent, and writes a verdict and summary into the bundle.

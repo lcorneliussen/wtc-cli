@@ -253,7 +253,7 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	default:
 		branchNote = fmt.Sprintf("Worktrees start **detached at the development tip** — no branch exists yet.\nCreate one at your first commit:\n\n    git switch -c %s\n\n(that is the expected name; adjust it if the work turns out to be something else).", result.IntendedBranch)
 	}
-	handoff := fmt.Sprintf("# wtc: %s — launch note (EPHEMERAL)\n\n**Goal:** %s\n\nFirst agent on this wtc: read this, turn anything durable into issues /\ncommits / PRs, then **delete this file as your very first action**\n(harness/AGENTS.md → \"State lives in git\").\n\n%s Collection env: `.env.collection` (inherited via `mise.toml`).\nRetire with `harness/tools/retire.sh`.\n", filepath.Base(result.Collection), defaultSource(result.Source), branchNote)
+	handoff := fmt.Sprintf("# wtc: %s — launch note (EPHEMERAL)\n\n**Goal:** %s\n\nFirst agent on this wtc: read this, turn anything durable into issues /\ncommits / PRs, then **delete this file as your very first action**\n(harness/AGENTS.md → \"State lives in git\").\n\n%s Collection env: `.env.collection` (inherited via `mise.toml`).\nRetire with `wtc retire %s` from another collection.\n", filepath.Base(result.Collection), defaultSource(result.Source), branchNote, filepath.Base(result.Collection))
 	if err := os.WriteFile(filepath.Join(result.Collection, "HANDOFF.md"), []byte(handoff), 0644); err != nil {
 		return result, err
 	}

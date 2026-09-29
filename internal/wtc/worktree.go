@@ -260,6 +260,15 @@ func trustWorktreeMise(path string) {
 // RunRepoInit preserves the repository lifecycle hook contract. Failure is
 // reported but does not discard an otherwise valid new worktree.
 func RunRepoInit(worktree string) {
+	runRepoLifecycle(worktree, "init")
+}
+
+// RunRepoTeardown reports hook failures but allows retirement to continue.
+func RunRepoTeardown(worktree string) {
+	runRepoLifecycle(worktree, "teardown")
+}
+
+func runRepoLifecycle(worktree, hook string) {
 	if mise, err := exec.LookPath("mise"); err == nil {
 		if _, err := os.Stat(filepath.Join(worktree, "mise.toml")); err == nil {
 			cmd := exec.Command(mise, "tasks", "ls")
@@ -267,30 +276,30 @@ func RunRepoInit(worktree string) {
 			if output, err := cmd.Output(); err == nil {
 				scanner := bufio.NewScanner(strings.NewReader(string(output)))
 				for scanner.Scan() {
-					if fields := strings.Fields(scanner.Text()); len(fields) > 0 && fields[0] == "harness:init" {
-						runRepoCommand(worktree, mise, "run", "harness:init")
+					if fields := strings.Fields(scanner.Text()); len(fields) > 0 && fields[0] == "harness:"+hook {
+						runRepoCommand(worktree, hook, mise, "run", "harness:"+hook)
 						return
 					}
 				}
 			}
 		}
 	}
-	path := filepath.Join(worktree, ".harness", "init.sh")
+	path := filepath.Join(worktree, ".harness", hook+".sh")
 	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() && info.Mode()&0111 != 0 {
-		runRepoCommand(worktree, path)
+		runRepoCommand(worktree, hook, path)
 	}
 }
 
-func runRepoCommand(worktree, program string, args ...string) {
+func runRepoCommand(worktree, hook, program string, args ...string) {
 	collection := filepath.Dir(worktree)
 	// mise loads the parent config itself, but direct script hooks need the same
 	// generated and local collection env when mise is absent. Source the files
 	// as data in a child shell, then replace it with the actual hook process.
-	argv := append([]string{"-c", `set -a; . "$1"; . "$2"; shift 2; exec "$@"`, "wtc-init", filepath.Join(collection, ".env.collection"), filepath.Join(collection, ".env.collection.local"), program}, args...)
+	argv := append([]string{"-c", `set -a; [ ! -f "$1" ] || . "$1"; [ ! -f "$2" ] || . "$2"; shift 2; exec "$@"`, "wtc-" + hook, filepath.Join(collection, ".env.collection"), filepath.Join(collection, ".env.collection.local"), program}, args...)
 	cmd := exec.Command("/bin/sh", argv...)
 	cmd.Dir = worktree
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "wtc: warning: init hook for %s failed: %v; setup may be incomplete\n", filepath.Base(worktree), err)
+		fmt.Fprintf(os.Stderr, "wtc: warning: %s hook for %s failed: %v\n", hook, filepath.Base(worktree), err)
 	}
 }
