@@ -7,10 +7,10 @@ command and its contract checks cover their behavior.
 
 | Shell entry point | Provisional CLI | State |
 |---|---|---|
-| `refresh-env.sh` | `wtc env` | Native in v0.1.3; trust fix and target-aware shell shim released in v0.1.9; native `--all` parity pending |
+| `refresh-env.sh` | `wtc env` | Native in v0.1.3; target-aware shim in v0.1.9; native `--all` and safe shell sweep released in v0.1.14 |
 | `wtc-pr.sh` | `wtc pr path/list/enlist/unlist` | Native in v0.1.3; released target-aware shell shim and binary contract tests |
 | `refresh-configs.sh` | `wtc registry refresh` | Native in v0.1.3; generic shell shim released in v0.1.6 |
-| `link-mcp.sh` | `wtc mcp render` | Native for one collection in v0.1.3; `--all` shim parity pending |
+| `link-mcp.sh` | `wtc mcp render` | Native for one collection in v0.1.3; native `--all` and target-aware shell shim released in v0.1.14 |
 | `link-skills.sh` | `wtc skills render` | Native in v0.1.8; released target-aware shell shim and contract tests |
 | Skill section patches and overlay drift | `wtc skills diff` | Full skill overrides supported; section patch and drift review pending |
 | `link-secrets.sh` | `wtc secrets link` | Native in v0.1.5; released shims and harness tests in upstream and derivatives |
