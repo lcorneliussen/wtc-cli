@@ -217,6 +217,7 @@ func run() error {
 	addSkillsCommands(root, &asJSON)
 	addReviewCommands(root, &asJSON)
 	addNewCommand(root, &asJSON)
+	addAddRepoCommand(root, &asJSON)
 	return root.Execute()
 }
 

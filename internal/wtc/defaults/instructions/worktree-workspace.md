@@ -100,12 +100,17 @@ sibling that develops on `develop` will read as behind when it is not.
 A wtc can start from a plain slug, an issue, a tracker ticket, or a PR:
 
 ```bash
-tools/branch-off.sh fix-login-flow api        # slug
-tools/branch-off.sh --issue api-foh7 paging-clamp       # issue (owning repo auto-included)
-tools/branch-off.sh --tracker PROJ-123 rate-limits api
-tools/branch-off.sh --pr api#41               # review wtc on the PR's head branch
-tools/add-repo.sh  <collection> <repo> […]             # bring repos in later
+wtc new fix-login-flow api                   # slug
+wtc new --issue api-foh7 paging-clamp       # issue (owning repo auto-included)
+wtc new --tracker PROJ-123 rate-limits api
+wtc new --pr api#41                          # review wtc on the PR's head branch
+wtc add-repo api console                     # bring repos into this collection later
 ```
+
+`tools/branch-off.sh` and `tools/add-repo.sh` remain compatibility entry
+points. They select a matching installed CLI release and retain shell
+bootstrap for older pins. `wtc add-repo --collection <name> <repo>` explicitly
+targets another collection in the same workspace.
 
 Naming follows the source: `<slug>`, `<issue-id>-<slug>`, `<tracker-key>-<slug>`,
 or `<repo>-pr<n>`. That name is the branch the work is *expected* to get — it

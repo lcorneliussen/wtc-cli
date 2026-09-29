@@ -22,11 +22,13 @@ serves, `issues_prefix` if it owns issues), then `refresh-configs.sh` re-run.
 ## 2. Add it
 
 ```bash
-harness/tools/add-repo.sh <collection> <repo> [<repo> …]
+wtc add-repo <repo> [<repo> …]
 ```
 
-Run from any harness worktree; `<collection>` is the collection's directory
-name under the workspace root, not a path.
+Run from this collection. An explicitly requested other collection can be
+selected with `--collection <name>`, where the name is its directory under
+the same workspace root. On an older pin, use
+`harness/tools/add-repo.sh <repo> [<repo> …]` from this collection.
 
 Default: the new worktree is **detached at the repo's `default_ref`** — no
 branch. A repo added purely for context (reading a sibling's code, checking an
@@ -39,19 +41,16 @@ commit.
   picking up a branch someone else pushed.
 - `--tip` — accepted and ignored; detached at the tip is the default now.
 
-The tool clones a missing bare owner from GitHub first, then runs the new
-repo's init hook. The collection env already carries every registry repo's
-port, so nothing needs re-wiring.
+The CLI fetches a missing bare owner, adds a detached worktree, links that
+repository's gitignored control-root files, refreshes skills and MCP settings,
+then runs its init hook. The collection env already carries every registry
+repo's port, so nothing needs re-wiring.
 
 ## 3. Wire the rest
 
-```bash
-harness/tools/link-secrets.sh --repo <repo>
-```
-
-The init hook normally does this itself, but hooks are per repo and a repo
-without one links nothing. A nonzero exit means a target is not gitignored —
-fix the ignore rule in that repo first, never work around it.
+The native command links secrets before init. If the shell fallback was used,
+run `harness/tools/link-secrets.sh --repo <repo>` afterwards. A nonzero exit
+means a target is not gitignored — fix the ignore rule in that repo first.
 
 ## 4. Before changing anything in it
 
