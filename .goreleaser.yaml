@@ -1,0 +1,22 @@
+version: 2
+project_name: wtc
+builds:
+  - id: wtc
+    main: ./cmd/wtc
+    binary: wtc
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+archives:
+  - id: wtc
+    formats: [tar.gz]
+    name_template: 'wtc_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+checksum:
+  name_template: checksums.txt
