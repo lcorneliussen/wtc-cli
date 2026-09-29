@@ -9,11 +9,11 @@ A CLI for worktree collections. This repository is the beginning of the migratio
 - `wtc commands --json` lists the command surface for agents.
 - `wtc eject 'skills/wtc-*'` copies selected embedded defaults into the harness so they can be customized. Existing files are never overwritten.
 
-Run locally with `go run ./cmd/wtc`. Commands that have not migrated remain in the reference harness. Tagged releases build macOS and Linux binaries through GoReleaser. A harness will pin a specific GitHub release in its own `mise.toml`; no global installation is required.
+Run locally with `go run ./cmd/wtc`. Commands that have not migrated remain in the reference harness. Tagged releases build macOS and Linux binaries through GoReleaser. A harness pins an exact release in its checked-in `.wtc-cli-version` file (for example, `0.1.1`). `wtc env` reads that file and writes the tool entry into the generated collection-root `mise.toml`, which every sibling inherits. Then run `mise install` in the collection. No global installation is required.
 
 ```toml
 [tools]
-"github:lcorneliussen/wtc-cli" = "0.1.0"
+"github:lcorneliussen/wtc-cli" = "0.1.1"
 ```
 
-The pin shown here is an example; use a published release version.
+The pin shown here is an example; use a published release version. The shell environment generator in a harness must also preserve the same pin during migration.
