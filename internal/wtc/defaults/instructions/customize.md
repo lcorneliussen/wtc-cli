@@ -37,6 +37,7 @@ CLI sends one JSON object on stdin with `event`, `collection`, `harness`,
 | `wtc pr unlist` | `pr.unlist.pre.sh` | `pr.unlist.post.sh` |
 | `wtc registry refresh` | `registry.refresh.pre.sh` | `registry.refresh.post.sh` |
 | `wtc mcp render` | `mcp.render.pre.sh` | `mcp.render.post.sh` |
+| `wtc secrets link` | `secrets.link.pre.sh` | `secrets.link.post.sh` |
 
 A pre-hook can stop the action by exiting nonzero. A post-hook failure is
 reported as a warning; the completed action remains complete. Dry runs and
@@ -66,8 +67,20 @@ Make init safe to repeat: a repo can be added after collection creation, and
 catch-up may repeat setup. Check whether a sibling exists before using it.
 Keep teardown limited to resources owned by that worktree. The harness warns
 and continues if a repository hook fails, so the hook should report incomplete
-setup clearly on stderr. To link secrets, call the harness's
-`tools/link-secrets.sh --repo <name>` rather than making links independently.
+setup clearly on stderr. To link control-root files, call
+`wtc secrets link --repo <name>` or the harness's compatibility shim rather
+than making links independently. The command refuses a target without a git
+ignore rule and backs up an existing regular file before replacing it.
+
+Production-capable files stay out of worktrees unless `--include-prod` is
+explicit. Declare their paths relative to each repository in its registry
+entry's `prod_paths`, or use `[secrets] prod_paths` in `wtc.toml` with
+`repo/path` entries:
+
+```toml
+[secrets]
+prod_paths = ["api/.env.production"]
+```
 
 ## Skills and instructions
 

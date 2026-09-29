@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"gopkg.in/yaml.v3"
@@ -46,6 +47,9 @@ type Config struct {
 	Mise struct {
 		Tools map[string]string `toml:"tools"`
 	} `toml:"mise"`
+	Secrets struct {
+		ProdPaths []string `toml:"prod_paths"`
+	} `toml:"secrets"`
 }
 type Context struct {
 	Collection string   `json:"collection"`
@@ -150,6 +154,19 @@ func (c *Context) load() error {
 		return fmt.Errorf("config: %w", err)
 	}
 	c.ConfigRoot = os.Getenv("WTC_CONFIG_ROOT")
+	if c.ConfigRoot == "" {
+		data, err := os.ReadFile(filepath.Join(c.Collection, ".env.collection"))
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "WTC_CONFIG_ROOT=") {
+				value := strings.TrimPrefix(line, "WTC_CONFIG_ROOT=")
+				c.ConfigRoot = strings.Trim(value, "'\"")
+				break
+			}
+		}
+	}
 	if c.ConfigRoot == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
