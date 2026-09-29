@@ -45,8 +45,8 @@ case "$*" in
   *'api -X POST repos/example/app/pulls/7/comments'*)
     if [ "${FAIL_INLINE:-}" = 1 ]; then exit 5; fi
     printf '{"id":401,"html_url":"https://github.com/example/app/pull/7#discussion_r401"}\n' ;;
-  *'issues/comments/301'*) printf '{"id":301,"html_url":"https://github.com/example/app/pull/7#issuecomment-301"}\n' ;;
-  *'issues/7/comments'*) printf '{"id":301,"html_url":"https://github.com/example/app/pull/7#issuecomment-301"}\n' ;;
+  *'issues/comments/301'*) cat > "$FAKE_GH_BODY"; printf '{"id":301,"html_url":"https://github.com/example/app/pull/7#issuecomment-301"}\n' ;;
+  *'issues/7/comments'*) cat > "$FAKE_GH_BODY"; printf '{"id":301,"html_url":"https://github.com/example/app/pull/7#issuecomment-301"}\n' ;;
   *) printf 'unexpected args: %s\n' "$*" >&2; exit 4 ;;
 esac
 `
@@ -55,6 +55,7 @@ esac
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("FAKE_GH_LOG", log)
+	t.Setenv("FAKE_GH_BODY", filepath.Join(bin, "last-body.json"))
 	c, err := OpenCollection(collection)
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +94,10 @@ esac
 	}
 	if _, err := os.Stat(reviewReceiptPath(collection, "github", "example/app", "7", head, "301", "pass")); !os.IsNotExist(err) {
 		t.Fatal("failed inline post left a trusted receipt")
+	}
+	lastBody, err := os.ReadFile(filepath.Join(bin, "last-body.json"))
+	if err != nil || !strings.Contains(string(lastBody), "verdict=pending") {
+		t.Fatalf("failed inline post left a passing public summary: %s %v", lastBody, err)
 	}
 	requests, err := os.ReadFile(log)
 	if err != nil || strings.Count(string(requests), "api -X POST repos/example/app/pulls/7/comments") != 3 || !strings.Contains(string(requests), "resolveReviewThread") {
