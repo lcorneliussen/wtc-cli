@@ -177,6 +177,15 @@ func (c *Context) WriteMCP(render MCPRender, dryRun bool) ([]string, error) {
 	var changed []string
 	for _, rel := range paths {
 		target := filepath.Join(c.Collection, rel)
+		if filepath.Dir(target) != c.Collection {
+			parent, err := os.Lstat(filepath.Dir(target))
+			if err == nil && !parent.IsDir() {
+				return nil, fmt.Errorf("refusing non-directory MCP config parent: %s", filepath.Dir(target))
+			}
+			if err != nil && !os.IsNotExist(err) {
+				return nil, err
+			}
+		}
 		info, err := os.Lstat(target)
 		if err == nil && !info.Mode().IsRegular() {
 			return nil, fmt.Errorf("refusing non-regular generated MCP file: %s", target)

@@ -27,6 +27,9 @@ func (c *Context) RunHook(event string, values map[string]string) error {
 	if !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
 		return fmt.Errorf("hook must be an executable file: %s", path)
 	}
+	if values == nil {
+		values = map[string]string{}
+	}
 	payload, err := json.Marshal(map[string]any{
 		"event": event, "collection": c.Collection, "harness": c.Harness,
 		"workspace": c.Workspace, "values": values,

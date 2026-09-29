@@ -73,3 +73,20 @@ servers:
 		t.Fatalf("second render changed files: %v, %v", changed, err)
 	}
 }
+
+func TestMCPRefusesSymlinkedConfigDirectory(t *testing.T) {
+	c := fixture(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(c.Collection, ".cursor")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.WriteMCP(MCPRender{Files: map[string][]byte{
+		".mcp.json": []byte("{}\n"), ".cursor/mcp.json": []byte("{}\n"), ".codex/config.toml": []byte("# empty\n"),
+	}}, false)
+	if err == nil {
+		t.Fatal("followed symlinked config directory")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "mcp.json")); !os.IsNotExist(err) {
+		t.Fatal("wrote outside collection")
+	}
+}
