@@ -2,6 +2,7 @@ package wtc
 
 import (
 	"bufio"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -142,6 +143,67 @@ func (c *Context) AddWorktree(name, directory, destination, branch string) error
 	if _, err := gitOutput(args...); err != nil {
 		return err
 	}
+	trustWorktreeMise(path)
+	return nil
+}
+
+// AddPRWorktree fetches GitHub's immutable view of the PR head and verifies
+// it against the forge response. A missing head must never turn into a new
+// branch at the development tip.
+func (c *Context) AddPRWorktree(name, directory, destination, branch, number, expectedSHA string) error {
+	if !prNumber.MatchString(number) || !validRepoName.MatchString(directory) || branch == "" {
+		return fmt.Errorf("invalid PR worktree identity")
+	}
+	decoded, err := hex.DecodeString(expectedSHA)
+	if err != nil || (len(decoded) != 20 && len(decoded) != 32) {
+		return fmt.Errorf("invalid PR head commit")
+	}
+	if _, err := gitOutput("check-ref-format", "--branch", branch); err != nil {
+		return fmt.Errorf("invalid PR head branch %q: %w", branch, err)
+	}
+	repo, err := c.Repository(name)
+	if err != nil {
+		return err
+	}
+	bare, err := c.ensureBare(repo)
+	if err != nil {
+		return err
+	}
+	ref := "refs/remotes/wtc-pr/" + number
+	if _, err := gitOutput("--git-dir="+bare, "fetch", "origin", "+refs/pull/"+number+"/head:"+ref); err != nil {
+		return fmt.Errorf("fetch PR head #%s: %w", number, err)
+	}
+	head, err := gitOutput("--git-dir="+bare, "rev-parse", "--verify", ref)
+	if err != nil || !strings.EqualFold(head, expectedSHA) {
+		return fmt.Errorf("PR head changed while creating collection; expected %s, fetched %s", expectedSHA, head)
+	}
+	path := filepath.Join(destination, directory)
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("worktree path already exists: %s", path)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	args := []string{"--git-dir=" + bare, "worktree", "add"}
+	if localHead, err := gitOutput("--git-dir="+bare, "rev-parse", "--verify", "refs/heads/"+branch); err == nil {
+		if !strings.EqualFold(localHead, expectedSHA) {
+			return fmt.Errorf("local branch %s differs from PR head %s", branch, expectedSHA)
+		}
+		args = append(args, path, branch)
+	} else {
+		start := ref
+		if originHead, err := gitOutput("--git-dir="+bare, "rev-parse", "--verify", "refs/remotes/origin/"+branch); err == nil && strings.EqualFold(originHead, expectedSHA) {
+			start = "origin/" + branch
+		}
+		args = append(args, "-b", branch, path, start)
+	}
+	if _, err := gitOutput(args...); err != nil {
+		return err
+	}
+	trustWorktreeMise(path)
+	return nil
+}
+
+func trustWorktreeMise(path string) {
 	if _, err := os.Stat(filepath.Join(path, "mise.toml")); err == nil {
 		if mise, err := exec.LookPath("mise"); err == nil {
 			cmd := exec.Command(mise, "trust", filepath.Join(path, "mise.toml"))
@@ -149,7 +211,6 @@ func (c *Context) AddWorktree(name, directory, destination, branch string) error
 			_ = cmd.Run() // Matches the shell bootstrap: a missing trust is reported by later use.
 		}
 	}
-	return nil
 }
 
 // RunRepoInit preserves the repository lifecycle hook contract. Failure is

@@ -137,3 +137,35 @@ func TestNewCollectionPreHookCanVetoBeforeCreatingDirectory(t *testing.T) {
 		t.Fatalf("vetoed collection exists: %v", err)
 	}
 }
+
+func TestPRWorktreeFetchesExactHeadAndRefusesMissingHead(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	source := filepath.Join(c.Workspace, "source-widget")
+	fixtureGit(t, "-C", source, "checkout", "-qb", "fork-feature")
+	fixtureFile(t, filepath.Join(source, "feature.txt"), "review change\n", 0644)
+	fixtureGit(t, "-C", source, "add", "feature.txt")
+	fixtureGit(t, "-C", source, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "PR head")
+	head := fixtureGit(t, "-C", source, "rev-parse", "HEAD")
+	fixtureGit(t, "-C", source, "update-ref", "refs/pull/12/head", head)
+	fixtureGit(t, "-C", source, "checkout", "-q", "main")
+	fixtureGit(t, "-C", source, "branch", "-D", "fork-feature")
+	destination := filepath.Join(c.Workspace, "review")
+	if err := os.Mkdir(destination, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.AddPRWorktree("widget", "widget", destination, "fork-feature", "13", head); err == nil {
+		t.Fatal("missing PR ref was accepted")
+	}
+	if _, err := os.Stat(filepath.Join(destination, "widget")); !os.IsNotExist(err) {
+		t.Fatalf("missing PR ref created a worktree: %v", err)
+	}
+	if err := c.AddPRWorktree("widget", "widget", destination, "fork-feature", "12", head); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixtureGit(t, "-C", filepath.Join(destination, "widget"), "rev-parse", "HEAD"); got != head {
+		t.Fatalf("PR worktree at %s, want %s", got, head)
+	}
+	if got := fixtureGit(t, "-C", filepath.Join(destination, "widget"), "branch", "--show-current"); got != "fork-feature" {
+		t.Fatalf("PR head branch = %q", got)
+	}
+}

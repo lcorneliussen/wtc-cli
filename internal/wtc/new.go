@@ -38,7 +38,7 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	if err != nil {
 		return result, err
 	}
-	primary, primaryBranch := "", opt.Branch
+	primary, primaryBranch, prID, prHead := "", opt.Branch, "", ""
 	if opt.PR != "" {
 		parts := strings.Split(opt.PR, "#")
 		if len(parts) != 2 || !prNumber.MatchString(parts[1]) {
@@ -53,20 +53,21 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 			return result, fmt.Errorf("PR collection requires a GitHub repository remote")
 		}
 		slug := strings.TrimSuffix(strings.TrimPrefix(url, "https://github.com/"), "/pull/"+parts[1])
-		output, err := exec.Command("gh", "pr", "view", parts[1], "--repo", slug, "--json", "headRefName").Output()
+		output, err := exec.Command("gh", "pr", "view", parts[1], "--repo", slug, "--json", "headRefName,headRefOid").Output()
 		if err != nil {
 			return result, fmt.Errorf("resolve PR head: %w", err)
 		}
 		var details struct {
 			HeadRefName string `json:"headRefName"`
+			HeadRefOID  string `json:"headRefOid"`
 		}
-		if err := json.Unmarshal(output, &details); err != nil || details.HeadRefName == "" {
+		if err := json.Unmarshal(output, &details); err != nil || details.HeadRefName == "" || details.HeadRefOID == "" {
 			return result, fmt.Errorf("could not read PR head for %s", opt.PR)
 		}
 		result.Collection = parts[0] + "-pr" + parts[1]
 		result.IntendedBranch = details.HeadRefName
 		result.Source = fmt.Sprintf("Review wtc for %s#%s (head branch `%s`).", slug, parts[1], details.HeadRefName)
-		primary, primaryBranch = parts[0], details.HeadRefName
+		primary, primaryBranch, prID, prHead = parts[0], details.HeadRefName, parts[1], details.HeadRefOID
 	} else if opt.Issue != "" {
 		if !collectionNamePattern.MatchString(opt.Issue) || !collectionNamePattern.MatchString(opt.Slug) {
 			return result, fmt.Errorf("invalid issue ID or collection slug")
@@ -148,7 +149,12 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 		} else if name == primary {
 			branch = primaryBranch
 		}
-		if err := c.AddWorktree(name, directory, result.Collection, branch); err != nil {
+		if name == primary && prID != "" {
+			err = c.AddPRWorktree(name, directory, result.Collection, branch, prID, prHead)
+		} else {
+			err = c.AddWorktree(name, directory, result.Collection, branch)
+		}
+		if err != nil {
 			return result, fmt.Errorf("add %s: %w (partial collection at %s)", name, err, result.Collection)
 		}
 	}
