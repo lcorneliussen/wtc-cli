@@ -18,7 +18,7 @@ func addMCPCommands(root *cobra.Command, asJSON *bool) {
 	mcp.PersistentFlags().StringVar(&collection, "collection", "", "Collection directory (default: current)")
 	render := &cobra.Command{Use: "render", Short: "Render the harness MCP registry into agent configs", Args: cobra.NoArgs}
 	render.Flags().BoolVar(&dryRun, "dry-run", false, "Report changes without writing")
-	render.Flags().BoolVar(&all, "all", false, "Render every collection in the workspace")
+	render.Flags().BoolVar(&all, "all", false, "Render every collection in the workspace (omit per-collection credential diagnostics)")
 	render.RunE = func(cmd *cobra.Command, args []string) error {
 		var c *wtc.Context
 		var err error
@@ -70,6 +70,10 @@ func addMCPCommands(root *cobra.Command, asJSON *bool) {
 					item.mcpResult, openErr = renderMCPCollection(target, dryRun)
 					if openErr != nil {
 						item.Error = openErr.Error()
+					} else {
+						// The invoking shell is not each target's agent environment.
+						// Its unset variables cannot diagnose target credentials.
+						item.Missing = nil
 					}
 				}
 			}
@@ -89,11 +93,12 @@ func addMCPCommands(root *cobra.Command, asJSON *bool) {
 		}
 		summary := fmt.Sprintf("swept %d collection(s), %d failed", len(results), failures)
 		if *asJSON {
-			if err := emit(envelope{OK: failures == 0, Data: map[string]any{"results": results, "dry_run": dryRun, "failed": failures}, Summary: summary}, true); err != nil {
+			if err := emit(envelope{OK: failures == 0, Data: map[string]any{"results": results, "dry_run": dryRun, "failed": failures, "missing_env_diagnostics": false}, Summary: summary}, true); err != nil {
 				return err
 			}
 		} else {
 			fmt.Println(summary)
+			fmt.Println("note: per-collection credential diagnostics are omitted from workspace sweeps")
 		}
 		if failures > 0 {
 			return fmt.Errorf("%d collection(s) failed MCP rendering", failures)

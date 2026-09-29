@@ -11,7 +11,7 @@ import (
 func TestMCPSweepUsesEachRegistryAndContinuesAfterFailure(t *testing.T) {
 	workspace := t.TempDir()
 	for name, registry := range map[string]string{
-		"alpha":  "schema_version: 1\nservers:\n  - name: alpha-server\n    command: alpha-command\n",
+		"alpha":  "schema_version: 1\nservers:\n  - name: alpha-server\n    command: alpha-command\n    env: TARGET_TOKEN\n",
 		"broken": "schema_version: 2\nservers: []\n",
 	} {
 		harness := filepath.Join(workspace, name, "harness")
@@ -60,6 +60,9 @@ func TestMCPSweepUsesEachRegistryAndContinuesAfterFailure(t *testing.T) {
 		if data["failed"] != float64(1) || len(data["results"].([]any)) != 3 {
 			t.Fatalf("unexpected sweep result: %v", data)
 		}
+		if data["missing_env_diagnostics"] != false {
+			t.Fatalf("sweep claimed target credential diagnostics: %v", data)
+		}
 		byName := map[string]map[string]any{}
 		for _, raw := range data["results"].([]any) {
 			item := raw.(map[string]any)
@@ -67,6 +70,9 @@ func TestMCPSweepUsesEachRegistryAndContinuesAfterFailure(t *testing.T) {
 		}
 		if len(byName["alpha"]["changed"].([]any)) != 3 || byName["broken"]["error"] == nil || byName["older"]["absent"] != true {
 			t.Fatalf("lost per-target result: %v", byName)
+		}
+		if byName["alpha"]["missing_env"] != nil {
+			t.Fatalf("used invoking shell to diagnose target credentials: %v", byName["alpha"])
 		}
 		alphaConfig := filepath.Join(workspace, "alpha", ".mcp.json")
 		config, readErr := os.ReadFile(alphaConfig)
