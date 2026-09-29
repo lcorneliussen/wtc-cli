@@ -19,6 +19,9 @@ Inspect the target harness or repository before editing: its existing hooks,
   disposable collection, then run the relevant harness or repository tests.
 - For an embedded instruction or skill that needs local wording, run
   `wtc eject <path>` and edit the copied file. Eject refuses overwrites.
+- Run `wtc skills render --dry-run` before applying skill or agent-hook
+  changes. Check in skill overrides under `harness/skills/` or
+  `harness/overlays/skills/`, then render and verify the generated links.
 
 Keep credentials in the control root or `.env.collection.local`. Generated
 collection-root files are regenerated, so put durable customization in git.
