@@ -11,7 +11,7 @@ command and its contract checks cover their behavior.
 | `wtc-pr.sh` | `wtc pr path/list/enlist/unlist` | Native in v0.1.3; shell shim pending |
 | `refresh-configs.sh` | `wtc registry refresh` | Native in v0.1.3; generic shell shim released in v0.1.6 |
 | `link-mcp.sh` | `wtc mcp render` | Native for one collection in v0.1.3; `--all` shim parity pending |
-| `link-skills.sh` | `wtc skills render` | Native in this branch; shell shim and contract parity pending |
+| `link-skills.sh` | `wtc skills render` | Native in v0.1.8; released target-aware shell shim and contract tests |
 | Skill section patches and overlay drift | `wtc skills diff` | Full skill overrides supported; section patch and drift review pending |
 | `link-secrets.sh` | `wtc secrets link` | Native in v0.1.5; released shims and harness tests in upstream and derivatives |
 | `agent-env.sh` | `wtc agent-env` | Native in v0.1.6; generic shim released; configurable collection-local bins in v0.1.7 |

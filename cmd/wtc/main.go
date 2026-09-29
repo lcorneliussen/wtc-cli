@@ -93,6 +93,9 @@ func run() error {
 			if err := c.EnsureEnvSupport(); err != nil {
 				return err
 			}
+			if err := c.TrustMise(); err != nil {
+				return err
+			}
 			if err := c.RunHook("env.post", nil); err != nil {
 				return err
 			}

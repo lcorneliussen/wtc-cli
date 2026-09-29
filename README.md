@@ -4,7 +4,7 @@ A CLI for worktree collections. This repository is the beginning of the migratio
 
 ## Commands
 
-- `wtc env [--collection DIR] [--dry-run]` regenerates `.env.collection`, preserving its port base. It leaves `.env.collection.local` intact and writes the collection's mise environment file.
+- `wtc env [--collection DIR] [--dry-run]` regenerates `.env.collection`, preserving its port base. It leaves `.env.collection.local` intact, writes the collection's mise environment file, and trusts the generated mise config when mise is installed.
 - `wtc doctor` checks the collection registry and local tool availability.
 - `wtc commands --json` lists the command surface for agents.
 - `wtc eject 'skills/wtc-*'` copies selected embedded defaults into the harness so they can be customized. Existing files are never overwritten.
