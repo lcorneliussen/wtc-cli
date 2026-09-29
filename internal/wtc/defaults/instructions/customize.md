@@ -49,6 +49,8 @@ CLI sends one JSON object on stdin with `event`, `collection`, `harness`,
 | `wtc mcp render` | `mcp.render.pre.sh` | `mcp.render.post.sh` |
 | `wtc secrets link` | `secrets.link.pre.sh` | `secrets.link.post.sh` |
 | `wtc skills render` | `skills.render.pre.sh` | `skills.render.post.sh` |
+| `wtc new` | `new.pre.sh` | `new.post.sh` |
+| `wtc add-repo` | `add-repo.pre.sh` | `add-repo.post.sh` |
 
 A pre-hook can stop the action by exiting nonzero. A post-hook failure is
 reported as a warning; the completed action remains complete. Dry runs and
@@ -74,8 +76,11 @@ run = "./.harness/init.sh"
 run = "./.harness/teardown.sh"
 ```
 
-Make init safe to repeat: a repo can be added after collection creation, and
-catch-up may repeat setup. Check whether a sibling exists before using it.
+`wtc add-repo` links the new repository's gitignored control-root files before
+running init, then refreshes skills and MCP configuration. The hook can use
+those files immediately. Make init safe to repeat: a repo can be added after
+collection creation, and catch-up may repeat setup. Check whether a sibling
+exists before using it.
 Keep teardown limited to resources owned by that worktree. The harness warns
 and continues if a repository hook fails, so the hook should report incomplete
 setup clearly on stderr. To link control-root files, call

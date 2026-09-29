@@ -15,8 +15,8 @@ command and its contract checks cover their behavior.
 | Skill section patches and overlay drift | `wtc skills diff` | Full skill overrides supported; section patch and drift review pending |
 | `link-secrets.sh` | `wtc secrets link` | Native in v0.1.5; released shims and harness tests in upstream and derivatives |
 | `agent-env.sh` | `wtc agent-env` | Native in v0.1.6; generic shim released; configurable collection-local bins in v0.1.7 |
-| `branch-off.sh` | `wtc new` | Pending |
-| `add-repo.sh` | `wtc add-repo` | Pending |
+| `branch-off.sh` | `wtc new` | Native in v0.1.10; reference shim released with matching-pin dispatch and bootstrap fallback |
+| `add-repo.sh` | `wtc add-repo` | Native implementation in progress; shim and release pending |
 | `retire.sh` | `wtc retire` | Pending |
 | `catch-up.sh` | `wtc catch-up` | Pending |
 | `wtc-status.sh`, `wtc-status-tui.sh` | `wtc status` | Pending data layer and TUI |
