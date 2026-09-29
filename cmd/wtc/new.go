@@ -68,7 +68,7 @@ func addNewCommand(root *cobra.Command, asJSON *bool) {
 			}
 			openCmd := exec.Command(path, filepath.Base(result.Collection))
 			openCmd.Dir = result.Collection
-			openCmd.Stdout, openCmd.Stderr = os.Stdout, os.Stderr
+			openCmd.Stdout, openCmd.Stderr = os.Stderr, os.Stderr
 			if err := openCmd.Run(); err != nil {
 				return fmt.Errorf("collection created at %s, but opening failed: %w", result.Collection, err)
 			}

@@ -263,7 +263,7 @@ func runRepoCommand(worktree, program string, args ...string) {
 	argv := append([]string{"-c", `set -a; . "$1"; . "$2"; shift 2; exec "$@"`, "wtc-init", filepath.Join(collection, ".env.collection"), filepath.Join(collection, ".env.collection.local"), program}, args...)
 	cmd := exec.Command("/bin/sh", argv...)
 	cmd.Dir = worktree
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "wtc: warning: init hook for %s failed: %v; setup may be incomplete\n", filepath.Base(worktree), err)
 	}
