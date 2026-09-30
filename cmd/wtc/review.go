@@ -234,7 +234,7 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 			if statusErr != nil {
 				return fmt.Errorf("cannot verify review gate: %w", statusErr)
 			}
-			if state.State != "current" || state.Verdict != "pass" && state.Verdict != "pass-with-notes" {
+			if !reviewReadyAllowed(state) {
 				return fmt.Errorf("review gate closed for %s #%s: %s %s", name, args[0], state.State, state.Verdict)
 			}
 		}
@@ -259,4 +259,9 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	}
 	review.AddCommand(ready)
 	root.AddCommand(review)
+}
+
+func reviewReadyAllowed(state wtc.ReviewStatus) bool {
+	return state.State == "current" && state.Blockers != nil && *state.Blockers == 0 &&
+		(state.Verdict == "pass" || state.Verdict == "pass-with-notes")
 }
