@@ -125,8 +125,9 @@ func TestReviewStatsTableUsesWallAndAgentTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	in, out, read := int64(10), int64(2), int64(0)
+	cost := 0.01
 	for name, stats := range map[string]reviewRunStats{
-		"code": {Agent: "test", Seconds: 70, Status: "ok", InputTokens: &in, OutputTokens: &out, CacheReadTokens: &read},
+		"code": {Agent: "test", Seconds: 70, Status: "ok", InputTokens: &in, OutputTokens: &out, CacheReadTokens: &read, CostUSD: &cost, CostPartial: true},
 		"lead": {Agent: "test", Seconds: 65, Status: "ok"},
 	} {
 		if err := writeReviewStats(bundle, name, stats); err != nil {
@@ -134,7 +135,7 @@ func TestReviewStatsTableUsesWallAndAgentTime(t *testing.T) {
 		}
 	}
 	table, err := reviewStatsTable(bundle, 80*time.Second)
-	if err != nil || !strings.Contains(table, "| **Total** | | 2m15s | 10+ / 2+ (0+) | - |") || !strings.Contains(table, "Wall-clock for the whole run: 1m20s (agent time summed: 2m15s).") {
+	if err != nil || !strings.Contains(table, "| code | test: | 1m10s | 10 / 2 (0) | $0.01+ |") || !strings.Contains(table, "| **Total** | | 2m15s | 10+ / 2+ (0+) | $0.01+ |") || !strings.Contains(table, "Wall-clock for the whole run: 1m20s (agent time summed: 2m15s).") {
 		t.Fatalf("wrong time totals: %s %v", table, err)
 	}
 	if err := os.Remove(filepath.Join(bundle, "stats", "code.json")); err != nil {
@@ -190,6 +191,9 @@ func TestReviewStatsParseBuiltinUsage(t *testing.T) {
 			stats := collectReviewStats(filepath.Join(t.TempDir(), "stats.json"), tc.agent, "", 0, "ok", []byte(tc.output))
 			if stats.InputTokens == nil || *stats.InputTokens != tc.input || stats.OutputTokens == nil || *stats.OutputTokens != tc.outputTokens || stats.CacheReadTokens == nil || *stats.CacheReadTokens != tc.cached {
 				t.Fatalf("wrong %s usage: %+v", tc.agent, stats)
+			}
+			if tc.agent == "claude" && (stats.CostUSD == nil || *stats.CostUSD != 0.05 || stats.Turns == nil || *stats.Turns != 2) {
+				t.Fatalf("Claude cost or turns missing: %+v", stats)
 			}
 		})
 	}

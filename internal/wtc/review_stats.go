@@ -210,7 +210,7 @@ func reviewStatsTable(bundle string, wall time.Duration) (string, error) {
 		if stats.Status != "ok" && stats.Status != "" {
 			name += " (" + stats.Status + ")"
 		}
-		lines = append(lines, fmt.Sprintf("| %s | %s:%s | %s | %s | %s |", name, stats.Agent, stats.Model, reviewSeconds(stats.Seconds), tokens, reviewCost(stats.CostUSD)))
+		lines = append(lines, fmt.Sprintf("| %s | %s:%s | %s | %s | %s |", name, stats.Agent, stats.Model, reviewSeconds(stats.Seconds), tokens, reviewCostMarked(stats.CostUSD, stats.CostPartial)))
 	}
 	totalCost := "-"
 	if knownCost {
@@ -281,4 +281,11 @@ func reviewCost(value *float64) string {
 		return "-"
 	}
 	return fmt.Sprintf("$%.2f", *value)
+}
+func reviewCostMarked(value *float64, partial bool) string {
+	shown := reviewCost(value)
+	if value != nil && partial {
+		return shown + "+"
+	}
+	return shown
 }
