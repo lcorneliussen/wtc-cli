@@ -10,28 +10,50 @@ import (
 )
 
 type bundleComment struct {
-	Body   string `json:"body"`
-	When   string `json:"createdAt"`
+	Body    string `json:"body"`
+	When    string `json:"createdAt"`
+	Content struct {
+		Raw string `json:"raw"`
+	} `json:"content"`
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
 	User struct {
-		Login string `json:"login"`
+		Login       string `json:"login"`
+		DisplayName string `json:"display_name"`
+		Nickname    string `json:"nickname"`
 	} `json:"user"`
 	CreatedAt string `json:"created_at"`
+	CreatedOn string `json:"created_on"`
+}
+
+func (c bundleComment) body() string {
+	if c.Content.Raw != "" {
+		return c.Content.Raw
+	}
+	return c.Body
 }
 
 func (c bundleComment) author() string {
+	if c.User.DisplayName != "" {
+		return c.User.DisplayName
+	}
 	if c.Author.Login != "" {
 		return c.Author.Login
 	}
 	if c.User.Login != "" {
 		return c.User.Login
 	}
+	if c.User.Nickname != "" {
+		return c.User.Nickname
+	}
 	return "unknown"
 }
 
 func (c bundleComment) when() string {
+	if c.CreatedOn != "" {
+		return c.CreatedOn
+	}
 	if c.When != "" {
 		return c.When
 	}
@@ -67,7 +89,26 @@ func isBundleInlineFinding(body string) bool {
 // Forge comments are optional review context. An unavailable forge leaves a
 // usable local bundle, while posting still verifies the current remote head.
 func copyPublicReviewComments(dir string, manifest ReviewManifest) {
-	if manifest.PR == "" || manifest.Forge != "github" {
+	if manifest.PR == "" {
+		return
+	}
+	if manifest.Forge == "bitbucket" {
+		raw, err := reviewForgeCommand(manifest.RepoDir, "bb", []string{"--json", "pr", "comments", "list", manifest.PR, "--limit", "1000", "--no-truncate"}, nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "wtc: warning: Bitbucket review comments unavailable: %v\n", err)
+			return
+		}
+		comments, err := parseBitbucketBundleComments(raw)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "wtc: warning: Bitbucket review comments could not be parsed: %v\n", err)
+			return
+		}
+		if err := writeBundleComments(dir, comments); err != nil {
+			fmt.Fprintf(os.Stderr, "wtc: warning: Bitbucket review comments could not be saved: %v\n", err)
+		}
+		return
+	}
+	if manifest.Forge != "github" {
 		return
 	}
 	conversation, err := reviewForgeCommand(manifest.RepoDir, "gh", []string{"pr", "view", manifest.PR, "--repo", manifest.Slug, "--json", "comments"}, nil)
@@ -88,6 +129,35 @@ func copyPublicReviewComments(dir string, manifest ReviewManifest) {
 	if err := writeBundleComments(dir, comments); err != nil {
 		fmt.Fprintf(os.Stderr, "wtc: warning: review comments could not be saved: %v\n", err)
 	}
+}
+
+func parseBitbucketBundleComments(raw []byte) ([]bundleComment, error) {
+	const commentLimit = 1000
+	var comments []bundleComment
+	if err := json.Unmarshal(raw, &comments); err != nil {
+		var page struct {
+			Comments []bundleComment `json:"comments"`
+			Values   []bundleComment `json:"values"`
+			Count    *int            `json:"count"`
+		}
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return nil, err
+		}
+		comments = page.Comments
+		if comments == nil {
+			comments = page.Values
+		}
+		if page.Count != nil && *page.Count > len(comments) {
+			return nil, fmt.Errorf("Bitbucket returned %d of %d comments", len(comments), *page.Count)
+		}
+	}
+	// The CLI's count can mean the number collected rather than the remote
+	// total. Reaching the requested limit therefore cannot prove completeness.
+	if len(comments) >= commentLimit {
+		return nil, fmt.Errorf("Bitbucket returned the %d-comment limit; review context may be incomplete", commentLimit)
+	}
+	sort.SliceStable(comments, func(i, j int) bool { return comments[i].when() < comments[j].when() })
+	return comments, nil
 }
 
 func parseBundleComments(conversation, inline []byte) ([]bundleComment, error) {
@@ -124,10 +194,11 @@ func writeBundleComments(dir string, comments []bundleComment) error {
 	latestReview := -1
 	keys := map[string]bool{}
 	for i, comment := range comments {
-		if isBundleStatusComment(comment.Body) {
+		body := comment.body()
+		if isBundleStatusComment(body) {
 			latestReview = i
 		}
-		for _, match := range reviewInlineMarker.FindAllStringSubmatch(comment.Body, -1) {
+		for _, match := range reviewInlineMarker.FindAllStringSubmatch(body, -1) {
 			keys[match[1]] = true
 		}
 	}
@@ -152,10 +223,11 @@ func writeBundleComments(dir string, comments []bundleComment) error {
 	}
 	var transcript strings.Builder
 	for i, comment := range comments {
-		if i <= latestReview || isBundleStatusComment(comment.Body) || isBundleInlineFinding(comment.Body) || strings.TrimSpace(comment.Body) == "" {
+		body := comment.body()
+		if i <= latestReview || isBundleStatusComment(body) || isBundleInlineFinding(body) || strings.TrimSpace(body) == "" {
 			continue
 		}
-		fmt.Fprintf(&transcript, "### %s, %s\n\n%s\n\n", comment.author(), comment.when(), strings.TrimSpace(comment.Body))
+		fmt.Fprintf(&transcript, "### %s, %s\n\n%s\n\n", comment.author(), comment.when(), strings.TrimSpace(body))
 	}
 	if transcript.Len() > 0 {
 		return os.WriteFile(filepath.Join(prior, "comments.md"), []byte(transcript.String()), 0644)

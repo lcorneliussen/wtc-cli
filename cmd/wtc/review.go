@@ -29,7 +29,7 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	var base, head, dir string
 	var round int
 	var public, noCatchUp bool
-	bundle := &cobra.Command{Use: "bundle <repo> [pr-number]", Short: "Build a public-safe local review bundle", Args: cobra.RangeArgs(1, 2)}
+	bundle := &cobra.Command{Use: "bundle <repo> [pr-number]", Short: "Build a local review bundle", Args: cobra.RangeArgs(1, 2)}
 	bundle.Flags().StringVar(&base, "base", "", "Base ref (default: PR destination or repository default)")
 	bundle.Flags().StringVar(&head, "head", "HEAD", "Head commit ref")
 	bundle.Flags().StringVar(&dir, "dir", "", "Bundle directory")
