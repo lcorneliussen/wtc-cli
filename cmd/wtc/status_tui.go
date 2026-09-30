@@ -36,6 +36,7 @@ type statusTUIModel struct {
 	reposOnly    bool
 	processes    []wtc.StatusProcess
 	noFetch      bool
+	fetchAge     time.Duration
 	noClick      bool
 	interval     time.Duration
 	background   time.Duration
@@ -55,19 +56,19 @@ func statusTUITick() tea.Cmd {
 	return tea.Tick(time.Second, func(at time.Time) tea.Msg { return statusTickMsg(at) })
 }
 
-func statusTUIRefresh(c *wtc.Context, all, procs, noFetch bool) tea.Cmd {
+func statusTUIRefresh(c *wtc.Context, all, procs, noFetch bool, fetchAge time.Duration) tea.Cmd {
 	return func() tea.Msg {
 		if procs {
 			processes, err := c.StatusProcesses()
 			return statusLoadedMsg{processes: processes, err: err, at: time.Now()}
 		}
-		snapshot, report, err := c.StatusLiveSnapshot(all, noFetch)
+		snapshot, report, err := c.StatusLiveSnapshotWithFetchAge(all, noFetch, fetchAge)
 		return statusLoadedMsg{snapshot: snapshot, fetched: report, err: err, at: time.Now()}
 	}
 }
 
 func (m statusTUIModel) Init() tea.Cmd {
-	return tea.Batch(statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch))
+	return tea.Batch(statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge))
 }
 
 func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -100,7 +101,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusTickMsg:
 		if !m.refreshing && !m.nextRefresh.IsZero() && !time.Now().Before(m.nextRefresh) {
 			m.refreshing = true
-			return m, tea.Batch(statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch))
+			return m, tea.Batch(statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge))
 		}
 		return m, statusTUITick()
 	case tea.MouseClickMsg:
@@ -126,7 +127,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			if !m.refreshing {
 				m.refreshing = true
-				return m, statusTUIRefresh(m.context, m.all, m.procs, m.noFetch)
+				return m, statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge)
 			}
 		case "up", "k":
 			if m.scroll > 0 {
@@ -455,11 +456,11 @@ func (m statusTUIModel) View() tea.View {
 	return view
 }
 
-func runStatusTUI(c *wtc.Context, all, procs, reposOnly, noFetch, noClick bool, interval, background time.Duration) error {
+func runStatusTUI(c *wtc.Context, all, procs, reposOnly, noFetch, noClick bool, interval, background, fetchAge time.Duration) error {
 	if !term.IsTerminal(os.Stdin.Fd()) || !term.IsTerminal(os.Stdout.Fd()) {
 		return fmt.Errorf("status TUI requires a terminal")
 	}
-	model := statusTUIModel{context: c, all: all, procs: procs, reposOnly: reposOnly, noFetch: noFetch, noClick: noClick, interval: interval,
+	model := statusTUIModel{context: c, all: all, procs: procs, reposOnly: reposOnly, noFetch: noFetch, noClick: noClick, fetchAge: fetchAge, interval: interval,
 		background: background, focused: true, refreshing: true}
 	if !all && !procs {
 		model.snapshot.Collection = filepath.Base(c.Collection)

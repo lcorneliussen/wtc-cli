@@ -49,6 +49,10 @@ func TestStatusArchiveCountsWeekdayHours(t *testing.T) {
 	if statusArchived(friday.Format(time.RFC3339), monday) || !statusArchived(friday.Format(time.RFC3339), wednesday) {
 		t.Fatal("archive window ignored weekday hours")
 	}
+	t.Setenv("WTC_PR_ARCHIVE_HOURS", "12")
+	if !statusArchived(friday.Format(time.RFC3339), monday) {
+		t.Fatal("configured weekday archive window ignored")
+	}
 }
 
 func TestStatusEnlistedSnapshotPreservesUnknownForgeState(t *testing.T) {

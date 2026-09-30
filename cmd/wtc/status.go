@@ -18,9 +18,11 @@ import (
 // Explicit previews do not write snapshots that a status pane could mistake
 // for a completed one-shot collection.
 func addStatusCommand(root *cobra.Command, asJSON *bool) {
-	var local, forge, all, md, ansi, reposOnly, cached, noFetch, tui, procs, noClick bool
-	var watchSeconds int
-	cmd := &cobra.Command{Use: "status", Short: "Inspect worktree collection status", Args: cobra.NoArgs}
+	var local, forge, all, md, ansi, reposOnly, cached, noFetch, tui, procs, noClick, click, noWatch bool
+	var watchSeconds, fetchAgeSeconds int
+	cmd := &cobra.Command{Use: "status [collection]", Short: "Inspect worktree collection status",
+		Long: "Show repository and PR status for this collection, a named collection, or --all. One-shot runs update this collection's status snapshots. --cached reads those snapshots without Git or forge calls. --tui (or --watch) opens a live view when attached to a terminal; captured output prints one pass. Watch defaults can be set in WTC_CONFIG_ROOT/wtc.env with WTC_STATUS_WATCH, WTC_STATUS_WATCH_BG, and WTC_STATUS_NO_CLICK.",
+		Args: cobra.MaximumNArgs(1)}
 	cmd.Flags().BoolVar(&local, "local", false, "Preview local Git facts (no forge facts or cache writes)")
 	cmd.Flags().BoolVar(&forge, "forge", false, "Preview local Git and PR facts (no snapshot writes)")
 	cmd.Flags().BoolVar(&all, "all", false, "Include every collection in the workspace")
@@ -32,12 +34,24 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&tui, "tui", false, "Run the interactive status view")
 	cmd.Flags().BoolVar(&procs, "procs", false, "Show processes under the herdr session")
 	cmd.Flags().BoolVar(&noClick, "no-click", false, "Disable build URL mouse targets in the TUI")
+	cmd.Flags().BoolVar(&click, "click", false, "Enable build URL mouse targets in the TUI")
+	cmd.Flags().BoolVar(&noWatch, "no-watch", false, "Print one status pass and exit")
+	cmd.Flags().IntVar(&fetchAgeSeconds, "fetch-age", 300, "Refresh remote refs older than this many seconds")
 	cmd.Flags().IntVar(&watchSeconds, "watch", 0, "Run the interactive view with this refresh interval in seconds")
 	cmd.Flags().Lookup("watch").NoOptDefVal = "30"
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		interactive := (tui || watchSeconds > 0) && term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd())
+		interactive := !noWatch && (tui || watchSeconds > 0) && term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd())
 		if watchSeconds < 0 {
 			return fmt.Errorf("--watch must be nonnegative")
+		}
+		if fetchAgeSeconds < 0 {
+			return fmt.Errorf("--fetch-age must be nonnegative")
+		}
+		if click && noClick {
+			return fmt.Errorf("--click and --no-click cannot be combined")
+		}
+		if all && len(args) != 0 {
+			return fmt.Errorf("--all and a named collection cannot be combined")
 		}
 		if procs && (local || forge || cached || all || reposOnly) {
 			return fmt.Errorf("--procs cannot be combined with preview, cached, --all, or --repos")
@@ -63,6 +77,15 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 		if err != nil {
 			return err
 		}
+		if len(args) != 0 {
+			if args[0] == "." || args[0] == ".." || filepath.Base(args[0]) != args[0] {
+				return fmt.Errorf("expected a collection name")
+			}
+			c, err = wtc.OpenCollection(filepath.Join(c.Workspace, args[0]))
+			if err != nil {
+				return err
+			}
+		}
 		if !procs && !cmd.Flags().Changed("repos") && statusTrue(statusSetting(c, "WTC_STATUS_REPOS")) {
 			reposOnly = true
 		}
@@ -82,11 +105,14 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 			if !cmd.Flags().Changed("no-click") && statusTrue(clickSetting) {
 				noClick = true
 			}
+			if click {
+				noClick = false
+			}
 			if seconds > 0 {
 				if local || forge || cached || md || ansi || *asJSON {
 					return fmt.Errorf("--tui/--watch cannot be combined with preview, cached, Markdown, or JSON output")
 				}
-				return runStatusTUI(c, all, procs, reposOnly, noFetch, noClick, time.Duration(seconds)*time.Second, time.Duration(background)*time.Second)
+				return runStatusTUI(c, all, procs, reposOnly, noFetch, noClick, time.Duration(seconds)*time.Second, time.Duration(background)*time.Second, time.Duration(fetchAgeSeconds)*time.Second)
 			}
 		}
 		if procs {
@@ -134,11 +160,11 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 		var snapshot wtc.StatusSnapshot
 		var fetched wtc.StatusFetchReport
 		if forge {
-			snapshot, fetched, err = c.StatusLivePreview(noFetch)
+			snapshot, fetched, err = c.StatusLivePreviewWithFetchAge(noFetch, time.Duration(fetchAgeSeconds)*time.Second)
 		} else if local {
 			snapshot, err = c.StatusLocalSnapshot(all)
 		} else {
-			snapshot, fetched, err = c.StatusLiveSnapshot(all, noFetch)
+			snapshot, fetched, err = c.StatusLiveSnapshotWithFetchAge(all, noFetch, time.Duration(fetchAgeSeconds)*time.Second)
 		}
 		if fetched.Failed > 0 {
 			fmt.Fprintf(os.Stderr, "wtc: warning: %d status ref refresh(es) failed; showing local refs\n", fetched.Failed)
@@ -169,6 +195,38 @@ func statusTerminalWidth() int {
 		return 80
 	}
 	return width
+}
+
+// Cobra's optional-value flags do not consume a following token. Preserve the
+// established `--watch 30` spelling while also accepting bare `--watch`.
+func normalizeStatusWatchArgs(args []string) ([]string, error) {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--watch" && i+1 < len(args) && len(args[i+1]) > 0 && args[i+1][0] >= '0' && args[i+1][0] <= '9' {
+			if !statusDigits(args[i+1]) {
+				return nil, fmt.Errorf("--watch wants a whole number of seconds")
+			}
+			out = append(out, "--watch="+args[i+1])
+			i++
+		} else if strings.HasPrefix(args[i], "--watch=") && !statusDigits(strings.TrimPrefix(args[i], "--watch=")) {
+			return nil, fmt.Errorf("--watch wants a whole number of seconds")
+		} else {
+			out = append(out, args[i])
+		}
+	}
+	return out, nil
+}
+
+func statusDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func statusSetting(c *wtc.Context, name string) string {

@@ -24,6 +24,10 @@ func statusCommonDir(worktree string) (string, error) {
 }
 
 func (c *Context) StatusRefreshRefs(all bool) (StatusFetchReport, error) {
+	return c.StatusRefreshRefsWithAge(all, 5*time.Minute)
+}
+
+func (c *Context) StatusRefreshRefsWithAge(all bool, maxAge time.Duration) (StatusFetchReport, error) {
 	var report StatusFetchReport
 	inventory, targets, err := c.CatchUpInventory(CatchUpOptions{All: all, DryRun: true})
 	if err != nil {
@@ -44,7 +48,7 @@ func (c *Context) StatusRefreshRefs(all bool) (StatusFetchReport, error) {
 		}
 		seen[common] = true
 		info, err := os.Stat(filepath.Join(common, "FETCH_HEAD"))
-		if err == nil && time.Since(info.ModTime()) < 5*time.Minute {
+		if err == nil && time.Since(info.ModTime()) < maxAge {
 			continue
 		}
 		report.Attempted++
@@ -58,10 +62,14 @@ func (c *Context) StatusRefreshRefs(all bool) (StatusFetchReport, error) {
 // StatusLivePreview refreshes stale refs before gathering local and forge
 // facts. A failed fetch is reported but does not erase the last known refs.
 func (c *Context) StatusLivePreview(noFetch bool) (StatusSnapshot, StatusFetchReport, error) {
+	return c.StatusLivePreviewWithFetchAge(noFetch, 5*time.Minute)
+}
+
+func (c *Context) StatusLivePreviewWithFetchAge(noFetch bool, maxAge time.Duration) (StatusSnapshot, StatusFetchReport, error) {
 	var report StatusFetchReport
 	if !noFetch {
 		var err error
-		report, err = c.StatusRefreshRefs(false)
+		report, err = c.StatusRefreshRefsWithAge(false, maxAge)
 		if err != nil {
 			return StatusSnapshot{}, report, err
 		}
@@ -74,10 +82,14 @@ func (c *Context) StatusLivePreview(noFetch bool) (StatusSnapshot, StatusFetchRe
 // result updates the three collection caches; an explicit workspace sweep
 // stays read-only across collection boundaries and omits enlisted PR sections.
 func (c *Context) StatusLiveSnapshot(all, noFetch bool) (StatusSnapshot, StatusFetchReport, error) {
+	return c.StatusLiveSnapshotWithFetchAge(all, noFetch, 5*time.Minute)
+}
+
+func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.Duration) (StatusSnapshot, StatusFetchReport, error) {
 	var report StatusFetchReport
 	if !noFetch {
 		var err error
-		report, err = c.StatusRefreshRefs(all)
+		report, err = c.StatusRefreshRefsWithAge(all, maxAge)
 		if err != nil {
 			return StatusSnapshot{}, report, err
 		}

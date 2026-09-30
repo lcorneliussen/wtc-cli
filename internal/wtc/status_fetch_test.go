@@ -45,6 +45,10 @@ func TestStatusRefreshRefsUsesSharedOwnerAgeGate(t *testing.T) {
 	if err != nil || report.Attempted != 0 {
 		t.Fatalf("fresh shared owner fetched again: %+v %v", report, err)
 	}
+	report, err = c.StatusRefreshRefsWithAge(false, 0)
+	if err != nil || report.Attempted != 1 || report.Failed != 0 {
+		t.Fatalf("zero fetch age did not force a refresh: %+v %v", report, err)
+	}
 }
 
 func TestStatusLiveSnapshotWritesOnlyScopedCaches(t *testing.T) {
