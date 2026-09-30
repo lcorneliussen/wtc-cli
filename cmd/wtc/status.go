@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -13,14 +14,19 @@ import (
 // view are being ported. Neither writes a snapshot that a status pane could
 // mistake for a complete one.
 func addStatusCommand(root *cobra.Command, asJSON *bool) {
-	var local, forge, all, md bool
+	var local, forge, all, md, cached bool
 	cmd := &cobra.Command{Use: "status", Short: "Inspect worktree collection status", Args: cobra.NoArgs}
 	cmd.Flags().BoolVar(&local, "local", false, "Preview local Git facts (no forge facts or cache writes)")
 	cmd.Flags().BoolVar(&forge, "forge", false, "Preview local Git and PR facts (no snapshot writes)")
 	cmd.Flags().BoolVar(&all, "all", false, "Include every collection in the workspace")
 	cmd.Flags().BoolVar(&md, "md", false, "Render agent Markdown")
+	cmd.Flags().BoolVar(&cached, "cached", false, "Read the last completed snapshot without Git or forge calls")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		if local == forge {
+		if cached {
+			if local || forge || all {
+				return fmt.Errorf("--cached cannot be combined with --local, --forge, or --all")
+			}
+		} else if local == forge {
 			return fmt.Errorf("native status is still being ported; choose --local or --forge for a preview")
 		}
 		if forge && all {
@@ -36,6 +42,30 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 		c, err := wtc.Discover(cwd)
 		if err != nil {
 			return err
+		}
+		if cached {
+			snapshot, err := c.ReadStatusSnapshot()
+			if err == nil {
+				if *asJSON {
+					return json.NewEncoder(os.Stdout).Encode(snapshot)
+				}
+				age, err := c.CachedStatusAge()
+				if err != nil {
+					return err
+				}
+				body := snapshot.Markdown()
+				fmt.Printf("# %s (snapshot, %ds old)\n%s", snapshot.Collection, age, strings.TrimPrefix(body, "# "+snapshot.Collection+"\n"))
+				return nil
+			}
+			if !os.IsNotExist(err) || *asJSON {
+				return err
+			}
+			text, err := c.LegacyStatusText()
+			if err != nil {
+				return err
+			}
+			fmt.Print(text)
+			return nil
 		}
 		var snapshot wtc.StatusSnapshot
 		if forge {
