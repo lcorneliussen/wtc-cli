@@ -13,7 +13,7 @@ func statusCommand(timeout time.Duration, name string, args ...string) ([]byte, 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = 200 * time.Millisecond
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("%s timed out after %s", name, timeout)
