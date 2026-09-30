@@ -290,7 +290,10 @@ func browseInPane(c *wtc.Context, session string) error {
 	case "nvim":
 		fmt.Printf("==> %s: Neovim already in %s\n", filepath.Base(c.Collection), paneID)
 	case "idle":
-		command := browseShellQuote(filepath.Join(c.Harness, "tools", "wtc-browse.sh")) + " --here"
+		command, err := browsePaneCommand(c)
+		if err != nil {
+			return err
+		}
 		_, err = browseHerdr(session, "pane", "run", paneID, command)
 		if err != nil {
 			return err
@@ -305,6 +308,16 @@ func browseInPane(c *wtc.Context, session string) error {
 
 func browseShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func browsePaneCommand(c *wtc.Context) (string, error) {
+	shim := filepath.Join(c.Harness, "tools", "wtc-browse.sh")
+	if info, err := os.Stat(shim); err == nil && info.Mode().IsRegular() && info.Mode()&0111 != 0 {
+		return browseShellQuote(shim) + " --here", nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	return "cd " + browseShellQuote(c.Collection) + " && wtc browse --here", nil
 }
 
 func browseEnsurePane(c *wtc.Context, session, workspaceID string, panes []struct {

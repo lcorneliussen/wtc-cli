@@ -113,8 +113,24 @@ esac
 		t.Fatal(err)
 	}
 	text := string(body)
-	if !strings.Contains(text, "pane run target-browse '"+filepath.Join(c.Harness, "tools", "wtc-browse.sh")+"' --here") || strings.Contains(text, "pane run target-agent") {
+	if !strings.Contains(text, "pane run target-browse cd '"+c.Collection+"' && wtc browse --here") || strings.Contains(text, "pane run target-agent") {
 		t.Fatalf("browse was not routed to the target pane: %s", text)
+	}
+}
+
+func TestBrowsePaneCommandPrefersTargetHarnessShim(t *testing.T) {
+	root := t.TempDir()
+	c := &wtc.Context{Collection: filepath.Join(root, "target"), Harness: filepath.Join(root, "target", "harness")}
+	shim := filepath.Join(c.Harness, "tools", "wtc-browse.sh")
+	if err := os.MkdirAll(filepath.Dir(shim), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shim, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	command, err := browsePaneCommand(c)
+	if err != nil || command != "'"+shim+"' --here" {
+		t.Fatalf("target harness shim was not used: %q, %v", command, err)
 	}
 }
 
