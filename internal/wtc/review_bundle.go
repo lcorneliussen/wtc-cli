@@ -13,12 +13,14 @@ import (
 )
 
 type ReviewBundleOptions struct {
-	Repo  string
-	PR    string
-	Base  string
-	Head  string
-	Dir   string
-	Round int
+	Repo      string
+	PR        string
+	Base      string
+	Head      string
+	Dir       string
+	Round     int
+	Public    bool
+	NoCatchUp bool
 }
 
 type ReviewManifest struct {
@@ -35,6 +37,8 @@ type ReviewManifest struct {
 	RepoDir    string `json:"repo_dir"`
 	Collection string `json:"collection"`
 	Public     bool   `json:"public"`
+	Downstream string `json:"downstream,omitempty"`
+	Upstream   string `json:"upstream,omitempty"`
 }
 
 type ReviewBundle struct {
@@ -42,6 +46,7 @@ type ReviewBundle struct {
 	Manifest ReviewManifest `json:"manifest"`
 	Files    int            `json:"files"`
 	Concerns int            `json:"concerns"`
+	Related  int            `json:"related"`
 }
 
 func reviewGit(worktree string, args ...string) ([]byte, error) {
@@ -58,7 +63,33 @@ func reviewRef(worktree, ref string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+func checkoutReviewBranch(worktree, branch string) error {
+	if _, err := reviewGit(worktree, "check-ref-format", "--branch", branch); err != nil {
+		return fmt.Errorf("invalid branch name %q", branch)
+	}
+	if _, err := reviewGit(worktree, "fetch", "origin", branch); err != nil {
+		fmt.Fprintf(os.Stderr, "wtc: warning: could not fetch PR branch %s before checkout\n", branch)
+	}
+	if _, err := reviewGit(worktree, "show-ref", "--verify", "refs/heads/"+branch); err == nil {
+		_, err = reviewGit(worktree, "switch", "--merge", branch)
+		return err
+	}
+	if _, err := reviewGit(worktree, "show-ref", "--verify", "refs/remotes/origin/"+branch); err != nil {
+		return fmt.Errorf("PR branch is not available locally")
+	}
+	_, err := reviewGit(worktree, "switch", "--merge", "-c", branch, "--track", "origin/"+branch)
+	return err
+}
+
+// BuildPublicReviewBundle retains the original public, no-catch-up contract
+// for callers that explicitly prepare a review for an external audience.
 func (c *Context) BuildPublicReviewBundle(opt ReviewBundleOptions) (ReviewBundle, error) {
+	opt.Public = true
+	opt.NoCatchUp = true
+	return c.BuildReviewBundle(opt)
+}
+
+func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, error) {
 	worktree, slug, forge, err := c.ReviewRepo(opt.Repo)
 	if err != nil {
 		return ReviewBundle{}, err
@@ -90,57 +121,88 @@ func (c *Context) BuildPublicReviewBundle(opt ReviewBundleOptions) (ReviewBundle
 			raw, err = cmd.Output()
 		}
 		if err != nil {
-			return ReviewBundle{}, fmt.Errorf("read PR #%s: %w", opt.PR, err)
+			fmt.Fprintf(os.Stderr, "wtc: warning: PR #%s metadata unavailable; bundle will use local refs\n", opt.PR)
+			raw = nil
 		}
-		var p struct {
-			Title       string `json:"title"`
-			Body        string `json:"body"`
-			Description string `json:"description"`
-			BaseRefName string `json:"baseRefName"`
-			HeadRefOid  string `json:"headRefOid"`
-			HeadRefName string `json:"headRefName"`
-			URL         string `json:"url"`
-			Destination struct {
-				Branch struct {
-					Name string `json:"name"`
-				} `json:"branch"`
-			} `json:"destination"`
-			Source struct {
-				Branch struct {
-					Name string `json:"name"`
-				} `json:"branch"`
-				Commit struct {
-					Hash string `json:"hash"`
-				} `json:"commit"`
-			} `json:"source"`
-			Links struct {
-				HTML struct {
-					Href string `json:"href"`
-				} `json:"html"`
-			} `json:"links"`
+		if len(raw) > 0 {
+			var p struct {
+				Title       string `json:"title"`
+				Body        string `json:"body"`
+				Description string `json:"description"`
+				BaseRefName string `json:"baseRefName"`
+				HeadRefOid  string `json:"headRefOid"`
+				HeadRefName string `json:"headRefName"`
+				URL         string `json:"url"`
+				Destination struct {
+					Branch struct {
+						Name string `json:"name"`
+					} `json:"branch"`
+				} `json:"destination"`
+				Source struct {
+					Branch struct {
+						Name string `json:"name"`
+					} `json:"branch"`
+					Commit struct {
+						Hash string `json:"hash"`
+					} `json:"commit"`
+				} `json:"source"`
+				Links struct {
+					HTML struct {
+						Href string `json:"href"`
+					} `json:"html"`
+				} `json:"links"`
+			}
+			if err := json.Unmarshal(raw, &p); err != nil {
+				fmt.Fprintf(os.Stderr, "wtc: warning: PR #%s metadata is invalid; bundle will use local refs\n", opt.PR)
+			} else {
+				prTitle, prBody, prBase, prHead, prBranch, prURL = p.Title, p.Body, p.BaseRefName, p.HeadRefOid, p.HeadRefName, p.URL
+				if prBody == "" {
+					prBody = p.Description
+				}
+				if prBase == "" {
+					prBase = p.Destination.Branch.Name
+				}
+				if prHead == "" {
+					prHead = p.Source.Commit.Hash
+				}
+				if prBranch == "" {
+					prBranch = p.Source.Branch.Name
+				}
+				if prURL == "" {
+					prURL = p.Links.HTML.Href
+				}
+			}
 		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return ReviewBundle{}, err
+	}
+	if opt.PR != "" && opt.Head == "HEAD" {
+		if prBranch != "" && branch != prBranch {
+			if err := checkoutReviewBranch(worktree, prBranch); err != nil {
+				return ReviewBundle{}, fmt.Errorf("check out PR #%s branch %q: %w", opt.PR, prBranch, err)
+			}
+			branch = prBranch
 		}
-		prTitle, prBody, prBase, prHead, prBranch, prURL = p.Title, p.Body, p.BaseRefName, p.HeadRefOid, p.HeadRefName, p.URL
-		if prBody == "" {
-			prBody = p.Description
+		if !opt.NoCatchUp {
+			if _, err := c.CatchUp(CatchUpOptions{}); err != nil {
+				return ReviewBundle{}, fmt.Errorf("catch-up before review: %w", err)
+			}
+			refreshed, err := OpenCollection(c.Collection)
+			if err != nil {
+				return ReviewBundle{}, fmt.Errorf("read collection after catch-up: %w", err)
+			}
+			c = refreshed
+			if current, err := reviewGit(worktree, "branch", "--show-current"); err != nil || strings.TrimSpace(string(current)) != prBranch && prBranch != "" {
+				return ReviewBundle{}, fmt.Errorf("PR branch changed during catch-up")
+			}
 		}
-		if prBase == "" {
-			prBase = p.Destination.Branch.Name
+	}
+	if prURL == "" && opt.PR != "" {
+		suffix := "pull/"
+		host := "github.com"
+		if forge == "bitbucket" {
+			suffix = "pull-requests/"
+			host = "bitbucket.org"
 		}
-		if prHead == "" {
-			prHead = p.Source.Commit.Hash
-		}
-		if prBranch == "" {
-			prBranch = p.Source.Branch.Name
-		}
-		if prURL == "" {
-			prURL = p.Links.HTML.Href
-		}
-		if opt.Head == "HEAD" && prBranch != "" && branch != "" && branch != prBranch {
-			return ReviewBundle{}, fmt.Errorf("worktree is on %q, PR #%s is on %q; check out the PR branch first", branch, opt.PR, prBranch)
-		}
+		prURL = "https://" + host + "/" + slug + "/" + suffix + opt.PR
 	}
 	headSHA, err := reviewRef(worktree, opt.Head)
 	if err != nil {
@@ -225,29 +287,51 @@ func (c *Context) BuildPublicReviewBundle(opt ReviewBundleOptions) (ReviewBundle
 	if err := os.MkdirAll(filepath.Join(dir, "concerns"), 0755); err != nil {
 		return ReviewBundle{}, err
 	}
-	manifest := ReviewManifest{Repo: opt.Repo, PR: opt.PR, Forge: forge, Slug: slug, URL: prURL, BaseRef: baseRef, BaseSHA: baseSHA, HeadSHA: headSHA, HeadBranch: branch, Round: round, RepoDir: worktree, Collection: filepath.Base(c.Collection), Public: true}
+	manifest := ReviewManifest{Repo: opt.Repo, PR: opt.PR, Forge: forge, Slug: slug, URL: prURL, BaseRef: baseRef, BaseSHA: baseSHA, HeadSHA: headSHA, HeadBranch: branch, Round: round, RepoDir: worktree, Collection: filepath.Base(c.Collection), Public: opt.Public}
 	prText := fmt.Sprintf("# %s\n\n%s\n", prTitle, prBody)
 	if opt.PR == "" {
 		prText = fmt.Sprintf("# %s\n\n(branch-only review)\n", branch)
+	} else if prTitle == "" {
+		prText = fmt.Sprintf("# %s\n\n(no PR text: PR #%s not readable)\n", branch, opt.PR)
 	}
 	for rel, body := range map[string][]byte{"pr.md": []byte(prText), "diff.patch": diff, "changed-files.txt": changed, "log.txt": log} {
 		if err := os.WriteFile(filepath.Join(dir, rel), body, 0644); err != nil {
 			return ReviewBundle{}, err
 		}
 	}
+	if !opt.Public {
+		downstream, upstream, err := c.snapshotReviewRepositories(dir, opt.Repo)
+		if err != nil {
+			return ReviewBundle{}, err
+		}
+		manifest.Downstream = strings.Join(downstream, " ")
+		manifest.Upstream = strings.Join(upstream, " ")
+	}
 	if err := writeReviewManifest(dir, manifest); err != nil {
 		return ReviewBundle{}, err
 	}
-	concerns, err := c.copyPublicReviewConcerns(dir, worktree, baseSHA, string(changed))
+	var concerns int
+	if opt.Public {
+		concerns, err = c.copyPublicReviewConcerns(dir, worktree, baseSHA, string(changed))
+	} else {
+		concerns, err = c.copyPrivateReviewConcerns(dir, worktree, baseSHA, string(changed))
+	}
 	if err != nil {
 		return ReviewBundle{}, err
 	}
-	if err := copyPublicReviewPrior(dir, root, manifest); err != nil {
+	if err := copyReviewPrior(dir, root, manifest); err != nil {
 		return ReviewBundle{}, err
 	}
 	copyPublicReviewComments(dir, manifest)
+	related := 0
+	if !opt.Public {
+		related, err = c.copyRelatedReviewPatches(dir, opt.Repo, opt.PR)
+		if err != nil {
+			return ReviewBundle{}, err
+		}
+	}
 	files := len(changedPaths)
-	return ReviewBundle{Dir: dir, Manifest: manifest, Files: files, Concerns: concerns}, nil
+	return ReviewBundle{Dir: dir, Manifest: manifest, Files: files, Concerns: concerns, Related: related}, nil
 }
 
 func nextReviewRound(root, repo, pr, branch string) int {
@@ -257,9 +341,8 @@ func nextReviewRound(root, repo, pr, branch string) int {
 		if !e.IsDir() {
 			continue
 		}
-		var m ReviewManifest
-		data, err := os.ReadFile(filepath.Join(root, e.Name(), "manifest.json"))
-		if err != nil || json.Unmarshal(data, &m) != nil {
+		m, ok, _ := readPriorReviewManifest(filepath.Join(root, e.Name()))
+		if !ok {
 			continue
 		}
 		if m.Repo == repo && m.PR == pr && (pr != "" || m.HeadBranch == branch) && m.Round > maxRound {
@@ -277,7 +360,7 @@ func writeReviewManifest(dir string, m ReviewManifest) error {
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), append(data, '\n'), 0644); err != nil {
 		return err
 	}
-	fields := [][2]string{{"REPO", m.Repo}, {"PR", m.PR}, {"FORGE", m.Forge}, {"SLUG", m.Slug}, {"URL", m.URL}, {"BASE_REF", m.BaseRef}, {"BASE_SHA", m.BaseSHA}, {"HEAD_SHA", m.HeadSHA}, {"HEAD_BRANCH", m.HeadBranch}, {"ROUND", strconv.Itoa(m.Round)}, {"REPO_DIR", m.RepoDir}, {"COLLECTION", m.Collection}, {"DOWNSTREAM", ""}, {"UPSTREAM", ""}}
+	fields := [][2]string{{"REPO", m.Repo}, {"PR", m.PR}, {"FORGE", m.Forge}, {"SLUG", m.Slug}, {"URL", m.URL}, {"BASE_REF", m.BaseRef}, {"BASE_SHA", m.BaseSHA}, {"HEAD_SHA", m.HeadSHA}, {"HEAD_BRANCH", m.HeadBranch}, {"ROUND", strconv.Itoa(m.Round)}, {"REPO_DIR", m.RepoDir}, {"COLLECTION", m.Collection}, {"DOWNSTREAM", m.Downstream}, {"UPSTREAM", m.Upstream}}
 	var b strings.Builder
 	b.WriteString("# review bundle manifest (sourceable)\n")
 	for _, field := range fields {

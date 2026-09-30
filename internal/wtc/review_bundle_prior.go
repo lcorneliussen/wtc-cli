@@ -1,7 +1,6 @@
 package wtc
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,10 +8,9 @@ import (
 	"strings"
 )
 
-// copyPublicReviewPrior supplies earlier review rounds without mixing in
-// private bundles or reviews for another pull request. A public reviewer still
-// needs the bundle inspected before it is sent to an external agent.
-func copyPublicReviewPrior(dir, root string, current ReviewManifest) error {
+// copyReviewPrior supplies earlier rounds. Public bundles exclude private
+// rounds, while private bundles can use either kind as context.
+func copyReviewPrior(dir, root string, current ReviewManifest) error {
 	type previous struct {
 		path  string
 		round int
@@ -39,15 +37,11 @@ func copyPublicReviewPrior(dir, root string, current ReviewManifest) error {
 			if path == dir {
 				continue
 			}
-			data, err := os.ReadFile(filepath.Join(path, "manifest.json"))
-			if err != nil {
+			manifest, ok, legacy := readPriorReviewManifest(path)
+			if !ok || current.Public && (legacy || !manifest.Public) || manifest.Round < 1 || manifest.Round >= current.Round {
 				continue
 			}
-			var manifest ReviewManifest
-			if json.Unmarshal(data, &manifest) != nil || !manifest.Public || manifest.Round < 1 || manifest.Round >= current.Round {
-				continue
-			}
-			if manifest.Repo != current.Repo || manifest.PR != current.PR || manifest.Slug != current.Slug || manifest.Forge != current.Forge {
+			if manifest.Repo != current.Repo || manifest.PR != current.PR || !legacy && (manifest.Slug != current.Slug || manifest.Forge != current.Forge) {
 				continue
 			}
 			if current.PR == "" && manifest.HeadBranch != current.HeadBranch {

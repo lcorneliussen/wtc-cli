@@ -123,7 +123,7 @@ func TestPublicReviewBundleUsesBaseConcernsAndExcludesLocalOverlays(t *testing.T
 	}
 	gh := `#!/bin/sh
 case "$*" in
-  *'--json title,body,baseRefName,headRefOid,headRefName,url') cat "$GH_PR_INFO" ;;
+	  *'--json title,body,baseRefName,headRefOid,headRefName,url') [ "${GH_FAIL_PR_INFO:-}" != 1 ] || exit 1; cat "$GH_PR_INFO" ;;
   *'--json comments') [ "${GH_FAIL_COMMENTS:-}" != 1 ] || exit 1; cat "$GH_CONVERSATION" ;;
   'api '*) cat "$GH_INLINE" ;;
   *) exit 2 ;;
@@ -159,5 +159,14 @@ esac
 	}
 	if _, err := os.Stat(filepath.Join(fourth.Dir, "prior", "comments.md")); !os.IsNotExist(err) {
 		t.Fatalf("unavailable comment context was written: %v", err)
+	}
+	t.Setenv("GH_FAIL_PR_INFO", "1")
+	fifth, err := c.BuildPublicReviewBundle(ReviewBundleOptions{Repo: "app", PR: "7", Base: "main"})
+	if err != nil {
+		t.Fatalf("forge outage prevented local review bundle: %v", err)
+	}
+	prText, err := os.ReadFile(filepath.Join(fifth.Dir, "pr.md"))
+	if err != nil || !strings.Contains(string(prText), "PR #7 not readable") || fifth.Manifest.URL != "https://github.com/example/app/pull/7" {
+		t.Fatalf("offline PR fallback missing: %s %+v %v", prText, fifth.Manifest, err)
 	}
 }
