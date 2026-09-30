@@ -39,6 +39,12 @@ type browseHerdrResult struct {
 		Pane   struct {
 			ID string `json:"pane_id"`
 		} `json:"pane"`
+		RootPane struct {
+			ID string `json:"pane_id"`
+		} `json:"root_pane"`
+		Tab struct {
+			ID string `json:"tab_id"`
+		} `json:"tab"`
 		ProcessInfo struct {
 			Group     int `json:"foreground_process_group_id"`
 			Processes []struct {
@@ -159,8 +165,15 @@ func browseHere(c *wtc.Context) error {
 	}
 	socket := browseSocket(c.Workspace, filepath.Base(c.Collection))
 	argv := []string{}
-	probe := exec.Command("nvim", "--server", socket, "--remote-expr", "1")
-	if probe.Run() != nil {
+	probeContext, stopProbe := context.WithTimeout(context.Background(), 3*time.Second)
+	probe := exec.CommandContext(probeContext, "nvim", "--server", socket, "--remote-expr", "1")
+	probeErr := probe.Run()
+	probeTimedOut := probeContext.Err() != nil
+	stopProbe()
+	if probeTimedOut {
+		return fmt.Errorf("browse Neovim at %s did not answer within three seconds", socket)
+	}
+	if probeErr != nil {
 		if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -417,10 +430,16 @@ func browseEnsurePRTab(c *wtc.Context, session, workspaceID string) {
 			return
 		}
 		tabID = created.Result.TabID
+		if tabID == "" {
+			tabID = created.Result.Tab.ID
+		}
 		if tabID == "" && len(created.Result.Tabs) > 0 {
 			tabID = created.Result.Tabs[0].ID
 		}
 		paneID := created.Result.PaneID
+		if paneID == "" {
+			paneID = created.Result.RootPane.ID
+		}
 		if paneID == "" && len(created.Result.Panes) > 0 {
 			paneID = created.Result.Panes[0].ID
 		}

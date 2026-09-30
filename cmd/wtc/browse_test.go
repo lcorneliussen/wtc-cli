@@ -117,3 +117,41 @@ esac
 		t.Fatalf("browse was not routed to the target pane: %s", text)
 	}
 }
+
+func TestBrowsePRTabUsesHerdrRootPaneResponse(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	if err := os.Mkdir(bin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(root, "herdr.log")
+	program := `#!/bin/sh
+printf '%s\n' "$*" >> "$BROWSE_TEST_LOG"
+case "$*" in
+  *'tab list --workspace target-ws') echo '{"result":{"tabs":[]}}' ;;
+  *'tab create --workspace target-ws '*) echo '{"result":{"root_pane":{"pane_id":"pr-pane"},"tab":{"tab_id":"pr-tab"}}}' ;;
+  *'pane rename pr-pane pr') echo '{"result":{}}' ;;
+  *'pane list --workspace target-ws') echo '{"result":{"panes":[{"label":"pr","pane_id":"pr-pane","tab_id":"pr-tab"}]}}' ;;
+  *'pane process-info --pane pr-pane') echo '{"result":{"process_info":{"foreground_process_group_id":8,"foreground_processes":[{"pid":8,"name":"zsh","argv":["-zsh"]}]}}}' ;;
+  *'pane run pr-pane gh dash') echo '{"result":{}}' ;;
+  *) exit 2 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "herdr"), []byte(program), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BROWSE_TEST_LOG", log)
+	browseEnsurePRTab(&wtc.Context{Collection: filepath.Join(root, "target")}, "test-session", "target-ws")
+	body, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "pane rename pr-pane pr") || !strings.Contains(text, "pane run pr-pane gh dash") {
+		t.Fatalf("herdr's root pane was not used for the PR tab: %s", text)
+	}
+}
