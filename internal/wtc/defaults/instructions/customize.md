@@ -86,6 +86,14 @@ shows `T` and `P` cells only when build facts exist; clicking a cell opens its
 HTTP(S) URL unless `--no-click` is set. A harness without this provider has
 no build columns.
 
+### Browse view
+
+`wtc browse` ships its Neovim collection view inside the CLI release. To
+replace that view for one harness, check in
+`harness/overlays/browse/wtc-browse.lua`. The command loads the overlay in
+place of the bundled view. Keep the file workspace-agnostic: the selected
+collection path is available in `vim.g.wtc_browse_root`.
+
 ## Hooks in an application repository
 
 The existing collection lifecycle runs an `init` hook when it creates or adds
