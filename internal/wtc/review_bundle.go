@@ -242,6 +242,10 @@ func (c *Context) BuildPublicReviewBundle(opt ReviewBundleOptions) (ReviewBundle
 	if err != nil {
 		return ReviewBundle{}, err
 	}
+	if err := copyPublicReviewPrior(dir, root, manifest); err != nil {
+		return ReviewBundle{}, err
+	}
+	copyPublicReviewComments(dir, manifest)
 	files := len(changedPaths)
 	return ReviewBundle{Dir: dir, Manifest: manifest, Files: files, Concerns: concerns}, nil
 }

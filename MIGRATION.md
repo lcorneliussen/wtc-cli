@@ -22,7 +22,7 @@ command and its contract checks cover their behavior.
 | `wtc-status.sh`, `wtc-status-tui.sh` | `wtc status` | Native one-shot and TUI released in v0.1.16; reference shims, published-binary contracts, and watch lifecycle ported |
 | `wtc-open.sh` | `wtc open` | Pending |
 | `wtc-browse.sh` | `wtc browse` | Native launch, bundled Neovim view, and herdr routing released in v0.1.17; reference matching-pin shim and released-binary contracts merged |
-| `review-bundle.sh` | `wtc review bundle` | Native public no-catch-up subset in v0.1.4; private snapshots, overlays, catch-up, and prior-round context pending |
+| `review-bundle.sh` | `wtc review bundle` | Native public no-catch-up subset in v0.1.4; public prior summaries and GitHub reply context added after v0.1.17; private snapshots, overlays, Bitbucket reply context, and catch-up pending |
 | `review-run.sh` | `wtc review run` | Native local runner subset in v0.1.4; integrated posting lifecycle and rich stats pending |
 | `review-post.sh` | `wtc review post` | Native summary lifecycle, inline dedup, and local receipt in v0.1.4; forge parity tests pending |
 | `review-status.sh` | `wtc review status` | Native GitHub and Bitbucket status and trusted-local check in v0.1.4 |

@@ -1,6 +1,7 @@
 package wtc
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,8 +83,81 @@ func TestPublicReviewBundleUsesBaseConcernsAndExcludesLocalOverlays(t *testing.T
 	if err != nil || !strings.Contains(string(manifest), "ROUND='1'") {
 		t.Fatalf("invalid shell manifest: %s %v", manifest, err)
 	}
+	if err := os.WriteFile(filepath.Join(first.Dir, "summary.md"), []byte("First public round\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeInlineRecords(first.Dir, []ReviewInlineRecord{{Key: "012345abcd", ID: "123"}, {Key: "def567abcd"}}); err != nil {
+		t.Fatal(err)
+	}
+	privateDir := filepath.Join(collection, ".wtc-reviews", "private-round")
+	if err := os.MkdirAll(privateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	privateManifest := first.Manifest
+	privateManifest.Public = false
+	privateData, err := json.Marshal(privateManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(privateDir, "manifest.json"), privateData, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(privateDir, "summary.md"), []byte("private context\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	second, err := c.BuildPublicReviewBundle(ReviewBundleOptions{Repo: "app", Base: "main"})
 	if err != nil || second.Manifest.Round != 2 {
 		t.Fatalf("next round: %+v %v", second, err)
+	}
+	prior, err := os.ReadFile(filepath.Join(second.Dir, "prior", "r1.md"))
+	if err != nil || string(prior) != "First public round\n" {
+		t.Fatalf("public prior round missing or mixed with private context: %q %v", prior, err)
+	}
+	keys, err := os.ReadFile(filepath.Join(second.Dir, "prior", "inline-keys.txt"))
+	if err != nil || string(keys) != "012345abcd\n" {
+		t.Fatalf("posted inline keys missing or unposted key included: %q %v", keys, err)
+	}
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(bin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	gh := `#!/bin/sh
+case "$*" in
+  *'--json title,body,baseRefName,headRefOid,headRefName,url') cat "$GH_PR_INFO" ;;
+  *'--json comments') [ "${GH_FAIL_COMMENTS:-}" != 1 ] || exit 1; cat "$GH_CONVERSATION" ;;
+  'api '*) cat "$GH_INLINE" ;;
+  *) exit 2 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(gh), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeFixture := func(name, body string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	t.Setenv("GH_PR_INFO", writeFixture("pr.json", `{"title":"Improve app","body":"Review this change","baseRefName":"main","headRefName":"feature","url":"https://github.com/example/app/pull/7"}`))
+	t.Setenv("GH_CONVERSATION", writeFixture("comments.json", `{"comments":[{"author":{"login":"author"},"createdAt":"2026-01-01T11:00:00Z","body":"follow-up reply"}]}`))
+	t.Setenv("GH_INLINE", writeFixture("inline.json", `[[]]`))
+	third, err := c.BuildPublicReviewBundle(ReviewBundleOptions{Repo: "app", PR: "7", Base: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	comments, err := os.ReadFile(filepath.Join(third.Dir, "prior", "comments.md"))
+	if err != nil || !strings.Contains(string(comments), "follow-up reply") {
+		t.Fatalf("GitHub reply context missing: %s %v", comments, err)
+	}
+	t.Setenv("GH_FAIL_COMMENTS", "1")
+	fourth, err := c.BuildPublicReviewBundle(ReviewBundleOptions{Repo: "app", PR: "7", Base: "main"})
+	if err != nil {
+		t.Fatalf("forge outage prevented local bundle: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(fourth.Dir, "prior", "comments.md")); !os.IsNotExist(err) {
+		t.Fatalf("unavailable comment context was written: %v", err)
 	}
 }
