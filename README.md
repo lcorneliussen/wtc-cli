@@ -1,6 +1,7 @@
 # wtc
 
-A CLI for worktree collections. This repository is the beginning of the migration from the reference harness's shell tools to a versioned binary.
+A versioned CLI for worktree collections. The reference harness keeps shell
+entry points as compatibility shims; their normal paths use the pinned binary.
 
 ## Commands
 
@@ -14,6 +15,7 @@ A CLI for worktree collections. This repository is the beginning of the migratio
 - `wtc secrets link [--repo <name>] [--dry-run] [--include-prod]` links gitignored control-root files into checked-out worktrees, preserving displaced local files in collection backups.
 - `wtc agent-env` prints shell exports for sibling mise toolchains and configured collection-local bins; `--write` refreshes `.env.toolchain`, `--print-path` prints its bin list, and `--wrap` handles PreToolUse JSON from stdin.
 - `wtc skills render [--seed-scope] [--dry-run]` exposes embedded skills and harness overrides to agent clients, wires the collection entry point and hooks, and refreshes agent shell files. `--all` explicitly renders every collection in the workspace.
+- `wtc skills diff [--changes] [--json]` reports skill overrides, H2 section patches, and drift from a recorded base digest.
 - `wtc customize` prints the versioned customization guide, including harness hooks and application repository init/teardown hooks.
 - `wtc new [slug] [repo ...]` creates a collection from a slug, issue, tracker key, or GitHub PR head, then prepares its environment and runs repository init hooks.
 - `wtc open [collection ...]` opens or repairs herdr workspaces with agent, browse, shell, and status panes. Use `--list` or `--dry-run` to inspect them, `--wide` or `--narrow` to set the layout, and `--all` only when intentionally opening every collection. `wtc new --open` uses this native command.
@@ -27,14 +29,21 @@ A CLI for worktree collections. This repository is the beginning of the migratio
 - `wtc review ready <pr-number> [--repo NAME]` promotes a draft only after a current, locally posted passing review (or an explicit user override).
 - `wtc browse [collection]` opens the bundled Neovim collection view. From an agent pane it uses that collection's browse pane; `--here` opens it in the current terminal. A harness can replace the view through `overlays/browse/wtc-browse.lua`.
 
-Run locally with `go run ./cmd/wtc`. Commands that have not migrated remain in the reference harness. Tagged releases build macOS and Linux binaries through GoReleaser. A harness pins an exact release in its checked-in `.wtc-cli-version` file (for example, `0.1.3`). `wtc env` reads that file and writes the tool entry into the generated collection-root `mise.toml`, which every sibling inherits. Then run `mise install` in the collection. No global installation is required.
+Run locally with `go run ./cmd/wtc`. Tagged releases build macOS and Linux
+binaries through GoReleaser. A harness pins an exact release in its checked-in
+`.wtc-cli-version` file (for example, `0.1.25`). `wtc env` reads that file and
+writes the tool entry into the generated collection-root `mise.toml`, which
+every sibling inherits. Then run `mise install` in the collection. No global
+installation is required.
 
 ```toml
 [tools]
-"github:lcorneliussen/wtc-cli" = "0.1.3"
+"github:lcorneliussen/wtc-cli" = "0.1.25"
 ```
 
-The pin shown here is an example; use a published release version. The shell environment generator in a harness must also preserve the same pin during migration.
+The pin shown here is an example; use a published release version. Retained
+shell entry points select the target collection's pin and keep a bootstrap
+fallback for older installations.
 
 Additional collection-root mise tools belong in the harness's committed `wtc.toml` under `[mise.tools]`. The CLI retains them when regenerating `mise.toml`. The exact CLI pin remains in `.wtc-cli-version` and cannot be overridden there.
 
