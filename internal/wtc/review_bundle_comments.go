@@ -132,6 +132,7 @@ func copyPublicReviewComments(dir string, manifest ReviewManifest) {
 }
 
 func parseBitbucketBundleComments(raw []byte) ([]bundleComment, error) {
+	const commentLimit = 1000
 	var comments []bundleComment
 	if err := json.Unmarshal(raw, &comments); err != nil {
 		var page struct {
@@ -149,6 +150,11 @@ func parseBitbucketBundleComments(raw []byte) ([]bundleComment, error) {
 		if page.Count != nil && *page.Count > len(comments) {
 			return nil, fmt.Errorf("Bitbucket returned %d of %d comments", len(comments), *page.Count)
 		}
+	}
+	// The CLI's count can mean the number collected rather than the remote
+	// total. Reaching the requested limit therefore cannot prove completeness.
+	if len(comments) >= commentLimit {
+		return nil, fmt.Errorf("Bitbucket returned the %d-comment limit; review context may be incomplete", commentLimit)
 	}
 	sort.SliceStable(comments, func(i, j int) bool { return comments[i].when() < comments[j].when() })
 	return comments, nil
