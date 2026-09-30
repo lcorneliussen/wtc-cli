@@ -142,7 +142,7 @@ func TestBitbucketReviewCommentAPIShapesAndAuthentication(t *testing.T) {
 			t.Fatalf("Bitbucket API result: %+v %v %v", result, ok, err)
 		}
 		got := requests[len(requests)-1]
-		if got.method != call.method || !strings.HasSuffix(got.path, call.suffix) || got.body["content"].(map[string]any)["raw"] != call.body {
+		if got.method != call.method || got.path != "/2.0/repositories/example/app/pullrequests/7"+call.suffix || got.body["content"].(map[string]any)["raw"] != call.body {
 			t.Fatalf("Bitbucket API request: %+v", got)
 		}
 	}
