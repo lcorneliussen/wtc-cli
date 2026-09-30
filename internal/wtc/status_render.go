@@ -74,6 +74,15 @@ func statusBuildLabel(build *StatusBuild) string {
 // Markdown renders the agent-facing view from the same structured snapshot
 // used by JSON and the future live status pane.
 func (s StatusSnapshot) Markdown() string {
+	return s.markdown(true)
+}
+
+// ReposMarkdown omits the collection's enlisted PR section.
+func (s StatusSnapshot) ReposMarkdown() string {
+	return s.markdown(false)
+}
+
+func (s StatusSnapshot) markdown(includePRs bool) string {
 	var b strings.Builder
 	collection := s.Collection
 	if collection == "" {
@@ -139,7 +148,7 @@ func (s StatusSnapshot) Markdown() string {
 	if s.StaleCount != 0 {
 		fmt.Fprintf(&b, "\n_%d worktree(s) behind remote — catch-up needed._\n", s.StaleCount)
 	}
-	if s.ShowCollectionColumn {
+	if s.ShowCollectionColumn || !includePRs {
 		b.WriteString("\n")
 		return b.String()
 	}

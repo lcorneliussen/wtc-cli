@@ -101,4 +101,8 @@ func TestStatusMarkdownKeepsRepoAndPRSignals(t *testing.T) {
 			t.Fatalf("Markdown missing %q:\n%s", want, md)
 		}
 	}
+	reposOnly := snapshot.ReposMarkdown()
+	if strings.Contains(reposOnly, "## PRs") || strings.Contains(reposOnly, "## Orphans") || !strings.Contains(reposOnly, "**widget**") {
+		t.Fatalf("repository-only Markdown retained PR section: %s", reposOnly)
+	}
 }
