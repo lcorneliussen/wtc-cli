@@ -20,7 +20,7 @@ func TestPrivateReviewBundleIncludesSnapshotsOverlaysAndRelatedPatch(t *testing.
 	}
 	registry := "repos:\n" +
 		"  - name: library\n    remote: https://github.com/example/library.git\n    default_ref: main\n    downstream: consumer\n" +
-		"  - name: consumer\n    remote: https://github.com/example/consumer.git\n    default_ref: main\n    production_ref: main\n" +
+		"  - name: consumer\n    remote: https://github.com/example/consumer.git\n    production_ref: main\n" +
 		"  - name: framework\n    remote: https://github.com/example/framework.git\n    default_ref: main\n    downstream: library\n"
 	if err := os.WriteFile(filepath.Join(harness, ".harness-repos.yml"), []byte(registry), 0644); err != nil {
 		t.Fatal(err)
@@ -53,6 +53,7 @@ func TestPrivateReviewBundleIncludesSnapshotsOverlaysAndRelatedPatch(t *testing.
 		git(name, "add", ".")
 		git(name, "commit", "-m", "base")
 	}
+	git("consumer", "update-ref", "refs/remotes/origin/main", "refs/heads/main")
 	git("library", "switch", "-c", "feature")
 	write("library", "feature.go", "package feature\n")
 	git("library", "add", ".")
@@ -137,6 +138,27 @@ func TestReviewBundleChecksOutPRBranchAndStopsOnCatchUpFailure(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(c.Collection, ".wtc-catch-up.json")); err != nil {
 		t.Fatalf("catch-up report missing after refusal: %v", err)
 	}
+	gh = strings.Replace(gh, "  *) exit 1 ;;", "  *'--json state,isDraft') printf '%s\\n' '[{\"state\":\"OPEN\",\"isDraft\":false}]' ;;\n  *) exit 1 ;;", 1)
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(gh), 0755); err != nil {
+		t.Fatal(err)
+	}
+	registryPath := filepath.Join(c.Harness, ".harness-repos.yml")
+	registry, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry = []byte(strings.Replace(string(registry), "default_ref: origin/main\n    port_offset", "default_ref: origin/feature\n    port_offset", 1))
+	if err := os.WriteFile(registryPath, registry, 0644); err != nil {
+		t.Fatal(err)
+	}
+	defaultBundle, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "widget", PR: "7", Public: true})
+	if err != nil {
+		report, _ := os.ReadFile(filepath.Join(c.Collection, ".wtc-catch-up.json"))
+		t.Fatalf("default catch-up bundle failed: %v\n%s", err, report)
+	}
+	if defaultBundle.Manifest.HeadSHA != head || defaultBundle.Manifest.HeadBranch != "feature" || defaultBundle.Files != 1 {
+		t.Fatalf("default catch-up bundle is incomplete: %+v", defaultBundle)
+	}
 	bundle, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "widget", PR: "7", Public: true, NoCatchUp: true})
 	if err != nil {
 		t.Fatal(err)
@@ -176,5 +198,52 @@ func TestLegacyShellReviewRoundContinuesOnlyInPrivateBundle(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(public, "prior")); !os.IsNotExist(err) {
 		t.Fatalf("legacy summary entered public bundle: %v", err)
+	}
+}
+
+func TestReviewArchiveAllowsInternalSymlinkAndRejectsEscape(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "source")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s: %v", args, out, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-b", "main")
+	git("config", "user.name", "Fixture")
+	git("config", "user.email", "fixture@example.invalid")
+	if err := os.WriteFile(filepath.Join(repo, "target.txt"), []byte("inside\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("target.txt", filepath.Join(repo, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-m", "internal link")
+	owner := filepath.Join(repo, ".git")
+	good := filepath.Join(t.TempDir(), "good")
+	if err := archiveReviewCommit(owner, git("rev-parse", "HEAD"), good); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(filepath.Join(good, "link.txt")); err != nil || target != "target.txt" {
+		t.Fatalf("internal archive link: %q %v", target, err)
+	}
+	if err := os.Remove(filepath.Join(repo, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../../outside", filepath.Join(repo, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-m", "escaping link")
+	bad := filepath.Join(t.TempDir(), "bad")
+	if err := archiveReviewCommit(owner, git("rev-parse", "HEAD"), bad); err == nil || !strings.Contains(err.Error(), "unsafe archive symlink") {
+		t.Fatalf("escaping link was accepted: %v", err)
 	}
 }

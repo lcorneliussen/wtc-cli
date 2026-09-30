@@ -265,10 +265,14 @@ func (c *Context) copyRelatedReviewPatches(dir, reviewed, number string) (int, e
 			continue
 		}
 		repo, ok := c.reviewRegistryRepo(record.Repo)
-		if !ok || repo.DefaultRef == "" {
+		if !ok {
 			continue
 		}
-		mergeBase, err := reviewGit(worktree, "merge-base", repo.DefaultRef, "HEAD")
+		defaultRef := repo.DefaultRef
+		if defaultRef == "" {
+			defaultRef = "origin/main"
+		}
+		mergeBase, err := reviewGit(worktree, "merge-base", defaultRef, "HEAD")
 		if err != nil {
 			continue
 		}
