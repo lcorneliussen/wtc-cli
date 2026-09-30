@@ -61,10 +61,10 @@ func statusDiscoverBranch(forge, slug, branch string) (string, error) {
 	var err error
 	switch forge {
 	case "github.com":
-		raw, err = catchUpJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "open", "--limit", "50", "--json", "number,headRefName")
+		raw, err = statusJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "open", "--limit", "50", "--json", "number,headRefName")
 	case "bitbucket.org":
 		parts := strings.SplitN(slug, "/", 2)
-		raw, err = catchUpJSON("bb", "pr", "list", "-w", parts[0], "-r", parts[1], "--state", "OPEN", "--limit", "50", "--json")
+		raw, err = statusJSON("bb", "pr", "list", "-w", parts[0], "-r", parts[1], "--state", "OPEN", "--limit", "50", "--json")
 	default:
 		return "", fmt.Errorf("unsupported forge")
 	}

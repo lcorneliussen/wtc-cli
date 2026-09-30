@@ -69,3 +69,18 @@ func TestStatusBuildHookRejectsUnsafeURL(t *testing.T) {
 		t.Fatal("hook supplied a non-web build URL")
 	}
 }
+
+func TestStatusBuildHookSkipsUnregisteredWorktree(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	hook := filepath.Join(c.Harness, "hooks", "wtc", "status.build.sh")
+	if err := os.MkdirAll(filepath.Dir(hook), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nprintf '{\"checks\":\"SUCCESS\"}\\n'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := StatusSnapshot{Repos: []StatusRepo{{Repo: "extra", Worktree: c.Harness}}}
+	if err := c.statusBuildFacts(&snapshot); err != nil || snapshot.Repos[0].Tip != nil {
+		t.Fatalf("unregistered row blocked status: %+v %v", snapshot, err)
+	}
+}

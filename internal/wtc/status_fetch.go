@@ -13,7 +13,7 @@ type StatusFetchReport struct {
 }
 
 func statusCommonDir(worktree string) (string, error) {
-	common, err := catchUpGit(worktree, "rev-parse", "--git-common-dir")
+	common, err := statusGit(worktree, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", err
 	}
@@ -52,7 +52,7 @@ func (c *Context) StatusRefreshRefsWithAge(all bool, maxAge time.Duration) (Stat
 			continue
 		}
 		report.Attempted++
-		if _, err := gitOutput("--git-dir="+common, "fetch", "--prune", "origin"); err != nil {
+		if _, err := statusJSON("git", "--git-dir="+common, "fetch", "--prune", "origin"); err != nil {
 			report.Failed++
 		}
 	}
@@ -112,7 +112,8 @@ func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.
 		if err != nil {
 			return snapshot, report, err
 		}
-		part, err := collection.StatusForgePreview()
+		// A workspace sweep must not execute hooks from other collections.
+		part, err := collection.statusForgePreview(false)
 		if err != nil {
 			return snapshot, report, err
 		}

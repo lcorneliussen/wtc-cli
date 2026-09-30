@@ -60,7 +60,7 @@ func (c *Context) statusLegacy(snapshot StatusSnapshot) statusLegacyCache {
 	for _, row := range snapshot.Repos {
 		item := statusLegacyCacheRepo{Repo: row.Dir, Branch: row.BranchDisplay, Ahead: row.Ahead,
 			Behind: row.Behind, Tree: row.Tree, Forge: "unknown"}
-		item.Head, _ = catchUpGit(row.Worktree, "rev-parse", "--short", "HEAD")
+		item.Head, _ = statusGit(row.Worktree, "rev-parse", "--short", "HEAD")
 		_, forge := c.statusRecordForge(PRRecord{Repo: row.Repo}, snapshot.Repos)
 		item.Forge = strings.TrimSuffix(forge, ".com")
 		if forge == "bitbucket.org" {

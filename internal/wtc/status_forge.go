@@ -39,6 +39,9 @@ func statusCheckResult(rollup []struct {
 		if check.Status != "" && !strings.EqualFold(check.Status, "COMPLETED") {
 			pending = true
 		}
+		if conclusion == "PENDING" || conclusion == "IN_PROGRESS" || conclusion == "QUEUED" {
+			pending = true
+		}
 	}
 	switch {
 	case failed:
@@ -120,11 +123,14 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 
 func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	var p struct {
-		ID           int    `json:"id"`
-		State        string `json:"state"`
-		Draft        bool   `json:"draft"`
-		Title        string `json:"title"`
-		UpdatedOn    string `json:"updated_on"`
+		ID          int    `json:"id"`
+		State       string `json:"state"`
+		Draft       bool   `json:"draft"`
+		Title       string `json:"title"`
+		MergedOn    string `json:"merged_on"`
+		MergeCommit struct {
+			Date string `json:"date"`
+		} `json:"merge_commit"`
 		Participants []struct {
 			Approved bool   `json:"approved"`
 			State    string `json:"state"`
@@ -157,7 +163,10 @@ func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	if d.State == "MERGED" {
 		d.Merge = "MERGED"
 		d.Review = "merged"
-		d.MergedOn = p.UpdatedOn
+		d.MergedOn = p.MergedOn
+		if d.MergedOn == "" {
+			d.MergedOn = p.MergeCommit.Date
+		}
 	}
 	return d, nil
 }

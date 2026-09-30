@@ -26,7 +26,7 @@ func (c *Context) statusRecordForge(record PRRecord, rows []StatusRepo) (slug, f
 	for _, row := range rows {
 		if row.Repo == record.Repo || (record.Repo == "harness" && row.Dir == "harness") {
 			if row.Slug != "" {
-				remote, err := catchUpGit(row.Worktree, "remote", "get-url", "origin")
+				remote, err := statusGit(row.Worktree, "remote", "get-url", "origin")
 				if err == nil {
 					return catchUpForge(remote)
 				}
@@ -70,10 +70,10 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	var err error
 	switch forge {
 	case "github.com":
-		raw, err = catchUpJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,reviewRequests,latestReviews,mergedAt,updatedAt")
+		raw, err = statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,reviewRequests,latestReviews,mergedAt,updatedAt")
 	case "bitbucket.org":
 		parts := strings.SplitN(slug, "/", 2)
-		raw, err = catchUpJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
+		raw, err = statusJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
 	}
 	if err == nil {
 		if detail, parseErr := statusParseForgeDetail(forge, raw, record); parseErr == nil {
@@ -88,6 +88,10 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 // branches. Build facts, snapshot persistence, and the live renderer are
 // supplied by later stages. A forge failure never becomes a merged claim.
 func (c *Context) StatusForgePreview() (StatusSnapshot, error) {
+	return c.statusForgePreview(true)
+}
+
+func (c *Context) statusForgePreview(includeBuild bool) (StatusSnapshot, error) {
 	snapshot, err := c.StatusLocalSnapshot(false)
 	if err != nil {
 		return snapshot, err
@@ -167,8 +171,10 @@ func (c *Context) StatusForgePreview() (StatusSnapshot, error) {
 				Merge: detail.Merge, Review: detail.Review, Draft: detail.State == "DRAFT"}
 		}
 	}
-	if err := c.statusBuildFacts(&snapshot); err != nil {
-		return snapshot, err
+	if includeBuild {
+		if err := c.statusBuildFacts(&snapshot); err != nil {
+			return snapshot, err
+		}
 	}
 	return snapshot, nil
 }

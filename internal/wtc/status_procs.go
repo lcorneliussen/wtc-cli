@@ -3,11 +3,11 @@ package wtc
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type StatusProcess struct {
@@ -78,8 +78,7 @@ func statusParseProcesses(output, session string) []StatusProcess {
 }
 
 func (c *Context) StatusProcesses() ([]StatusProcess, error) {
-	command := exec.Command("ps", "-axo", "pid=,ppid=,pcpu=,pmem=,rss=,args=")
-	out, err := command.Output()
+	out, err := statusCommand(10*time.Second, "ps", "-axo", "pid=,ppid=,pcpu=,pmem=,rss=,args=")
 	if err != nil {
 		return nil, fmt.Errorf("ps: %w", err)
 	}

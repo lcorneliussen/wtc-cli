@@ -116,7 +116,9 @@ func (c *Context) statusBuildFacts(snapshot *StatusSnapshot) error {
 		row := &snapshot.Repos[i]
 		repo, err := c.Repository(row.Repo)
 		if err != nil {
-			return err
+			// Auxiliary worktrees can be checked out without a registry entry.
+			// The build provider only has a branch contract for registered repos.
+			continue
 		}
 		tip := strings.TrimPrefix(repo.DefaultRef, "origin/")
 		if tip == "" {

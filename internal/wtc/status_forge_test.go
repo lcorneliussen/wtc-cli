@@ -19,6 +19,11 @@ func TestStatusGHDetailSeparatesChecksReviewAndMerge(t *testing.T) {
 	if err != nil || d.Checks != "FAILURE" || d.Review != "noreviewers" || d.Title != "fallback" {
 		t.Fatalf("failed check or reviewer state lost: %+v %v", d, err)
 	}
+	pendingState := []byte(`{"number":7,"state":"OPEN","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"},{"state":"PENDING"}]}`)
+	d, err = statusGHDetail(pendingState, PRRecord{})
+	if err != nil || d.Checks != "PENDING" {
+		t.Fatalf("pending state hidden by passing check: %+v %v", d, err)
+	}
 }
 
 func TestStatusDraftMergedAndUnknownFacts(t *testing.T) {
@@ -36,6 +41,10 @@ func TestStatusDraftMergedAndUnknownFacts(t *testing.T) {
 	bb, err := statusBBDetail([]byte(`{"id":9,"state":"OPEN","participants":[{"approved":true}]}`), PRRecord{Title: "fallback"})
 	if err != nil || bb.Number != "9" || bb.Review != "approved" || bb.Merge != "UNKNOWN" || bb.Title != "fallback" {
 		t.Fatalf("wrong Bitbucket facts: %+v %v", bb, err)
+	}
+	bbMerged, err := statusBBDetail([]byte(`{"id":9,"state":"MERGED","updated_on":"2026-09-30T12:00:00Z","merged_on":"2026-09-20T12:00:00Z"}`), PRRecord{})
+	if err != nil || bbMerged.MergedOn != "2026-09-20T12:00:00Z" {
+		t.Fatalf("merge time replaced by last update: %+v %v", bbMerged, err)
 	}
 }
 

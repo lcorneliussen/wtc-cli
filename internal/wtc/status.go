@@ -81,7 +81,7 @@ type StatusOrphan struct {
 }
 
 func statusCount(worktree, rangeSpec string) (int, error) {
-	value, err := catchUpGit(worktree, "rev-list", "--count", rangeSpec)
+	value, err := statusGit(worktree, "rev-list", "--count", rangeSpec)
 	if err != nil {
 		return 0, err
 	}
@@ -96,11 +96,11 @@ func statusLocalRepo(t catchUpTarget) (StatusRepo, error) {
 	dir := filepath.Base(t.path)
 	row := StatusRepo{Collection: t.collection, Dir: dir, Repo: t.repo,
 		Worktree: t.path, Tree: "clean"}
-	remote, err := catchUpGit(t.path, "remote", "get-url", "origin")
+	remote, err := statusGit(t.path, "remote", "get-url", "origin")
 	if err == nil {
 		row.Slug, _ = catchUpForge(remote)
 	}
-	branch, err := catchUpGit(t.path, "symbolic-ref", "--quiet", "--short", "HEAD")
+	branch, err := statusGit(t.path, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err == nil {
 		row.BranchKind = "branch"
 		row.Branch = branch
@@ -112,7 +112,7 @@ func statusLocalRepo(t catchUpTarget) (StatusRepo, error) {
 	}
 	upstream := t.ref
 	if row.BranchKind == "branch" {
-		if found, err := catchUpGit(t.path, "rev-parse", "--abbrev-ref", "@{u}"); err == nil {
+		if found, err := statusGit(t.path, "rev-parse", "--abbrev-ref", "@{u}"); err == nil {
 			upstream = found
 		}
 	}
@@ -124,7 +124,7 @@ func statusLocalRepo(t catchUpTarget) (StatusRepo, error) {
 	if err != nil {
 		return StatusRepo{}, fmt.Errorf("%s development-tip count: %w", t.path, err)
 	}
-	porcelain, err := catchUpGit(t.path, "status", "--porcelain")
+	porcelain, err := statusGit(t.path, "status", "--porcelain")
 	if err != nil {
 		return StatusRepo{}, fmt.Errorf("%s working tree: %w", t.path, err)
 	}

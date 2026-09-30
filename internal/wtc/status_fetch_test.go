@@ -83,3 +83,25 @@ func TestStatusLiveSnapshotWritesOnlyScopedCaches(t *testing.T) {
 		t.Fatalf("other collection cache written: %v", err)
 	}
 }
+
+func TestStatusAllDoesNotRunOtherCollectionBuildHook(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	if _, err := c.NewCollection(NewOptions{Slug: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(c.Workspace, "other")
+	hook := filepath.Join(other, "harness", "hooks", "wtc", "status.build.sh")
+	if err := os.MkdirAll(filepath.Dir(hook), 0755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(other, "marker")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.StatusLiveSnapshot(true, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("workspace sweep ran another collection hook: %v", err)
+	}
+}
