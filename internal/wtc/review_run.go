@@ -47,10 +47,16 @@ type reviewFindingFile struct {
 }
 
 type reviewRunStats struct {
-	Agent   string  `json:"agent"`
-	Model   string  `json:"model"`
-	Seconds float64 `json:"seconds"`
-	Status  string  `json:"status"`
+	Agent            string   `json:"agent"`
+	Model            string   `json:"model"`
+	Seconds          float64  `json:"seconds"`
+	Status           string   `json:"status"`
+	InputTokens      *int64   `json:"input_tokens"`
+	OutputTokens     *int64   `json:"output_tokens"`
+	CacheReadTokens  *int64   `json:"cache_read_tokens"`
+	CacheWriteTokens *int64   `json:"cache_write_tokens"`
+	CostUSD          *float64 `json:"cost_usd"`
+	Turns            *int64   `json:"turns"`
 }
 
 func reviewEnv(key, fallback string) string {
@@ -130,6 +136,13 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 			return ReviewRunResult{}, err
 		}
 	}
+	if stale, err := filepath.Glob(filepath.Join(bundle, "stats", "*.json")); err == nil {
+		for _, path := range stale {
+			if err := os.Remove(path); err != nil {
+				return ReviewRunResult{}, err
+			}
+		}
+	}
 	concernFiles, err := filepath.Glob(filepath.Join(bundle, "concerns", "*.md"))
 	if err != nil {
 		return ReviewRunResult{}, err
@@ -183,7 +196,7 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	if err != nil {
 		leadStatus = "error"
 	}
-	if writeErr := writeReviewStats(bundle, "lead", reviewRunStats{Agent: leadAgent, Model: leadModel, Seconds: leadSeconds.Seconds(), Status: leadStatus}); writeErr != nil {
+	if writeErr := writeReviewStats(bundle, "lead", collectReviewStats(filepath.Join(bundle, "stats", "lead.json"), leadAgent, leadModel, leadSeconds, leadStatus, leadOutput)); writeErr != nil {
 		return ReviewRunResult{}, writeErr
 	}
 	if err != nil {
@@ -221,8 +234,11 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 			clean = append(clean, line)
 		}
 	}
-	stats := fmt.Sprintf("\n### Run stats\n\n- Concerns: %d; elapsed: %s.\n\n", count, time.Since(started).Round(time.Second))
-	final := strings.TrimRight(strings.Join(clean, "\n"), "\n") + "\n" + stats + statusLine + "\n"
+	stats, err := reviewStatsTable(bundle, time.Since(started))
+	if err != nil {
+		return ReviewRunResult{}, err
+	}
+	final := strings.TrimRight(strings.Join(clean, "\n"), "\n") + "\n\n" + stats + "\n\n" + statusLine + "\n"
 	final = alignReviewHeading(final, verdict)
 	if err := os.WriteFile(summaryPath, []byte(final), 0644); err != nil {
 		return ReviewRunResult{}, err
@@ -290,7 +306,7 @@ func (c *Context) runReviewConcern(bundle string, manifest ReviewManifest, id, p
 		}
 		_ = writeReviewStub(bundle, id, "error", runErr.Error())
 	}
-	_ = writeReviewStats(bundle, id, reviewRunStats{Agent: agent, Model: model, Seconds: elapsed.Seconds(), Status: status})
+	_ = writeReviewStats(bundle, id, collectReviewStats(filepath.Join(bundle, "stats", id+".json"), agent, model, elapsed, status, output))
 	if runErr != nil {
 		return "ERROR " + id + ": " + runErr.Error() + "\n"
 	}
@@ -405,6 +421,7 @@ func runReviewChain(bundle, repoDir, prompt, specs string, timeout time.Duration
 		if len(parts) == 2 {
 			model = parts[1]
 		}
+		_ = os.Remove(statsPath)
 		output, elapsed, err := launchReviewAgent(bundle, repoDir, prompt, agent, model, timeout, statsPath)
 		if err == nil || i == len(list)-1 || !reviewLimitMessage.Match(output) {
 			return agent, model, output, elapsed, err
