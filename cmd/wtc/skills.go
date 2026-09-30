@@ -139,8 +139,11 @@ func addSkillsCommands(root *cobra.Command, asJSON *bool) {
 		}
 		for _, report := range reports {
 			fmt.Printf("%s: %s (%s)\n", report.Name, report.Status, report.Source)
-			if report.Status == "drifted" || report.Status == "untracked" {
+			if report.Status == "drifted" || report.Status == "untracked" || report.Status == "invalid" {
 				fmt.Printf("  current base: %s\n", report.DefaultHash)
+			}
+			if report.Error != "" {
+				fmt.Printf("  cannot apply: %s\n", report.Error)
 			}
 			if showChanges {
 				for _, line := range report.Changes {

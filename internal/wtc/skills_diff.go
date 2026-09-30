@@ -21,6 +21,7 @@ type SkillDiff struct {
 	DefaultHash  string   `json:"default_sha256,omitempty"`
 	RecordedBase string   `json:"recorded_base_sha256,omitempty"`
 	Changes      []string `json:"changes,omitempty"`
+	Error        string   `json:"error,omitempty"`
 }
 
 func (c *Context) DiffSkills() ([]SkillDiff, error) {
@@ -143,27 +144,7 @@ func (c *Context) DiffSkills() ([]SkillDiff, error) {
 		if !ok {
 			return nil, fmt.Errorf("section patches for unknown skill %s", name)
 		}
-		current := base
-		seenHeadings := map[string]bool{}
-		for _, patch := range patches {
-			if patch.IsDir() || !strings.HasSuffix(patch.Name(), ".md") {
-				continue
-			}
-			body, err := os.ReadFile(filepath.Join(patchDir, patch.Name()))
-			if err != nil {
-				return nil, err
-			}
-			heading := strings.SplitN(string(body), "\n", 2)[0]
-			if seenHeadings[heading] {
-				return nil, fmt.Errorf("duplicate skill %s section patch for %q", name, heading)
-			}
-			seenHeadings[heading] = true
-			current, err = applySkillSection(current, body)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", filepath.Join(patchDir, patch.Name()), err)
-			}
-		}
-		item := SkillDiff{Name: name, Source: filepath.ToSlash(strings.TrimPrefix(patchDir, c.Harness+string(filepath.Separator))), DefaultHash: skillDigest(base), Changes: skillLineChanges(base, current)}
+		item := SkillDiff{Name: name, Source: filepath.ToSlash(strings.TrimPrefix(patchDir, c.Harness+string(filepath.Separator))), DefaultHash: skillDigest(base)}
 		recorded, err := os.ReadFile(filepath.Join(patchRoot, name, ".wtc-base.sha256"))
 		if err != nil && !os.IsNotExist(err) {
 			return nil, err
@@ -181,6 +162,34 @@ func (c *Context) DiffSkills() ([]SkillDiff, error) {
 			item.Status = "reviewed"
 		default:
 			item.Status = "drifted"
+		}
+		current := base
+		seenHeadings := map[string]bool{}
+		for _, patch := range patches {
+			if patch.IsDir() || !strings.HasSuffix(patch.Name(), ".md") {
+				continue
+			}
+			body, err := os.ReadFile(filepath.Join(patchDir, patch.Name()))
+			if err != nil {
+				return nil, err
+			}
+			heading := strings.SplitN(string(body), "\n", 2)[0]
+			if seenHeadings[heading] {
+				item.Error = fmt.Sprintf("duplicate section patch for %q", heading)
+				break
+			}
+			seenHeadings[heading] = true
+			current, err = applySkillSection(current, body)
+			if err != nil {
+				item.Error = patch.Name() + ": " + err.Error()
+				break
+			}
+		}
+		if item.Error != "" && item.Status != "drifted" {
+			item.Status = "invalid"
+		}
+		if item.Error == "" {
+			item.Changes = skillLineChanges(base, current)
 		}
 		result = append(result, item)
 	}

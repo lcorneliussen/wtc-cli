@@ -289,14 +289,36 @@ func applySkillSection(base, patch []byte) ([]byte, error) {
 		return nil, fmt.Errorf("section patch must start with its exact H2 heading")
 	}
 	heading := strings.TrimSuffix(patchLines[0], "\n")
+	var fence byte
+	var fenceWidth int
 	for _, line := range patchLines[1 : len(patchLines)-1] {
-		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "# ") {
+		if nextFence, width, rest := skillFence(line); width > 0 {
+			if fence == 0 {
+				fence, fenceWidth = nextFence, width
+			} else if nextFence == fence && width >= fenceWidth && strings.TrimSpace(rest) == "" {
+				fence = 0
+			}
+			continue
+		}
+		if fence == 0 && skillTopHeading(line) {
 			return nil, fmt.Errorf("section patch may contain only one H2 section")
 		}
 	}
 	lines := strings.SplitAfter(string(base), "\n")
 	start, end := -1, -1
+	fence, fenceWidth = 0, 0
 	for i, line := range lines {
+		if nextFence, width, rest := skillFence(line); width > 0 {
+			if fence == 0 {
+				fence, fenceWidth = nextFence, width
+			} else if nextFence == fence && width >= fenceWidth && strings.TrimSpace(rest) == "" {
+				fence = 0
+			}
+			continue
+		}
+		if fence != 0 {
+			continue
+		}
 		if strings.TrimSuffix(line, "\n") == heading {
 			if start >= 0 {
 				return nil, fmt.Errorf("duplicate heading %q", heading)
@@ -304,7 +326,7 @@ func applySkillSection(base, patch []byte) ([]byte, error) {
 			start = i
 			continue
 		}
-		if start >= 0 && end < 0 && (strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "# ")) {
+		if start >= 0 && end < 0 && skillTopHeading(line) {
 			end = i
 		}
 	}
@@ -315,6 +337,30 @@ func applySkillSection(base, patch []byte) ([]byte, error) {
 		end = len(lines)
 	}
 	return []byte(strings.Join(lines[:start], "") + string(patch) + strings.Join(lines[end:], "")), nil
+}
+
+func skillTopHeading(line string) bool {
+	return strings.HasPrefix(line, "# ") || strings.HasPrefix(line, "## ")
+}
+
+func skillFence(line string) (byte, int, string) {
+	line = strings.TrimSuffix(line, "\n")
+	spaces := len(line) - len(strings.TrimLeft(line, " "))
+	if spaces > 3 {
+		return 0, 0, ""
+	}
+	line = line[spaces:]
+	if len(line) < 3 || line[0] != '`' && line[0] != '~' {
+		return 0, 0, ""
+	}
+	i := 0
+	for i < len(line) && line[i] == line[0] {
+		i++
+	}
+	if i < 3 {
+		return 0, 0, ""
+	}
+	return line[0], i, line[i:]
 }
 
 func renderSkillLink(collection, dest, want, label string, dryRun bool, r *SkillRenderResult) error {

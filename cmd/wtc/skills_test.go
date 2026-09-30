@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +98,17 @@ func TestSkillsDiffJSONIsReadOnly(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(collection, ".wtc")); !os.IsNotExist(err) {
 		t.Fatal("skills diff wrote generated files")
+	}
+	override := filepath.Join(harness, "skills", "wtc-customize", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(override), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(override, []byte("---\nname: wtc-customize\ndescription: local\n---\n\n# Local guidance\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("go", "run", ".", "skills", "diff", "--collection", collection, "--changes")
+	out, err = cmd.Output()
+	if err != nil || !strings.Contains(string(out), "+# Local guidance") || !strings.Contains(string(out), "-# Customize wtc behavior") {
+		t.Fatalf("skills diff changes = %s, %v", out, err)
 	}
 }

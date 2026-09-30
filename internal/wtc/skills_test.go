@@ -132,13 +132,13 @@ func TestRenderSkillsSectionPatchAndDriftFailure(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	patch := "## Local setup\n\nUse the local hook.\n"
+	patch := "## Local setup\n\nUse the local hook.\n\n```bash\n# Configure locally\nprintf 'ready\\n'\n```\n\n"
 	// Use a small harness skill so the section boundary is easy to verify.
 	baseDir := filepath.Join(c.Harness, "skills", "wtc-customize")
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	base := "---\nname: wtc-customize\ndescription: demo\n---\n\n# Demo\n\n## Local setup\n\nOld text.\n\n## Keep\n\nKeep text.\n"
+	base := "---\nname: wtc-customize\ndescription: demo\n---\n\n# Demo\n\n## Local setup\n\nOld text.\n\n```bash\n# Configure widget\nprintf 'old\\n'\n```\n\n## Keep\n\nKeep text.\n"
 	if err := os.WriteFile(filepath.Join(baseDir, "SKILL.md"), []byte(base), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestRenderSkillsSectionPatchAndDriftFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(c.Collection, ".wtc", "skills", "wtc-customize", "SKILL.md"))
-	if err != nil || !strings.Contains(string(got), "Use the local hook.") || strings.Contains(string(got), "Old text.") || !strings.Contains(string(got), "Keep text.") {
+	if err != nil || !strings.Contains(string(got), "Use the local hook.") || strings.Contains(string(got), "Old text.") || strings.Contains(string(got), "# Configure widget") || !strings.Contains(string(got), "# Configure locally") || !strings.Contains(string(got), "Keep text.") {
 		t.Fatalf("patched skill = %s, %v", got, err)
 	}
 	link, err := os.Readlink(filepath.Join(c.Collection, ".agents", "skills", "wtc-customize"))
@@ -174,5 +174,60 @@ func TestRenderSkillsSectionPatchAndDriftFailure(t *testing.T) {
 	}
 	if _, err := c.RenderSkills(SkillRenderOptions{}); err == nil || !strings.Contains(err.Error(), "drifted") {
 		t.Fatalf("stale base should stop render, got %v", err)
+	}
+}
+
+func TestApplySkillSectionRejectsInvalidAndAmbiguousPatches(t *testing.T) {
+	base := []byte("# Skill\n\n## Setup\n\nOld.\n\n## Keep\n\nKeep.\n")
+	cases := []struct{ name, patch, base string }{
+		{"missing newline", "## Setup\nNew.", string(base)},
+		{"wrong heading level", "### Setup\nNew.\n", string(base)},
+		{"extra top heading", "## Setup\nNew.\n## Keep\n", string(base)},
+		{"missing heading", "## Missing\nNew.\n", string(base)},
+		{"duplicate base heading", "## Setup\nNew.\n", string(base) + "## Setup\nAgain.\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := applySkillSection([]byte(tc.base), []byte(tc.patch)); err == nil {
+				t.Fatal("invalid patch accepted")
+			}
+		})
+	}
+}
+
+func TestRenderSkillsRejectsConflictingAndDuplicateSectionOverlays(t *testing.T) {
+	c := fixture(t)
+	overlay := filepath.Join(c.Harness, "overlays", "skills", "wtc-customize")
+	sections := filepath.Join(overlay, "sections")
+	if err := os.MkdirAll(sections, 0755); err != nil {
+		t.Fatal(err)
+	}
+	baseDir := filepath.Join(c.Harness, "skills", "wtc-customize")
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "SKILL.md"), []byte("# Skill\n\n## Setup\n\nOld.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sections, "a.md"), []byte("## Setup\n\nFirst.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sections, "b.md"), []byte("## Setup\n\nSecond.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RenderSkills(SkillRenderOptions{}); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("duplicate section patches accepted: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(c.Collection, ".wtc")); !os.IsNotExist(err) {
+		t.Fatal("failed render wrote generated skill")
+	}
+	if err := os.Remove(filepath.Join(sections, "b.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(overlay, "SKILL.md"), []byte("full override\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RenderSkills(SkillRenderOptions{}); err == nil || !strings.Contains(err.Error(), "both a full overlay") {
+		t.Fatalf("full overlay conflict accepted: %v", err)
 	}
 }

@@ -39,7 +39,7 @@ func TestDiffSkillsReportsPrecedenceAndBaseDrift(t *testing.T) {
 		return rows[0]
 	}
 	row := check("untracked")
-	if row.DefaultHash != skillDigest(base) || len(row.Changes) == 0 {
+	if row.DefaultHash != skillDigest(base) || !strings.Contains(strings.Join(row.Changes, "\n"), "-# Customize wtc behavior\n+# Customize local behavior") {
 		t.Fatalf("missing digest or line changes: %+v", row)
 	}
 	digest := filepath.Join(overlay, ".wtc-base.sha256")
@@ -113,7 +113,7 @@ func TestDiffSkillsSectionPatchDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 || rows[0].Status != "reviewed" || rows[0].Source != "overlays/skills/wtc-customize/sections" || len(rows[0].Changes) == 0 {
+	if len(rows) != 2 || rows[0].Status != "reviewed" || rows[0].Source != "overlays/skills/wtc-customize/sections" || !strings.Contains(strings.Join(rows[0].Changes, "\n"), "-Old setup.\n+New setup.") {
 		t.Fatalf("patch rows = %+v", rows)
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".wtc-base.sha256"), []byte(strings.Repeat("0", 64)+"\n"), 0644); err != nil {
@@ -122,5 +122,12 @@ func TestDiffSkillsSectionPatchDrift(t *testing.T) {
 	rows, err = c.DiffSkills()
 	if err != nil || rows[0].Status != "drifted" {
 		t.Fatalf("stale patch base = %+v, %v", rows, err)
+	}
+	if err := os.WriteFile(filepath.Join(local, "SKILL.md"), []byte(strings.Replace(localBase, "## Project setup", "## Renamed setup", 1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = c.DiffSkills()
+	if err != nil || len(rows) != 2 || rows[0].Status != "drifted" || rows[0].Error == "" || rows[0].DefaultHash != skillDigest([]byte(strings.Replace(localBase, "## Project setup", "## Renamed setup", 1))) {
+		t.Fatalf("renamed heading hides drift: %+v, %v", rows, err)
 	}
 }
