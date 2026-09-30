@@ -47,6 +47,23 @@ func isBundleStatusComment(body string) bool {
 	return strings.HasPrefix(status, "`wtc-review v1 ") && strings.HasSuffix(status, "`") && reviewStatusLine.MatchString(status)
 }
 
+func isBundleInlineFinding(body string) bool {
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	if len(lines) < 2 {
+		return false
+	}
+	first := lines[0]
+	knownSeverity := false
+	for _, severity := range []string{"blocker", "major", "minor", "nit"} {
+		if strings.HasPrefix(first, "**"+severity+"** · ") {
+			knownSeverity = true
+			break
+		}
+	}
+	last := strings.TrimSpace(lines[len(lines)-1])
+	return knownSeverity && strings.HasPrefix(last, "`wtc-review-inline v1 key=") && strings.HasSuffix(last, "`") && reviewInlineMarker.MatchString(last)
+}
+
 // Forge comments are optional review context. An unavailable forge leaves a
 // usable local bundle, while posting still verifies the current remote head.
 func copyPublicReviewComments(dir string, manifest ReviewManifest) {
@@ -135,7 +152,7 @@ func writeBundleComments(dir string, comments []bundleComment) error {
 	}
 	var transcript strings.Builder
 	for i, comment := range comments {
-		if i <= latestReview || isBundleStatusComment(comment.Body) || strings.TrimSpace(comment.Body) == "" {
+		if i <= latestReview || isBundleStatusComment(comment.Body) || isBundleInlineFinding(comment.Body) || strings.TrimSpace(comment.Body) == "" {
 			continue
 		}
 		fmt.Fprintf(&transcript, "### %s, %s\n\n%s\n\n", comment.author(), comment.when(), strings.TrimSpace(comment.Body))

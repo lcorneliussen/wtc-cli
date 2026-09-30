@@ -15,6 +15,7 @@ func TestPublicReviewCommentsKeepRepliesAfterLatestStatusAndAllInlineKeys(t *tes
 	]}`)
 	inline := []byte(`[[
 		{"user":{"login":"reviewer"},"created_at":"2026-01-01T09:00:00Z","body":"wtc-review-inline v1 key=012345abcd"},
+		{"user":{"login":"reviewer"},"created_at":"2026-01-01T12:30:00Z","body":"**minor** · \u0060tests\u0060 — Missing assertion\n\nPlease add it.\n\n\u0060wtc-review-inline v1 key=111222abcd concern=tests file=test.go line=7\u0060"},
 		{"user":{"login":"author"},"created_at":"2026-01-01T14:00:00Z","body":"The updated test passes. wtc-review-inline v1 key=def567abcd"}
 	]]`)
 	comments, err := parseBundleComments(conversation, inline)
@@ -36,11 +37,11 @@ func TestPublicReviewCommentsKeepRepliesAfterLatestStatusAndAllInlineKeys(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(transcript), "Fixed the fallback assertion") || !strings.Contains(string(transcript), "The updated test passes") || strings.Contains(string(transcript), "012345abcd") || strings.Contains(string(transcript), "**Local review: in progress**") || strings.Index(string(transcript), "Fixed the fallback assertion") > strings.Index(string(transcript), "The updated test passes") {
+	if !strings.Contains(string(transcript), "Fixed the fallback assertion") || !strings.Contains(string(transcript), "The updated test passes") || strings.Contains(string(transcript), "012345abcd") || strings.Contains(string(transcript), "Missing assertion") || strings.Contains(string(transcript), "**Local review: in progress**") || strings.Index(string(transcript), "Fixed the fallback assertion") > strings.Index(string(transcript), "The updated test passes") {
 		t.Fatalf("incorrect reply transcript: %s", transcript)
 	}
 	keys, err := os.ReadFile(filepath.Join(prior, "inline-keys.txt"))
-	if err != nil || string(keys) != "012345abcd\naaa555bbbb\ndef567abcd\n" {
+	if err != nil || string(keys) != "012345abcd\n111222abcd\naaa555bbbb\ndef567abcd\n" {
 		t.Fatalf("prior inline keys lost: %s %v", keys, err)
 	}
 }
