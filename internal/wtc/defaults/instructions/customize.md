@@ -59,6 +59,33 @@ read-only commands do not run hooks. Hooks should be idempotent and avoid
 writing to other collections. For example, a harness may use `env.post.sh`
 to regenerate a local tool configuration after the collection env changes.
 
+### Status build facts
+
+`wtc status` can read build results from an executable
+`harness/hooks/wtc/status.build.sh`. This is a read-only data provider, called
+once for each repository's development branch (`tier: "tip"`) and again for a
+distinct `production_ref` (`tier: "prod"`). It is not a lifecycle hook. It
+receives JSON on stdin:
+
+```json
+{"collection":"demo","repo":"widget","worktree":"/path/to/demo/widget","slug":"example/widget","branch":"main","tier":"tip"}
+```
+
+Return one JSON object with `checks` (`SUCCESS`, `FAILURE`, `PENDING`, or
+`NONE`), optional `build` and `url`, and optionally the same `branch`:
+
+```json
+{"checks":"SUCCESS","build":"123","url":"https://example.invalid/build/123"}
+```
+
+An empty response or `null` hides that build cell. Keep the provider
+read-only, fast, and safe to call during watched status refreshes. The CLI
+stops a call after 15 seconds, rejects invalid JSON or a different branch,
+and never infers a passing build when the provider cannot answer. The TUI
+shows `T` and `P` cells only when build facts exist; clicking a cell opens its
+HTTP(S) URL unless `--no-click` is set. A harness without this provider has
+no build columns.
+
 ## Hooks in an application repository
 
 The existing collection lifecycle runs an `init` hook when it creates or adds
