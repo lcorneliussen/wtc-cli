@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReviewRunnerUsesSeparateProcessResultsAndDowngradesErrors(t *testing.T) {
@@ -73,7 +74,7 @@ if [ "${FAIL_CONCERN:-}" = "$id" ]; then exit 3; fi
 		t.Fatalf("custom launcher usage was lost: %s %v", statsData, err)
 	}
 	summary, err := os.ReadFile(filepath.Join(bundle, "summary.md"))
-	if err != nil || !strings.Contains(string(summary), "| code | test: |") || !strings.Contains(string(summary), "| lead | test:sample-model |") || !strings.Contains(string(summary), "$0.03") {
+	if err != nil || !strings.Contains(string(summary), "| code | test: |") || !strings.Contains(string(summary), "| lead | test:sample-model |") || !strings.Contains(string(summary), "100 / 10 (20)") || !strings.Contains(string(summary), "1.2k / 50 (200)") || !strings.Contains(string(summary), "1.3k / 60 (220)") || !strings.Contains(string(summary), "$0.03") {
 		t.Fatalf("run statistics table missing: %s %v", summary, err)
 	}
 	skipped, err := os.ReadFile(filepath.Join(bundle, "findings", "compat.json"))
@@ -103,6 +104,75 @@ if [ "${FAIL_CONCERN:-}" = "$id" ]; then exit 3; fi
 	summary, err = os.ReadFile(filepath.Join(bundle, "summary.md"))
 	if err != nil || !strings.Contains(string(summary), "**Local review: changes-requested**") || strings.Contains(string(summary), "**Local review: pass**") {
 		t.Fatalf("runner verdict and summary heading disagree: %s %v", summary, err)
+	}
+	stale := filepath.Join(bundle, "stats", "unselected.json")
+	if err := os.WriteFile(stale, []byte(`{"agent":"old","input_tokens":99999,"status":"ok"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	opt.Only = []string{"code"}
+	if _, err := c.RunReviewBundle(bundle, opt); err != nil {
+		t.Fatal(err)
+	}
+	summary, err = os.ReadFile(filepath.Join(bundle, "summary.md"))
+	if err != nil || strings.Contains(string(summary), "unselected") || strings.Contains(string(summary), "99999") {
+		t.Fatalf("selected run retained prior statistics: %s %v", summary, err)
+	}
+}
+
+func TestReviewStatsTableUsesWallAndAgentTime(t *testing.T) {
+	bundle := t.TempDir()
+	if err := os.Mkdir(filepath.Join(bundle, "stats"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	in, out, read := int64(10), int64(2), int64(0)
+	for name, stats := range map[string]reviewRunStats{
+		"code": {Agent: "test", Seconds: 70, Status: "ok", InputTokens: &in, OutputTokens: &out, CacheReadTokens: &read},
+		"lead": {Agent: "test", Seconds: 65, Status: "ok"},
+	} {
+		if err := writeReviewStats(bundle, name, stats); err != nil {
+			t.Fatal(err)
+		}
+	}
+	table, err := reviewStatsTable(bundle, 80*time.Second)
+	if err != nil || !strings.Contains(table, "| **Total** | | 2m15s | 10+ / 2+ (0+) | - |") || !strings.Contains(table, "Wall-clock for the whole run: 1m20s (agent time summed: 2m15s).") {
+		t.Fatalf("wrong time totals: %s %v", table, err)
+	}
+	if err := os.Remove(filepath.Join(bundle, "stats", "code.json")); err != nil {
+		t.Fatal(err)
+	}
+	table, err = reviewStatsTable(bundle, 80*time.Second)
+	if err != nil || !strings.Contains(table, "| **Total** | | 1m05s | - / - (-) | - |") {
+		t.Fatalf("unknown usage displayed as zero: %s %v", table, err)
+	}
+}
+
+func TestReviewFallbackAggregatesCurrentAttempts(t *testing.T) {
+	bundle := t.TempDir()
+	prompt := filepath.Join(bundle, "prompt.md")
+	if err := os.WriteFile(prompt, []byte("Review"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(bundle, "agent.sh")
+	script := `#!/bin/sh
+if [ "$1" = first ]; then
+  printf '{"input_tokens":100,"output_tokens":10,"cache_read_tokens":0,"cost_usd":0.02}\n' > "$WTC_REVIEW_STATS_FILE"
+  printf 'usage limit\n'
+  exit 1
+fi
+printf '{"input_tokens":20,"output_tokens":2,"cache_read_tokens":0,"cost_usd":0.01}\n' > "$WTC_REVIEW_STATS_FILE"
+printf 'complete\n'
+`
+	if err := os.WriteFile(launcher, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WTC_REVIEW_AGENT_CMD", launcher)
+	statsPath := filepath.Join(bundle, "stats.json")
+	agent, _, output, stats, err := runReviewChain(bundle, bundle, prompt, "first: second:", time.Minute, statsPath)
+	if err != nil || agent != "second" || !strings.Contains(string(output), "complete") {
+		t.Fatalf("fallback failed: %s %s %v", agent, output, err)
+	}
+	if stats.InputTokens == nil || *stats.InputTokens != 120 || stats.CostUSD == nil || *stats.CostUSD < 0.029 || *stats.CostUSD > 0.031 || stats.Agent != "second" || stats.UsagePartial || stats.CostPartial {
+		t.Fatalf("fallback did not aggregate current attempts: %+v", stats)
 	}
 }
 

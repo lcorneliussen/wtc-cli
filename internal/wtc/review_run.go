@@ -57,6 +57,8 @@ type reviewRunStats struct {
 	CacheWriteTokens *int64   `json:"cache_write_tokens"`
 	CostUSD          *float64 `json:"cost_usd"`
 	Turns            *int64   `json:"turns"`
+	UsagePartial     bool     `json:"usage_partial,omitempty"`
+	CostPartial      bool     `json:"cost_partial,omitempty"`
 }
 
 func reviewEnv(key, fallback string) string {
@@ -188,7 +190,7 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	}); err != nil {
 		return ReviewRunResult{}, err
 	}
-	leadAgent, leadModel, leadOutput, leadSeconds, err := runReviewChain(bundle, manifest.RepoDir, leadPrompt, opt.Lead, opt.Timeout, filepath.Join(bundle, "stats", "lead.json"))
+	leadAgent, leadModel, leadOutput, leadStats, err := runReviewChain(bundle, manifest.RepoDir, leadPrompt, opt.Lead, opt.Timeout, filepath.Join(bundle, "stats", "lead.json"))
 	if writeErr := os.WriteFile(filepath.Join(bundle, ".logs", "lead.out"), leadOutput, 0644); writeErr != nil {
 		return ReviewRunResult{}, writeErr
 	}
@@ -196,7 +198,8 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	if err != nil {
 		leadStatus = "error"
 	}
-	if writeErr := writeReviewStats(bundle, "lead", collectReviewStats(filepath.Join(bundle, "stats", "lead.json"), leadAgent, leadModel, leadSeconds, leadStatus, leadOutput)); writeErr != nil {
+	leadStats.Status = leadStatus
+	if writeErr := writeReviewStats(bundle, "lead", leadStats); writeErr != nil {
 		return ReviewRunResult{}, writeErr
 	}
 	if err != nil {
@@ -291,7 +294,7 @@ func (c *Context) runReviewConcern(bundle string, manifest ReviewManifest, id, p
 	}); err != nil {
 		return reviewConcernError(bundle, id, err.Error())
 	}
-	agent, model, output, elapsed, runErr := runReviewChain(bundle, manifest.RepoDir, prompt, spec, opt.Timeout, filepath.Join(bundle, "stats", id+".json"))
+	_, _, output, stats, runErr := runReviewChain(bundle, manifest.RepoDir, prompt, spec, opt.Timeout, filepath.Join(bundle, "stats", id+".json"))
 	_ = os.WriteFile(filepath.Join(bundle, ".logs", id+".out"), output, 0644)
 	status := "ok"
 	if runErr == nil {
@@ -306,7 +309,8 @@ func (c *Context) runReviewConcern(bundle string, manifest ReviewManifest, id, p
 		}
 		_ = writeReviewStub(bundle, id, "error", runErr.Error())
 	}
-	_ = writeReviewStats(bundle, id, collectReviewStats(filepath.Join(bundle, "stats", id+".json"), agent, model, elapsed, status, output))
+	stats.Status = status
+	_ = writeReviewStats(bundle, id, stats)
 	if runErr != nil {
 		return "ERROR " + id + ": " + runErr.Error() + "\n"
 	}
@@ -410,11 +414,12 @@ func countReviewFindings(dir string) (blockers, errors int, err error) {
 
 var reviewLimitMessage = regexp.MustCompile(`(?i)session limit|usage limit|rate limit|too many requests|overloaded|quota|HTTP/? ?429|status 429|hit your .{0,40}limit`)
 
-func runReviewChain(bundle, repoDir, prompt, specs string, timeout time.Duration, statsPath string) (string, string, []byte, time.Duration, error) {
+func runReviewChain(bundle, repoDir, prompt, specs string, timeout time.Duration, statsPath string) (string, string, []byte, reviewRunStats, error) {
 	list := strings.Fields(strings.ReplaceAll(specs, ",", " "))
 	if len(list) == 0 {
-		return "", "", nil, 0, fmt.Errorf("no review agent specified")
+		return "", "", nil, reviewRunStats{}, fmt.Errorf("no review agent specified")
 	}
+	var total reviewRunStats
 	for i, spec := range list {
 		parts := strings.SplitN(spec, ":", 2)
 		agent, model := parts[0], ""
@@ -423,11 +428,14 @@ func runReviewChain(bundle, repoDir, prompt, specs string, timeout time.Duration
 		}
 		_ = os.Remove(statsPath)
 		output, elapsed, err := launchReviewAgent(bundle, repoDir, prompt, agent, model, timeout, statsPath)
+		attempt := collectReviewStats(statsPath, agent, model, elapsed, "", output)
+		addReviewUsage(&total, attempt, i > 0)
+		total.Agent, total.Model = agent, attempt.Model
 		if err == nil || i == len(list)-1 || !reviewLimitMessage.Match(output) {
-			return agent, model, output, elapsed, err
+			return agent, model, output, total, err
 		}
 	}
-	return "", "", nil, 0, fmt.Errorf("review agent chain exhausted")
+	return "", "", nil, total, fmt.Errorf("review agent chain exhausted")
 }
 
 func launchReviewAgent(bundle, repoDir, prompt, agent, model string, timeout time.Duration, statsPath string) ([]byte, time.Duration, error) {

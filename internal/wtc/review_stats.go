@@ -123,6 +123,40 @@ func reviewIntPtr(value any) *int64 {
 	return &count
 }
 
+func addReviewUsage(total *reviewRunStats, attempt reviewRunStats, later bool) {
+	if later && (total.InputTokens == nil || total.OutputTokens == nil || total.CacheReadTokens == nil) {
+		total.UsagePartial = true
+	}
+	if attempt.InputTokens == nil || attempt.OutputTokens == nil || attempt.CacheReadTokens == nil {
+		total.UsagePartial = true
+	}
+	if later && total.CostUSD == nil || attempt.CostUSD == nil {
+		total.CostPartial = true
+	}
+	total.Seconds += attempt.Seconds
+	addReviewInt(&total.InputTokens, attempt.InputTokens)
+	addReviewInt(&total.OutputTokens, attempt.OutputTokens)
+	addReviewInt(&total.CacheReadTokens, attempt.CacheReadTokens)
+	addReviewInt(&total.CacheWriteTokens, attempt.CacheWriteTokens)
+	addReviewInt(&total.Turns, attempt.Turns)
+	if attempt.CostUSD != nil {
+		if total.CostUSD == nil {
+			total.CostUSD = new(float64)
+		}
+		*total.CostUSD += *attempt.CostUSD
+	}
+}
+
+func addReviewInt(total **int64, value *int64) {
+	if value == nil {
+		return
+	}
+	if *total == nil {
+		*total = new(int64)
+	}
+	**total += *value
+}
+
 func reviewStatsTable(bundle string, wall time.Duration) (string, error) {
 	paths, err := filepath.Glob(filepath.Join(bundle, "stats", "*.json"))
 	if err != nil {
@@ -140,7 +174,7 @@ func reviewStatsTable(bundle string, wall time.Duration) (string, error) {
 	})
 	lines := []string{"### Run stats", "", "| Concern | Agent | Time | Tokens in / out (cache read) | Cost |", "|---|---|---|---|---|"}
 	var seconds float64
-	var in, out, read int64
+	var in, out, read reviewTokenTotal
 	var cost float64
 	knownCost, unknownCost := false, false
 	for _, path := range paths {
@@ -158,18 +192,19 @@ func reviewStatsTable(bundle string, wall time.Duration) (string, error) {
 			continue
 		}
 		seconds += stats.Seconds
-		in += reviewValue(stats.InputTokens)
-		out += reviewValue(stats.OutputTokens)
-		read += reviewValue(stats.CacheReadTokens)
+		in.add(stats.InputTokens, stats.UsagePartial)
+		out.add(stats.OutputTokens, stats.UsagePartial)
+		read.add(stats.CacheReadTokens, stats.UsagePartial)
 		if stats.CostUSD == nil {
 			unknownCost = true
 		} else {
 			knownCost = true
 			cost += *stats.CostUSD
+			unknownCost = unknownCost || stats.CostPartial
 		}
 		tokens := "-"
 		if stats.InputTokens != nil || stats.OutputTokens != nil {
-			tokens = fmt.Sprintf("%s / %s (%s)", reviewTokens(stats.InputTokens), reviewTokens(stats.OutputTokens), reviewTokens(stats.CacheReadTokens))
+			tokens = fmt.Sprintf("%s / %s (%s)", reviewTokensMarked(stats.InputTokens, stats.UsagePartial), reviewTokensMarked(stats.OutputTokens, stats.UsagePartial), reviewTokensMarked(stats.CacheReadTokens, stats.UsagePartial))
 		}
 		name := id
 		if stats.Status != "ok" && stats.Status != "" {
@@ -184,15 +219,36 @@ func reviewStatsTable(bundle string, wall time.Duration) (string, error) {
 			totalCost += "+"
 		}
 	}
-	lines = append(lines, fmt.Sprintf("| **Total** | | %s | %s / %s (%s) | %s |", reviewSeconds(seconds), reviewTokens(&in), reviewTokens(&out), reviewTokens(&read), totalCost), "", fmt.Sprintf("Wall-clock for the whole run: %s (agent time summed: %s).", reviewSeconds(wall.Seconds()), reviewSeconds(seconds)))
+	lines = append(lines, fmt.Sprintf("| **Total** | | %s | %s / %s (%s) | %s |", reviewSeconds(seconds), in.render(), out.render(), read.render(), totalCost), "", fmt.Sprintf("Wall-clock for the whole run: %s (agent time summed: %s).", reviewSeconds(wall.Seconds()), reviewSeconds(seconds)))
 	return strings.Join(lines, "\n"), nil
 }
 
-func reviewValue(value *int64) int64 {
-	if value != nil {
-		return *value
+type reviewTokenTotal struct {
+	value          int64
+	known, partial bool
+}
+
+func (t *reviewTokenTotal) add(value *int64, partial bool) {
+	if value == nil {
+		t.partial = true
+		return
 	}
-	return 0
+	t.value += *value
+	t.known = true
+	t.partial = t.partial || partial
+}
+func (t reviewTokenTotal) render() string {
+	if !t.known {
+		return "-"
+	}
+	return reviewTokensMarked(&t.value, t.partial)
+}
+func reviewTokensMarked(value *int64, partial bool) string {
+	shown := reviewTokens(value)
+	if value != nil && partial {
+		return shown + "+"
+	}
+	return shown
 }
 func reviewSeconds(value float64) string {
 	seconds := int64(value)
