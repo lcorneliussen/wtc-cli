@@ -60,6 +60,7 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	}
 	review.AddCommand(bundle)
 	var strong, standard, fast, lead, only string
+	var postRun bool
 	var parallel, timeout int
 	run := &cobra.Command{Use: "run <bundle-dir>", Short: "Run separate headless reviewers and aggregate their findings", Args: cobra.ExactArgs(1)}
 	run.Flags().StringVar(&strong, "strong", "", "Agent:model chain for strong concerns")
@@ -69,6 +70,7 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	run.Flags().StringVar(&only, "only", "", "Comma-separated concern IDs")
 	run.Flags().IntVar(&parallel, "parallel", 0, "Maximum concurrent concern runs")
 	run.Flags().IntVar(&timeout, "timeout", 0, "Seconds allowed per agent run")
+	run.Flags().BoolVar(&postRun, "post", false, "Post one progress comment, then update it with the review result")
 	run.RunE = func(cmd *cobra.Command, args []string) error {
 		c, err := context()
 		if err != nil {
@@ -83,9 +85,24 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 				ids = append(ids, strings.TrimSpace(id))
 			}
 		}
+		if postRun {
+			if _, err := c.PostReviewBundle(args[0], wtc.ReviewPostOptions{Mode: "progress"}); err != nil {
+				return fmt.Errorf("post review progress: %w", err)
+			}
+		}
 		result, err := c.RunReviewBundle(args[0], wtc.ReviewRunOptions{Strong: strong, Standard: standard, Fast: fast, Lead: lead, Parallel: parallel, Timeout: time.Duration(timeout) * time.Second, Only: ids})
 		if err != nil {
+			if postRun {
+				if _, postErr := c.PostReviewBundle(args[0], wtc.ReviewPostOptions{Mode: "failed", Reason: err.Error()}); postErr != nil {
+					return fmt.Errorf("review failed: %v; failed to update progress comment: %w", err, postErr)
+				}
+			}
 			return err
+		}
+		if postRun {
+			if _, err := c.PostReviewBundle(args[0], wtc.ReviewPostOptions{Mode: "summary"}); err != nil {
+				return fmt.Errorf("post review result: %w", err)
+			}
 		}
 		if *asJSON {
 			return emit(envelope{OK: true, Data: result, Summary: result.Verdict}, true)
