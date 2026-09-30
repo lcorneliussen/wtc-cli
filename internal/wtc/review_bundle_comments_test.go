@@ -9,9 +9,9 @@ import (
 
 func TestPublicReviewCommentsKeepRepliesAfterLatestStatusAndAllInlineKeys(t *testing.T) {
 	conversation := []byte(`{"comments":[
-		{"author":{"login":"reviewer"},"createdAt":"2026-01-01T10:00:00Z","body":"wtc-review v1 head=aaaaaaaaaaaa verdict=pass blockers=0 round=1"},
-		{"author":{"login":"reviewer"},"createdAt":"2026-01-01T12:00:00Z","body":"wtc-review v1 head=bbbbbbbbbbbb verdict=pending blockers=0 round=2"},
-		{"author":{"login":"author"},"createdAt":"2026-01-01T13:00:00Z","body":"Fixed the fallback assertion."}
+		{"author":{"login":"reviewer"},"createdAt":"2026-01-01T10:00:00Z","body":"**Local review: pass**\n\n\u0060wtc-review v1 head=aaaaaaaaaaaa verdict=pass blockers=0 round=1\u0060"},
+		{"author":{"login":"reviewer"},"createdAt":"2026-01-01T12:00:00Z","body":"**Local review: in progress**\n\n\u0060wtc-review v1 head=bbbbbbbbbbbb verdict=pending blockers=0 round=2\u0060"},
+		{"author":{"login":"author"},"createdAt":"2026-01-01T13:00:00Z","body":"Fixed the fallback assertion.\n> \u0060wtc-review v1 head=aaaaaaaaaaaa verdict=pass blockers=0 round=1\u0060"}
 	]}`)
 	inline := []byte(`[[
 		{"user":{"login":"reviewer"},"created_at":"2026-01-01T09:00:00Z","body":"wtc-review-inline v1 key=012345abcd"},
@@ -36,7 +36,7 @@ func TestPublicReviewCommentsKeepRepliesAfterLatestStatusAndAllInlineKeys(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(transcript), "Fixed the fallback assertion") || !strings.Contains(string(transcript), "The updated test passes") || strings.Contains(string(transcript), "round=1") || strings.Contains(string(transcript), "round=2") {
+	if !strings.Contains(string(transcript), "Fixed the fallback assertion") || !strings.Contains(string(transcript), "The updated test passes") || strings.Contains(string(transcript), "012345abcd") || strings.Contains(string(transcript), "**Local review: in progress**") || strings.Index(string(transcript), "Fixed the fallback assertion") > strings.Index(string(transcript), "The updated test passes") {
 		t.Fatalf("incorrect reply transcript: %s", transcript)
 	}
 	keys, err := os.ReadFile(filepath.Join(prior, "inline-keys.txt"))

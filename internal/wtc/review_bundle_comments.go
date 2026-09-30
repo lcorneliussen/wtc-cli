@@ -38,6 +38,15 @@ func (c bundleComment) when() string {
 	return c.CreatedAt
 }
 
+func isBundleStatusComment(body string) bool {
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	if len(lines) < 2 || !strings.Contains(lines[0], "**Local review:") {
+		return false
+	}
+	status := strings.TrimSpace(lines[len(lines)-1])
+	return strings.HasPrefix(status, "`wtc-review v1 ") && strings.HasSuffix(status, "`") && reviewStatusLine.MatchString(status)
+}
+
 // Forge comments are optional review context. An unavailable forge leaves a
 // usable local bundle, while posting still verifies the current remote head.
 func copyPublicReviewComments(dir string, manifest ReviewManifest) {
@@ -98,7 +107,7 @@ func writeBundleComments(dir string, comments []bundleComment) error {
 	latestReview := -1
 	keys := map[string]bool{}
 	for i, comment := range comments {
-		if reviewStatusLine.MatchString(comment.Body) {
+		if isBundleStatusComment(comment.Body) {
 			latestReview = i
 		}
 		for _, match := range reviewInlineMarker.FindAllStringSubmatch(comment.Body, -1) {
@@ -126,7 +135,7 @@ func writeBundleComments(dir string, comments []bundleComment) error {
 	}
 	var transcript strings.Builder
 	for i, comment := range comments {
-		if i <= latestReview || reviewStatusLine.MatchString(comment.Body) || strings.TrimSpace(comment.Body) == "" {
+		if i <= latestReview || isBundleStatusComment(comment.Body) || strings.TrimSpace(comment.Body) == "" {
 			continue
 		}
 		fmt.Fprintf(&transcript, "### %s, %s\n\n%s\n\n", comment.author(), comment.when(), strings.TrimSpace(comment.Body))
