@@ -24,6 +24,7 @@ A CLI for worktree collections. This repository is the beginning of the migratio
 - `wtc review post <bundle-dir>` posts or updates the review comment, records a local receipt, and adds deduplicated inline findings.
 - `wtc review resolve <bundle-dir>` replies to and resolves inline review threads; without filters, it resolves every unresolved thread in the bundle.
 - `wtc review ready <pr-number> [--repo NAME]` promotes a draft only after a current, locally posted passing review (or an explicit user override).
+- `wtc browse [collection]` opens the bundled Neovim collection view. From an agent pane it uses that collection's browse pane; `--here` opens it in the current terminal. A harness can replace the view through `overlays/browse/wtc-browse.lua`.
 
 Run locally with `go run ./cmd/wtc`. Commands that have not migrated remain in the reference harness. Tagged releases build macOS and Linux binaries through GoReleaser. A harness pins an exact release in its checked-in `.wtc-cli-version` file (for example, `0.1.3`). `wtc env` reads that file and writes the tool entry into the generated collection-root `mise.toml`, which every sibling inherits. Then run `mise install` in the collection. No global installation is required.
 

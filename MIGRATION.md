@@ -19,9 +19,9 @@ command and its contract checks cover their behavior.
 | `add-repo.sh` | `wtc add-repo` | Native in v0.1.11; target-aware shim and released-binary contract tests |
 | `retire.sh` | `wtc retire` | Native in v0.1.12; released target-aware shell shim and binary contract tests |
 | `catch-up.sh` | `wtc catch-up` | Native in v0.1.15; matching-pin reference shim and released-binary contract tests |
-| `wtc-status.sh`, `wtc-status-tui.sh` | `wtc status` | Native one-shot and TUI implemented; reference shim and released-binary contracts pending |
+| `wtc-status.sh`, `wtc-status-tui.sh` | `wtc status` | Native one-shot and TUI released in v0.1.16; reference shims, published-binary contracts, and watch lifecycle ported |
 | `wtc-open.sh` | `wtc open` | Pending |
-| `wtc-browse.sh` | `wtc browse` | Pending |
+| `wtc-browse.sh` | `wtc browse` | Native launch and herdr routing in progress; reference shim and released-binary contracts pending |
 | `review-bundle.sh` | `wtc review bundle` | Native public no-catch-up subset in v0.1.4; private snapshots, overlays, catch-up, and prior-round context pending |
 | `review-run.sh` | `wtc review run` | Native local runner subset in v0.1.4; integrated posting lifecycle and rich stats pending |
 | `review-post.sh` | `wtc review post` | Native summary lifecycle, inline dedup, and local receipt in v0.1.4; forge parity tests pending |
