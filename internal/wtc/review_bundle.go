@@ -173,6 +173,13 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 				}
 			}
 		}
+		if prBranch == "" {
+			branchFromEnlistment, err := c.reviewEnlistedBranch(opt.Repo, opt.PR)
+			if err != nil {
+				return ReviewBundle{}, fmt.Errorf("cannot verify PR #%s branch without forge metadata: %w", opt.PR, err)
+			}
+			prBranch = branchFromEnlistment
+		}
 	}
 	if opt.PR != "" && opt.Head == "HEAD" {
 		if prBranch != "" && branch != prBranch {

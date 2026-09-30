@@ -161,12 +161,19 @@ esac
 		t.Fatalf("unavailable comment context was written: %v", err)
 	}
 	t.Setenv("GH_FAIL_PR_INFO", "1")
+	if _, err := c.BuildPublicReviewBundle(ReviewBundleOptions{Repo: "app", PR: "7", Base: "main"}); err == nil || !strings.Contains(err.Error(), "not enlisted") {
+		t.Fatalf("unverified offline PR was accepted: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(collection, ".wtc-prs"), []byte("app 7 feature\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	git("switch", "-c", "other")
 	fifth, err := c.BuildPublicReviewBundle(ReviewBundleOptions{Repo: "app", PR: "7", Base: "main"})
 	if err != nil {
 		t.Fatalf("forge outage prevented local review bundle: %v", err)
 	}
 	prText, err := os.ReadFile(filepath.Join(fifth.Dir, "pr.md"))
-	if err != nil || !strings.Contains(string(prText), "PR #7 not readable") || fifth.Manifest.URL != "https://github.com/example/app/pull/7" {
+	if err != nil || !strings.Contains(string(prText), "PR #7 not readable") || fifth.Manifest.URL != "https://github.com/example/app/pull/7" || fifth.Manifest.HeadBranch != "feature" {
 		t.Fatalf("offline PR fallback missing: %s %+v %v", prText, fifth.Manifest, err)
 	}
 }

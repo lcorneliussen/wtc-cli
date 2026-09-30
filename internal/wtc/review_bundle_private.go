@@ -36,6 +36,43 @@ func reviewDownstreamNames(repo Repo) []string {
 	return valid
 }
 
+func (c *Context) reviewEnlistedBranch(repo, number string) (string, error) {
+	records, err := c.ListPRs()
+	if err != nil {
+		return "", err
+	}
+	branch := ""
+	for _, record := range records {
+		if record.Number != number || record.Repo != repo && !(repo == "harness" && record.Repo == c.Config.Harness.Name) {
+			continue
+		}
+		if record.Branch == "" || branch != "" && branch != record.Branch {
+			return "", fmt.Errorf("PR enlistment has no unique branch")
+		}
+		branch = record.Branch
+	}
+	if branch == "" {
+		return "", fmt.Errorf("PR is not enlisted in this collection")
+	}
+	return branch, nil
+}
+
+func (c *Context) reviewBranchIsEnlisted(repo, branch string) bool {
+	if branch == "" {
+		return false
+	}
+	records, err := c.ListPRs()
+	if err != nil {
+		return false
+	}
+	for _, record := range records {
+		if record.Branch == branch && (record.Repo == repo || repo == c.Config.Harness.Name && record.Repo == "harness") {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Context) reviewRegistryRepo(name string) (Repo, bool) {
 	for _, repo := range c.Registry.Repos {
 		if repo.Name == name || name == "harness" && repo.Name == c.Config.Harness.Name {
@@ -136,15 +173,12 @@ func (c *Context) snapshotReviewRepository(dir, kind, name string) (bool, error)
 		if defaultRef == "" {
 			defaultRef = "origin/main"
 		}
-		if headErr == nil {
+		branch, branchErr := reviewGit(worktree, "branch", "--show-current")
+		label := strings.TrimSpace(string(branch))
+		if headErr == nil && branchErr == nil && c.reviewBranchIsEnlisted(name, label) {
 			if _, ancestorErr := reviewGit(worktree, "merge-base", "--is-ancestor", head, defaultRef); ancestorErr != nil {
 				if err := archiveReviewCommit(owner, head, filepath.Join(baseDir, "new")); err != nil {
 					return false, err
-				}
-				branch, _ := reviewGit(worktree, "branch", "--show-current")
-				label := strings.TrimSpace(string(branch))
-				if label == "" {
-					label = "HEAD"
 				}
 				refs += fmt.Sprintf("new=%s %s\n", label, head)
 			}

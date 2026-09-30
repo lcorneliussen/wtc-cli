@@ -103,6 +103,16 @@ func TestPrivateReviewBundleIncludesSnapshotsOverlaysAndRelatedPatch(t *testing.
 			t.Fatalf("public bundle included private %s", path)
 		}
 	}
+	if err := os.Remove(filepath.Join(collection, ".wtc-prs")); err != nil {
+		t.Fatal(err)
+	}
+	unlisted, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "library", Base: "main", NoCatchUp: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(unlisted.Dir, "downstream", "consumer", "new")); !os.IsNotExist(err) {
+		t.Fatalf("unlisted consumer branch became a rollout snapshot: %v", err)
+	}
 }
 
 func TestReviewBundleChecksOutPRBranchAndStopsOnCatchUpFailure(t *testing.T) {
