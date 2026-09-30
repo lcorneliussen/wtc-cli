@@ -98,6 +98,14 @@ outside changes in; `/wtc-follow` carries this session's work to its outcome.
 A status-only request remains read-only. Procedure and resumption limits:
 `harness/skills/wtc-follow/SKILL.md`.
 
+## Review a draft before marking it ready
+
+Use `/wtc-local-review` to bundle the diff and run a separate headless review.
+For a public PR, inspect the bundle and outgoing summary before posting them.
+`wtc review ready` requires a passing review posted on the current head with a
+local receipt. The rendered procedure is at
+`.agents/skills/wtc-local-review/SKILL.md`.
+
 ## Widening the scope is a decision
 
 Needing another repo, another system, another service is normal — doing it

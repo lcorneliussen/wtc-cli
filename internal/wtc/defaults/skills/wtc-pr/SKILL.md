@@ -161,12 +161,13 @@ opened — `tools/wtc-pr.sh enlist` afterwards fixes it.
 ### 5.2 Ready for review
 
 ```bash
-gh pr ready <n>                       # if it exists as a draft
+wtc review ready <n> --repo <repo>     # after /wtc-local-review on this head
 gh pr edit <n> --add-reviewer <who>   # only if the repo doesn't auto-assign
 ```
 
 Marking ready is what summons reviewers and the review bots. Do it only when
-the change is genuinely reviewable — otherwise this is a `wtc-draft-pr` job.
+the change is genuinely reviewable and the local review gate passes — otherwise
+this is a `wtc-draft-pr` job.
 
 ## 6. Follow it
 
