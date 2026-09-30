@@ -258,6 +258,11 @@ else:
 	if opened := openCollection(c, "sample", openOptions{Session: "test"}, "wide", true, true); !strings.Contains(opened.Error, "synthetic inspection failure") {
 		t.Fatalf("open concealed process inspection failure: %+v", opened)
 	}
+	for _, preview := range []openOptions{{Session: "test", List: true}, {Session: "test", DryRun: true}} {
+		if item := openCollection(c, "sample", preview, "wide", true, true); !strings.Contains(item.Error, "synthetic inspection failure") {
+			t.Fatalf("read-only open concealed process inspection failure: %+v", item)
+		}
+	}
 }
 
 func TestOpenAgentNamesFitHerdrLimit(t *testing.T) {
