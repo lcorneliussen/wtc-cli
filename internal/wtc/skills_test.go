@@ -183,6 +183,7 @@ func TestApplySkillSectionRejectsInvalidAndAmbiguousPatches(t *testing.T) {
 		{"missing newline", "## Setup\nNew.", string(base)},
 		{"wrong heading level", "### Setup\nNew.\n", string(base)},
 		{"extra top heading", "## Setup\nNew.\n## Keep\n", string(base)},
+		{"unclosed code fence", "## Setup\n\n```bash\necho ready\n", string(base)},
 		{"missing heading", "## Missing\nNew.\n", string(base)},
 		{"duplicate base heading", "## Setup\nNew.\n", string(base) + "## Setup\nAgain.\n"},
 	}

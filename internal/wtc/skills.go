@@ -304,6 +304,9 @@ func applySkillSection(base, patch []byte) ([]byte, error) {
 			return nil, fmt.Errorf("section patch may contain only one H2 section")
 		}
 	}
+	if fence != 0 {
+		return nil, fmt.Errorf("section patch has an unclosed code fence")
+	}
 	lines := strings.SplitAfter(string(base), "\n")
 	start, end := -1, -1
 	fence, fenceWidth = 0, 0
