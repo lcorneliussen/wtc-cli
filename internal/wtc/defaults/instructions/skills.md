@@ -69,6 +69,13 @@ The renderer runs at collection creation (`branch-off.sh`, `add-repo.sh`) and
 again at catch-up, which is how a collection created before a skill existed
 picks it up.
 
+For small local changes, a complete H2 section in
+`harness/overlays/skills/<name>/sections/<short-name>.md` replaces the matching
+section of the embedded or harness skill. Run `wtc skills diff --changes` to
+inspect overrides and upstream drift, then `wtc skills render --dry-run` to
+validate the assembled result. The patch format and base digest are documented
+in [customize.md](customize.md#skills-and-instructions).
+
 ### Across collections
 
 Every collection uses **its own** harness overrides and its pinned CLI's

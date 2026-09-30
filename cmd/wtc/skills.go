@@ -110,5 +110,49 @@ func addSkillsCommands(root *cobra.Command, asJSON *bool) {
 		return nil
 	}
 	skills.AddCommand(render)
+	var diffCollection string
+	var showChanges bool
+	diff := &cobra.Command{Use: "diff", Short: "Review skill overrides and upstream drift", Args: cobra.NoArgs}
+	diff.Flags().StringVar(&diffCollection, "collection", "", "Collection directory (default: current)")
+	diff.Flags().BoolVar(&showChanges, "changes", false, "Print changed lines for each override")
+	diff.RunE = func(cmd *cobra.Command, args []string) error {
+		var c *wtc.Context
+		var err error
+		if diffCollection == "" {
+			var cwd string
+			cwd, err = os.Getwd()
+			if err == nil {
+				c, err = wtc.Discover(cwd)
+			}
+		} else {
+			c, err = wtc.OpenCollection(diffCollection)
+		}
+		if err != nil {
+			return err
+		}
+		reports, err := c.DiffSkills()
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return emit(envelope{OK: true, Data: reports, Summary: fmt.Sprintf("%d skill override(s)", len(reports))}, true)
+		}
+		for _, report := range reports {
+			fmt.Printf("%s: %s (%s)\n", report.Name, report.Status, report.Source)
+			if report.Status == "drifted" || report.Status == "untracked" || report.Status == "invalid" {
+				fmt.Printf("  current base: %s\n", report.DefaultHash)
+			}
+			if report.Error != "" {
+				fmt.Printf("  cannot apply: %s\n", report.Error)
+			}
+			if showChanges {
+				for _, line := range report.Changes {
+					fmt.Println("  " + line)
+				}
+			}
+		}
+		return nil
+	}
+	skills.AddCommand(diff)
 	root.AddCommand(skills)
 }

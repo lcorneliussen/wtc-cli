@@ -71,6 +71,71 @@ func (c *Context) RenderSkills(opt SkillRenderOptions) (SkillRenderResult, error
 			}
 		}
 	}
+	patchRoot := filepath.Join(c.Harness, "overlays", "skills")
+	patchSkills, err := os.ReadDir(patchRoot)
+	if err != nil && !os.IsNotExist(err) {
+		return r, err
+	}
+	for _, entry := range patchSkills {
+		if !entry.IsDir() && entry.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		name := entry.Name()
+		patchDir := filepath.Join(patchRoot, name, "sections")
+		patches, err := os.ReadDir(patchDir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return r, err
+		}
+		if len(patches) == 0 {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(patchRoot, name, "SKILL.md")); err == nil {
+			return r, fmt.Errorf("skill %s has both a full overlay and section patches", name)
+		} else if !os.IsNotExist(err) {
+			return r, err
+		}
+		s, ok := sources[name]
+		if !ok {
+			return r, fmt.Errorf("section patches for unknown skill %s", name)
+		}
+		base := s.data
+		if base == nil {
+			base, err = os.ReadFile(s.path)
+			if err != nil {
+				return r, err
+			}
+		}
+		if recorded, err := os.ReadFile(filepath.Join(patchRoot, name, ".wtc-base.sha256")); err == nil {
+			if strings.TrimSpace(string(recorded)) != skillDigest(base) {
+				return r, fmt.Errorf("skill %s section patch base has drifted; review and update .wtc-base.sha256", name)
+			}
+		} else if !os.IsNotExist(err) {
+			return r, err
+		}
+		seenHeadings := map[string]bool{}
+		for _, patch := range patches {
+			if patch.IsDir() || !strings.HasSuffix(patch.Name(), ".md") {
+				continue
+			}
+			body, err := os.ReadFile(filepath.Join(patchDir, patch.Name()))
+			if err != nil {
+				return r, err
+			}
+			heading := strings.SplitN(string(body), "\n", 2)[0]
+			if seenHeadings[heading] {
+				return r, fmt.Errorf("duplicate skill %s section patch for %q", name, heading)
+			}
+			seenHeadings[heading] = true
+			base, err = applySkillSection(base, body)
+			if err != nil {
+				return r, fmt.Errorf("%s: %w", filepath.Join(patchDir, patch.Name()), err)
+			}
+		}
+		sources[name] = source{path: filepath.Join(c.Collection, ".wtc", "skills", name, "SKILL.md"), target: "../../.wtc/skills/" + name, data: base}
+	}
 	names := make([]string, 0, len(sources))
 	for name := range sources {
 		names = append(names, name)
@@ -211,6 +276,94 @@ func managedSkillTarget(target, harnessName string) bool {
 		}
 	}
 	return false
+}
+
+// A section patch is a complete Markdown H2 section. It replaces only the
+// matching H2 in the base skill, preserving its frontmatter and other sections.
+func applySkillSection(base, patch []byte) ([]byte, error) {
+	if len(patch) == 0 || patch[len(patch)-1] != '\n' {
+		return nil, fmt.Errorf("section patch must end with a newline")
+	}
+	patchLines := strings.SplitAfter(string(patch), "\n")
+	if len(patchLines) < 2 || !strings.HasPrefix(patchLines[0], "## ") {
+		return nil, fmt.Errorf("section patch must start with its exact H2 heading")
+	}
+	heading := strings.TrimSuffix(patchLines[0], "\n")
+	var fence byte
+	var fenceWidth int
+	for _, line := range patchLines[1 : len(patchLines)-1] {
+		if nextFence, width, rest := skillFence(line); width > 0 {
+			if fence == 0 {
+				fence, fenceWidth = nextFence, width
+			} else if nextFence == fence && width >= fenceWidth && strings.TrimSpace(rest) == "" {
+				fence = 0
+			}
+			continue
+		}
+		if fence == 0 && skillTopHeading(line) {
+			return nil, fmt.Errorf("section patch may contain only one H2 section")
+		}
+	}
+	if fence != 0 {
+		return nil, fmt.Errorf("section patch has an unclosed code fence")
+	}
+	lines := strings.SplitAfter(string(base), "\n")
+	start, end := -1, -1
+	fence, fenceWidth = 0, 0
+	for i, line := range lines {
+		if nextFence, width, rest := skillFence(line); width > 0 {
+			if fence == 0 {
+				fence, fenceWidth = nextFence, width
+			} else if nextFence == fence && width >= fenceWidth && strings.TrimSpace(rest) == "" {
+				fence = 0
+			}
+			continue
+		}
+		if fence != 0 {
+			continue
+		}
+		if strings.TrimSuffix(line, "\n") == heading {
+			if start >= 0 {
+				return nil, fmt.Errorf("duplicate heading %q", heading)
+			}
+			start = i
+			continue
+		}
+		if start >= 0 && end < 0 && skillTopHeading(line) {
+			end = i
+		}
+	}
+	if start < 0 {
+		return nil, fmt.Errorf("heading %q not found", heading)
+	}
+	if end < 0 {
+		end = len(lines)
+	}
+	return []byte(strings.Join(lines[:start], "") + string(patch) + strings.Join(lines[end:], "")), nil
+}
+
+func skillTopHeading(line string) bool {
+	return strings.HasPrefix(line, "# ") || strings.HasPrefix(line, "## ")
+}
+
+func skillFence(line string) (byte, int, string) {
+	line = strings.TrimSuffix(line, "\n")
+	spaces := len(line) - len(strings.TrimLeft(line, " "))
+	if spaces > 3 {
+		return 0, 0, ""
+	}
+	line = line[spaces:]
+	if len(line) < 3 || line[0] != '`' && line[0] != '~' {
+		return 0, 0, ""
+	}
+	i := 0
+	for i < len(line) && line[i] == line[0] {
+		i++
+	}
+	if i < 3 {
+		return 0, 0, ""
+	}
+	return line[0], i, line[i:]
 }
 
 func renderSkillLink(collection, dest, want, label string, dryRun bool, r *SkillRenderResult) error {

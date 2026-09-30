@@ -12,7 +12,7 @@ command and its contract checks cover their behavior.
 | `refresh-configs.sh` | `wtc registry refresh` | Native in v0.1.3; generic shell shim released in v0.1.6 |
 | `link-mcp.sh` | `wtc mcp render` | Native for one collection in v0.1.3; native `--all` and target-aware shell shim released in v0.1.14 |
 | `link-skills.sh` | `wtc skills render` | Native in v0.1.8; released target-aware shell shim and contract tests |
-| Skill section patches and overlay drift | `wtc skills diff` | Full skill overrides supported; section patch and drift review pending |
+| Skill section patches and overlay drift | `wtc skills diff` | H2 section patches and base-digest drift review implemented; release and published-binary contracts pending |
 | `link-secrets.sh` | `wtc secrets link` | Native in v0.1.5; released shims and harness tests in upstream and derivatives |
 | `agent-env.sh` | `wtc agent-env` | Native in v0.1.6; generic shim released; configurable collection-local bins in v0.1.7 |
 | `branch-off.sh` | `wtc new` | Native in v0.1.10; reference shim released with matching-pin dispatch and bootstrap fallback |
@@ -23,16 +23,18 @@ command and its contract checks cover their behavior.
 | `wtc-open.sh` | `wtc open` | Native command released in v0.1.21; matching-pin shim, bootstrap guidance, and published-binary contracts merged in the reference harness and in-scope ports |
 | `wtc-browse.sh` | `wtc browse` | Native launch, bundled Neovim view, and herdr routing released in v0.1.17; reference matching-pin shim and released-binary contracts merged |
 | `review-bundle.sh` | `wtc review bundle` | Native public and private bundles, branch checkout, collection catch-up, concern overlays, related patches, registry snapshots, prior summaries, and GitHub/Bitbucket reply context released in v0.1.23 with a matching-pin reference shim and published-binary contract tests |
-| `review-run.sh` | `wtc review run` | Native local runner and integrated progress/result posting; per-agent usage and run summary table implemented, reference shim and released-binary contracts pending |
-| `review-post.sh` | `wtc review post` | Native summary lifecycle, inline dedup, and local receipt in v0.1.4; forge parity tests pending |
-| `review-status.sh` | `wtc review status` | Native GitHub and Bitbucket status and trusted-local check in v0.1.4 |
-| `review-resolve.sh` | `wtc review resolve` | Native reply/resolve in v0.1.4; forge parity tests pending |
-| `bb-pr-ready.sh` | `wtc review ready` | Native guarded promotion in v0.1.4 |
+| `review-run.sh` | `wtc review run` | Native local runner, per-agent usage, and integrated posting released in v0.1.24; matching-pin reference shim and published-binary contracts merged |
+| `review-post.sh` | `wtc review post` | Native summary lifecycle and inline dedup; matching-pin reference shim and synthetic published-binary GitHub contract merged; Bitbucket forge parity pending |
+| `review-status.sh` | `wtc review status` | Native GitHub/Bitbucket status and trusted-local check; matching-pin reference shim and published-binary contracts merged |
+| `review-resolve.sh` | `wtc review resolve` | Native reply/resolve; matching-pin reference shim and synthetic published-binary GitHub contract merged; Bitbucket forge parity pending |
+| `bb-pr-ready.sh` | `wtc review ready` | Native guarded promotion; matching-pin reference shim and published-binary contract merged |
 
 `wtc-status-legacy.sh`, `wtc-status-legacy-tui.sh`, `lib.sh`, and
 `wtc-status-common.sh` are implementation support for those entry points.
-The status, PR-facts, and review Python helpers and browse Lua integration also need
-native replacements or retirement once their callers move.
+The status, PR-facts, and review Python helpers and browse Lua integration
+remain in shell fallback paths. The native commands have replacements for
+their normal dispatch; retire a helper only when its retained shim no longer
+needs it.
 
 The completion gate is behavior, not a command name: run the relevant
 black-box harness contracts through both the CLI and retained shims, including

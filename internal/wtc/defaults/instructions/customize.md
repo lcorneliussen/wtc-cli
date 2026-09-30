@@ -150,6 +150,25 @@ skills in either directory are linked as well. A real directory already at an
 agent client's skill destination is a local override and is left alone. The
 renderer prunes only stale symlinks it owns.
 
+To replace only one H2 section, put a complete section (starting with its
+exact `## Heading` and ending with a newline) in
+`harness/overlays/skills/<name>/sections/<short-name>.md`. The heading must
+occur exactly once in the base skill, and the patch cannot introduce another
+H1 or H2. The base is `harness/skills/<name>/SKILL.md` when present, otherwise
+the CLI's embedded skill. A full overlay `SKILL.md` and section patches for
+the same skill are mutually exclusive. `wtc skills render --dry-run` validates
+patches without writing them; rendering materializes the assembled skill in
+the collection's disposable `.wtc/skills/` directory.
+
+Use `wtc skills diff --changes` to review local skill changes against the
+installed CLI. It prints the current base SHA-256 for untracked or drifted
+overrides. Record that digest in
+`harness/overlays/skills/<name>/.wtc-base.sha256` after reviewing a section
+patch. If the base later changes, render stops and diff reports `drifted`;
+review the patch against the new base and update the digest. A full skill
+override can use the same sidecar file for drift reporting. Without a sidecar,
+diff reports `untracked`. `--json` provides the same findings for automation.
+
 `wtc eject 'skills/wtc-customize'` or another selected path copies an
 embedded default into the harness for editing; eject refuses to overwrite an
 existing file. Keep repository-specific agent instructions in that
