@@ -3,6 +3,7 @@ package wtc
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,5 +44,38 @@ func TestStatusRefreshRefsUsesSharedOwnerAgeGate(t *testing.T) {
 	report, err = c.StatusRefreshRefs(false)
 	if err != nil || report.Attempted != 0 {
 		t.Fatalf("fresh shared owner fetched again: %+v %v", report, err)
+	}
+}
+
+func TestStatusLiveSnapshotWritesOnlyScopedCaches(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	if _, err := c.NewCollection(NewOptions{Slug: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	all, _, err := c.StatusLiveSnapshot(true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !all.ShowCollectionColumn || all.Collection != "" || len(all.Repos) != 2 || len(all.PRs) != 0 {
+		t.Fatalf("wrong workspace status scope: %+v", all)
+	}
+	allMD := all.Markdown()
+	if !strings.Contains(allMD, "**main/harness**") || !strings.Contains(allMD, "**other/harness**") || strings.Contains(allMD, "## PRs") {
+		t.Fatalf("workspace Markdown lost collection scope: %s", allMD)
+	}
+	for _, name := range []string{"main", "other"} {
+		if _, err := os.Stat(filepath.Join(c.Workspace, name, ".wtc-status.json")); !os.IsNotExist(err) {
+			t.Fatalf("workspace sweep wrote %s cache: %v", name, err)
+		}
+	}
+	one, _, err := c.StatusLiveSnapshot(false, true)
+	if err != nil || one.Collection != "main" {
+		t.Fatalf("scoped status failed: %+v %v", one, err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Collection, ".wtc-status.json")); err != nil {
+		t.Fatalf("scoped cache missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Workspace, "other", ".wtc-status.json")); !os.IsNotExist(err) {
+		t.Fatalf("other collection cache written: %v", err)
 	}
 }

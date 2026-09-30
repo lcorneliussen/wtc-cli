@@ -10,9 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Previews are deliberately explicit while discovery, caching, and the live
-// view are being ported. Neither writes a snapshot that a status pane could
-// mistake for a complete one.
+// Explicit previews do not write snapshots that a status pane could mistake
+// for a completed one-shot collection.
 func addStatusCommand(root *cobra.Command, asJSON *bool) {
 	var local, forge, all, md, cached, noFetch bool
 	cmd := &cobra.Command{Use: "status", Short: "Inspect worktree collection status", Args: cobra.NoArgs}
@@ -27,8 +26,8 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 			if local || forge || all || noFetch {
 				return fmt.Errorf("--cached cannot be combined with --local, --forge, --all, or --no-fetch")
 			}
-		} else if local == forge {
-			return fmt.Errorf("native status is still being ported; choose --local or --forge for a preview")
+		} else if local && forge {
+			return fmt.Errorf("--local and --forge cannot be combined")
 		}
 		if forge && all {
 			return fmt.Errorf("--forge is currently scoped to this collection")
@@ -69,14 +68,16 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 			return nil
 		}
 		var snapshot wtc.StatusSnapshot
+		var fetched wtc.StatusFetchReport
 		if forge {
-			var fetched wtc.StatusFetchReport
 			snapshot, fetched, err = c.StatusLivePreview(noFetch)
-			if fetched.Failed > 0 {
-				fmt.Fprintf(os.Stderr, "wtc: warning: %d status ref refresh(es) failed; showing local refs\n", fetched.Failed)
-			}
-		} else {
+		} else if local {
 			snapshot, err = c.StatusLocalSnapshot(all)
+		} else {
+			snapshot, fetched, err = c.StatusLiveSnapshot(all, noFetch)
+		}
+		if fetched.Failed > 0 {
+			fmt.Fprintf(os.Stderr, "wtc: warning: %d status ref refresh(es) failed; showing local refs\n", fetched.Failed)
 		}
 		if err != nil {
 			return err

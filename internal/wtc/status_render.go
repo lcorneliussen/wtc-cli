@@ -95,7 +95,11 @@ func (s StatusSnapshot) Markdown() string {
 		if tree == "" {
 			tree = "clean"
 		}
-		parts := []string{fmt.Sprintf("**%s** (`%s`) — %s", row.Dir, branch, tree)}
+		name := row.Dir
+		if s.ShowCollectionColumn {
+			name = row.Collection + "/" + row.Dir
+		}
+		parts := []string{fmt.Sprintf("**%s** (`%s`) — %s", name, branch, tree)}
 		if row.Ahead > 0 {
 			parts = append(parts, fmt.Sprintf("↑%d", row.Ahead))
 		}
@@ -134,6 +138,10 @@ func (s StatusSnapshot) Markdown() string {
 	}
 	if s.StaleCount != 0 {
 		fmt.Fprintf(&b, "\n_%d worktree(s) behind remote — catch-up needed._\n", s.StaleCount)
+	}
+	if s.ShowCollectionColumn {
+		b.WriteString("\n")
+		return b.String()
 	}
 	b.WriteString("\n## PRs\n\n")
 	active, archived := []StatusPRRow{}, []StatusPRRow{}

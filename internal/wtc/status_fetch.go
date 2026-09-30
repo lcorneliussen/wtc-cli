@@ -69,3 +69,43 @@ func (c *Context) StatusLivePreview(noFetch bool) (StatusSnapshot, StatusFetchRe
 	snapshot, err := c.StatusForgePreview()
 	return snapshot, report, err
 }
+
+// StatusLiveSnapshot runs the complete public one-shot collector. A scoped
+// result updates the three collection caches; an explicit workspace sweep
+// stays read-only across collection boundaries and omits enlisted PR sections.
+func (c *Context) StatusLiveSnapshot(all, noFetch bool) (StatusSnapshot, StatusFetchReport, error) {
+	var report StatusFetchReport
+	if !noFetch {
+		var err error
+		report, err = c.StatusRefreshRefs(all)
+		if err != nil {
+			return StatusSnapshot{}, report, err
+		}
+	}
+	if !all {
+		snapshot, err := c.StatusForgePreview()
+		if err != nil {
+			return snapshot, report, err
+		}
+		return snapshot, report, c.WriteStatusSnapshot(snapshot)
+	}
+	collections, err := WorkspaceCollections(c.Workspace)
+	if err != nil {
+		return StatusSnapshot{}, report, err
+	}
+	snapshot := StatusSnapshot{Schema: 1, GeneratedAt: time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		ShowCollectionColumn: true, Repos: []StatusRepo{}, PRs: []StatusPRRow{}, Orphans: []StatusOrphan{}}
+	for _, dir := range collections {
+		collection, err := OpenCollection(dir)
+		if err != nil {
+			return snapshot, report, err
+		}
+		part, err := collection.StatusForgePreview()
+		if err != nil {
+			return snapshot, report, err
+		}
+		snapshot.Repos = append(snapshot.Repos, part.Repos...)
+		snapshot.StaleCount += part.StaleCount
+	}
+	return snapshot, report, nil
+}
