@@ -13,18 +13,18 @@ import (
 // view are being ported. Neither writes a snapshot that a status pane could
 // mistake for a complete one.
 func addStatusCommand(root *cobra.Command, asJSON *bool) {
-	var local, enlisted, all, md bool
+	var local, forge, all, md bool
 	cmd := &cobra.Command{Use: "status", Short: "Inspect worktree collection status", Args: cobra.NoArgs}
 	cmd.Flags().BoolVar(&local, "local", false, "Preview local Git facts (no forge facts or cache writes)")
-	cmd.Flags().BoolVar(&enlisted, "enlisted", false, "Preview local Git and enlisted PR facts (no cache writes)")
+	cmd.Flags().BoolVar(&forge, "forge", false, "Preview local Git and PR facts (no snapshot writes)")
 	cmd.Flags().BoolVar(&all, "all", false, "Include every collection in the workspace")
 	cmd.Flags().BoolVar(&md, "md", false, "Render agent Markdown")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		if local == enlisted {
-			return fmt.Errorf("native status is still being ported; choose --local or --enlisted for a preview")
+		if local == forge {
+			return fmt.Errorf("native status is still being ported; choose --local or --forge for a preview")
 		}
-		if enlisted && all {
-			return fmt.Errorf("--enlisted is currently scoped to this collection")
+		if forge && all {
+			return fmt.Errorf("--forge is currently scoped to this collection")
 		}
 		if md && *asJSON {
 			return fmt.Errorf("--md and --json cannot be combined")
@@ -38,8 +38,8 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 			return err
 		}
 		var snapshot wtc.StatusSnapshot
-		if enlisted {
-			snapshot, err = c.StatusEnlistedSnapshot()
+		if forge {
+			snapshot, err = c.StatusForgePreview()
 		} else {
 			snapshot, err = c.StatusLocalSnapshot(all)
 		}

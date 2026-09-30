@@ -84,10 +84,10 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	return statusUnknownDetail(record)
 }
 
-// StatusEnlistedSnapshot adds forge facts for this collection's enlisted PRs.
-// It is an intermediate stage: branch discovery, caching, builds, and the live
-// renderer are supplied by later stages. A forge failure remains UNKNOWN.
-func (c *Context) StatusEnlistedSnapshot() (StatusSnapshot, error) {
+// StatusForgePreview adds enlisted PRs and discovers open PRs on active
+// branches. Build facts, snapshot persistence, and the live renderer are
+// supplied by later stages. A forge failure never becomes a merged claim.
+func (c *Context) StatusForgePreview() (StatusSnapshot, error) {
 	snapshot, err := c.StatusLocalSnapshot(false)
 	if err != nil {
 		return snapshot, err
@@ -103,6 +103,7 @@ func (c *Context) StatusEnlistedSnapshot() (StatusSnapshot, error) {
 			return snapshot, err
 		}
 	}
+	enlistedBranches := map[string]bool{}
 	for _, record := range records {
 		if err := ValidatePRIdentity(record.Repo, record.Number); err != nil {
 			return snapshot, fmt.Errorf("invalid enlisted PR: %w", err)
@@ -113,6 +114,9 @@ func (c *Context) StatusEnlistedSnapshot() (StatusSnapshot, error) {
 		harnessName, _ := c.HarnessRepoName()
 		if record.Repo == "harness" || record.Repo == harnessName {
 			worktreeDir = "harness"
+		}
+		if record.Branch != "" {
+			enlistedBranches[worktreeDir+"\x00"+record.Branch] = true
 		}
 		branchRow := -1
 		for i, row := range snapshot.Repos {
@@ -147,6 +151,21 @@ func (c *Context) StatusEnlistedSnapshot() (StatusSnapshot, error) {
 			row.DisplayTitle = "MERGED — still on " + record.Branch + "; catch-up  " + detail.Title
 		}
 		snapshot.PRs = append(snapshot.PRs, row)
+	}
+	for i, row := range snapshot.Repos {
+		if row.BranchKind != "branch" || row.PR != nil || enlistedBranches[row.Dir+"\x00"+row.Branch] {
+			continue
+		}
+		slug, forge := c.statusRecordForge(PRRecord{Repo: row.Repo}, snapshot.Repos)
+		number, err := statusDiscoverBranch(forge, slug, row.Branch)
+		if err != nil || number == "" {
+			continue
+		}
+		detail := statusEnrichRecord(PRRecord{Repo: row.Repo, Number: number}, slug, forge)
+		if detail.State == "OPEN" || detail.State == "DRAFT" {
+			snapshot.Repos[i].PR = &StatusPRFacts{Number: detail.Number, Checks: detail.Checks,
+				Merge: detail.Merge, Review: detail.Review, Draft: detail.State == "DRAFT"}
+		}
 	}
 	return snapshot, nil
 }

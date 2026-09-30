@@ -22,8 +22,12 @@ func statusForgeCacheDir() string {
 }
 
 func statusForgeCachePath(forge, slug, number string) string {
-	key := sha256.Sum256([]byte(forge + "\x00" + slug + "\x00" + number))
-	return filepath.Join(statusForgeCacheDir(), "pr-"+hex.EncodeToString(key[:])+".json")
+	return statusForgeEntryPath("pr", forge, slug, number)
+}
+
+func statusForgeEntryPath(kind, forge, slug, key string) string {
+	digest := sha256.Sum256([]byte(kind + "\x00" + forge + "\x00" + slug + "\x00" + key))
+	return filepath.Join(statusForgeCacheDir(), kind+"-"+hex.EncodeToString(digest[:])+".json")
 }
 
 func statusSecureCacheDir(path string) bool {
@@ -41,7 +45,11 @@ func statusSecureCacheDir(path string) bool {
 }
 
 func statusReadForgeCache(forge, slug, number string) ([]byte, bool) {
-	path := statusForgeCachePath(forge, slug, number)
+	return statusReadForgeEntry("pr", forge, slug, number)
+}
+
+func statusReadForgeEntry(kind, forge, slug, key string) ([]byte, bool) {
+	path := statusForgeEntryPath(kind, forge, slug, key)
 	if !statusSecureCacheDir(filepath.Dir(path)) {
 		return nil, false
 	}
@@ -54,10 +62,14 @@ func statusReadForgeCache(forge, slug, number string) ([]byte, bool) {
 }
 
 func statusWriteForgeCache(forge, slug, number string, data []byte) {
+	statusWriteForgeEntry("pr", forge, slug, number, data)
+}
+
+func statusWriteForgeEntry(kind, forge, slug, key string, data []byte) {
 	if len(data) == 0 {
 		return
 	}
-	path := statusForgeCachePath(forge, slug, number)
+	path := statusForgeEntryPath(kind, forge, slug, key)
 	if !statusSecureCacheDir(filepath.Dir(path)) {
 		return
 	}

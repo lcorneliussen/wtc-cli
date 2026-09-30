@@ -57,7 +57,7 @@ func TestStatusEnlistedSnapshotPreservesUnknownForgeState(t *testing.T) {
 	if _, err := c.EnlistPR(PRRecord{Repo: "agent-harness", Number: "12", Branch: "topic", Title: "Synthetic change"}); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := c.StatusEnlistedSnapshot()
+	snapshot, err := c.StatusForgePreview()
 	if err != nil {
 		t.Fatal(err)
 	}
