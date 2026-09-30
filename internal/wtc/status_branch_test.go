@@ -1,8 +1,10 @@
 package wtc
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,6 +61,26 @@ esac
 	}
 	if _, err := statusDiscoverBranch("github.com", "example/widget", "different"); err == nil {
 		t.Fatal("failed discovery was treated as a negative result")
+	}
+}
+
+func TestStatusBitbucketDiscoveryReadsPastFirstPage(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	bin := t.TempDir()
+	items := make([]string, 50)
+	for i := range items {
+		items[i] = fmt.Sprintf(`{"id":%d,"source":{"branch":{"name":"other-%d"}}}`, i+1, i)
+	}
+	first := `{"pullRequests":[` + strings.Join(items, ",") + `]}`
+	last := `{"pullRequests":[{"id":99,"source":{"branch":{"name":"topic"}}}]}`
+	script := "#!/bin/sh\ncase \"$*\" in\n  *2147483647*) printf '%s\\n' '" + last + "' ;;\n  *) printf '%s\\n' '" + first + "' ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(bin, "bb"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	number, err := statusDiscoverBranch("bitbucket.org", "example/widget", "topic")
+	if err != nil || number != "99" {
+		t.Fatalf("branch beyond first page was missed: %q %v", number, err)
 	}
 }
 

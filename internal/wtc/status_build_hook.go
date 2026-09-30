@@ -59,6 +59,7 @@ func (c *Context) statusBuildFromHook(path string, request statusBuildRequest) (
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, path)
+	command.WaitDelay = 200 * time.Millisecond
 	command.Dir = c.Collection
 	command.Env = append(os.Environ(), "WTC_COLLECTION="+filepath.Base(c.Collection), "WTC_CONFIG_ROOT="+c.ConfigRoot)
 	command.Stdin = bytes.NewReader(payload)
