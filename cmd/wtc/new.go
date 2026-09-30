@@ -49,34 +49,42 @@ func addNewCommand(root *cobra.Command, asJSON *bool) {
 		if err != nil {
 			return err
 		}
-		shouldOpen := open
-		if !open && !noOpen {
-			if _, err := exec.LookPath("herdr"); err == nil {
-				shouldOpen = openSessionRunning(openSession(c, ""))
-			}
-		}
-		if shouldOpen {
-			if _, err := exec.LookPath("herdr"); err != nil {
-				return fmt.Errorf("collection created at %s, but herdr is unavailable: %w", result.Collection, err)
-			}
-			target, err := wtc.OpenCollection(result.Collection)
-			if err != nil {
-				return fmt.Errorf("collection created at %s, but cannot read its configuration: %w", result.Collection, err)
-			}
-			openOpt := openOptions{Session: openSession(target, "")}
-			running := openSessionRunning(openOpt.Session)
-			if !running {
-				if err := openEnsureSession(openOpt.Session); err != nil {
-					return fmt.Errorf("collection created at %s, but opening failed: %w", result.Collection, err)
-				}
-				running = true
-			}
-			item := openCollection(c, filepath.Base(result.Collection), openOpt, openDesiredLayout(target, openOpt, running), running, true)
-			if item.Error != "" {
-				return fmt.Errorf("collection created at %s, but opening failed: %s", result.Collection, item.Error)
-			}
+		if err := openAfterNew(c, result.Collection, open, noOpen); err != nil {
+			return err
 		}
 		return emit(envelope{OK: true, Data: result, Summary: "done: " + result.Collection}, *asJSON)
 	}
 	root.AddCommand(cmd)
+}
+
+func openAfterNew(source *wtc.Context, collection string, explicitOpen, noOpen bool) error {
+	shouldOpen := explicitOpen
+	if !explicitOpen && !noOpen {
+		if _, err := exec.LookPath("herdr"); err == nil {
+			shouldOpen = openSessionRunning(openSession(source, ""))
+		}
+	}
+	if !shouldOpen {
+		return nil
+	}
+	if _, err := exec.LookPath("herdr"); err != nil {
+		return fmt.Errorf("collection created at %s, but herdr is unavailable: %w", collection, err)
+	}
+	target, err := wtc.OpenCollection(collection)
+	if err != nil {
+		return fmt.Errorf("collection created at %s, but cannot read its configuration: %w", collection, err)
+	}
+	opt := openOptions{Session: openSession(target, "")}
+	running := openSessionRunning(opt.Session)
+	if !running {
+		if err := openEnsureSession(opt.Session); err != nil {
+			return fmt.Errorf("collection created at %s, but opening failed: %w", collection, err)
+		}
+		running = true
+	}
+	item := openCollection(source, filepath.Base(collection), opt, openDesiredLayout(target, opt, running), running, true)
+	if item.Error != "" {
+		return fmt.Errorf("collection created at %s, but opening failed: %s", collection, item.Error)
+	}
+	return nil
 }

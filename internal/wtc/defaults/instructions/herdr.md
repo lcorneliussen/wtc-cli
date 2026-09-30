@@ -199,9 +199,8 @@ string is emitted as `WTC_AGENT_NAME` in `.env.collection` (and injected into
 every pane); `wtc open` starts with `herdr agent start "$WTC_AGENT_NAME" …`,
 so the command shape is the same across collections and only the env differs.
 herdr caps names at 32 characters (`[a-z][a-z0-9_-]{0,31}`, unique among live
-agents); past that the collection half is trimmed and the session prefix
-stays, because the prefix is what keeps two sessions on one machine from
-colliding. A collection named for a GitHub issue (`239-timeline-…`) is fine:
+agents); longer names are shortened with a stable collection-specific suffix.
+A collection named for a GitHub issue (`239-timeline-…`) is fine:
 the session half starts with a letter, and if the session itself does not it
 gets a `w` prefix. One string then reads the same in the collection env, in
 `herdr agent list`, in Claude's Remote Control list, and on the phone.

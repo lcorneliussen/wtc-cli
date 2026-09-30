@@ -1,13 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
@@ -128,7 +128,9 @@ func openCollection(source *wtc.Context, name string, opt openOptions, desired s
 		item.Error = err.Error()
 		return item
 	}
-	openStartPanes(&item, target, panes, opt)
+	if err := openStartPanes(&item, target, panes, opt); err != nil {
+		item.Error = err.Error()
+	}
 	if opt.Focus && last {
 		if _, err := openHerdr(opt.Session, "workspace", "focus", item.Workspace); err != nil {
 			item.Error = err.Error()
@@ -189,32 +191,7 @@ func openCreateWorkspace(target *wtc.Context, session, name string) error {
 }
 
 func openAgentName(session, collection string) string {
-	clean := func(value string) string {
-		var out strings.Builder
-		for _, r := range strings.ToLower(value) {
-			if unicode.IsLower(r) && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-' {
-				out.WriteRune(r)
-			} else {
-				out.WriteByte('-')
-			}
-		}
-		return out.String()
-	}
-	s, c := clean(session), clean(collection)
-	if s == "" || s[0] < 'a' || s[0] > 'z' {
-		s = "w" + s
-	}
-	if len(s) >= 30 {
-		if len(s) > 32 {
-			s = s[:32]
-		}
-		return s
-	}
-	room := 32 - len(s) - 2
-	if len(c) > room {
-		c = c[:room]
-	}
-	return s + "--" + c
+	return wtc.AgentName(session, collection)
 }
 
 func openPaneState(session string, pane openPaneInfo) string {
@@ -267,7 +244,8 @@ func openPlanPanes(item *openItem, panes []openPaneInfo, opt openOptions) {
 	}
 }
 
-func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, opt openOptions) {
+func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, opt openOptions) error {
+	var failures []error
 	for _, label := range []string{"agent", "browse", "shell", "status"} {
 		pane := openPaneByLabel(panes, label)
 		state := openPaneState(opt.Session, pane)
@@ -279,6 +257,7 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 			}
 			if pane.ID == "" {
 				item.Actions = append(item.Actions, "agent no pane")
+				failures = append(failures, errors.New("agent pane is missing"))
 				continue
 			}
 			if state != "empty" && !strings.HasPrefix(state, "empty (") {
@@ -286,6 +265,7 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 				continue
 			}
 			if err := openStartAgent(target, opt, pane.ID); err != nil {
+				failures = append(failures, fmt.Errorf("agent: %w", err))
 				if strings.Contains(err.Error(), "first prompt") {
 					item.Actions = append(item.Actions, "agent started; "+err.Error())
 				} else {
@@ -301,6 +281,7 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 			}
 			if pane.ID == "" {
 				item.Actions = append(item.Actions, label+" no pane")
+				failures = append(failures, fmt.Errorf("%s pane is missing", label))
 				continue
 			}
 			if state != "empty" && !strings.HasPrefix(state, "empty (") {
@@ -322,14 +303,19 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 				continue
 			}
 			if _, err := openHerdr(opt.Session, "pane", "run", pane.ID, command); err != nil {
+				failures = append(failures, fmt.Errorf("%s: %w", label, err))
 				item.Actions = append(item.Actions, label+" start failed: "+err.Error())
 			} else {
 				item.Actions = append(item.Actions, label+" started")
 			}
 		case "shell":
 			item.Actions = append(item.Actions, "shell "+state)
+			if pane.ID == "" {
+				failures = append(failures, errors.New("shell pane is missing"))
+			}
 		}
 	}
+	return errors.Join(failures...)
 }
 
 func openStartAgent(target *wtc.Context, opt openOptions, pane string) error {

@@ -32,6 +32,12 @@ state_path = os.environ["OPEN_TEST_STATE"]
 calls_path = os.environ["OPEN_TEST_CALLS"]
 args = sys.argv[3:]
 with open(calls_path, "a") as f: f.write(" ".join(args) + "\n")
+marker = os.environ.get("OPEN_TEST_SESSION_MARKER")
+if args == ["server"]:
+    if marker: open(marker, "w").close()
+    sys.exit(0)
+if args == ["workspace", "list"] and marker and not os.path.exists(marker):
+    sys.exit(1)
 try:
     state = json.load(open(state_path))
 except FileNotFoundError:
@@ -84,7 +90,17 @@ elif args[:2] == ["pane", "close"]:
     state["panes"] = [p for p in state["panes"] if p["pane_id"] != args[2]]
     save(); emit({})
 elif args[:2] == ["pane", "process-info"]:
-    emit({"process_info":{"foreground_process_group_id":1,"foreground_processes":[{"pid":1,"argv":["-zsh"]}]}})
+    argv = state.get("running", {}).get(args[args.index("--pane")+1], ["-zsh"])
+    emit({"process_info":{"foreground_process_group_id":1,"foreground_processes":[{"pid":1,"argv":argv}]}})
+elif args[:2] == ["agent", "start"]:
+    state.setdefault("running", {})[args[args.index("--pane")+1]] = ["claude"]
+    save(); emit({})
+elif args[:2] == ["pane", "run"]:
+    if os.environ.get("OPEN_TEST_FAIL_PANE_RUN"):
+        print("synthetic pane failure", file=sys.stderr)
+        sys.exit(2)
+    state.setdefault("running", {})[args[2]] = ["bash", args[3]]
+    save(); emit({})
 elif args[:2] == ["api", "snapshot"]:
     emit({"snapshot":{"layouts":[{"area":{"width":180},"panes":[
         {"pane_id":pane["pane_id"],"rect":{"x":0 if pane["label"] in ("agent","shell") else 80}}
@@ -168,6 +184,59 @@ else:
 	if !strings.Contains(string(state), `"label": "tools"`) || !strings.Contains(string(state), `"pane_id": "p1", "tab_id": "t1", "label": "agent"`) || !strings.Contains(string(state), `"pane_id": "p4", "tab_id": "t2", "label": "shell"`) {
 		t.Fatalf("narrow layout is incomplete: %s", state)
 	}
+	if err := os.WriteFile(filepath.Join(bin, "nvim"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	enabled := openOptions{Session: "test"}
+	first := openCollection(c, "sample", enabled, "narrow", true, true)
+	if first.Error != "" || !strings.Contains(strings.Join(first.Actions, " "), "agent started") || !strings.Contains(strings.Join(first.Actions, " "), "browse started") || !strings.Contains(strings.Join(first.Actions, " "), "status started") {
+		t.Fatalf("normal start failed: %+v", first)
+	}
+	before, _ := os.ReadFile(log)
+	second := openCollection(c, "sample", enabled, "narrow", true, true)
+	after, _ := os.ReadFile(log)
+	if second.Error != "" || strings.Count(string(after), "agent start ") != strings.Count(string(before), "agent start ") || strings.Count(string(after), "pane run ") != strings.Count(string(before), "pane run ") {
+		t.Fatalf("live panes were restarted: %+v\n%s", second, after)
+	}
+	stale := strings.Replace(string(state), `"panes":`, `"running": {}, "panes":`, 1)
+	if err := os.WriteFile(os.Getenv("OPEN_TEST_STATE"), []byte(stale), 0644); err != nil {
+		t.Fatal(err)
+	}
+	recovered := openCollection(c, "sample", enabled, "narrow", true, true)
+	afterRecovery, _ := os.ReadFile(log)
+	if recovered.Error != "" || strings.Count(string(afterRecovery), "agent start ") != strings.Count(string(after), "agent start ")+1 || strings.Count(string(afterRecovery), "pane run ") != strings.Count(string(after), "pane run ")+2 {
+		t.Fatalf("idle panes were not recovered: %+v\n%s", recovered, afterRecovery)
+	}
+	if err := os.Remove(os.Getenv("OPEN_TEST_STATE")); err != nil {
+		t.Fatal(err)
+	}
+	if err := openAfterNew(c, collection, true, false); err != nil {
+		t.Fatalf("new --open path failed: %v", err)
+	}
+	if err := os.Remove(os.Getenv("OPEN_TEST_STATE")); err != nil {
+		t.Fatal(err)
+	}
+	if err := openAfterNew(c, collection, false, false); err != nil {
+		t.Fatalf("new automatic open path failed: %v", err)
+	}
+	if err := os.Remove(os.Getenv("OPEN_TEST_STATE")); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "session-running")
+	t.Setenv("OPEN_TEST_SESSION_MARKER", marker)
+	if err := openAfterNew(c, collection, true, false); err != nil {
+		t.Fatalf("new --open with an absent session failed: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("headless session was not started: %v", err)
+	}
+	if err := os.Remove(os.Getenv("OPEN_TEST_STATE")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPEN_TEST_FAIL_PANE_RUN", "1")
+	if err := openAfterNew(c, collection, true, false); err == nil || !strings.Contains(err.Error(), "synthetic pane failure") {
+		t.Fatalf("new --open concealed pane startup failure: %v", err)
+	}
 }
 
 func TestOpenAgentNamesFitHerdrLimit(t *testing.T) {
@@ -176,6 +245,10 @@ func TestOpenAgentNamesFitHerdrLimit(t *testing.T) {
 		if len(name) > 32 || name[0] < 'a' || name[0] > 'z' {
 			t.Fatalf("invalid agent name %q", name)
 		}
+	}
+	long := strings.Repeat("s", 40)
+	if openAgentName(long, "first") == openAgentName(long, "second") {
+		t.Fatal("long session name loses the collection identity")
 	}
 }
 
