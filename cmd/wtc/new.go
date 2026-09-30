@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -53,24 +52,28 @@ func addNewCommand(root *cobra.Command, asJSON *bool) {
 		shouldOpen := open
 		if !open && !noOpen {
 			if _, err := exec.LookPath("herdr"); err == nil {
-				session := c.Config.Herdr.Session
-				if session == "" {
-					session = strings.TrimSuffix(strings.TrimSuffix(filepath.Base(c.Workspace), "-harness"), "-wtc")
-				}
-				probe := exec.Command("herdr", "--session", session, "workspace", "list")
-				shouldOpen = probe.Run() == nil
+				shouldOpen = openSessionRunning(openSession(c, ""))
 			}
 		}
 		if shouldOpen {
-			path := filepath.Join(result.Collection, "harness", "tools", "wtc-open.sh")
-			if _, err := os.Stat(path); err != nil {
-				return fmt.Errorf("collection created at %s, but open tool is unavailable: %w", result.Collection, err)
+			if _, err := exec.LookPath("herdr"); err != nil {
+				return fmt.Errorf("collection created at %s, but herdr is unavailable: %w", result.Collection, err)
 			}
-			openCmd := exec.Command(path, filepath.Base(result.Collection))
-			openCmd.Dir = result.Collection
-			openCmd.Stdout, openCmd.Stderr = os.Stderr, os.Stderr
-			if err := openCmd.Run(); err != nil {
-				return fmt.Errorf("collection created at %s, but opening failed: %w", result.Collection, err)
+			target, err := wtc.OpenCollection(result.Collection)
+			if err != nil {
+				return fmt.Errorf("collection created at %s, but cannot read its configuration: %w", result.Collection, err)
+			}
+			openOpt := openOptions{Session: openSession(target, "")}
+			running := openSessionRunning(openOpt.Session)
+			if !running {
+				if err := openEnsureSession(openOpt.Session); err != nil {
+					return fmt.Errorf("collection created at %s, but opening failed: %w", result.Collection, err)
+				}
+				running = true
+			}
+			item := openCollection(c, filepath.Base(result.Collection), openOpt, openDesiredLayout(target, openOpt, running), running, true)
+			if item.Error != "" {
+				return fmt.Errorf("collection created at %s, but opening failed: %s", result.Collection, item.Error)
 			}
 		}
 		return emit(envelope{OK: true, Data: result, Summary: "done: " + result.Collection}, *asJSON)
