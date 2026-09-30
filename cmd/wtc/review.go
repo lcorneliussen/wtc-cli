@@ -35,11 +35,8 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	bundle.Flags().StringVar(&dir, "dir", "", "Bundle directory")
 	bundle.Flags().IntVar(&round, "round", 0, "Review round (default: next)")
 	bundle.Flags().BoolVar(&public, "public", false, "Exclude local overlays and related repository snapshots")
-	bundle.Flags().BoolVar(&noCatchUp, "no-catch-up", false, "Use current local refs without updating worktrees")
+	bundle.Flags().BoolVar(&noCatchUp, "no-catch-up", false, "Skip PR collection catch-up (PR branch checkout still runs)")
 	bundle.RunE = func(cmd *cobra.Command, args []string) error {
-		if !public || !noCatchUp {
-			return fmt.Errorf("this native bundle command currently requires --public --no-catch-up")
-		}
 		c, err := context()
 		if err != nil {
 			return err
@@ -48,7 +45,7 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 		if len(args) == 2 {
 			pr = args[1]
 		}
-		result, err := c.BuildPublicReviewBundle(wtc.ReviewBundleOptions{Repo: args[0], PR: pr, Base: base, Head: head, Dir: dir, Round: round})
+		result, err := c.BuildReviewBundle(wtc.ReviewBundleOptions{Repo: args[0], PR: pr, Base: base, Head: head, Dir: dir, Round: round, Public: public, NoCatchUp: noCatchUp})
 		if err != nil {
 			return err
 		}

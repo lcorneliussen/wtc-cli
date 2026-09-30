@@ -20,9 +20,9 @@ command and its contract checks cover their behavior.
 | `retire.sh` | `wtc retire` | Native in v0.1.12; released target-aware shell shim and binary contract tests |
 | `catch-up.sh` | `wtc catch-up` | Native in v0.1.15; matching-pin reference shim and released-binary contract tests |
 | `wtc-status.sh`, `wtc-status-tui.sh` | `wtc status` | Native one-shot and TUI released in v0.1.16; reference shims, published-binary contracts, and watch lifecycle ported |
-| `wtc-open.sh` | `wtc open` | Native workspace creation, layout and pane recovery, list/dry-run, and `wtc new --open` integration implemented; released shim and black-box contracts pending |
+| `wtc-open.sh` | `wtc open` | Native command released in v0.1.21; matching-pin shim, bootstrap guidance, and published-binary contracts merged in the reference harness and in-scope ports |
 | `wtc-browse.sh` | `wtc browse` | Native launch, bundled Neovim view, and herdr routing released in v0.1.17; reference matching-pin shim and released-binary contracts merged |
-| `review-bundle.sh` | `wtc review bundle` | Native public no-catch-up subset in v0.1.4; prior summaries, GitHub reply context and Bitbucket reply context added after v0.1.17; private snapshots, overlays, and catch-up pending |
+| `review-bundle.sh` | `wtc review bundle` | Native public and private bundles, branch checkout, collection catch-up, concern overlays, related patches, registry snapshots, prior summaries, and GitHub/Bitbucket reply context implemented; released shell shim and wider contract parity pending |
 | `review-run.sh` | `wtc review run` | Native local runner in v0.1.4; integrated progress/result posting implemented, rich stats pending |
 | `review-post.sh` | `wtc review post` | Native summary lifecycle, inline dedup, and local receipt in v0.1.4; forge parity tests pending |
 | `review-status.sh` | `wtc review status` | Native GitHub and Bitbucket status and trusted-local check in v0.1.4 |
