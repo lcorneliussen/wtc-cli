@@ -109,10 +109,12 @@ func openCollection(source *wtc.Context, name string, opt openOptions, desired s
 	}
 	if opt.DryRun {
 		panes, err := openPanes(opt.Session, item.Workspace)
-		if err == nil {
-			if err := openPlanPanes(&item, panes, opt); err != nil {
-				item.Error = err.Error()
-			}
+		if err != nil {
+			item.Error = err.Error()
+			return item
+		}
+		if err := openPlanPanes(&item, panes, opt); err != nil {
+			item.Error = err.Error()
 		}
 		return item
 	}

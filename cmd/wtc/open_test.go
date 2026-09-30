@@ -53,6 +53,11 @@ elif args[:2] == ["workspace", "create"]:
     state["tabs"] = [{"tab_id":"t1","label":"1"}]
     save(); emit({"workspace_id":"ws1", "pane_id":"p1"})
 elif args[:2] == ["pane", "list"]:
+    if os.environ.get("OPEN_TEST_FAIL_SECOND_PANE_LIST"):
+        count = sum(line.startswith("pane list ") for line in open(calls_path))
+        if count >= 2:
+            print("synthetic pane list failure", file=sys.stderr)
+            sys.exit(2)
     emit({"panes": state["panes"]})
 elif args[:2] == ["tab", "list"]:
     emit({"tabs":state["tabs"]})
@@ -262,6 +267,14 @@ else:
 		if item := openCollection(c, "sample", preview, "wide", true, true); !strings.Contains(item.Error, "synthetic inspection failure") {
 			t.Fatalf("read-only open concealed process inspection failure: %+v", item)
 		}
+	}
+	t.Setenv("OPEN_TEST_FAIL_PROCESS_INFO", "")
+	t.Setenv("OPEN_TEST_FAIL_SECOND_PANE_LIST", "1")
+	if err := os.WriteFile(log, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if item := openCollection(c, "sample", openOptions{Session: "test", DryRun: true}, "wide", true, true); !strings.Contains(item.Error, "synthetic pane list failure") {
+		t.Fatalf("dry run concealed pane listing failure: %+v", item)
 	}
 }
 
