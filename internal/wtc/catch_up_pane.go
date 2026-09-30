@@ -1,0 +1,249 @@
+package wtc
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type catchUpWorkspaceList struct {
+	Result struct {
+		Workspaces []struct {
+			Label string `json:"label"`
+			ID    string `json:"workspace_id"`
+		} `json:"workspaces"`
+	} `json:"result"`
+}
+
+type catchUpPaneList struct {
+	Result struct {
+		Panes []struct {
+			Label string          `json:"label"`
+			ID    string          `json:"pane_id"`
+			Agent json.RawMessage `json:"agent"`
+		} `json:"panes"`
+	} `json:"result"`
+}
+
+type catchUpProcessInfo struct {
+	Result struct {
+		ProcessInfo struct {
+			Group     int `json:"foreground_process_group_id"`
+			Processes []struct {
+				PID     int      `json:"pid"`
+				Argv    []string `json:"argv"`
+				Cmdline string   `json:"cmdline"`
+			} `json:"foreground_processes"`
+		} `json:"process_info"`
+	} `json:"result"`
+}
+
+func catchUpHerdr(session string, args ...string) ([]byte, error) {
+	command := append([]string{"--session", session}, args...)
+	return exec.Command("herdr", command...).Output()
+}
+
+func catchUpSession(c *Context) string {
+	for _, value := range []string{os.Getenv("HARNESS_HERDR_SESSION"), os.Getenv("HERDR_SESSION"), c.Config.Herdr.Session} {
+		if value != "" {
+			return value
+		}
+	}
+	return strings.TrimSuffix(strings.TrimSuffix(filepath.Base(c.Workspace), "-harness"), "-wtc")
+}
+
+func catchUpPane(c *Context, session, collection string) (string, bool, error) {
+	workspaces, err := catchUpHerdr(session, "workspace", "list")
+	if err != nil {
+		return "", false, fmt.Errorf("herdr workspace lookup failed; no pane control attempted")
+	}
+	var ws catchUpWorkspaceList
+	if json.Unmarshal(workspaces, &ws) != nil {
+		return "", false, fmt.Errorf("herdr workspace lookup failed; no pane control attempted")
+	}
+	id := ""
+	for _, item := range ws.Result.Workspaces {
+		if item.Label == collection {
+			id = item.ID
+			break
+		}
+	}
+	if id == "" {
+		return "", false, nil
+	}
+	panes, err := catchUpHerdr(session, "pane", "list", "--workspace", id)
+	if err != nil {
+		return "", false, fmt.Errorf("herdr pane lookup failed; no pane control attempted")
+	}
+	var listing catchUpPaneList
+	if json.Unmarshal(panes, &listing) != nil {
+		return "", false, fmt.Errorf("herdr pane lookup failed; no pane control attempted")
+	}
+	for _, item := range listing.Result.Panes {
+		if item.Label == "status" {
+			occupied := len(item.Agent) != 0 && string(item.Agent) != "null" && string(item.Agent) != `""`
+			return item.ID, occupied, nil
+		}
+	}
+	return "", false, nil
+}
+
+func catchUpForeground(session, pane string) ([]string, error) {
+	data, err := catchUpHerdr(session, "pane", "process-info", "--pane", pane)
+	if err != nil {
+		return nil, err
+	}
+	var info catchUpProcessInfo
+	if json.Unmarshal(data, &info) != nil {
+		return nil, fmt.Errorf("invalid foreground process response")
+	}
+	for _, process := range info.Result.ProcessInfo.Processes {
+		if process.PID != info.Result.ProcessInfo.Group {
+			continue
+		}
+		if len(process.Argv) != 0 {
+			return process.Argv, nil
+		}
+		return strings.Fields(process.Cmdline), nil
+	}
+	return nil, fmt.Errorf("foreground process unknown")
+}
+
+func catchUpShell(argv []string) bool {
+	if len(argv) == 0 {
+		return false
+	}
+	name := filepath.Base(strings.TrimPrefix(argv[0], "-"))
+	switch name {
+	case "bash", "sh", "zsh", "fish", "nu", "nushell":
+		return len(argv) == 1 || len(argv) == 2 && strings.HasPrefix(argv[1], "-")
+	}
+	return false
+}
+
+func catchUpStatusProcess(argv []string) bool {
+	if len(argv) == 0 {
+		return false
+	}
+	if name := filepath.Base(argv[0]); name == "bash" || name == "sh" {
+		argv = argv[1:]
+	}
+	if len(argv) == 0 {
+		return false
+	}
+	switch filepath.Base(argv[0]) {
+	case "wtc-status-tui.sh", "wtc-status.sh", "wtc-status-legacy-tui.sh", "wtc-status-legacy.sh":
+		return true
+	}
+	return false
+}
+
+func catchUpQuoteShell(path string, argv []string) string {
+	if len(argv) != 0 && (filepath.Base(argv[0]) == "nu" || filepath.Base(argv[0]) == "nushell") {
+		return "bash " + strconv.Quote(path)
+	}
+	return "bash '" + strings.ReplaceAll(path, "'", "'\"'\"'") + "'"
+}
+
+func (c *Context) catchUpReloadStatus(report *CatchUpReport, t catchUpTarget, opt CatchUpOptions) {
+	add := func(outcome, reason string) {
+		report.add("pane", t.collection, "status", outcome, reason, "", "", "")
+	}
+	if _, err := exec.LookPath("herdr"); err != nil {
+		add("skipped", "herdr unavailable; no pane control attempted")
+		return
+	}
+	target, err := OpenCollection(filepath.Join(c.Workspace, t.collection))
+	if err != nil {
+		add("failed", "target collection unavailable; no pane control attempted")
+		return
+	}
+	session := catchUpSession(target)
+	pane, occupied, err := catchUpPane(target, session, t.collection)
+	if err != nil {
+		add("failed", err.Error())
+		return
+	}
+	if pane == "" {
+		add("skipped", "no matching status pane")
+		return
+	}
+	if occupied {
+		add("needs-owner", "status-labelled pane contains an agent; untouched")
+		return
+	}
+	argv, err := catchUpForeground(session, pane)
+	if err != nil {
+		add("failed", "foreground lookup failed; no pane control attempted")
+		return
+	}
+	if !catchUpShell(argv) && !catchUpStatusProcess(argv) {
+		add("needs-owner", "status pane runs an unrelated process; untouched")
+		return
+	}
+	script := filepath.Join(target.Harness, "tools", "wtc-status-tui.sh")
+	info, err := os.Stat(script)
+	if err != nil || info.Mode()&0111 == 0 {
+		add("skipped", "target status entrypoint unavailable")
+		return
+	}
+	if opt.DryRun {
+		add("planned", "would reload "+pane)
+		return
+	}
+	if !catchUpShell(argv) {
+		if _, err := catchUpHerdr(session, "pane", "send-keys", pane, "ctrl+c"); err != nil {
+			add("failed", "could not interrupt "+pane)
+			return
+		}
+	}
+	idle := false
+	for attempt := 0; attempt < 5; attempt++ {
+		argv, err = catchUpForeground(session, pane)
+		if err != nil {
+			add("failed", "foreground lookup failed after interrupting "+pane)
+			return
+		}
+		if catchUpShell(argv) {
+			idle = true
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if !idle {
+		add("needs-owner", "pane "+pane+" did not become a verified shell")
+		return
+	}
+	checkPane, agent, err := catchUpPane(target, session, t.collection)
+	if err != nil || checkPane != pane {
+		add("failed", "status pane identity changed; no command sent")
+		return
+	}
+	if agent {
+		add("needs-owner", "agent appeared in status pane "+pane+"; no command sent")
+		return
+	}
+	command := catchUpQuoteShell(script, argv)
+	if _, err := catchUpHerdr(session, "pane", "run", pane, command); err != nil {
+		add("failed", "restart failed for "+pane)
+		return
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		argv, err = catchUpForeground(session, pane)
+		if err != nil {
+			add("failed", "foreground lookup failed after restarting "+pane)
+			return
+		}
+		if catchUpStatusProcess(argv) {
+			add("restarted", "observed status process in "+pane+"; ongoing health not monitored")
+			return
+		}
+		time.Sleep(time.Second)
+	}
+	add("failed", "command delivered to "+pane+" but status restart not observed")
+}
