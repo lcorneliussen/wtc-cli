@@ -31,7 +31,7 @@ tab tools:  browse / shell     (stacked; shell 20%)
 ```
 
 Layout is applied on create. Explicit `--narrow` / `--wide` **switches** an
-existing workspace (the agent pane is kept; status is recreated). A partial
+existing workspace (live panes are moved). A partial
 workspace — common when you start the agent first, then open — is built out
 toward the resolved layout. `auto` never flips a complete wide ↔ narrow.
 `--wide` / `--narrow` override `WTC_LAYOUT` (and auto).

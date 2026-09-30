@@ -90,6 +90,9 @@ elif args[:2] == ["pane", "close"]:
     state["panes"] = [p for p in state["panes"] if p["pane_id"] != args[2]]
     save(); emit({})
 elif args[:2] == ["pane", "process-info"]:
+    if os.environ.get("OPEN_TEST_FAIL_PROCESS_INFO") == args[args.index("--pane")+1]:
+        print("synthetic inspection failure", file=sys.stderr)
+        sys.exit(2)
     argv = state.get("running", {}).get(args[args.index("--pane")+1], ["-zsh"])
     emit({"process_info":{"foreground_process_group_id":1,"foreground_processes":[{"pid":1,"argv":argv}]}})
 elif args[:2] == ["agent", "start"]:
@@ -167,6 +170,9 @@ else:
 	if !strings.Contains(string(state), `"pane_id": "p1", "tab_id": "t1", "label": "agent"`) || !strings.Contains(string(state), `"pane_id": "p2", "tab_id": "t2", "label": "browse"`) {
 		t.Fatalf("switch did not preserve the agent and move browse: %s", state)
 	}
+	if !strings.Contains(string(state), `"pane_id": "p4", "tab_id": "t1", "label": "status"`) {
+		t.Fatalf("switch did not preserve the status pane: %s", state)
+	}
 	if err := os.Remove(os.Getenv("OPEN_TEST_STATE")); err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +204,12 @@ else:
 	if second.Error != "" || strings.Count(string(after), "agent start ") != strings.Count(string(before), "agent start ") || strings.Count(string(after), "pane run ") != strings.Count(string(before), "pane run ") {
 		t.Fatalf("live panes were restarted: %+v\n%s", second, after)
 	}
+	liveSwitch := openCollection(c, "sample", openOptions{Session: "test", LayoutSet: true}, "wide", true, true)
+	liveState, _ := os.ReadFile(os.Getenv("OPEN_TEST_STATE"))
+	liveCalls, _ := os.ReadFile(log)
+	if liveSwitch.Error != "" || !strings.Contains(string(liveState), `"pane_id": "p2", "tab_id": "t1", "label": "status"`) || strings.Contains(string(liveCalls), "pane close ") {
+		t.Fatalf("layout switch did not preserve live status pane: %+v\n%s\n%s", liveSwitch, liveState, liveCalls)
+	}
 	stale := strings.Replace(string(state), `"panes":`, `"running": {}, "panes":`, 1)
 	if err := os.WriteFile(os.Getenv("OPEN_TEST_STATE"), []byte(stale), 0644); err != nil {
 		t.Fatal(err)
@@ -219,6 +231,10 @@ else:
 	if err := openAfterNew(c, collection, false, false); err != nil {
 		t.Fatalf("new automatic open path failed: %v", err)
 	}
+	autoState, err := os.ReadFile(os.Getenv("OPEN_TEST_STATE"))
+	if err != nil || !strings.Contains(string(autoState), `"created": true`) || !strings.Contains(string(autoState), `"running": {`) {
+		t.Fatalf("new automatic open did not create and start panes: %s, %v", autoState, err)
+	}
 	if err := os.Remove(os.Getenv("OPEN_TEST_STATE")); err != nil {
 		t.Fatal(err)
 	}
@@ -236,6 +252,11 @@ else:
 	t.Setenv("OPEN_TEST_FAIL_PANE_RUN", "1")
 	if err := openAfterNew(c, collection, true, false); err == nil || !strings.Contains(err.Error(), "synthetic pane failure") {
 		t.Fatalf("new --open concealed pane startup failure: %v", err)
+	}
+	t.Setenv("OPEN_TEST_FAIL_PANE_RUN", "")
+	t.Setenv("OPEN_TEST_FAIL_PROCESS_INFO", "p1")
+	if opened := openCollection(c, "sample", openOptions{Session: "test"}, "wide", true, true); !strings.Contains(opened.Error, "synthetic inspection failure") {
+		t.Fatalf("open concealed process inspection failure: %+v", opened)
 	}
 }
 

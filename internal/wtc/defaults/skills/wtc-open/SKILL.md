@@ -35,7 +35,7 @@ is always something you typed.
 | When | default when the session is wide enough | `--narrow`, or `WTC_LAYOUT=narrow` / auto under `WTC_LAYOUT_NARROW_AT` |
 
 `--narrow` / `--wide` **switch** an existing workspace. The agent pane is
-preserved; status is recreated (cheap). Auto never flips a complete wide ↔
+preserved; the status pane moves with its running process. Auto never flips a complete wide ↔
 narrow on its own.
 
 ## 2. Agent-first is normal

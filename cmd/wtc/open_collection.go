@@ -78,7 +78,14 @@ func openCollection(source *wtc.Context, name string, opt openOptions, desired s
 			item.Layout = current
 			item.Actions = append(item.Actions, openLayoutDescription(current, panes))
 			for _, label := range []string{"agent", "browse", "shell", "status"} {
-				item.Actions = append(item.Actions, label+": "+openPaneState(opt.Session, openPaneByLabel(panes, label)))
+				state, inspectErr := openPaneState(opt.Session, openPaneByLabel(panes, label))
+				item.Actions = append(item.Actions, label+": "+state)
+				if inspectErr != nil {
+					if item.Error != "" {
+						item.Error += "; "
+					}
+					item.Error += fmt.Sprintf("%s: %v", label, inspectErr)
+				}
 			}
 			return item
 		}
@@ -103,7 +110,9 @@ func openCollection(source *wtc.Context, name string, opt openOptions, desired s
 	if opt.DryRun {
 		panes, err := openPanes(opt.Session, item.Workspace)
 		if err == nil {
-			openPlanPanes(&item, panes, opt)
+			if err := openPlanPanes(&item, panes, opt); err != nil {
+				item.Error = err.Error()
+			}
 		}
 		return item
 	}
@@ -194,28 +203,28 @@ func openAgentName(session, collection string) string {
 	return wtc.AgentName(session, collection)
 }
 
-func openPaneState(session string, pane openPaneInfo) string {
+func openPaneState(session string, pane openPaneInfo) (string, error) {
 	if pane.ID == "" {
-		return "no pane"
+		return "no pane", nil
 	}
 	argv, err := openPaneCommand(session, pane.ID)
 	if err != nil {
-		return "unknown"
+		return "unknown", err
 	}
 	if openShellCommand(argv) {
 		if pane.Label == "shell" {
-			return "ready"
+			return "ready", nil
 		}
 		if pane.Agent != "" {
-			return "empty (" + pane.Agent + " exited)"
+			return "empty (" + pane.Agent + " exited)", nil
 		}
-		return "empty"
+		return "empty", nil
 	}
 	if pane.Agent != "" {
-		return pane.Agent + " " + pane.AgentStatus
+		return pane.Agent + " " + pane.AgentStatus, nil
 	}
 	if len(argv) == 0 {
-		return "busy"
+		return "busy", nil
 	}
 	for _, word := range argv {
 		name := filepath.Base(word)
@@ -226,35 +235,46 @@ func openPaneState(session string, pane openPaneInfo) string {
 		case "env", "zsh", "bash", "fish", "sh", "nu", "dash", "ksh", "python3", "python", "node", "ruby", "perl":
 			continue
 		}
-		return name
+		return name, nil
 	}
-	return filepath.Base(argv[0])
+	return filepath.Base(argv[0]), nil
 }
 
-func openPlanPanes(item *openItem, panes []openPaneInfo, opt openOptions) {
+func openPlanPanes(item *openItem, panes []openPaneInfo, opt openOptions) error {
+	var failures []error
 	for _, label := range []string{"agent", "browse", "status"} {
 		if label == "agent" && opt.NoAgent || label == "browse" && opt.NoBrowse || label == "status" && opt.NoStatus {
 			continue
 		}
 		pane := openPaneByLabel(panes, label)
-		state := openPaneState(opt.Session, pane)
+		state, err := openPaneState(opt.Session, pane)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", label, err))
+			continue
+		}
 		if state == "empty" || strings.HasPrefix(state, "empty (") {
 			item.Actions = append(item.Actions, label+" empty → would start")
 		}
 	}
+	return errors.Join(failures...)
 }
 
 func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, opt openOptions) error {
 	var failures []error
 	for _, label := range []string{"agent", "browse", "shell", "status"} {
+		if label == "agent" && opt.NoAgent || label == "browse" && opt.NoBrowse || label == "status" && opt.NoStatus {
+			item.Actions = append(item.Actions, label+" skipped")
+			continue
+		}
 		pane := openPaneByLabel(panes, label)
-		state := openPaneState(opt.Session, pane)
+		state, inspectErr := openPaneState(opt.Session, pane)
+		if inspectErr != nil {
+			item.Actions = append(item.Actions, label+" inspection failed")
+			failures = append(failures, fmt.Errorf("%s: %w", label, inspectErr))
+			continue
+		}
 		switch label {
 		case "agent":
-			if opt.NoAgent {
-				item.Actions = append(item.Actions, "agent skipped")
-				continue
-			}
 			if pane.ID == "" {
 				item.Actions = append(item.Actions, "agent no pane")
 				failures = append(failures, errors.New("agent pane is missing"))
@@ -275,10 +295,6 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 				item.Actions = append(item.Actions, "agent started")
 			}
 		case "browse", "status":
-			if label == "browse" && opt.NoBrowse || label == "status" && opt.NoStatus {
-				item.Actions = append(item.Actions, label+" skipped")
-				continue
-			}
 			if pane.ID == "" {
 				item.Actions = append(item.Actions, label+" no pane")
 				failures = append(failures, fmt.Errorf("%s pane is missing", label))

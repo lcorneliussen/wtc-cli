@@ -167,9 +167,11 @@ func openSwitchNarrow(session, workspace, agent, cwd string, panes []openPaneInf
 		}
 	}
 	if status := openPaneByLabel(panes, "status").ID; status != "" {
-		if _, err := openHerdr(session, "pane", "close", status); err != nil {
+		main := openPaneTab(session, agent)
+		if _, err := openHerdr(session, "pane", "move", status, "--tab", main, "--split", "down", "--target-pane", agent, "--ratio", "0.65", "--no-focus"); err != nil {
 			return err
 		}
+		return nil
 	}
 	status, err := openSplit(session, agent, "down", "0.65", cwd)
 	if err != nil {
@@ -217,9 +219,10 @@ func openSwitchWide(session, agent, cwd string, panes []openPaneInfo) error {
 		}
 	}
 	if status := openPaneByLabel(panes, "status").ID; status != "" {
-		if _, err := openHerdr(session, "pane", "close", status); err != nil {
+		if _, err := openHerdr(session, "pane", "move", status, "--tab", main, "--split", "down", "--target-pane", browse, "--ratio", "0.65", "--no-focus"); err != nil {
 			return err
 		}
+		return nil
 	}
 	status, err := openSplit(session, browse, "down", "0.65", cwd)
 	if err != nil {
