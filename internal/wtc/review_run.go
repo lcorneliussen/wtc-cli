@@ -223,10 +223,22 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	}
 	stats := fmt.Sprintf("\n### Run stats\n\n- Concerns: %d; elapsed: %s.\n\n", count, time.Since(started).Round(time.Second))
 	final := strings.TrimRight(strings.Join(clean, "\n"), "\n") + "\n" + stats + statusLine + "\n"
+	final = alignReviewHeading(final, verdict)
 	if err := os.WriteFile(summaryPath, []byte(final), 0644); err != nil {
 		return ReviewRunResult{}, err
 	}
 	return ReviewRunResult{Bundle: bundle, Verdict: verdict, Blockers: blockers, Round: manifest.Round, Concerns: count}, nil
+}
+
+var reviewHeading = regexp.MustCompile(`(?m)^(?:🟢 |🟡 |🔴 )?\*\*Local review: (pass|pass-with-notes|changes-requested)\*\*[^\n]*`)
+
+func alignReviewHeading(summary, verdict string) string {
+	match := reviewHeading.FindStringSubmatchIndex(summary)
+	if len(match) < 4 || summary[match[2]:match[3]] == verdict {
+		return summary
+	}
+	heading := "**Local review: " + verdict + "** — The runner adjusted the lead verdict; see the findings and gate record."
+	return summary[:match[0]] + heading + summary[match[1]:]
 }
 
 func (c *Context) runReviewConcern(bundle string, manifest ReviewManifest, id, path, template string, opt ReviewRunOptions) string {

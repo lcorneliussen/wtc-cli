@@ -89,4 +89,8 @@ if [ "${FAIL_CONCERN:-}" = "$id" ]; then exit 3; fi
 	if err != nil || got.Verdict != "changes-requested" || got.Blockers != 1 {
 		t.Fatalf("open blocker did not close gate: %+v %v", got, err)
 	}
+	summary, err = os.ReadFile(filepath.Join(bundle, "summary.md"))
+	if err != nil || !strings.Contains(string(summary), "**Local review: changes-requested**") || strings.Contains(string(summary), "**Local review: pass**") {
+		t.Fatalf("runner verdict and summary heading disagree: %s %v", summary, err)
+	}
 }

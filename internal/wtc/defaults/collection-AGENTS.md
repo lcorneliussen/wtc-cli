@@ -103,7 +103,8 @@ A status-only request remains read-only. Procedure and resumption limits:
 Use `/wtc-local-review` to bundle the diff and run a separate headless review.
 For a public PR, inspect the bundle and outgoing summary before posting them.
 `wtc review ready` requires a passing review posted on the current head with a
-local receipt. The procedure is in `harness/skills/wtc-local-review/SKILL.md`.
+local receipt. The rendered procedure is at
+`.agents/skills/wtc-local-review/SKILL.md`.
 
 ## Widening the scope is a decision
 
