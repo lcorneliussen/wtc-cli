@@ -2,6 +2,7 @@ package wtc
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -192,5 +193,24 @@ esac
 	selected, err := reviewGit(repo, "branch", "--show-current")
 	if err != nil || strings.TrimSpace(string(selected)) != "feature" {
 		t.Fatalf("offline PR left worktree on %q: %v", selected, err)
+	}
+	customRoot := t.TempDir()
+	customFirst, err := c.BuildPublicReviewBundle(ReviewBundleOptions{Repo: "app", PR: "7", Base: "main", Dir: filepath.Join(customRoot, "first")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(customFirst.Dir, "summary.md"), []byte("Custom round summary\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	customSecond, err := c.BuildPublicReviewBundle(ReviewBundleOptions{Repo: "app", PR: "7", Base: "main", Dir: filepath.Join(customRoot, "second")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if customSecond.Manifest.Round != customFirst.Manifest.Round+1 {
+		t.Fatalf("custom bundle round did not advance: %d then %d", customFirst.Manifest.Round, customSecond.Manifest.Round)
+	}
+	priorCustom, err := os.ReadFile(filepath.Join(customSecond.Dir, "prior", fmt.Sprintf("r%d.md", customFirst.Manifest.Round)))
+	if err != nil || string(priorCustom) != "Custom round summary\n" {
+		t.Fatalf("custom prior summary missing: %q %v", priorCustom, err)
 	}
 }

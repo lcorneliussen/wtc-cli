@@ -267,9 +267,17 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 		return ReviewBundle{}, err
 	}
 	root := filepath.Join(c.Collection, ".wtc-reviews")
+	customParent := ""
+	if opt.Dir != "" {
+		absoluteDir, err := filepath.Abs(opt.Dir)
+		if err != nil {
+			return ReviewBundle{}, err
+		}
+		customParent = filepath.Dir(absoluteDir)
+	}
 	round := opt.Round
 	if round == 0 {
-		round = nextReviewRound(root, opt.Repo, opt.PR, branch)
+		round = nextReviewRound(root, opt.Repo, opt.PR, branch, customParent)
 	}
 	if round < 1 {
 		return ReviewBundle{}, fmt.Errorf("round must be positive")
@@ -341,19 +349,26 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 	return ReviewBundle{Dir: dir, Manifest: manifest, Files: files, Concerns: concerns, Related: related}, nil
 }
 
-func nextReviewRound(root, repo, pr, branch string) int {
+func nextReviewRound(root, repo, pr, branch string, extra ...string) int {
 	maxRound := 0
-	entries, _ := os.ReadDir(root)
-	for _, e := range entries {
-		if !e.IsDir() {
+	seen := map[string]bool{}
+	for _, scan := range append([]string{root}, extra...) {
+		if scan == "" || seen[scan] {
 			continue
 		}
-		m, ok, _ := readPriorReviewManifest(filepath.Join(root, e.Name()))
-		if !ok {
-			continue
-		}
-		if m.Repo == repo && m.PR == pr && (pr != "" || m.HeadBranch == branch) && m.Round > maxRound {
-			maxRound = m.Round
+		seen[scan] = true
+		entries, _ := os.ReadDir(scan)
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			m, ok, _ := readPriorReviewManifest(filepath.Join(scan, e.Name()))
+			if !ok {
+				continue
+			}
+			if m.Repo == repo && m.PR == pr && (pr != "" || m.HeadBranch == branch) && m.Round > maxRound {
+				maxRound = m.Round
+			}
 		}
 	}
 	return maxRound + 1

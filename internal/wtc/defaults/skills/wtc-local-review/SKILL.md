@@ -10,15 +10,15 @@ after a separate reviewer process posts a passing summary for its current head.
 The review is independent of the authoring agent; do not write its findings,
 summary, or verdict yourself.
 
-1. Build a bundle: `wtc review bundle <repo> <pr> --public --no-catch-up` for a
-   public PR. Inspect the bundle before giving it to an external reviewer.
-   Public bundles exclude other repositories and local concern overlays.
-   The current native bundle command requires both flags; use the collection's
-   shell tool when private snapshots or catch-up are needed.
-2. Run `wtc review run <bundle-dir>`. For a private destination, `--post`
-   creates one progress comment and updates it with the final summary. For a
-   public or unknown audience, run without `--post`, inspect `summary.md` and
-   planned inline comments, then run `wtc review post <bundle-dir>`.
+1. Build a bundle with `wtc review bundle <repo> <pr>`. For a public or
+   unknown-audience PR, add `--public` to exclude other repositories and local
+   concern overlays. A known PR checks out its branch and catches up the
+   collection before the diff; `--no-catch-up` skips that refresh. Branch-only
+   reviews use current local refs. Inspect the bundle before giving it to an
+   external reviewer.
+2. Run `wtc review run <bundle-dir>` without `--post`. Inspect `summary.md`
+   and planned inline comments against the destination's audience, then run
+   `wtc review post <bundle-dir>`.
 3. Read `summary.md`, `verdict`, and any error output in `run.log`. Address or
    answer every open finding. Use `wtc review resolve <bundle-dir> --reply
    "..."` for inline threads after answering them. A later round retains the
