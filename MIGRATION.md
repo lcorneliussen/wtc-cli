@@ -7,6 +7,12 @@ status/resolve/ready`, `pr path/list/enlist/unlist`, `registry refresh`,
 `mcp render`, and `secrets link`). The old script names remain compatibility
 entry points. No command rename is needed for the final transition.
 
+Skill names keep the `wtc-` prefix for agent discovery. Mechanism-backed
+skills use the matching action name (`wtc-new`, `wtc-open`, `wtc-catch-up`,
+`wtc-browse`, `wtc-status`, `wtc-add-repo`, and `wtc-retire`). Procedure-only
+skills such as `wtc-start`, `wtc-follow`, `wtc-pr`, and `wtc-local-review` keep
+their task names; they are not claims that a same-named CLI command exists.
+
 | Shell entry point | CLI | State |
 |---|---|---|
 | `refresh-env.sh` | `wtc env` | Native in v0.1.3; target-aware shim in v0.1.9; native `--all` and safe shell sweep released in v0.1.14 |
