@@ -125,3 +125,54 @@ func TestRenderSkillsUsesEmbeddedEntryWhenHarnessHasNone(t *testing.T) {
 		t.Fatalf("embedded entry missing: %v", err)
 	}
 }
+
+func TestRenderSkillsSectionPatchAndDriftFailure(t *testing.T) {
+	c := fixture(t)
+	dir := filepath.Join(c.Harness, "overlays", "skills", "wtc-customize", "sections")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	patch := "## Local setup\n\nUse the local hook.\n"
+	// Use a small harness skill so the section boundary is easy to verify.
+	baseDir := filepath.Join(c.Harness, "skills", "wtc-customize")
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	base := "---\nname: wtc-customize\ndescription: demo\n---\n\n# Demo\n\n## Local setup\n\nOld text.\n\n## Keep\n\nKeep text.\n"
+	if err := os.WriteFile(filepath.Join(baseDir, "SKILL.md"), []byte(base), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "setup.md"), []byte(patch), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RenderSkills(SkillRenderOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(c.Collection, ".wtc", "skills", "wtc-customize", "SKILL.md"))
+	if err != nil || !strings.Contains(string(got), "Use the local hook.") || strings.Contains(string(got), "Old text.") || !strings.Contains(string(got), "Keep text.") {
+		t.Fatalf("patched skill = %s, %v", got, err)
+	}
+	link, err := os.Readlink(filepath.Join(c.Collection, ".agents", "skills", "wtc-customize"))
+	if err != nil || link != "../../.wtc/skills/wtc-customize" {
+		t.Fatalf("patched link = %q, %v", link, err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "SKILL.md"), []byte(strings.Replace(base, "## Local setup", "## Renamed setup", 1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RenderSkills(SkillRenderOptions{}); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("missing heading should stop render, got %v", err)
+	}
+	stale, err := os.ReadFile(filepath.Join(c.Collection, ".wtc", "skills", "wtc-customize", "SKILL.md"))
+	if err != nil || string(stale) != string(got) {
+		t.Fatal("failed patch altered previous generated skill")
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "SKILL.md"), []byte(base), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(dir), ".wtc-base.sha256"), []byte(strings.Repeat("0", 64)+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RenderSkills(SkillRenderOptions{}); err == nil || !strings.Contains(err.Error(), "drifted") {
+		t.Fatalf("stale base should stop render, got %v", err)
+	}
+}

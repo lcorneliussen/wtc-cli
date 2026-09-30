@@ -1,0 +1,126 @@
+package wtc
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestDiffSkillsReportsPrecedenceAndBaseDrift(t *testing.T) {
+	c := fixture(t)
+	base, err := ReadDefault("skills/wtc-customize/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := filepath.Join(c.Harness, "skills", "wtc-customize")
+	overlay := filepath.Join(c.Harness, "overlays", "skills", "wtc-customize")
+	for _, dir := range []string{local, overlay} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(local, "SKILL.md"), []byte("unused override\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	modified := strings.Replace(string(base), "# Customize wtc behavior", "# Customize local behavior", 1)
+	if err := os.WriteFile(filepath.Join(overlay, "SKILL.md"), []byte(modified), 0644); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want string) SkillDiff {
+		t.Helper()
+		rows, err := c.DiffSkills()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 || rows[0].Status != want || rows[0].Source != "overlays/skills/wtc-customize/SKILL.md" {
+			t.Fatalf("rows = %+v, want %s overlay", rows, want)
+		}
+		return rows[0]
+	}
+	row := check("untracked")
+	if row.DefaultHash != skillDigest(base) || len(row.Changes) == 0 {
+		t.Fatalf("missing digest or line changes: %+v", row)
+	}
+	digest := filepath.Join(overlay, ".wtc-base.sha256")
+	if err := os.WriteFile(digest, []byte(row.DefaultHash+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	check("reviewed")
+	if err := os.WriteFile(digest, []byte(strings.Repeat("0", 64)+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	check("drifted")
+	if err := os.WriteFile(digest, []byte("invalid\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.DiffSkills(); err == nil {
+		t.Fatal("invalid base digest accepted")
+	}
+}
+
+func TestDiffSkillsCustomAndUnchanged(t *testing.T) {
+	c := fixture(t)
+	base, err := ReadDefault("skills/wtc-customize/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string][]byte{"wtc-customize": base, "wtc-extra": []byte("custom\n")} {
+		dir := filepath.Join(c.Harness, "skills", name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), body, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := c.DiffSkills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Name != "wtc-customize" || rows[0].Status != "current" || rows[1].Name != "wtc-extra" || rows[1].Status != "custom" {
+		t.Fatalf("rows = %+v", rows)
+	}
+}
+
+func TestDiffSkillsSectionPatchDrift(t *testing.T) {
+	c := fixture(t)
+	dir := filepath.Join(c.Harness, "overlays", "skills", "wtc-customize")
+	if err := os.MkdirAll(filepath.Join(dir, "sections"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := ReadDefault("skills/wtc-customize/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The default skill has no H2 headings, so use a harness full skill as
+	// the patch base and verify the patch is reported separately.
+	local := filepath.Join(c.Harness, "skills", "wtc-customize")
+	if err := os.MkdirAll(local, 0755); err != nil {
+		t.Fatal(err)
+	}
+	localBase := string(base) + "\n## Project setup\n\nOld setup.\n"
+	if err := os.WriteFile(filepath.Join(local, "SKILL.md"), []byte(localBase), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sections", "setup.md"), []byte("## Project setup\n\nNew setup.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".wtc-base.sha256"), []byte(skillDigest([]byte(localBase))+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := c.DiffSkills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Status != "reviewed" || rows[0].Source != "overlays/skills/wtc-customize/sections" || len(rows[0].Changes) == 0 {
+		t.Fatalf("patch rows = %+v", rows)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".wtc-base.sha256"), []byte(strings.Repeat("0", 64)+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = c.DiffSkills()
+	if err != nil || rows[0].Status != "drifted" {
+		t.Fatalf("stale patch base = %+v, %v", rows, err)
+	}
+}
