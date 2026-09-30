@@ -88,15 +88,7 @@ func addBrowseCommand(root *cobra.Command, asJSON *bool) {
 		if _, err := exec.LookPath("nvim"); err != nil {
 			return errors.New("nvim is not on PATH")
 		}
-		if session == "" {
-			session = os.Getenv("HERDR_SESSION")
-		}
-		if session == "" {
-			session = c.Config.Herdr.Session
-		}
-		if session == "" {
-			session = strings.TrimSuffix(strings.TrimSuffix(filepath.Base(c.Workspace), "-harness"), "-wtc")
-		}
+		session = browseSession(c, session)
 		if !here {
 			callerAgent, err := browseCallerIsAgent()
 			if err != nil {
@@ -109,6 +101,22 @@ func addBrowseCommand(root *cobra.Command, asJSON *bool) {
 		return browseHere(c)
 	}
 	root.AddCommand(cmd)
+}
+
+func browseSession(c *wtc.Context, requested string) string {
+	if requested != "" {
+		return requested
+	}
+	if active := os.Getenv("HERDR_SESSION"); active != "" {
+		return active
+	}
+	if configured := statusSetting(c, "HARNESS_HERDR_SESSION"); configured != "" {
+		return configured
+	}
+	if c.Config.Herdr.Session != "" {
+		return c.Config.Herdr.Session
+	}
+	return strings.TrimSuffix(strings.TrimSuffix(filepath.Base(c.Workspace), "-harness"), "-wtc")
 }
 
 func browseHerdr(session string, args ...string) (browseHerdrResult, error) {

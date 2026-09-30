@@ -23,6 +23,22 @@ func TestBrowseSocketMatchesShellContract(t *testing.T) {
 	}
 }
 
+func TestBrowseSessionRespectsActiveAndConfiguredHerdrSessions(t *testing.T) {
+	c := &wtc.Context{Workspace: "/work/sample-wtc", ConfigRoot: t.TempDir()}
+	t.Setenv("HARNESS_HERDR_SESSION", "configured")
+	t.Setenv("HERDR_SESSION", "active")
+	if got := browseSession(c, ""); got != "active" {
+		t.Fatalf("active session ignored: %s", got)
+	}
+	if got := browseSession(c, "explicit"); got != "explicit" {
+		t.Fatalf("explicit session ignored: %s", got)
+	}
+	t.Setenv("HERDR_SESSION", "")
+	if got := browseSession(c, ""); got != "configured" {
+		t.Fatalf("configured session ignored: %s", got)
+	}
+}
+
 func TestBrowseHereLoadsBundledViewInCollection(t *testing.T) {
 	root := t.TempDir()
 	collection := filepath.Join(root, "topic")
