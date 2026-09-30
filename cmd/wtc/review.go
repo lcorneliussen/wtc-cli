@@ -35,7 +35,7 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	bundle.Flags().StringVar(&dir, "dir", "", "Bundle directory")
 	bundle.Flags().IntVar(&round, "round", 0, "Review round (default: next)")
 	bundle.Flags().BoolVar(&public, "public", false, "Exclude local overlays and related repository snapshots")
-	bundle.Flags().BoolVar(&noCatchUp, "no-catch-up", false, "Skip collection catch-up (PR branch checkout still runs)")
+	bundle.Flags().BoolVar(&noCatchUp, "no-catch-up", false, "Skip PR collection catch-up (PR branch checkout still runs)")
 	bundle.RunE = func(cmd *cobra.Command, args []string) error {
 		c, err := context()
 		if err != nil {

@@ -167,13 +167,30 @@ esac
 	if err := os.WriteFile(filepath.Join(collection, ".wtc-prs"), []byte("app 7 feature\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	featureHead, err := reviewRef(repo, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
 	git("switch", "-c", "other")
+	if err := os.WriteFile(filepath.Join(repo, "other.go"), []byte("package other\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "other.go")
+	git("commit", "-m", "unrelated branch commit")
 	fifth, err := c.BuildPublicReviewBundle(ReviewBundleOptions{Repo: "app", PR: "7", Base: "main"})
 	if err != nil {
 		t.Fatalf("forge outage prevented local review bundle: %v", err)
 	}
 	prText, err := os.ReadFile(filepath.Join(fifth.Dir, "pr.md"))
-	if err != nil || !strings.Contains(string(prText), "PR #7 not readable") || fifth.Manifest.URL != "https://github.com/example/app/pull/7" || fifth.Manifest.HeadBranch != "feature" {
+	if err != nil || !strings.Contains(string(prText), "PR #7 not readable") || fifth.Manifest.URL != "https://github.com/example/app/pull/7" || fifth.Manifest.HeadBranch != "feature" || fifth.Manifest.HeadSHA != featureHead {
 		t.Fatalf("offline PR fallback missing: %s %+v %v", prText, fifth.Manifest, err)
+	}
+	diff, err := os.ReadFile(filepath.Join(fifth.Dir, "diff.patch"))
+	if err != nil || !strings.Contains(string(diff), "feature file.go") || strings.Contains(string(diff), "other.go") {
+		t.Fatalf("offline PR selected wrong diff: %s %v", diff, err)
+	}
+	selected, err := reviewGit(repo, "branch", "--show-current")
+	if err != nil || strings.TrimSpace(string(selected)) != "feature" {
+		t.Fatalf("offline PR left worktree on %q: %v", selected, err)
 	}
 }

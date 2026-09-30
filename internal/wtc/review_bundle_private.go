@@ -291,6 +291,9 @@ func (c *Context) copyRelatedReviewPatches(dir, reviewed, number string) (int, e
 			continue
 		}
 		worktree := filepath.Join(c.Collection, record.Repo)
+		if record.Repo == "harness" || record.Repo == c.Config.Harness.Name {
+			worktree = c.Harness
+		}
 		if _, err := os.Stat(filepath.Join(worktree, ".git")); err != nil {
 			continue
 		}

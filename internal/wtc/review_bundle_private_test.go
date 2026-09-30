@@ -19,6 +19,7 @@ func TestPrivateReviewBundleIncludesSnapshotsOverlaysAndRelatedPatch(t *testing.
 		}
 	}
 	registry := "repos:\n" +
+		"  - name: agent-harness\n    remote: https://github.com/example/agent-harness.git\n    default_ref: main\n" +
 		"  - name: library\n    remote: https://github.com/example/library.git\n    default_ref: main\n    downstream: consumer\n" +
 		"  - name: consumer\n    remote: https://github.com/example/consumer.git\n    production_ref: main\n" +
 		"  - name: framework\n    remote: https://github.com/example/framework.git\n    default_ref: main\n    downstream: library\n"
@@ -64,18 +65,28 @@ func TestPrivateReviewBundleIncludesSnapshotsOverlaysAndRelatedPatch(t *testing.
 	git("consumer", "commit", "-m", "consumer feature")
 	write("harness", "review/concerns/code.md", "---\nid: code\napplies: '*.go'\n---\nGeneric concern.\n")
 	write("harness", "review/concerns.d/code.md", "---\nid: code\napplies: '*.go'\n---\nLocal overlay.\n")
-	if err := os.WriteFile(filepath.Join(collection, ".wtc-prs"), []byte("consumer 8 feature\n"), 0644); err != nil {
+	git("harness", "init", "-b", "main")
+	git("harness", "config", "user.name", "Fixture")
+	git("harness", "config", "user.email", "fixture@example.invalid")
+	git("harness", "add", ".")
+	git("harness", "commit", "-m", "base")
+	git("harness", "switch", "-c", "feature")
+	write("harness", "harness-feature.go", "package feature\n")
+	git("harness", "add", ".")
+	git("harness", "commit", "-m", "harness feature")
+	if err := os.WriteFile(filepath.Join(collection, ".wtc-prs"), []byte("consumer 8 feature\nagent-harness 9 feature\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	c, err := OpenCollection(collection)
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.Config.Harness.Name = "agent-harness"
 	bundle, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "library", Base: "main", NoCatchUp: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bundle.Manifest.Public || bundle.Manifest.Downstream != "consumer" || bundle.Manifest.Upstream != "framework" || bundle.Concerns != 2 || bundle.Related != 1 {
+	if bundle.Manifest.Public || bundle.Manifest.Downstream != "consumer" || bundle.Manifest.Upstream != "framework" || bundle.Concerns != 2 || bundle.Related != 2 {
 		t.Fatalf("incomplete private bundle: %+v", bundle)
 	}
 	for path, want := range map[string]string{
@@ -85,6 +96,7 @@ func TestPrivateReviewBundleIncludesSnapshotsOverlaysAndRelatedPatch(t *testing.
 		"concerns/code.md":                "Local overlay.",
 		"concerns/library.md":             "Library base concern.",
 		"related/consumer-pr8.patch":      "new.txt",
+		"related/agent-harness-pr9.patch": "harness-feature.go",
 	} {
 		body, err := os.ReadFile(filepath.Join(bundle.Dir, path))
 		if err != nil || !strings.Contains(string(body), want) {
