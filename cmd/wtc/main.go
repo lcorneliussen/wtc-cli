@@ -250,6 +250,7 @@ func run() error {
 	addAddRepoCommand(root, &asJSON)
 	addRetireCommand(root, &asJSON)
 	addCatchUpCommand(root, &asJSON)
+	addStatusCommand(root, &asJSON)
 	return root.Execute()
 }
 
