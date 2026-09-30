@@ -14,17 +14,18 @@ import (
 // view are being ported. Neither writes a snapshot that a status pane could
 // mistake for a complete one.
 func addStatusCommand(root *cobra.Command, asJSON *bool) {
-	var local, forge, all, md, cached bool
+	var local, forge, all, md, cached, noFetch bool
 	cmd := &cobra.Command{Use: "status", Short: "Inspect worktree collection status", Args: cobra.NoArgs}
 	cmd.Flags().BoolVar(&local, "local", false, "Preview local Git facts (no forge facts or cache writes)")
 	cmd.Flags().BoolVar(&forge, "forge", false, "Preview local Git and PR facts (no snapshot writes)")
 	cmd.Flags().BoolVar(&all, "all", false, "Include every collection in the workspace")
 	cmd.Flags().BoolVar(&md, "md", false, "Render agent Markdown")
 	cmd.Flags().BoolVar(&cached, "cached", false, "Read the last completed snapshot without Git or forge calls")
+	cmd.Flags().BoolVar(&noFetch, "no-fetch", false, "Use current local refs without fetching")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if cached {
-			if local || forge || all {
-				return fmt.Errorf("--cached cannot be combined with --local, --forge, or --all")
+			if local || forge || all || noFetch {
+				return fmt.Errorf("--cached cannot be combined with --local, --forge, --all, or --no-fetch")
 			}
 		} else if local == forge {
 			return fmt.Errorf("native status is still being ported; choose --local or --forge for a preview")
@@ -69,7 +70,11 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 		}
 		var snapshot wtc.StatusSnapshot
 		if forge {
-			snapshot, err = c.StatusForgePreview()
+			var fetched wtc.StatusFetchReport
+			snapshot, fetched, err = c.StatusLivePreview(noFetch)
+			if fetched.Failed > 0 {
+				fmt.Fprintf(os.Stderr, "wtc: warning: %d status ref refresh(es) failed; showing local refs\n", fetched.Failed)
+			}
 		} else {
 			snapshot, err = c.StatusLocalSnapshot(all)
 		}
