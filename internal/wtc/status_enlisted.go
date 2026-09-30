@@ -167,5 +167,8 @@ func (c *Context) StatusForgePreview() (StatusSnapshot, error) {
 				Merge: detail.Merge, Review: detail.Review, Draft: detail.State == "DRAFT"}
 		}
 	}
+	if err := c.statusBuildFacts(&snapshot); err != nil {
+		return snapshot, err
+	}
 	return snapshot, nil
 }
