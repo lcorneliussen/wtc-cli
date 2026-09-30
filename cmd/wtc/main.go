@@ -251,6 +251,7 @@ func run() error {
 	addRetireCommand(root, &asJSON)
 	addCatchUpCommand(root, &asJSON)
 	addStatusCommand(root, &asJSON)
+	addOpenCommand(root, &asJSON)
 	addBrowseCommand(root, &asJSON)
 	args, err := normalizeStatusWatchArgs(os.Args[1:])
 	if err != nil {

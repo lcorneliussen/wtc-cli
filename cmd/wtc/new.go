@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -50,30 +49,42 @@ func addNewCommand(root *cobra.Command, asJSON *bool) {
 		if err != nil {
 			return err
 		}
-		shouldOpen := open
-		if !open && !noOpen {
-			if _, err := exec.LookPath("herdr"); err == nil {
-				session := c.Config.Herdr.Session
-				if session == "" {
-					session = strings.TrimSuffix(strings.TrimSuffix(filepath.Base(c.Workspace), "-harness"), "-wtc")
-				}
-				probe := exec.Command("herdr", "--session", session, "workspace", "list")
-				shouldOpen = probe.Run() == nil
-			}
-		}
-		if shouldOpen {
-			path := filepath.Join(result.Collection, "harness", "tools", "wtc-open.sh")
-			if _, err := os.Stat(path); err != nil {
-				return fmt.Errorf("collection created at %s, but open tool is unavailable: %w", result.Collection, err)
-			}
-			openCmd := exec.Command(path, filepath.Base(result.Collection))
-			openCmd.Dir = result.Collection
-			openCmd.Stdout, openCmd.Stderr = os.Stderr, os.Stderr
-			if err := openCmd.Run(); err != nil {
-				return fmt.Errorf("collection created at %s, but opening failed: %w", result.Collection, err)
-			}
+		if err := openAfterNew(c, result.Collection, open, noOpen); err != nil {
+			return err
 		}
 		return emit(envelope{OK: true, Data: result, Summary: "done: " + result.Collection}, *asJSON)
 	}
 	root.AddCommand(cmd)
+}
+
+func openAfterNew(source *wtc.Context, collection string, explicitOpen, noOpen bool) error {
+	shouldOpen := explicitOpen
+	if !explicitOpen && !noOpen {
+		if _, err := exec.LookPath("herdr"); err == nil {
+			shouldOpen = openSessionRunning(openSession(source, ""))
+		}
+	}
+	if !shouldOpen {
+		return nil
+	}
+	if _, err := exec.LookPath("herdr"); err != nil {
+		return fmt.Errorf("collection created at %s, but herdr is unavailable: %w", collection, err)
+	}
+	target, err := wtc.OpenCollection(collection)
+	if err != nil {
+		return fmt.Errorf("collection created at %s, but cannot read its configuration: %w", collection, err)
+	}
+	opt := openOptions{Session: openSession(target, "")}
+	running := openSessionRunning(opt.Session)
+	if !running {
+		if err := openEnsureSession(opt.Session); err != nil {
+			return fmt.Errorf("collection created at %s, but opening failed: %w", collection, err)
+		}
+		running = true
+	}
+	item := openCollection(source, filepath.Base(collection), opt, openDesiredLayout(target, opt, running), running, true)
+	if item.Error != "" {
+		return fmt.Errorf("collection created at %s, but opening failed: %s", collection, item.Error)
+	}
+	return nil
 }
