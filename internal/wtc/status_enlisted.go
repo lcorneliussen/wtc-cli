@@ -40,31 +40,45 @@ func statusUnknownDetail(record PRRecord) statusPRDetail {
 	return statusPRDetail{Number: record.Number, State: "UNKNOWN", Checks: "NONE", Merge: "UNKNOWN", Review: "none", Title: record.Title}
 }
 
+func statusParseForgeDetail(forge string, raw []byte, record PRRecord) (statusPRDetail, error) {
+	var detail statusPRDetail
+	var err error
+	switch forge {
+	case "github.com":
+		detail, err = statusGHDetail(raw, record)
+	case "bitbucket.org":
+		detail, err = statusBBDetail(raw, record)
+	default:
+		return statusPRDetail{}, fmt.Errorf("unsupported forge")
+	}
+	if err == nil && detail.Number != record.Number {
+		err = fmt.Errorf("forge returned a different PR number")
+	}
+	return detail, err
+}
+
 func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	if slug == "" || forge == "" {
 		return statusUnknownDetail(record)
+	}
+	if cached, ok := statusReadForgeCache(forge, slug, record.Number); ok {
+		if detail, err := statusParseForgeDetail(forge, cached, record); err == nil {
+			return detail
+		}
 	}
 	var raw []byte
 	var err error
 	switch forge {
 	case "github.com":
 		raw, err = catchUpJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,reviewRequests,latestReviews,mergedAt,updatedAt")
-		if err == nil {
-			var detail statusPRDetail
-			detail, err = statusGHDetail(raw, record)
-			if err == nil && detail.Number == record.Number {
-				return detail
-			}
-		}
 	case "bitbucket.org":
 		parts := strings.SplitN(slug, "/", 2)
 		raw, err = catchUpJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
-		if err == nil {
-			var detail statusPRDetail
-			detail, err = statusBBDetail(raw, record)
-			if err == nil && detail.Number == record.Number {
-				return detail
-			}
+	}
+	if err == nil {
+		if detail, parseErr := statusParseForgeDetail(forge, raw, record); parseErr == nil {
+			statusWriteForgeCache(forge, slug, record.Number, raw)
+			return detail
 		}
 	}
 	return statusUnknownDetail(record)
