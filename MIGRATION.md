@@ -21,7 +21,7 @@ command and its contract checks cover their behavior.
 | `catch-up.sh` | `wtc catch-up` | Native in v0.1.15; matching-pin reference shim and released-binary contract tests |
 | `wtc-status.sh`, `wtc-status-tui.sh` | `wtc status` | Native one-shot and TUI released in v0.1.16; reference shims, published-binary contracts, and watch lifecycle ported |
 | `wtc-open.sh` | `wtc open` | Pending |
-| `wtc-browse.sh` | `wtc browse` | Native launch and herdr routing in progress; reference shim and released-binary contracts pending |
+| `wtc-browse.sh` | `wtc browse` | Native launch, bundled Neovim view, and herdr routing released in v0.1.17; reference matching-pin shim and released-binary contracts merged |
 | `review-bundle.sh` | `wtc review bundle` | Native public no-catch-up subset in v0.1.4; private snapshots, overlays, catch-up, and prior-round context pending |
 | `review-run.sh` | `wtc review run` | Native local runner subset in v0.1.4; integrated posting lifecycle and rich stats pending |
 | `review-post.sh` | `wtc review post` | Native summary lifecycle, inline dedup, and local receipt in v0.1.4; forge parity tests pending |
