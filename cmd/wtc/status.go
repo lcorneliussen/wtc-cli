@@ -9,18 +9,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The local preview is deliberately explicit while forge facts and the live
-// view are being ported. It never writes a snapshot that a status pane could
+// Previews are deliberately explicit while discovery, caching, and the live
+// view are being ported. Neither writes a snapshot that a status pane could
 // mistake for a complete one.
 func addStatusCommand(root *cobra.Command, asJSON *bool) {
-	var local, all, md bool
+	var local, enlisted, all, md bool
 	cmd := &cobra.Command{Use: "status", Short: "Inspect worktree collection status", Args: cobra.NoArgs}
 	cmd.Flags().BoolVar(&local, "local", false, "Preview local Git facts (no forge facts or cache writes)")
+	cmd.Flags().BoolVar(&enlisted, "enlisted", false, "Preview local Git and enlisted PR facts (no cache writes)")
 	cmd.Flags().BoolVar(&all, "all", false, "Include every collection in the workspace")
 	cmd.Flags().BoolVar(&md, "md", false, "Render agent Markdown")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		if !local {
-			return fmt.Errorf("native status is still being ported; use --local for a Git-only preview")
+		if local == enlisted {
+			return fmt.Errorf("native status is still being ported; choose --local or --enlisted for a preview")
+		}
+		if enlisted && all {
+			return fmt.Errorf("--enlisted is currently scoped to this collection")
 		}
 		if md && *asJSON {
 			return fmt.Errorf("--md and --json cannot be combined")
@@ -33,7 +37,12 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 		if err != nil {
 			return err
 		}
-		snapshot, err := c.StatusLocalSnapshot(all)
+		var snapshot wtc.StatusSnapshot
+		if enlisted {
+			snapshot, err = c.StatusEnlistedSnapshot()
+		} else {
+			snapshot, err = c.StatusLocalSnapshot(all)
+		}
 		if err != nil {
 			return err
 		}

@@ -32,6 +32,20 @@ func statusShownGlyph(value string) string {
 	return glyph
 }
 
+func statusMergeGlyph(value string) string {
+	switch value {
+	case "BEHIND":
+		return "↓"
+	case "DIRTY":
+		return "⚠"
+	case "BLOCKED":
+		return "⊘"
+	case "FOLLOW":
+		return "→"
+	}
+	return ""
+}
+
 func statusMarkdownLink(url *string, label string) string {
 	if url != nil && *url != "" {
 		return "[" + label + "](" + *url + ")"
@@ -96,7 +110,7 @@ func (s StatusSnapshot) Markdown() string {
 			if g := statusShownGlyph(row.PR.Checks); g != "" {
 				bits = append(bits, g)
 			}
-			if g := statusShownGlyph(row.PR.Merge); g != "" {
+			if g := statusMergeGlyph(row.PR.Merge); g != "" {
 				bits = append(bits, g)
 			}
 			if label := statusReviewLabels[row.PR.Review]; label != "" {
@@ -161,7 +175,7 @@ func (s StatusSnapshot) Markdown() string {
 					}
 				}
 				if merge != "FOLLOW" && merge != "MERGED" && merge != "UNKNOWN" {
-					if g := statusShownGlyph(merge); g != "" {
+					if g := statusMergeGlyph(merge); g != "" {
 						bits = append(bits, g)
 					}
 				}

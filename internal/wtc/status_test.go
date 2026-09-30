@@ -92,7 +92,7 @@ func TestStatusMarkdownKeepsRepoAndPRSignals(t *testing.T) {
 		Orphans: []StatusOrphan{{Repo: "harness", Branch: "old", State: "MERGED"}}}
 	md := snapshot.Markdown()
 	for _, want := range []string{
-		"# fixture", "**widget** (`topic`) — ±2; ↑1; ↓1; PR #7 ✓ CLEAN ∅ no reviewers",
+		"# fixture", "**widget** (`topic`) — ±2; ↑1; ↓1; PR #7 ✓ ∅ no reviewers",
 		"_1 worktree(s) behind remote — catch-up needed._",
 		"[Add widget](https://github.com/example/widget/pull/7)",
 		"## Orphans", "**harness** on `old` — PR MERGED; catch-up returns it to the tip",
