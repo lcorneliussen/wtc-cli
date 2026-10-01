@@ -9,19 +9,22 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // PRRecord is the collection-local link from a branch to a forge pull request.
 // The file format is shared with the shell status and catch-up commands.
 type PRRecord struct {
-	Repo   string `json:"repo"`
-	Number string `json:"number"`
-	Branch string `json:"branch,omitempty"`
-	URL    string `json:"url,omitempty"`
-	Title  string `json:"title,omitempty"`
+	Repo        string `json:"repo"`
+	Number      string `json:"number"`
+	Branch      string `json:"branch,omitempty"`
+	URL         string `json:"url,omitempty"`
+	Title       string `json:"title,omitempty"`
+	MergedOn    string `json:"merged_on,omitempty"`
+	FinalChecks string `json:"final_checks,omitempty"`
 }
 
-const prHeader = "# Local PR enlistment for this collection (not committed; dies with retire).\n# Format: repo  number  [branch]  [url]  [title…]\n# Manage: wtc pr enlist|unlist|list\n"
+const prHeader = "# Local PR enlistment for this collection (not committed; dies with retire).\n# Format: repo  number  [branch]  [url]  [title…]\n# Final merges: # merged-pr repo number merged-at checks\n# Manage: wtc pr enlist|unlist|list\n"
 
 var prNumber = regexp.MustCompile(`^[0-9]+$`)
 var prRepoName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -83,6 +86,23 @@ func parsePR(line string) (PRRecord, bool) {
 	return r, true
 }
 
+func prRecordKey(repo, number string) string { return repo + "\x00" + number }
+
+func parseMergedPR(line string) (repo, number, mergedOn, checks string, ok bool) {
+	fields := strings.Fields(line)
+	if len(fields) != 6 || fields[0] != "#" || fields[1] != "merged-pr" || ValidatePRIdentity(fields[2], fields[3]) != nil {
+		return "", "", "", "", false
+	}
+	if _, err := time.Parse(time.RFC3339, fields[4]); err != nil {
+		return "", "", "", "", false
+	}
+	switch fields[5] {
+	case "SUCCESS", "FAILURE", "NONE":
+		return fields[2], fields[3], fields[4], fields[5], true
+	}
+	return "", "", "", "", false
+}
+
 func (c *Context) ListPRs() ([]PRRecord, error) {
 	f, err := os.Open(c.PRFile())
 	if os.IsNotExist(err) {
@@ -93,13 +113,24 @@ func (c *Context) ListPRs() ([]PRRecord, error) {
 	}
 	defer f.Close()
 	var records []PRRecord
+	merged := map[string]PRRecord{}
 	s := bufio.NewScanner(f)
 	for s.Scan() {
 		if record, ok := parsePR(s.Text()); ok {
 			records = append(records, record)
+		} else if repo, number, when, checks, ok := parseMergedPR(s.Text()); ok {
+			merged[prRecordKey(repo, number)] = PRRecord{MergedOn: when, FinalChecks: checks}
 		}
 	}
-	return records, s.Err()
+	if err := s.Err(); err != nil {
+		return nil, err
+	}
+	for i := range records {
+		if final, ok := merged[prRecordKey(records[i].Repo, records[i].Number)]; ok {
+			records[i].MergedOn, records[i].FinalChecks = final.MergedOn, final.FinalChecks
+		}
+	}
+	return records, nil
 }
 
 func formatPR(r PRRecord) string {
@@ -147,17 +178,24 @@ func (c *Context) rewritePRs(removeRepo, removeNumber string, add *PRRecord) err
 		if record, ok := parsePR(line); ok && record.Repo == removeRepo && record.Number == removeNumber {
 			continue
 		}
+		if repo, number, _, _, ok := parseMergedPR(line); ok && repo == removeRepo && number == removeNumber && add == nil {
+			continue
+		}
 		fmt.Fprintln(&out, line)
 	}
 	if add != nil {
 		fmt.Fprintln(&out, formatPR(*add))
 	}
+	return c.writePRFile(out.Bytes())
+}
+
+func (c *Context) writePRFile(data []byte) error {
 	tmp, err := os.CreateTemp(c.Collection, ".wtc-prs.tmp-")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(out.Bytes()); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -168,7 +206,81 @@ func (c *Context) rewritePRs(removeRepo, removeNumber string, add *PRRecord) err
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return os.Rename(tmp.Name(), c.PRFile())
+}
+
+// recordMergedPRs freezes facts that cannot change after a merge. The extra
+// comment rows keep the registry readable by older shell tools, which ignore
+// comments and continue to parse the ordinary PR rows.
+func (c *Context) recordMergedPRs(records []PRRecord, details []statusPRDetail) (int, error) {
+	if len(records) != len(details) {
+		return 0, fmt.Errorf("PR records and details differ in length")
+	}
+	updates := map[string]statusPRDetail{}
+	for i, record := range records {
+		detail := details[i]
+		if record.MergedOn != "" || detail.State != "MERGED" {
+			continue
+		}
+		if _, err := time.Parse(time.RFC3339, detail.MergedOn); err != nil {
+			continue
+		}
+		switch detail.Checks {
+		case "PENDING":
+			// Checks can still settle after the merge; retry later.
+			continue
+		case "SUCCESS", "FAILURE", "NONE":
+		default:
+			detail.Checks = "NONE"
+		}
+		updates[prRecordKey(record.Repo, record.Number)] = detail
+	}
+	if len(updates) == 0 {
+		return 0, nil
+	}
+	path := c.PRFile()
+	info, err := os.Lstat(path)
+	if err != nil {
+		return 0, err
+	}
+	if !info.Mode().IsRegular() {
+		return 0, fmt.Errorf("refusing non-regular PR file: %s", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	var out bytes.Buffer
+	seen := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
+		if record, ok := parsePR(line); ok {
+			key := prRecordKey(record.Repo, record.Number)
+			if detail, update := updates[key]; update {
+				if detail.Title != "" {
+					record.Title = cleanPRField(detail.Title)
+				}
+				fmt.Fprintln(&out, formatPR(record))
+				seen[key] = true
+				continue
+			}
+		}
+		if repo, number, _, _, ok := parseMergedPR(line); ok && updates[prRecordKey(repo, number)].State == "MERGED" {
+			continue
+		}
+		fmt.Fprintln(&out, line)
+	}
+	count := 0
+	for _, record := range records {
+		key := prRecordKey(record.Repo, record.Number)
+		if detail, ok := updates[key]; ok && seen[key] {
+			fmt.Fprintf(&out, "# merged-pr %s %s %s %s\n", record.Repo, record.Number, detail.MergedOn, detail.Checks)
+			count++
+		}
+	}
+	if count == 0 {
+		return 0, nil
+	}
+	return count, c.writePRFile(out.Bytes())
 }
 
 func (c *Context) EnlistPR(r PRRecord) (PRRecord, error) {

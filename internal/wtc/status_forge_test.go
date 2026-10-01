@@ -93,8 +93,90 @@ printf '{"number":%s,"state":"OPEN","title":"Synthetic %s"}\n' "$3" "$3"
 			t.Fatalf("detail %d crossed records: %+v", i, detail)
 		}
 	}
-	if len(progress) != len(records) || !strings.Contains(progress[len(progress)-1], "6/6") {
+	if len(progress) != len(records)+1 || !strings.Contains(progress[len(progress)-1], "6/6") {
 		t.Fatalf("missing completion progress: %v", progress)
+	}
+}
+
+func TestMergedPRRegistryStopsRefreshingFinalFacts(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	bin := t.TempDir()
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("WTC_TEST_GH_CALLS", calls)
+	script := `#!/bin/sh
+printf 'called\n' >> "$WTC_TEST_GH_CALLS"
+printf '%s\n' '{"number":7,"state":"MERGED","title":"Finished change","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}'
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	c := fixture(t)
+	c.Registry.Repos = []Repo{{Name: "widget", Remote: "https://github.com/example/widget.git"}}
+	if _, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "7", Branch: "topic", Title: "Old title"}); err != nil {
+		t.Fatal(err)
+	}
+	records, err := c.ListPRs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	details, err := c.statusEnrichRecords(records, nil)
+	if err != nil || details[0].State != "MERGED" || details[0].Checks != "SUCCESS" {
+		t.Fatalf("initial merged detail: %+v, %v", details, err)
+	}
+	if count, err := c.recordMergedPRs(records, details); err != nil || count != 1 {
+		t.Fatalf("record final merge: count=%d err=%v", count, err)
+	}
+	data, err := os.ReadFile(c.PRFile())
+	if err != nil || !strings.Contains(string(data), "widget 7 topic https://github.com/example/widget/pull/7 Finished change") ||
+		!strings.Contains(string(data), "# merged-pr widget 7 2026-09-30T12:00:00Z SUCCESS") {
+		t.Fatalf("shell-readable registry lost final facts: %s %v", data, err)
+	}
+	if err := os.Remove(statusForgeCachePath("github.com", "example/widget", "7")); err != nil {
+		t.Fatal(err)
+	}
+	var progress []string
+	c.StatusProgress = func(message string) { progress = append(progress, message) }
+	records, err = c.ListPRs()
+	if err != nil || records[0].MergedOn != "2026-09-30T12:00:00Z" {
+		t.Fatalf("merge annotation not read: %+v %v", records, err)
+	}
+	details, err = c.statusEnrichRecords(records, nil)
+	if err != nil || details[0].State != "MERGED" || details[0].Title != "Finished change" || details[0].Checks != "SUCCESS" {
+		t.Fatalf("recorded merge facts lost: %+v %v", details, err)
+	}
+	if len(progress) != 1 || progress[0] != "Using 1 recorded merges" {
+		t.Fatalf("recorded merge was counted as a live check: %v", progress)
+	}
+	callData, err := os.ReadFile(calls)
+	if err != nil || strings.Count(string(callData), "called") != 1 {
+		t.Fatalf("merged PR was fetched again: %s %v", callData, err)
+	}
+	if err := c.UnlistPR("widget", "7"); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(c.PRFile())
+	if err != nil || strings.Contains(string(data), "merged-pr widget 7") {
+		t.Fatalf("unlist left orphaned merge annotation: %s %v", data, err)
+	}
+}
+
+func TestMergedPRRegistryWaitsForSettledChecks(t *testing.T) {
+	c := fixture(t)
+	if _, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "8", Branch: "topic"}); err != nil {
+		t.Fatal(err)
+	}
+	records, err := c.ListPRs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	details := []statusPRDetail{{Number: "8", State: "MERGED", MergedOn: "2026-09-30T12:00:00Z", Checks: "PENDING"}}
+	if count, err := c.recordMergedPRs(records, details); err != nil || count != 0 {
+		t.Fatalf("pending check was frozen: %d %v", count, err)
+	}
+	records, err = c.ListPRs()
+	if err != nil || records[0].MergedOn != "" {
+		t.Fatalf("pending PR stopped being live: %+v %v", records, err)
 	}
 }
 

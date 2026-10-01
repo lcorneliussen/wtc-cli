@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/mattn/go-runewidth"
 )
@@ -21,6 +22,44 @@ func statusTestMessage(t *testing.T, command tea.Cmd) tea.Msg {
 	case <-time.After(3 * time.Second):
 		t.Fatal("TUI refresh event did not arrive")
 		return nil
+	}
+}
+
+func TestStatusTUILinksColorsAndClickTargets(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	prURL := "https://github.com/example/widget/pull/7"
+	buildURL := "https://example.invalid/build/42"
+	passed := "SUCCESS"
+	merged := "MERGED"
+	model := statusTUIModel{width: 100, height: 24, snapshot: wtc.StatusSnapshot{Collection: "fixture",
+		Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "feature", Tree: "clean",
+			PR:  &wtc.StatusPRFacts{Number: "7", URL: prURL, Checks: "SUCCESS"},
+			Tip: &wtc.StatusBuild{Checks: &passed, URL: &buildURL}}},
+		PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", Title: "Change widget", URL: &prURL, Merge: &merged}}}}
+	view := model.View().Content
+	if strings.Count(view, ansi.SetHyperlink(prURL)) < 2 || !strings.Contains(view, ansi.SetHyperlink(buildURL)) ||
+		!strings.Contains(view, "\x1b[4;38;5;81m") || !strings.Contains(view, "\x1b[1;38;5;180m") {
+		t.Fatalf("TUI lost terminal links or visual hierarchy: %q", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if ansi.StringWidth(line) > model.width {
+			t.Fatalf("styled line exceeded terminal width: %q", line)
+		}
+	}
+	if got := model.buildClickTarget(54, 3); got != prURL {
+		t.Fatalf("repo PR cell click = %q", got)
+	}
+	if got := model.buildClickTarget(83, 3); got != buildURL {
+		t.Fatalf("build cell click = %q", got)
+	}
+	if got := model.buildClickTarget(5, 6); got != prURL {
+		t.Fatalf("PR list row click = %q", got)
+	}
+	t.Setenv("NO_COLOR", "1")
+	view = model.View().Content
+	if strings.Contains(view, "\x1b[4;38;5;81m") || !strings.Contains(view, ansi.SetHyperlink(prURL)) {
+		t.Fatal("NO_COLOR suppressed links or retained styling")
 	}
 }
 
@@ -68,7 +107,7 @@ func TestStatusTUIRepoRowsKeepSignalsWithinWidth(t *testing.T) {
 		Dir: "widget", BranchDisplay: "topic", Tree: "±2", Ahead: 1, Behind: 3,
 		PR: &wtc.StatusPRFacts{Number: "7", Checks: "SUCCESS", Merge: "BEHIND", Review: "waiting"},
 	}}}
-	lines := statusTUIRepoLines(snapshot, 60)
+	lines := statusTUIRepoLines(snapshot, 60, false)
 	if len(lines) != 2 || !strings.Contains(lines[1], "#7 ✓ ↓ …") || !strings.Contains(lines[1], "±2 ↑1 ↓3") {
 		t.Fatalf("repo signals missing: %q", lines)
 	}
@@ -84,7 +123,7 @@ func TestStatusTUIModelShowsCachedRowsAndControls(t *testing.T) {
 		width: 90, height: 20, focused: true, interval: 30 * time.Second, background: 5 * time.Minute,
 		lastRefresh: time.Now().Add(-time.Minute), nextRefresh: time.Now().Add(time.Minute)}
 	view := model.View().Content
-	if !strings.Contains(view, "wtc status · fixture") || !strings.Contains(view, "widget") || !strings.Contains(view, "1 archived PR(s) hidden") || strings.Contains(view, "Old change") {
+	if !strings.Contains(view, "wtc status · fixture") || !strings.Contains(view, "widget") || !strings.Contains(view, "archived (1)") || strings.Contains(view, "Old change") {
 		t.Fatalf("cached view wrong: %s", view)
 	}
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Text: "a"}))

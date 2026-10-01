@@ -43,6 +43,7 @@ type StatusRepo struct {
 
 type StatusPRFacts struct {
 	Number string `json:"number"`
+	URL    string `json:"url,omitempty"`
 	Checks string `json:"checks"`
 	Merge  string `json:"merge"`
 	Review string `json:"review"`
