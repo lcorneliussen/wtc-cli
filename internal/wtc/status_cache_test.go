@@ -7,6 +7,52 @@ import (
 	"time"
 )
 
+func TestStatusMergedPRCacheOutlivesActiveCache(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_CACHE_AGE", "")
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nexit 2\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	forge, slug, number := "github.com", "example/widget", "7"
+	path := statusForgeCachePath(forge, slug, number)
+	stale := time.Now().Add(-2 * time.Minute)
+	cache := func(raw string) {
+		statusWriteForgeCache(forge, slug, number, []byte(raw))
+		if err := os.Chtimes(path, stale, stale); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cache(`{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z"}`)
+	if detail := statusEnrichRecord(PRRecord{Repo: "widget", Number: number}, slug, forge); detail.State != "MERGED" {
+		t.Fatalf("stale merged result was needlessly refetched: %+v", detail)
+	}
+	cache(`{"number":7,"state":"OPEN"}`)
+	if detail := statusEnrichRecord(PRRecord{Repo: "widget", Number: number}, slug, forge); detail.State != "UNKNOWN" {
+		t.Fatalf("stale active result was trusted: %+v", detail)
+	}
+	cache(`{"number":7,"state":"MERGED"}`)
+	t.Setenv("WTC_FORGE_CACHE_AGE", "1")
+	if detail := statusEnrichRecord(PRRecord{Repo: "widget", Number: number}, slug, forge); detail.State != "UNKNOWN" {
+		t.Fatalf("explicit short cache age was ignored: %+v", detail)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte(`{"number":7,"state":"MERGED"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, path); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WTC_FORGE_CACHE_AGE", "")
+	if detail := statusEnrichRecord(PRRecord{Repo: "widget", Number: number}, slug, forge); detail.State != "UNKNOWN" {
+		t.Fatalf("merged cache followed symlink: %+v", detail)
+	}
+}
+
 func TestStatusForgeCacheIsPrivateFreshAndDoesNotReadSymlinks(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("WTC_FORGE_CACHE_AGE", "1")

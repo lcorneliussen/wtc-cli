@@ -67,6 +67,13 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 			return detail
 		}
 	}
+	// A merged PR cannot become open again. Reuse its detail for a day after
+	// the short active-PR cache expires, while still refreshing it daily.
+	if cached, ok := statusReadMergedForgeCache(forge, slug, record.Number); ok {
+		if detail, err := statusParseForgeDetail(forge, cached, record); err == nil && detail.State == "MERGED" {
+			return detail
+		}
+	}
 	var raw []byte
 	var err error
 	switch forge {
