@@ -53,12 +53,12 @@ func TestStatusTUILinksColorsAndClickTargets(t *testing.T) {
 	if got := model.buildClickTarget(83, 3); got != buildURL {
 		t.Fatalf("build cell click = %q", got)
 	}
-	if got := model.buildClickTarget(5, 6); got != prURL {
+	if got := model.buildClickTarget(5, 7); got != prURL {
 		t.Fatalf("PR list row click = %q", got)
 	}
 	branchOnly := statusTUIModel{width: 80, height: 16, snapshot: wtc.StatusSnapshot{Collection: "fixture",
 		Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "feature", PR: &wtc.StatusPRFacts{Number: "7", URL: prURL}}}}}
-	if branchOnly.View().MouseMode != tea.MouseModeCellMotion || branchOnly.buildClickTarget(51, 3) != prURL {
+	if branchOnly.View().MouseMode != tea.MouseModeCellMotion || branchOnly.buildClickTarget(35, 3) != prURL {
 		t.Fatal("discovered branch PR did not enable its ordinary click target")
 	}
 	t.Setenv("NO_COLOR", "1")
@@ -112,8 +112,8 @@ func TestStatusTUIMouseModeRequiresVisibleValidTarget(t *testing.T) {
 	}
 	model.width = 25
 	model.snapshot.Repos = []wtc.StatusRepo{{Dir: "widget", PR: &wtc.StatusPRFacts{Number: "7", URL: valid}}}
-	if model.View().MouseMode != tea.MouseModeNone {
-		t.Fatalf("PR cell clipped outside a narrow terminal captured mouse input: %q", model.View().Content)
+	if model.View().MouseMode != tea.MouseModeCellMotion || model.buildClickTarget(21, 3) != valid {
+		t.Fatalf("visible PR cell in a narrow terminal was not clickable: %q", model.View().Content)
 	}
 	model.width = 80
 	model.snapshot.Repos[0].PR.URL = "HTTPS://example.invalid/pull/7"
@@ -126,13 +126,13 @@ func TestStatusTUIClickTargetExcludesFooterAndOffscreenPR(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	first := "https://example.invalid/pull/7"
 	second := "https://example.invalid/pull/8"
-	m := statusTUIModel{width: 80, height: 9, snapshot: wtc.StatusSnapshot{Collection: "fixture",
+	m := statusTUIModel{width: 80, height: 10, snapshot: wtc.StatusSnapshot{Collection: "fixture",
 		Repos: []wtc.StatusRepo{{Dir: "widget"}},
 		PRs:   []wtc.StatusPRRow{{Repo: "widget", Number: "7", URL: &first}, {Repo: "widget", Number: "8", URL: &second}}}}
-	if m.View().MouseMode != tea.MouseModeCellMotion || m.buildClickTarget(8, 6) != first {
+	if m.View().MouseMode != tea.MouseModeCellMotion || m.buildClickTarget(2, 7) != first {
 		t.Fatal("visible PR row was not clickable")
 	}
-	if got := m.buildClickTarget(8, 7); got != "" {
+	if got := m.buildClickTarget(2, 8); got != "" {
 		t.Fatalf("footer click opened offscreen PR: %q", got)
 	}
 }
@@ -182,11 +182,38 @@ func TestStatusTUIRepoRowsKeepSignalsWithinWidth(t *testing.T) {
 		PR: &wtc.StatusPRFacts{Number: "7", Checks: "SUCCESS", Merge: "BEHIND", Review: "waiting"},
 	}}}
 	lines := statusTUIRepoLines(snapshot, 60, false)
-	if len(lines) != 2 || !strings.Contains(lines[1], "#7 ✓ ↓ …") || !strings.Contains(lines[1], "±2 ↑1 ↓3") {
+	if len(lines) != 2 || !strings.Contains(lines[1], "#7 ✓ ↓ …") ||
+		!strings.Contains(lines[0], "±    ↑   ↓") || !strings.Contains(lines[1], "±2   1   3") {
 		t.Fatalf("repo signals missing: %q", lines)
 	}
 	if fitted := statusTUIFit("⌂ development-tip", 8); runewidth.StringWidth(fitted) != 8 || !strings.HasSuffix(fitted, "…") {
 		t.Fatalf("wide branch clipping failed: %q", fitted)
+	}
+}
+
+func TestStatusTUIKeepsBuildColumnsAndMutesMergedPRs(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	merged, passed := "MERGED", "SUCCESS"
+	url := "https://example.invalid/pull/8"
+	snapshot := wtc.StatusSnapshot{Collection: "fixture",
+		Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "main", Tree: "clean"}},
+		PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "8", Title: "Finished work", URL: &url,
+			Merge: &merged, Checks: &passed}}}
+	repos := statusTUIRepoLines(snapshot, 100, false)
+	if !strings.Contains(repos[0], "±") || !strings.Contains(repos[0], "↑") ||
+		!strings.Contains(repos[0], "↓") || !strings.Contains(repos[0], "TEST") ||
+		!strings.Contains(repos[0], "PROD") || runewidth.StringWidth(repos[0]) > 100 {
+		t.Fatalf("repo columns disappeared without build facts: %q", repos[0])
+	}
+	prs := statusTUIPRLines(snapshot, 100, false, true)
+	if len(prs) != 4 || !strings.Contains(ansi.Strip(prs[2]), "PR") ||
+		!strings.Contains(ansi.Strip(prs[2]), "STATE") ||
+		!strings.Contains(prs[3], "\x1b[2;4;38;5;245m") ||
+		!strings.Contains(prs[3], "\x1b[2;38;5;245m") ||
+		!strings.Contains(prs[3], ansi.SetHyperlink(url)) ||
+		strings.Contains(ansi.Strip(prs[3]), "✓") {
+		t.Fatalf("merged PR row was not aligned, muted and linked: %q", prs)
 	}
 }
 

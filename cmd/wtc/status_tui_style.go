@@ -59,6 +59,10 @@ func statusTUIURL(raw string) string {
 }
 
 func statusTUILink(label, rawURL string) string {
+	return statusTUILinkTone(label, rawURL, statusToneLink)
+}
+
+func statusTUILinkTone(label, rawURL, tone string) string {
 	if os.Getenv("TERM") == "dumb" {
 		return label
 	}
@@ -66,7 +70,7 @@ func statusTUILink(label, rawURL string) string {
 	if target == "" {
 		return label
 	}
-	return ansi.SetHyperlink(target) + statusTUIStyle(label, statusToneLink) + ansi.ResetHyperlink()
+	return ansi.SetHyperlink(target) + statusTUIStyle(label, tone) + ansi.ResetHyperlink()
 }
 
 func statusTUIFitANSI(value string, width int) string {
