@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,58 @@ import (
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/mattn/go-runewidth"
 )
+
+func statusTestMessage(t *testing.T, command tea.Cmd) tea.Msg {
+	t.Helper()
+	messages := make(chan tea.Msg, 1)
+	go func() { messages <- command() }()
+	select {
+	case message := <-messages:
+		return message
+	case <-time.After(3 * time.Second):
+		t.Fatal("TUI refresh event did not arrive")
+		return nil
+	}
+}
+
+func TestStatusTUIRefreshStreamsCollectorProgressAndCompletion(t *testing.T) {
+	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, width: 80, height: 16}
+	model.startRefresh()
+	command := statusTUIRefreshWithCollector(&wtc.Context{}, false, func(c *wtc.Context) statusLoadedMsg {
+		c.StatusProgress("Checking remote refs")
+		return statusLoadedMsg{snapshot: wtc.StatusSnapshot{Collection: "fixture", Schema: 1}, at: time.Now()}
+	})
+	started := statusTestMessage(t, command)
+	updated, wait := model.Update(started)
+	model = updated.(statusTUIModel)
+	progress := statusTestMessage(t, wait)
+	updated, wait = model.Update(progress)
+	model = updated.(statusTUIModel)
+	if !strings.Contains(model.View().Content, "Checking remote refs") {
+		t.Fatalf("collector progress did not reach the TUI: %s", model.View().Content)
+	}
+	loaded := statusTestMessage(t, wait)
+	updated, _ = model.Update(loaded)
+	model = updated.(statusTUIModel)
+	if model.refreshing || model.snapshot.Schema != 1 {
+		t.Fatalf("collector completion did not reach the TUI: %+v", model)
+	}
+
+	model.startRefresh()
+	command = statusTUIRefreshWithCollector(&wtc.Context{}, false, func(*wtc.Context) statusLoadedMsg {
+		return statusLoadedMsg{err: errors.New("fixture failure"), at: time.Now()}
+	})
+	started = statusTestMessage(t, command)
+	updated, wait = model.Update(started)
+	model = updated.(statusTUIModel)
+	loaded = statusTestMessage(t, wait)
+	updated, _ = model.Update(loaded)
+	model = updated.(statusTUIModel)
+	if model.refreshing || !strings.Contains(model.errorText, "fixture failure") ||
+		!strings.Contains(strings.Join(model.progressLog, "\n"), "Refresh failed") {
+		t.Fatalf("collector failure did not reach the TUI: %+v", model)
+	}
+}
 
 func TestStatusTUIRepoRowsKeepSignalsWithinWidth(t *testing.T) {
 	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{
@@ -49,6 +102,59 @@ func TestStatusTUIModelShowsCachedRowsAndControls(t *testing.T) {
 	model = updated.(statusTUIModel)
 	if model.refreshing || len(model.snapshot.Repos) != 0 || model.nextRefresh.IsZero() {
 		t.Fatalf("refresh state did not advance: %+v", model)
+	}
+}
+
+func TestStatusTUIRefreshLogUpdatesWhileCollectorRuns(t *testing.T) {
+	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, width: 80, height: 16}
+	model.startRefresh()
+	events := make(chan tea.Msg)
+	updated, next := model.Update(statusProgressMsg{message: "Checked pull requests 2/4", at: model.startedAt.Add(2 * time.Second), events: events})
+	model = updated.(statusTUIModel)
+	if next == nil || !strings.Contains(model.View().Content, "Checked pull requests 2/4") ||
+		model.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("refresh progress was not visible or clickable: %s", model.View().Content)
+	}
+	refreshAt := runewidth.StringWidth(strings.Split(model.headerLine(), "refreshing")[0])
+	updated, _ = model.Update(tea.MouseClickMsg{X: refreshAt, Y: 0})
+	model = updated.(statusTUIModel)
+	if !model.showLog || !strings.Contains(model.View().Content, "2s  Checked pull requests 2/4") {
+		t.Fatalf("refresh click did not open log: %s", model.View().Content)
+	}
+	updated, _ = model.Update(statusLoadedMsg{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, at: model.startedAt.Add(3 * time.Second)})
+	model = updated.(statusTUIModel)
+	if model.refreshing || !strings.Contains(model.View().Content, "3s  Refresh finished") {
+		t.Fatalf("refresh completion did not appear in log: %s", model.View().Content)
+	}
+}
+
+func TestStatusTUIRefreshLogKeepsNewestEntryVisible(t *testing.T) {
+	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, width: 80, height: 12, showLog: true, showHelp: true}
+	model.startRefresh()
+	for i := 0; i < 20; i++ {
+		model.progressLog = append(model.progressLog, "step")
+		model.focusLogTail()
+	}
+	model.progressLog = append(model.progressLog, "latest progress")
+	model.focusLogTail()
+	if !strings.Contains(model.View().Content, "latest progress") {
+		t.Fatalf("latest progress hidden while refreshing: %s", model.View().Content)
+	}
+	updated, _ := model.Update(statusLoadedMsg{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, at: model.startedAt.Add(time.Second)})
+	model = updated.(statusTUIModel)
+	if !strings.Contains(model.View().Content, "Refresh finished") {
+		t.Fatalf("completion hidden after refresh: %s", model.View().Content)
+	}
+}
+
+func TestStatusTUIRefreshLogReportsFetchFallback(t *testing.T) {
+	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, width: 80, height: 12, showLog: true}
+	model.startRefresh()
+	updated, _ := model.Update(statusLoadedMsg{snapshot: wtc.StatusSnapshot{Collection: "fixture"},
+		fetched: wtc.StatusFetchReport{Attempted: 2, Failed: 1}, at: model.startedAt.Add(time.Second)})
+	model = updated.(statusTUIModel)
+	if !strings.Contains(model.View().Content, "1 ref refresh failed; showing local refs") {
+		t.Fatalf("failed fetch was hidden from refresh log: %s", model.View().Content)
 	}
 }
 

@@ -18,6 +18,14 @@ import (
 
 type statusTickMsg time.Time
 
+type statusRefreshStartedMsg struct{ events <-chan tea.Msg }
+
+type statusProgressMsg struct {
+	message string
+	at      time.Time
+	events  <-chan tea.Msg
+}
+
 type statusLoadedMsg struct {
 	snapshot  wtc.StatusSnapshot
 	processes []wtc.StatusProcess
@@ -49,6 +57,10 @@ type statusTUIModel struct {
 	refreshing   bool
 	showHelp     bool
 	showArchived bool
+	showLog      bool
+	progressLog  []string
+	progressStep string
+	startedAt    time.Time
 	errorText    string
 }
 
@@ -57,13 +69,52 @@ func statusTUITick() tea.Cmd {
 }
 
 func statusTUIRefresh(c *wtc.Context, all, procs, noFetch bool, fetchAge time.Duration) tea.Cmd {
-	return func() tea.Msg {
-		if procs {
-			processes, err := c.StatusProcesses()
-			return statusLoadedMsg{processes: processes, err: err, at: time.Now()}
-		}
-		snapshot, report, err := c.StatusLiveSnapshotWithFetchAge(all, noFetch, fetchAge)
+	return statusTUIRefreshWithCollector(c, procs, func(collector *wtc.Context) statusLoadedMsg {
+		snapshot, report, err := collector.StatusLiveSnapshotWithFetchAge(all, noFetch, fetchAge)
 		return statusLoadedMsg{snapshot: snapshot, fetched: report, err: err, at: time.Now()}
+	})
+}
+
+func statusTUIRefreshWithCollector(c *wtc.Context, procs bool, collect func(*wtc.Context) statusLoadedMsg) tea.Cmd {
+	return func() tea.Msg {
+		events := make(chan tea.Msg, 128)
+		go func() {
+			if procs {
+				processes, err := c.StatusProcesses()
+				events <- statusLoadedMsg{processes: processes, err: err, at: time.Now()}
+				return
+			}
+			collector := *c
+			collector.StatusProgress = func(message string) {
+				select {
+				case events <- statusProgressMsg{message: message, at: time.Now(), events: events}:
+				default: // Keep collecting if the terminal cannot render every step.
+				}
+			}
+			events <- collect(&collector)
+		}()
+		return statusRefreshStartedMsg{events: events}
+	}
+}
+
+func statusTUIWait(events <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg { return <-events }
+}
+
+func (m *statusTUIModel) startRefresh() {
+	m.refreshing = true
+	m.startedAt = time.Now()
+	m.progressStep = "Starting refresh"
+	m.progressLog = []string{"0s  Starting refresh"}
+}
+
+func (m *statusTUIModel) focusLogTail() {
+	if m.showLog {
+		height := m.height
+		if height <= 0 {
+			height = 24
+		}
+		m.scroll = max(0, len(m.contentLines())-max(1, height-2))
 	}
 }
 
@@ -81,8 +132,34 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BlurMsg:
 		m.focused = false
 		m.nextRefresh = time.Now().Add(m.background)
+	case statusRefreshStartedMsg:
+		return m, statusTUIWait(msg.events)
+	case statusProgressMsg:
+		if m.startedAt.IsZero() {
+			m.startedAt = msg.at
+		}
+		m.progressStep = msg.message
+		m.progressLog = append(m.progressLog, fmt.Sprintf("%s  %s", msg.at.Sub(m.startedAt).Truncate(time.Second), msg.message))
+		m.focusLogTail()
+		return m, statusTUIWait(msg.events)
 	case statusLoadedMsg:
+		if m.startedAt.IsZero() {
+			m.startedAt = msg.at
+		}
 		m.refreshing = false
+		m.progressStep = ""
+		outcome := "Refresh finished"
+		if msg.err != nil {
+			outcome = "Refresh failed: " + msg.err.Error()
+		} else if msg.fetched.Failed != 0 {
+			plural := "es"
+			if msg.fetched.Failed == 1 {
+				plural = ""
+			}
+			outcome = fmt.Sprintf("Refresh finished: %d ref refresh%s failed; showing local refs", msg.fetched.Failed, plural)
+		}
+		m.progressLog = append(m.progressLog, fmt.Sprintf("%s  %s", msg.at.Sub(m.startedAt).Truncate(time.Second), outcome))
+		m.focusLogTail()
 		m.lastRefresh = msg.at
 		m.nextRefresh = msg.at.Add(m.interval)
 		if !m.focused {
@@ -100,11 +177,25 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case statusTickMsg:
 		if !m.refreshing && !m.nextRefresh.IsZero() && !time.Now().Before(m.nextRefresh) {
-			m.refreshing = true
+			m.startRefresh()
 			return m, tea.Batch(statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge))
 		}
 		return m, statusTUITick()
 	case tea.MouseClickMsg:
+		header := m.headerLine()
+		refreshIndex := strings.Index(header, "refreshing")
+		headerWidth := m.width
+		if headerWidth <= 0 {
+			headerWidth = 80
+		}
+		if msg.Y == 0 && m.refreshing && refreshIndex >= 0 &&
+			msg.X >= runewidth.StringWidth(header[:refreshIndex]) &&
+			msg.X < min(headerWidth, runewidth.StringWidth(header)) {
+			m.showLog = !m.showLog
+			m.scroll = 0
+			m.focusLogTail()
+			return m, nil
+		}
 		if !m.noClick && !m.procs {
 			if target := m.buildClickTarget(msg.X, msg.Y); target != "" {
 				return m, statusOpenURL(target)
@@ -126,9 +217,13 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showArchived = !m.showArchived
 		case "r":
 			if !m.refreshing {
-				m.refreshing = true
+				m.startRefresh()
 				return m, statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge)
 			}
+		case "l":
+			m.showLog = !m.showLog
+			m.scroll = 0
+			m.focusLogTail()
 		case "up", "k":
 			if m.scroll > 0 {
 				m.scroll--
@@ -287,10 +382,13 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int) []string {
 }
 
 func (m statusTUIModel) buildClickTarget(x, y int) string {
-	if !statusTUIBuildColumns(m.snapshot) {
+	if m.showLog || !statusTUIBuildColumns(m.snapshot) {
 		return ""
 	}
 	base := 3
+	if m.refreshing && m.progressStep != "" {
+		base += 2
+	}
 	if m.showHelp {
 		base += 3
 	}
@@ -374,11 +472,7 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, showArchived bool) []string {
 	return lines
 }
 
-func (m statusTUIModel) contentLines() []string {
-	width := m.width
-	if width <= 0 {
-		width = 80
-	}
+func (m statusTUIModel) headerLine() string {
 	name := m.snapshot.Collection
 	if m.procs {
 		name = "processes"
@@ -392,14 +486,33 @@ func (m statusTUIModel) contentLines() []string {
 	}
 	if m.refreshing {
 		age += " · refreshing"
+		if m.progressStep != "" {
+			age += ": " + m.progressStep
+		}
 	}
-	lines := []string{fmt.Sprintf("wtc status · %s · %s", name, age), ""}
+	return fmt.Sprintf("wtc status · %s · %s", name, age)
+}
+
+func (m statusTUIModel) contentLines() []string {
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	lines := []string{m.headerLine(), ""}
+	if m.refreshing && m.progressStep != "" {
+		lines = append(lines, m.progressStep+" (l: refresh log)", "")
+	}
 	if m.showHelp {
-		keys := "r refresh   a show/hide archived PRs   ? help   q quit"
+		keys := "r refresh   l log   a show/hide archived PRs   ? help   q quit"
 		if m.procs {
-			keys = "r refresh   ? help   q quit"
+			keys = "r refresh   l log   ? help   q quit"
 		}
 		lines = append(lines, keys, "↑/↓ scroll   PgUp/PgDn scroll faster", "")
+	}
+	if m.showLog {
+		lines = append(lines, "Refresh log", "")
+		lines = append(lines, m.progressLog...)
+		return lines
 	}
 	if m.procs {
 		lines = append(lines, strings.Split(strings.TrimSuffix(wtc.StatusProcessesText(m.processes), "\n"), "\n")...)
@@ -428,9 +541,9 @@ func (m statusTUIModel) View() tea.View {
 		height = 24
 	}
 	lines := m.contentLines()
-	footer := "r refresh · a archived · ? help · q quit"
+	footer := "r refresh · l log · a archived · ? help · q quit"
 	if m.procs {
-		footer = "r refresh · ? help · q quit"
+		footer = "r refresh · l log · ? help · q quit"
 	}
 	if !m.nextRefresh.IsZero() && !m.refreshing {
 		footer += fmt.Sprintf(" · next %ds", max(0, int(time.Until(m.nextRefresh).Seconds())))
@@ -450,7 +563,7 @@ func (m statusTUIModel) View() tea.View {
 	view := tea.NewView(b.String())
 	view.AltScreen = true
 	view.ReportFocus = true
-	if !m.noClick && statusTUIBuildColumns(m.snapshot) {
+	if m.refreshing || (!m.noClick && statusTUIBuildColumns(m.snapshot)) {
 		view.MouseMode = tea.MouseModeCellMotion
 	}
 	return view
@@ -462,6 +575,7 @@ func runStatusTUI(c *wtc.Context, all, procs, reposOnly, noFetch, noClick bool, 
 	}
 	model := statusTUIModel{context: c, all: all, procs: procs, reposOnly: reposOnly, noFetch: noFetch, noClick: noClick, fetchAge: fetchAge, interval: interval,
 		background: background, focused: true, refreshing: true}
+	model.startRefresh()
 	if !all && !procs {
 		model.snapshot.Collection = filepath.Base(c.Collection)
 	}

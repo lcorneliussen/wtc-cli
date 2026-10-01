@@ -55,12 +55,15 @@ type Config struct {
 	} `toml:"secrets"`
 }
 type Context struct {
-	Collection      string   `json:"collection"`
-	Harness         string   `json:"harness"`
-	Workspace       string   `json:"workspace"`
-	Registry        Registry `json:"registry"`
-	Config          Config   `json:"-"`
-	ConfigRoot      string   `json:"config_root"`
+	Collection string   `json:"collection"`
+	Harness    string   `json:"harness"`
+	Workspace  string   `json:"workspace"`
+	Registry   Registry `json:"registry"`
+	Config     Config   `json:"-"`
+	ConfigRoot string   `json:"config_root"`
+	// StatusProgress receives human-readable collector steps. It is nil for
+	// callers that only need the snapshot.
+	StatusProgress  func(string) `json:"-"`
 	previewPortBase *int
 }
 

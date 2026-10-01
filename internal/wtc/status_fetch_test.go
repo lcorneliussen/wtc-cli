@@ -84,6 +84,27 @@ func TestStatusLiveSnapshotWritesOnlyScopedCaches(t *testing.T) {
 	}
 }
 
+func TestStatusAllForwardsProgressIntoEachCollection(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	if _, err := c.NewCollection(NewOptions{Slug: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	var steps []string
+	c.StatusProgress = func(step string) { steps = append(steps, step) }
+	if _, _, err := c.StatusLiveSnapshot(true, true); err != nil {
+		t.Fatal(err)
+	}
+	worktrees := 0
+	for _, step := range steps {
+		if strings.HasPrefix(step, "Reading worktrees") {
+			worktrees++
+		}
+	}
+	if worktrees != 2 {
+		t.Fatalf("workspace sweep lost per-collection progress: %v", steps)
+	}
+}
+
 func TestStatusAllDoesNotRunOtherCollectionBuildHook(t *testing.T) {
 	c := newWorkspaceFixture(t)
 	if _, err := c.NewCollection(NewOptions{Slug: "other"}); err != nil {

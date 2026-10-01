@@ -18,10 +18,10 @@ import (
 // Explicit previews do not write snapshots that a status pane could mistake
 // for a completed one-shot collection.
 func addStatusCommand(root *cobra.Command, asJSON *bool) {
-	var local, forge, all, md, ansi, reposOnly, cached, noFetch, tui, procs, noClick, click, noWatch bool
+	var local, forge, all, md, ansi, reposOnly, cached, noFetch, tui, procs, noClick, click, noWatch, silent bool
 	var watchSeconds, fetchAgeSeconds int
 	cmd := &cobra.Command{Use: "status [collection]", Short: "Inspect worktree collection status",
-		Long: "Show repository and PR status for this collection, a named collection, or --all. One-shot runs update this collection's status snapshots. --cached reads those snapshots without Git or forge calls. --tui (or --watch) opens a live view when attached to a terminal; captured output prints one pass. Watch defaults can be set in WTC_CONFIG_ROOT/wtc.env with WTC_STATUS_WATCH, WTC_STATUS_WATCH_BG, and WTC_STATUS_NO_CLICK.",
+		Long: "Show repository and PR status for this collection, a named collection, or --all. One-shot runs update this collection's status snapshots. Interactive one-shot runs log collector progress on stderr; --silent suppresses it. --cached reads snapshots without Git or forge calls. --tui (or --watch) opens a live view when attached to a terminal; click refreshing or press l for its log. Captured output prints one pass. Watch defaults can be set in WTC_CONFIG_ROOT/wtc.env with WTC_STATUS_WATCH, WTC_STATUS_WATCH_BG, and WTC_STATUS_NO_CLICK.",
 		Args: cobra.MaximumNArgs(1)}
 	cmd.Flags().BoolVar(&local, "local", false, "Preview local Git facts (no forge facts or cache writes)")
 	cmd.Flags().BoolVar(&forge, "forge", false, "Preview local Git and PR facts (no snapshot writes)")
@@ -36,6 +36,7 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&noClick, "no-click", false, "Disable build URL mouse targets in the TUI")
 	cmd.Flags().BoolVar(&click, "click", false, "Enable build URL mouse targets in the TUI")
 	cmd.Flags().BoolVar(&noWatch, "no-watch", false, "Print one status pass and exit")
+	cmd.Flags().BoolVar(&silent, "silent", false, "Suppress progress messages during one-shot terminal output")
 	cmd.Flags().IntVar(&fetchAgeSeconds, "fetch-age", 300, "Refresh remote refs older than this many seconds")
 	cmd.Flags().IntVar(&watchSeconds, "watch", 0, "Run the interactive view with this refresh interval in seconds")
 	cmd.Flags().Lookup("watch").NoOptDefVal = "30"
@@ -84,6 +85,13 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 			c, err = wtc.OpenCollection(filepath.Join(c.Workspace, args[0]))
 			if err != nil {
 				return err
+			}
+		}
+		if !interactive && !silent && !cached && !procs && !*asJSON && !md &&
+			term.IsTerminal(os.Stdout.Fd()) && term.IsTerminal(os.Stderr.Fd()) {
+			started := time.Now()
+			c.StatusProgress = func(message string) {
+				fmt.Fprintf(os.Stderr, "wtc status [%s] %s\n", time.Since(started).Truncate(time.Second), message)
 			}
 		}
 		if !procs && !cmd.Flags().Changed("repos") && statusTrue(statusSetting(c, "WTC_STATUS_REPOS")) {

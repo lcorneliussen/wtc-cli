@@ -80,6 +80,12 @@ type StatusOrphan struct {
 	State  string `json:"state"`
 }
 
+func (c *Context) statusProgress(message string) {
+	if c.StatusProgress != nil {
+		c.StatusProgress(message)
+	}
+}
+
 func statusCount(worktree, rangeSpec string) (int, error) {
 	value, err := statusGit(worktree, "rev-list", "--count", rangeSpec)
 	if err != nil {
@@ -152,7 +158,8 @@ func (c *Context) StatusLocalSnapshot(all bool) (StatusSnapshot, error) {
 	if report.ExitStatus != 0 {
 		return snapshot, fmt.Errorf("cannot read %d collection(s) in status inventory", len(report.Outcomes))
 	}
-	for _, target := range targets {
+	for i, target := range targets {
+		c.statusProgress(fmt.Sprintf("Reading worktrees %d/%d", i+1, len(targets)))
 		row, err := statusLocalRepo(target)
 		if err != nil {
 			return snapshot, err

@@ -17,6 +17,14 @@ func statusForgeCacheAge() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+func statusMergedCacheAge() time.Duration {
+	// Explicit cache-age overrides apply to both active and merged PRs.
+	if os.Getenv("WTC_FORGE_CACHE_AGE") != "" {
+		return statusForgeCacheAge()
+	}
+	return 24 * time.Hour
+}
+
 func statusForgeCacheDir() string {
 	return filepath.Join(os.TempDir(), "wtc-status-"+strconv.Itoa(os.Getuid()))
 }
@@ -48,13 +56,21 @@ func statusReadForgeCache(forge, slug, number string) ([]byte, bool) {
 	return statusReadForgeEntry("pr", forge, slug, number)
 }
 
+func statusReadMergedForgeCache(forge, slug, number string) ([]byte, bool) {
+	return statusReadForgeEntryWithAge("pr", forge, slug, number, statusMergedCacheAge())
+}
+
 func statusReadForgeEntry(kind, forge, slug, key string) ([]byte, bool) {
+	return statusReadForgeEntryWithAge(kind, forge, slug, key, statusForgeCacheAge())
+}
+
+func statusReadForgeEntryWithAge(kind, forge, slug, key string, age time.Duration) ([]byte, bool) {
 	path := statusForgeEntryPath(kind, forge, slug, key)
 	if !statusSecureCacheDir(filepath.Dir(path)) {
 		return nil, false
 	}
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || time.Since(info.ModTime()) >= statusForgeCacheAge() {
+	if err != nil || !info.Mode().IsRegular() || time.Since(info.ModTime()) >= age {
 		return nil, false
 	}
 	data, err := os.ReadFile(path)

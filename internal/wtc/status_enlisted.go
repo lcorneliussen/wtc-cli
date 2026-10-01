@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -66,6 +67,13 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 			return detail
 		}
 	}
+	// A merged PR cannot become open again. Reuse its detail for a day after
+	// the short active-PR cache expires, while still refreshing it daily.
+	if cached, ok := statusReadMergedForgeCache(forge, slug, record.Number); ok {
+		if detail, err := statusParseForgeDetail(forge, cached, record); err == nil && detail.State == "MERGED" {
+			return detail
+		}
+	}
 	var raw []byte
 	var err error
 	switch forge {
@@ -82,6 +90,38 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 		}
 	}
 	return statusUnknownDetail(record)
+}
+
+// Forge CLIs spend most of their time waiting on network responses. Bound the
+// fan-out so a large enlistment refreshes promptly without flooding a forge.
+func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]statusPRDetail, error) {
+	details := make([]statusPRDetail, len(records))
+	for _, record := range records {
+		if err := ValidatePRIdentity(record.Repo, record.Number); err != nil {
+			return nil, fmt.Errorf("invalid enlisted PR: %w", err)
+		}
+	}
+	const parallel = 4
+	limit := make(chan struct{}, parallel)
+	done := make(chan struct{}, len(records))
+	var workers sync.WaitGroup
+	for i, record := range records {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			limit <- struct{}{}
+			defer func() { <-limit }()
+			slug, forge := c.statusRecordForge(record, rows)
+			details[i] = statusEnrichRecord(record, slug, forge)
+			done <- struct{}{}
+		}()
+	}
+	for i := range records {
+		<-done
+		c.statusProgress(fmt.Sprintf("Checked pull requests %d/%d", i+1, len(records)))
+	}
+	workers.Wait()
+	return details, nil
 }
 
 // StatusForgePreview adds enlisted PRs and discovers open PRs on active
@@ -108,12 +148,16 @@ func (c *Context) statusForgePreview(includeBuild bool) (StatusSnapshot, error) 
 		}
 	}
 	enlistedBranches := map[string]bool{}
-	for _, record := range records {
-		if err := ValidatePRIdentity(record.Repo, record.Number); err != nil {
-			return snapshot, fmt.Errorf("invalid enlisted PR: %w", err)
-		}
+	if len(records) != 0 {
+		c.statusProgress(fmt.Sprintf("Checking %d pull requests", len(records)))
+	}
+	details, err := c.statusEnrichRecords(records, snapshot.Repos)
+	if err != nil {
+		return snapshot, err
+	}
+	for i, record := range records {
 		slug, forge := c.statusRecordForge(record, snapshot.Repos)
-		detail := statusEnrichRecord(record, slug, forge)
+		detail := details[i]
 		worktreeDir := record.Repo
 		harnessName, _ := c.HarnessRepoName()
 		if record.Repo == "harness" || record.Repo == harnessName {
@@ -161,6 +205,7 @@ func (c *Context) statusForgePreview(includeBuild bool) (StatusSnapshot, error) 
 			continue
 		}
 		slug, forge := c.statusRecordForge(PRRecord{Repo: row.Repo}, snapshot.Repos)
+		c.statusProgress(fmt.Sprintf("Finding branch pull requests %d/%d", i+1, len(snapshot.Repos)))
 		number, err := statusDiscoverBranch(forge, slug, row.Branch)
 		if err != nil || number == "" {
 			continue
@@ -172,6 +217,7 @@ func (c *Context) statusForgePreview(includeBuild bool) (StatusSnapshot, error) 
 		}
 	}
 	if includeBuild {
+		c.statusProgress("Checking build providers")
 		if err := c.statusBuildFacts(&snapshot); err != nil {
 			return snapshot, err
 		}
