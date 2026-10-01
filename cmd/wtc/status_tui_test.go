@@ -363,10 +363,12 @@ func TestStatusTUIPRTableFitsNarrowOneShotWidths(t *testing.T) {
 func TestStatusOneShotTablesFitNarrowTerminals(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	url := "https://example.invalid/pull/7"
-	snapshot := wtc.StatusSnapshot{Collection: "fixture", GeneratedAt: "2026-10-01T00:00:00Z",
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", GeneratedAt: "2026-10-01T00:00:00Z", StaleCount: 1,
 		Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "feature/topic", Tree: "±2",
 			PR: &wtc.StatusPRFacts{Number: "7", URL: url}}},
-		PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", Title: "Synthetic change", URL: &url}}}
+		PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", Title: "Synthetic change", URL: &url},
+			{Repo: "widget", Number: "6", Title: "Older change", Archived: true}},
+		Orphans: []wtc.StatusOrphan{{Repo: "widget", Branch: "old-topic", State: "MERGED"}}}
 	for _, width := range []int{24, 25, 30, 31, 39, 40} {
 		for _, line := range strings.Split(strings.TrimSuffix(statusTable(snapshot, false, width), "\n"), "\n") {
 			if runewidth.StringWidth(line) > width {

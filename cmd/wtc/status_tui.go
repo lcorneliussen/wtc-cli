@@ -776,15 +776,25 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 	}
 	if archived > 0 && !showArchived {
 		hint := fmt.Sprintf("%d archived PR(s) hidden; press a", archived)
+		if width < 40 {
+			hint = fmt.Sprintf("archived (%d) · a", archived)
+		}
 		if styled {
-			hint = statusTUIStyle(fmt.Sprintf("▸ archived (%d) · a to show", archived), statusToneDim)
+			if width >= 40 {
+				hint = fmt.Sprintf("▸ archived (%d) · a to show", archived)
+			}
+			hint = statusTUIStyle(statusTUIFit(hint, width), statusToneDim)
+		} else {
+			hint = statusTUIFit(hint, width)
 		}
 		lines = append(lines, hint)
 	}
 	for _, orphan := range snapshot.Orphans {
 		warning := fmt.Sprintf("⚠ %s on %s: PR %s; catch-up", orphan.Repo, orphan.Branch, orphan.State)
 		if styled {
-			warning = statusTUIStyle(warning, statusToneWarning)
+			warning = statusTUIStyle(statusTUIFit(warning, width), statusToneWarning)
+		} else {
+			warning = statusTUIFit(warning, width)
 		}
 		lines = append(lines, warning)
 	}
