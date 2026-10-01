@@ -474,10 +474,28 @@ func TestStatusTUIRefreshKeepsTablePositionAndCoalescesCounts(t *testing.T) {
 			t.Fatalf("refresh line exceeds terminal width: %q", line)
 		}
 	}
+	model.width = 24
+	if line := strings.Split(model.View().Content, "\n")[1]; !strings.Contains(line, "15/15") || ansi.StringWidth(line) > model.width {
+		t.Fatalf("narrow progress hid its count or wrapped: %q", line)
+	}
 	updated, _ := model.Update(statusLoadedMsg{snapshot: model.snapshot, at: model.startedAt.Add(16 * time.Second)})
 	model = updated.(statusTUIModel)
 	if !strings.Contains(strings.Split(model.View().Content, "\n")[3], "widget") {
 		t.Fatalf("repository shifted after refresh: %q", model.View().Content)
+	}
+}
+
+func TestStatusTUIRefreshLogSeparatesCountedStages(t *testing.T) {
+	model := statusTUIModel{width: 40, height: 12}
+	model.startRefresh()
+	events := make(chan tea.Msg)
+	for i, message := range []string{"Fetching remote refs 1", "Fetching remote refs 2", "Reading worktrees 1/2", "Reading worktrees 2/2"} {
+		updated, _ := model.Update(statusProgressMsg{message: message, at: model.startedAt.Add(time.Duration(i+1) * time.Second), events: events})
+		model = updated.(statusTUIModel)
+	}
+	if len(model.progressLog) != 3 || !strings.Contains(model.progressLog[1], "refs 2") ||
+		!strings.Contains(model.progressLog[2], "worktrees 2/2") {
+		t.Fatalf("counted stages were not kept separately: %q", model.progressLog)
 	}
 }
 

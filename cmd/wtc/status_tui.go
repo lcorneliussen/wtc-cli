@@ -851,6 +851,18 @@ func (m statusTUIModel) headerLine() string {
 	return fmt.Sprintf("wtc status · %s · %s", name, age)
 }
 
+func statusTUIProgressLine(step string, elapsed time.Duration, width int) string {
+	full := fmt.Sprintf("↻ %s · %s  (l: log)", elapsed, statusTUISafe(step))
+	if runewidth.StringWidth(full) <= width {
+		return full
+	}
+	if parts := statusTUIProgressCounter.FindStringSubmatch(step); len(parts) == 2 {
+		count := strings.TrimPrefix(step, parts[1]+" ")
+		return fmt.Sprintf("↻ %s · %s", count, statusTUISafe(parts[1]))
+	}
+	return "↻ " + statusTUISafe(step)
+}
+
 func (m statusTUIModel) contentLines() []string {
 	width := m.width
 	if width <= 0 {
@@ -862,7 +874,7 @@ func (m statusTUIModel) contentLines() []string {
 		if m.startedAt.IsZero() {
 			elapsed = 0
 		}
-		lines[1] = statusTUIStyle(fmt.Sprintf("↻ %s · %s  (l: log)", elapsed, statusTUISafe(m.progressStep)), statusToneWarning)
+		lines[1] = statusTUIStyle(statusTUIProgressLine(m.progressStep, elapsed, width), statusToneWarning)
 	}
 	if m.showHelp {
 		keys := "r refresh   l log   a show/hide archived PRs   ? help   q quit"
