@@ -308,6 +308,15 @@ func statusTUIBuildColumns(snapshot wtc.StatusSnapshot) bool {
 	return false
 }
 
+func statusTUIRepoPRLinks(snapshot wtc.StatusSnapshot) bool {
+	for _, row := range snapshot.Repos {
+		if row.PR != nil && statusTUIURL(row.PR.URL) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func statusTUIBranchWidth(width int, builds bool) int {
 	if builds {
 		return max(14, width-64)
@@ -657,7 +666,7 @@ func (m statusTUIModel) View() tea.View {
 	view := tea.NewView(b.String())
 	view.AltScreen = true
 	view.ReportFocus = true
-	if m.refreshing || (!m.noClick && (statusTUIBuildColumns(m.snapshot) || len(m.snapshot.PRs) != 0)) {
+	if m.refreshing || (!m.noClick && (statusTUIBuildColumns(m.snapshot) || statusTUIRepoPRLinks(m.snapshot) || len(m.snapshot.PRs) != 0)) {
 		view.MouseMode = tea.MouseModeCellMotion
 	}
 	return view

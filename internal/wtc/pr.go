@@ -219,7 +219,7 @@ func (c *Context) recordMergedPRs(records []PRRecord, details []statusPRDetail) 
 	updates := map[string]statusPRDetail{}
 	for i, record := range records {
 		detail := details[i]
-		if record.MergedOn != "" || detail.State != "MERGED" {
+		if record.MergedOn != "" || detail.State != "MERGED" || detail.ChecksUnsettled {
 			continue
 		}
 		if _, err := time.Parse(time.RFC3339, detail.MergedOn); err != nil {
@@ -231,7 +231,7 @@ func (c *Context) recordMergedPRs(records []PRRecord, details []statusPRDetail) 
 			continue
 		case "SUCCESS", "FAILURE", "NONE":
 		default:
-			detail.Checks = "NONE"
+			continue
 		}
 		updates[prRecordKey(record.Repo, record.Number)] = detail
 	}

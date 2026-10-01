@@ -56,10 +56,24 @@ func TestStatusTUILinksColorsAndClickTargets(t *testing.T) {
 	if got := model.buildClickTarget(5, 6); got != prURL {
 		t.Fatalf("PR list row click = %q", got)
 	}
+	branchOnly := statusTUIModel{width: 80, height: 16, snapshot: wtc.StatusSnapshot{Collection: "fixture",
+		Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "feature", PR: &wtc.StatusPRFacts{Number: "7", URL: prURL}}}}}
+	if branchOnly.View().MouseMode != tea.MouseModeCellMotion || branchOnly.buildClickTarget(51, 3) != prURL {
+		t.Fatal("discovered branch PR did not enable its ordinary click target")
+	}
 	t.Setenv("NO_COLOR", "1")
 	view = model.View().Content
 	if strings.Contains(view, "\x1b[4;38;5;81m") || !strings.Contains(view, ansi.SetHyperlink(prURL)) {
 		t.Fatal("NO_COLOR suppressed links or retained styling")
+	}
+}
+
+func TestStatusTUIRejectsTerminalControlsInLinks(t *testing.T) {
+	if got := statusTUIURL("https://example.invalid/\u009bunsafe"); got != "" {
+		t.Fatalf("C1 control in terminal link target: %q", got)
+	}
+	if got := statusTUISafe("label\u009bcell"); got != "label cell" {
+		t.Fatalf("C1 control in terminal label: %q", got)
 	}
 }
 

@@ -74,8 +74,8 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 			return detail
 		}
 	}
-	// A merged PR cannot become open again. Reuse its detail for a day after
-	// the short active-PR cache expires, while still refreshing it daily.
+	// Reuse merged forge detail until its final facts are written to the
+	// collection registry; the registry then avoids later forge calls.
 	if cached, ok := statusReadMergedForgeCache(forge, slug, record.Number); ok {
 		if detail, err := statusParseForgeDetail(forge, cached, record); err == nil && detail.State == "MERGED" {
 			return detail
@@ -157,10 +157,10 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 // branches. Build facts, snapshot persistence, and the live renderer are
 // supplied by later stages. A forge failure never becomes a merged claim.
 func (c *Context) StatusForgePreview() (StatusSnapshot, error) {
-	return c.statusForgePreview(true)
+	return c.statusForgePreview(true, true)
 }
 
-func (c *Context) statusForgePreview(includeBuild bool) (StatusSnapshot, error) {
+func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSnapshot, error) {
 	snapshot, err := c.StatusLocalSnapshot(false)
 	if err != nil {
 		return snapshot, err
@@ -181,10 +181,12 @@ func (c *Context) statusForgePreview(includeBuild bool) (StatusSnapshot, error) 
 	if err != nil {
 		return snapshot, err
 	}
-	if count, err := c.recordMergedPRs(records, details); err != nil {
-		c.statusProgress(fmt.Sprintf("Could not record merged pull requests: %v", err))
-	} else if count != 0 {
-		c.statusProgress(fmt.Sprintf("Recorded %d final merges", count))
+	if recordMerges {
+		if count, err := c.recordMergedPRs(records, details); err != nil {
+			c.statusProgress(fmt.Sprintf("Could not record merged pull requests: %v", err))
+		} else if count != 0 {
+			c.statusProgress(fmt.Sprintf("Recorded %d final merges", count))
+		}
 	}
 	forgeByRepo := map[string]struct{ slug, forge string }{}
 	for i, record := range records {

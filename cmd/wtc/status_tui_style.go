@@ -28,7 +28,7 @@ func statusTUIStyle(value, tone string) string {
 
 func statusTUISafe(value string) string {
 	return strings.Map(func(r rune) rune {
-		if r < ' ' || r == 0x7f {
+		if r < ' ' || r == 0x7f || r >= 0x80 && r <= 0x9f {
 			return ' '
 		}
 		return r
@@ -36,7 +36,7 @@ func statusTUISafe(value string) string {
 }
 
 func statusTUIURL(raw string) string {
-	if raw == "" || strings.IndexFunc(raw, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
+	if raw == "" || strings.IndexFunc(raw, func(r rune) bool { return r < ' ' || r == 0x7f || r >= 0x80 && r <= 0x9f }) >= 0 {
 		return ""
 	}
 	parsed, err := url.Parse(raw)

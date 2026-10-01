@@ -10,20 +10,21 @@ import (
 )
 
 type statusPRDetail struct {
-	Number   string
-	State    string
-	Checks   string
-	Merge    string
-	Review   string
-	Title    string
-	MergedOn string
+	Number          string
+	State           string
+	Checks          string
+	Merge           string
+	Review          string
+	Title           string
+	MergedOn        string
+	ChecksUnsettled bool
 }
 
 func statusCheckResult(rollup []struct {
 	Conclusion string `json:"conclusion"`
 	State      string `json:"state"`
 	Status     string `json:"status"`
-}) string {
+}) (string, bool) {
 	failed, pending, passed := false, false, false
 	for _, check := range rollup {
 		conclusion := strings.ToUpper(check.Conclusion)
@@ -45,13 +46,13 @@ func statusCheckResult(rollup []struct {
 	}
 	switch {
 	case failed:
-		return "FAILURE"
+		return "FAILURE", pending
 	case pending:
-		return "PENDING"
+		return "PENDING", true
 	case passed:
-		return "SUCCESS"
+		return "SUCCESS", false
 	default:
-		return "NONE"
+		return "NONE", false
 	}
 }
 
@@ -79,8 +80,9 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	if p.Number == 0 || p.State == "" {
 		return statusPRDetail{}, fmt.Errorf("missing GitHub PR identity or state")
 	}
+	checks, unsettled := statusCheckResult(p.StatusCheckRollup)
 	d := statusPRDetail{Number: fmt.Sprint(p.Number), State: strings.ToUpper(p.State),
-		Checks: statusCheckResult(p.StatusCheckRollup), Merge: p.MergeStateStatus,
+		Checks: checks, ChecksUnsettled: unsettled, Merge: p.MergeStateStatus,
 		Title: cleanPRField(p.Title), MergedOn: p.MergedAt}
 	if d.Title == "" {
 		d.Title = fallback.Title

@@ -178,6 +178,51 @@ func TestMergedPRRegistryWaitsForSettledChecks(t *testing.T) {
 	if err != nil || records[0].MergedOn != "" {
 		t.Fatalf("pending PR stopped being live: %+v %v", records, err)
 	}
+	detail, err := statusGHDetail([]byte(`{"number":8,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"FAILURE","status":"COMPLETED"},{"status":"IN_PROGRESS"}]}`), records[0])
+	if err != nil || detail.Checks != "FAILURE" || !detail.ChecksUnsettled {
+		t.Fatalf("failure with running checks lost pending marker: %+v %v", detail, err)
+	}
+	if count, err := c.recordMergedPRs(records, []statusPRDetail{detail}); err != nil || count != 0 {
+		t.Fatalf("failure with running checks was frozen: %d %v", count, err)
+	}
+}
+
+func TestMergedPRRegistryRejectsMalformedFactsAndKeepsFinalAnnotationOnReenlist(t *testing.T) {
+	c := fixture(t)
+	registry := "widget 7 topic https://github.com/example/widget/pull/7 Previous title\n" +
+		"# merged-pr widget 7 invalid SUCCESS\n" +
+		"# merged-pr widget 7 2026-09-30T12:00:00Z BOGUS\n" +
+		"# merged-pr widget 7 2026-09-30T12:00:00Z FAILURE\n"
+	if err := os.WriteFile(c.PRFile(), []byte(registry), 0644); err != nil {
+		t.Fatal(err)
+	}
+	records, err := c.ListPRs()
+	if err != nil || len(records) != 1 || records[0].FinalChecks != "FAILURE" {
+		t.Fatalf("valid final annotation was not read: %+v %v", records, err)
+	}
+	if _, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "7", Branch: "corrected", URL: "https://github.com/example/widget/pull/7", Title: "Final title"}); err != nil {
+		t.Fatal(err)
+	}
+	records, err = c.ListPRs()
+	if err != nil || len(records) != 1 || records[0].Branch != "corrected" || records[0].MergedOn != "2026-09-30T12:00:00Z" {
+		t.Fatalf("re-enlist lost final annotation: %+v %v", records, err)
+	}
+	if _, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "8", Branch: "next", URL: "https://github.com/example/widget/pull/8"}); err != nil {
+		t.Fatal(err)
+	}
+	records, err = c.ListPRs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, err := c.recordMergedPRs(records, []statusPRDetail{{Number: "7", State: "MERGED", Checks: "FAILURE"},
+		{Number: "8", State: "MERGED", MergedOn: "2026-09-30T13:00:00Z", Checks: "BOGUS"}})
+	if err != nil || count != 0 {
+		t.Fatalf("unknown checks were frozen: %d %v", count, err)
+	}
+	records, err = c.ListPRs()
+	if err != nil || records[1].MergedOn != "" {
+		t.Fatalf("unknown check state was recorded: %+v %v", records, err)
+	}
 }
 
 func TestStatusGHDetailSeparatesChecksReviewAndMerge(t *testing.T) {
