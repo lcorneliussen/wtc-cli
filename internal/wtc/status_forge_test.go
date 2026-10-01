@@ -232,6 +232,26 @@ printf '%s\n' '{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","s
 	}
 }
 
+func TestBitbucketMergeActivitySuppliesAuthoritativeTime(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	bin := t.TempDir()
+	script := `#!/bin/sh
+case "$2" in
+  view) printf '%s\n' '{"id":9,"state":"MERGED","updated_on":"2026-10-01T15:00:00Z","merge_commit":{"date":"2026-09-29T12:00:00Z"}}' ;;
+  activity) printf '%s\n' '{"activities":[{"update":{"state":"MERGED","date":"2026-09-30T12:00:00.500000+00:00"}},{"update":{"state":"OPEN","date":"2026-09-29T12:00:00Z"}}]}' ;;
+  *) exit 2 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "bb"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	detail := statusEnrichRecord(PRRecord{Repo: "widget", Number: "9"}, "example/widget", "bitbucket.org")
+	if detail.State != "MERGED" || detail.MergedOn != "2026-09-30T12:00:00Z" {
+		t.Fatalf("Bitbucket merge event was not used: %+v", detail)
+	}
+}
+
 func TestMergedPRRegistryRejectsMalformedFactsAndKeepsFinalAnnotationOnReenlist(t *testing.T) {
 	c := fixture(t)
 	registry := "widget 7 topic https://github.com/example/widget/pull/7 Previous title\n" +

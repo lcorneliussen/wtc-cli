@@ -1,12 +1,51 @@
 package wtc
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
 	"time"
 )
+
+func statusBBMergeEventTime(raw []byte) string {
+	var log struct {
+		Activities []struct {
+			Update struct {
+				State string `json:"state"`
+				Date  string `json:"date"`
+			} `json:"update"`
+		} `json:"activities"`
+	}
+	if json.Unmarshal(raw, &log) != nil {
+		return ""
+	}
+	for _, activity := range log.Activities {
+		if !strings.EqualFold(activity.Update.State, "MERGED") {
+			continue
+		}
+		if when, err := time.Parse(time.RFC3339Nano, activity.Update.Date); err == nil {
+			return when.UTC().Format(time.RFC3339)
+		}
+	}
+	return ""
+}
+
+func statusBBCompleteMergeTime(detail statusPRDetail, slug string) statusPRDetail {
+	if detail.State != "MERGED" || detail.MergedOn != "" {
+		return detail
+	}
+	parts := strings.SplitN(slug, "/", 2)
+	if len(parts) != 2 {
+		return detail
+	}
+	raw, err := statusJSON("bb", "pr", "activity", detail.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
+	if err == nil {
+		detail.MergedOn = statusBBMergeEventTime(raw)
+	}
+	return detail
+}
 
 func statusString(value string) *string {
 	if value == "" {
@@ -71,6 +110,9 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	}
 	if cached, ok := statusReadForgeCache(forge, slug, record.Number); ok {
 		if detail, err := statusParseForgeDetail(forge, cached, record); err == nil {
+			if forge == "bitbucket.org" {
+				detail = statusBBCompleteMergeTime(detail, slug)
+			}
 			return detail
 		}
 	}
@@ -93,6 +135,9 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	if err == nil {
 		if detail, parseErr := statusParseForgeDetail(forge, raw, record); parseErr == nil {
 			statusWriteForgeCache(forge, slug, record.Number, raw)
+			if forge == "bitbucket.org" {
+				detail = statusBBCompleteMergeTime(detail, slug)
+			}
 			return detail
 		}
 	}

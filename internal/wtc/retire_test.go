@@ -14,6 +14,7 @@ func TestRetireCollectionRunsTeardownAndKeepsRemoteRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := result.Collection
+	fixtureFile(t, filepath.Join(target, ".wtc-prs.lock"), "", 0600)
 	widget := filepath.Join(target, "widget")
 	if err := os.Remove(filepath.Join(widget, "init-ran")); err != nil {
 		t.Fatal(err)

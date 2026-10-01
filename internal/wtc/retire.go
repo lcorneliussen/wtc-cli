@@ -238,7 +238,7 @@ func removeRetiredGeneratedFiles(target string) error {
 	files := []string{
 		"HANDOFF.md", ".env.collection", ".env.collection.local", "mise.toml", ".DS_Store",
 		"WTC-SCOPE.md", ".env.toolchain",
-		".wtc-prs", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
+		".wtc-prs", ".wtc-prs.lock", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
 	}
 	for _, name := range files {
 		if err := os.Remove(filepath.Join(target, name)); err != nil && !os.IsNotExist(err) {
