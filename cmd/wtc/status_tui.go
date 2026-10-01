@@ -301,12 +301,12 @@ func statusTUIPR(pr *wtc.StatusPRFacts) string {
 
 type statusRepoLayout struct {
 	name, branch, pr, tree, ahead, behind, tip, prod int
-	showSync, showBuilds                             bool
+	showTree, showSync, showBuilds                   bool
 }
 
 func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayout {
 	l := statusRepoLayout{name: 16, branch: 30, pr: 15, tree: 4, ahead: 3, behind: 3, tip: 8, prod: 8,
-		showSync: true, showBuilds: true}
+		showTree: true, showSync: true, showBuilds: true}
 	for _, row := range snapshot.Repos {
 		if row.Tree != "clean" {
 			l.tree = max(l.tree, runewidth.StringWidth(row.Tree))
@@ -326,8 +326,16 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 	if width < 46 {
 		l.name = 10
 	}
+	if width < 40 {
+		l.name, l.pr = 8, 8
+		l.showSync, l.showBuilds = false, false
+		l.showTree = width >= 31
+	}
 	other := func() int {
-		n := l.name + 1 + l.pr + 1 + l.tree
+		n := l.name + 1 + l.pr
+		if l.showTree {
+			n += 1 + l.tree
+		}
 		if l.showSync {
 			n += 1 + l.ahead + 1 + l.behind
 		}
@@ -336,13 +344,17 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 		}
 		return n
 	}
-	if other()+9 > width {
+	minBranch := 8
+	if width < 31 {
+		minBranch = 6
+	}
+	if other()+minBranch+1 > width {
 		l.showBuilds = false
 	}
-	if other()+9 > width {
+	if other()+minBranch+1 > width {
 		l.showSync = false
 	}
-	l.branch = max(8, min(l.branch, width-other()-1))
+	l.branch = max(minBranch, min(l.branch, width-other()-1))
 	return l
 }
 
@@ -377,10 +389,10 @@ func statusTUIBuildCell(prefix string, build *wtc.StatusBuild) string {
 	return cell
 }
 
-func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, styled bool) string {
+func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, width int, styled bool) string {
 	plain := statusTUIPR(pr)
 	if !styled || pr == nil || pr.Number == "" {
-		return statusTUIFit(plain, 15)
+		return statusTUIFit(plain, width)
 	}
 	label := "#" + pr.Number
 	if statusTUIURL(pr.URL) != "" {
@@ -396,12 +408,15 @@ func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, styled bool) string {
 	} else if strings.Contains(suffix, "●") || strings.Contains(suffix, "↓") {
 		suffix = statusTUIStyle(suffix, statusToneWarning)
 	}
-	return statusTUIFitANSI(label+suffix, 15)
+	return statusTUIFitANSI(label+suffix, width)
 }
 
 func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []string {
 	l := statusTUIRepoLayout(snapshot, width)
-	header := statusTUIFit("REPO", l.name) + " " + statusTUIFit("BRANCH", l.branch) + " " + statusTUIFit("PR", l.pr) + " " + statusTUIFit("±", l.tree)
+	header := statusTUIFit("REPO", l.name) + " " + statusTUIFit("BRANCH", l.branch) + " " + statusTUIFit("PR", l.pr)
+	if l.showTree {
+		header += " " + statusTUIFit("±", l.tree)
+	}
 	if l.showSync {
 		header += " " + statusTUIFit("↑", l.ahead) + " " + statusTUIFit("↓", l.behind)
 	}
@@ -423,7 +438,7 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 		}
 		nameCell := statusTUIFit(statusTUISafe(name), l.name)
 		branchCell := statusTUIFit(statusTUISafe(row.BranchDisplay), l.branch)
-		prCell := statusTUIRepoPRCell(row.PR, styled)
+		prCell := statusTUIRepoPRCell(row.PR, l.pr, styled)
 		if styled {
 			nameCell = statusTUIStyle(nameCell, statusToneLabel)
 			if row.BranchKind == "detached" {
@@ -438,7 +453,10 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 				treeCell = statusTUIStyle(treeCell, statusToneWarning)
 			}
 		}
-		line := nameCell + " " + branchCell + " " + prCell + " " + treeCell
+		line := nameCell + " " + branchCell + " " + prCell
+		if l.showTree {
+			line += " " + treeCell
+		}
 		if l.showSync {
 			ahead, behind := "·", "·"
 			if row.Ahead > 0 {

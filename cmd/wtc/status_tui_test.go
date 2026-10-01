@@ -318,6 +318,27 @@ func TestStatusTUIPRTableFitsNarrowOneShotWidths(t *testing.T) {
 	}
 }
 
+func TestStatusOneShotTablesFitNarrowTerminals(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	url := "https://example.invalid/pull/7"
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", GeneratedAt: "2026-10-01T00:00:00Z",
+		Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "feature/topic", Tree: "±2",
+			PR: &wtc.StatusPRFacts{Number: "7", URL: url}}},
+		PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", Title: "Synthetic change", URL: &url}}}
+	for _, width := range []int{24, 25, 30, 31, 39, 40} {
+		for _, line := range strings.Split(strings.TrimSuffix(statusTable(snapshot, false, width), "\n"), "\n") {
+			if runewidth.StringWidth(line) > width {
+				t.Fatalf("one-shot table overflows %d columns: %q", width, line)
+			}
+		}
+		layout := statusTUIRepoLayout(snapshot, width)
+		model := statusTUIModel{snapshot: snapshot, width: width, height: 20}
+		if got := model.buildClickTarget(layout.prStart(), 3); got != url {
+			t.Fatalf("narrow repo PR click at width %d = %q", width, got)
+		}
+	}
+}
+
 func TestStatusTUIModelShowsCachedRowsAndControls(t *testing.T) {
 	merged := "MERGED"
 	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "⌂ main", Tree: "clean"}},
