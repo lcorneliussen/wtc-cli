@@ -90,17 +90,6 @@ func statusTUIFitANSI(value string, width int) string {
 	return ansi.Truncate(value, width, "…") + ansi.ResetHyperlink() + "\x1b[0m"
 }
 
-func statusTUILocalCell(cell string, row wtc.StatusRepo) string {
-	switch {
-	case row.Behind > 0 || row.Tree != "" && row.Tree != "clean":
-		return statusTUIStyle(cell, statusToneWarning)
-	case row.Ahead > 0:
-		return statusTUIStyle(cell, statusToneSuccess)
-	default:
-		return statusTUIStyle(cell, statusToneDim)
-	}
-}
-
 func statusTUIBuildLink(cell string, build *wtc.StatusBuild) string {
 	if build == nil {
 		return statusTUIStyle(cell, statusToneDim)

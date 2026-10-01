@@ -304,9 +304,16 @@ type statusRepoLayout struct {
 	showSync, showBuilds                             bool
 }
 
-func statusTUIRepoLayout(width int) statusRepoLayout {
+func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayout {
 	l := statusRepoLayout{name: 16, branch: 30, pr: 15, tree: 4, ahead: 3, behind: 3, tip: 8, prod: 8,
 		showSync: true, showBuilds: true}
+	for _, row := range snapshot.Repos {
+		if row.Tree != "clean" {
+			l.tree = max(l.tree, runewidth.StringWidth(row.Tree))
+		}
+		l.ahead = max(l.ahead, len(fmt.Sprint(row.Ahead)))
+		l.behind = max(l.behind, len(fmt.Sprint(row.Behind)))
+	}
 	if width >= 100 {
 		l.name = 20
 	}
@@ -316,17 +323,26 @@ func statusTUIRepoLayout(width int) statusRepoLayout {
 	if width < 55 {
 		l.showSync = false
 	}
-	if width < 45 {
+	if width < 46 {
 		l.name = 10
 	}
-	other := l.name + 1 + l.pr + 1 + l.tree
-	if l.showSync {
-		other += 1 + l.ahead + 1 + l.behind
+	other := func() int {
+		n := l.name + 1 + l.pr + 1 + l.tree
+		if l.showSync {
+			n += 1 + l.ahead + 1 + l.behind
+		}
+		if l.showBuilds {
+			n += 1 + l.tip + 1 + l.prod
+		}
+		return n
 	}
-	if l.showBuilds {
-		other += 1 + l.tip + 1 + l.prod
+	if other()+9 > width {
+		l.showBuilds = false
 	}
-	l.branch = max(8, min(l.branch, width-other-1))
+	if other()+9 > width {
+		l.showSync = false
+	}
+	l.branch = max(8, min(l.branch, width-other()-1))
 	return l
 }
 
@@ -384,7 +400,7 @@ func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, styled bool) string {
 }
 
 func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []string {
-	l := statusTUIRepoLayout(width)
+	l := statusTUIRepoLayout(snapshot, width)
 	header := statusTUIFit("REPO", l.name) + " " + statusTUIFit("BRANCH", l.branch) + " " + statusTUIFit("PR", l.pr) + " " + statusTUIFit("±", l.tree)
 	if l.showSync {
 		header += " " + statusTUIFit("↑", l.ahead) + " " + statusTUIFit("↓", l.behind)
@@ -416,7 +432,11 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 		}
 		treeCell := statusTUIFit(tree, l.tree)
 		if styled {
-			treeCell = statusTUILocalCell(treeCell, row)
+			if tree == "·" {
+				treeCell = statusTUIStyle(treeCell, statusToneDim)
+			} else {
+				treeCell = statusTUIStyle(treeCell, statusToneWarning)
+			}
 		}
 		line := nameCell + " " + branchCell + " " + prCell + " " + treeCell
 		if l.showSync {
@@ -429,8 +449,16 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 			}
 			aheadCell, behindCell := statusTUIFit(ahead, l.ahead), statusTUIFit(behind, l.behind)
 			if styled {
-				aheadCell = statusTUIStyle(aheadCell, statusToneSuccess)
-				behindCell = statusTUIStyle(behindCell, statusToneWarning)
+				if row.Ahead > 0 {
+					aheadCell = statusTUIStyle(aheadCell, statusToneSuccess)
+				} else {
+					aheadCell = statusTUIStyle(aheadCell, statusToneDim)
+				}
+				if row.Behind > 0 {
+					behindCell = statusTUIStyle(behindCell, statusToneWarning)
+				} else {
+					behindCell = statusTUIStyle(behindCell, statusToneDim)
+				}
 			}
 			line += " " + aheadCell + " " + behindCell
 		}
@@ -478,7 +506,7 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	}
 	if rowIndex < len(m.snapshot.Repos) {
 		row := m.snapshot.Repos[rowIndex]
-		layout := statusTUIRepoLayout(width)
+		layout := statusTUIRepoLayout(m.snapshot, width)
 		prStart := layout.prStart()
 		if x >= prStart && x < prStart+layout.pr && row.PR != nil {
 			return statusTUIURL(row.PR.URL)
@@ -508,10 +536,8 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	if x >= 7 {
 		return ""
 	}
-	for _, row := range m.snapshot.PRs {
-		if row.Archived && !m.showArchived {
-			continue
-		}
+	visible, _ := statusTUIVisiblePRs(m.snapshot, m.showArchived)
+	for _, row := range visible {
 		if visibleIndex == 0 && row.URL != nil {
 			return statusTUIURL(*row.URL)
 		}
@@ -567,6 +593,31 @@ func statusTUIPRGlyph(value *string) string {
 	return "·"
 }
 
+func statusTUIMergedPR(row wtc.StatusPRRow) bool {
+	return row.Merge != nil && *row.Merge == "MERGED" || row.MergedOn != nil && *row.MergedOn != ""
+}
+
+func statusTUIVisiblePRs(snapshot wtc.StatusSnapshot, showArchived bool) ([]wtc.StatusPRRow, int) {
+	active := make([]wtc.StatusPRRow, 0, len(snapshot.PRs))
+	merged := make([]wtc.StatusPRRow, 0)
+	archived := make([]wtc.StatusPRRow, 0)
+	for _, row := range snapshot.PRs {
+		switch {
+		case row.Archived:
+			archived = append(archived, row)
+		case statusTUIMergedPR(row) && !row.OnBranch:
+			merged = append(merged, row)
+		default:
+			active = append(active, row)
+		}
+	}
+	active = append(active, merged...)
+	if showArchived {
+		active = append(active, archived...)
+	}
+	return active, len(archived)
+}
+
 func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styled bool) []string {
 	if snapshot.ShowCollectionColumn {
 		return nil
@@ -586,12 +637,8 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 		header = statusTUIStyle(header, statusToneDim)
 	}
 	lines := []string{"", heading, header}
-	archived := 0
-	for _, row := range snapshot.PRs {
-		if row.Archived && !showArchived {
-			archived++
-			continue
-		}
+	visible, archived := statusTUIVisiblePRs(snapshot, showArchived)
+	for _, row := range visible {
 		label := statusTUISafe(row.DisplayTitle)
 		if label == "" {
 			label = statusTUISafe(row.Title)
@@ -600,7 +647,7 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 			label = "PR #" + row.Number
 		}
 		state := "open"
-		merged := row.Merge != nil && *row.Merge == "MERGED"
+		merged := statusTUIMergedPR(row)
 		if row.OnBranch {
 			state = "⚠ catch-up"
 		} else if row.Draft {
@@ -645,7 +692,7 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 	if len(snapshot.PRs) == 0 {
 		lines = append(lines, "(none enlisted)")
 	}
-	if archived > 0 {
+	if archived > 0 && !showArchived {
 		hint := fmt.Sprintf("%d archived PR(s) hidden; press a", archived)
 		if styled {
 			hint = statusTUIStyle(fmt.Sprintf("▸ archived (%d) · a to show", archived), statusToneDim)

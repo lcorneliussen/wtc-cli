@@ -217,6 +217,62 @@ func TestStatusTUIKeepsBuildColumnsAndMutesMergedPRs(t *testing.T) {
 	}
 }
 
+func TestStatusTUIResponsiveLayoutKeepsCountsAndClickColumns(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	prURL, buildURL := "https://example.invalid/pull/7", "https://example.invalid/build/7"
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{
+		Dir: "widget", BranchDisplay: "topic", Tree: "±1234", Ahead: 1234, Behind: 2345,
+		PR: &wtc.StatusPRFacts{Number: "7", URL: prURL}, Tip: &wtc.StatusBuild{URL: &buildURL},
+	}}}
+	wide := statusTUIRepoLines(snapshot, 100, false)
+	if !strings.Contains(wide[1], "±1234") || !strings.Contains(wide[1], "1234") ||
+		!strings.Contains(wide[1], "2345") || strings.Contains(wide[1], "12…") {
+		t.Fatalf("large counts were truncated: %q", wide[1])
+	}
+	for _, width := range []int{72, 55, 45} {
+		layout := statusTUIRepoLayout(snapshot, width)
+		lines := statusTUIRepoLines(snapshot, width, false)
+		if runewidth.StringWidth(lines[0]) > width || runewidth.StringWidth(lines[1]) > width {
+			t.Fatalf("repo table overflows %d columns: %q", width, lines)
+		}
+		model := statusTUIModel{snapshot: snapshot, width: width, height: 20}
+		if got := model.buildClickTarget(layout.prStart(), 3); got != prURL {
+			t.Fatalf("PR click at width %d = %q", width, got)
+		}
+		if layout.showBuilds {
+			if got := model.buildClickTarget(layout.tipStart(), 3); got != buildURL {
+				t.Fatalf("build click at width %d = %q", width, got)
+			}
+		} else if got := model.buildClickTarget(layout.tipStart(), 3); got != "" {
+			t.Fatalf("hidden build column at width %d was clickable: %q", width, got)
+		}
+	}
+}
+
+func TestStatusTUIPRTablePlacesActiveRowsFirstAndWarnsOnBranch(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	merged, passed := "MERGED", "SUCCESS"
+	oldURL, activeURL, staleURL := "https://example.invalid/pull/1", "https://example.invalid/pull/2", "https://example.invalid/pull/3"
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Dir: "widget"}},
+		PRs: []wtc.StatusPRRow{
+			{Repo: "widget", Number: "1", Title: "Finished", URL: &oldURL, Merge: &merged},
+			{Repo: "widget", Number: "2", Title: "In progress", DisplayTitle: "Display title", URL: &activeURL, Draft: true, Checks: &passed},
+			{Repo: "widget", Number: "3", Title: "Needs update", URL: &staleURL, Merge: &merged, OnBranch: true},
+		}}
+	lines := statusTUIPRLines(snapshot, 100, false, true)
+	if !strings.Contains(ansi.Strip(lines[3]), "#2") || !strings.Contains(ansi.Strip(lines[3]), "Display title") ||
+		!strings.Contains(ansi.Strip(lines[3]), "◇ draft") ||
+		!strings.Contains(ansi.Strip(lines[4]), "#3") || !strings.Contains(ansi.Strip(lines[4]), "⚠ catch-up") ||
+		!strings.Contains(ansi.Strip(lines[5]), "#1") {
+		t.Fatalf("PR table did not prioritize active work: %q", lines)
+	}
+	model := statusTUIModel{snapshot: snapshot, width: 100, height: 20}
+	if model.buildClickTarget(1, 7) != activeURL || model.buildClickTarget(1, 8) != staleURL ||
+		model.buildClickTarget(1, 9) != oldURL || model.buildClickTarget(8, 7) != "" {
+		t.Fatal("PR table click targets disagree with rendered row order or number column")
+	}
+}
+
 func TestStatusTUIModelShowsCachedRowsAndControls(t *testing.T) {
 	merged := "MERGED"
 	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "⌂ main", Tree: "clean"}},
