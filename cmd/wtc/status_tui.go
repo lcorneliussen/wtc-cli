@@ -611,7 +611,7 @@ func (m statusTUIModel) contentLines() []string {
 		if m.procs {
 			keys = "r refresh   l log   ? help   q quit"
 		}
-		lines = append(lines, keys, "↗ terminal link: modifier-click   T/P build links: click   ↑/↓ scroll   PgUp/PgDn scroll faster", "")
+		lines = append(lines, keys, "↗ link: modifier-click   PR/T/P: click   ↑/↓ scroll   PgUp/PgDn faster", "")
 	}
 	if m.showLog {
 		lines = append(lines, statusTUIStyle("Refresh log", statusToneHeading), "")
