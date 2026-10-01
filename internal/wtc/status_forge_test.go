@@ -221,6 +221,15 @@ printf '%s\n' '{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","s
 	if err != nil || strings.Count(string(data), "called") != 1 {
 		t.Fatalf("unsettled merge was not refreshed: %s %v", data, err)
 	}
+	statusWriteForgeCache(forge, slug, number, []byte(`{"number":7,"state":"MERGED","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}`))
+	if err := os.Chtimes(statusForgeCachePath(forge, slug, number), old, old); err != nil {
+		t.Fatal(err)
+	}
+	detail = statusEnrichRecord(PRRecord{Repo: "widget", Number: number}, slug, forge)
+	data, err = os.ReadFile(calls)
+	if err != nil || detail.MergedOn != "2026-09-30T12:00:00Z" || strings.Count(string(data), "called") != 2 {
+		t.Fatalf("untimed merged cache hid real merge time: %+v %s %v", detail, data, err)
+	}
 }
 
 func TestMergedPRRegistryRejectsMalformedFactsAndKeepsFinalAnnotationOnReenlist(t *testing.T) {
