@@ -429,6 +429,16 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	if m.showLog {
 		return ""
 	}
+	width, height := m.width, m.height
+	if width <= 0 {
+		width = 80
+	}
+	if height <= 0 {
+		height = 24
+	}
+	if x < 0 || x >= width || y < 0 || y >= max(1, height-2) {
+		return ""
+	}
 	base := 3
 	if m.refreshing && m.progressStep != "" {
 		base += 2
@@ -646,9 +656,14 @@ func (m statusTUIModel) View() tea.View {
 	scroll := m.effectiveScroll()
 	end := min(len(lines), scroll+bodyHeight)
 	var b strings.Builder
+	visibleLink := false
 	for _, line := range lines[scroll:end] {
-		b.WriteString(statusTUIFitANSI(line, width))
+		fitted := statusTUIFitANSI(line, width)
+		b.WriteString(fitted)
 		b.WriteByte('\n')
+		if statusTUIHasVisibleLink(fitted) {
+			visibleLink = true
+		}
 	}
 	for i := end - scroll; i < bodyHeight; i++ {
 		b.WriteByte('\n')
@@ -657,16 +672,7 @@ func (m statusTUIModel) View() tea.View {
 	view := tea.NewView(b.String())
 	view.AltScreen = true
 	view.ReportFocus = true
-	visibleLink := false
-	if !m.noClick {
-		for _, line := range lines[scroll:end] {
-			if strings.Contains(line, "\x1b]8;") {
-				visibleLink = true
-				break
-			}
-		}
-	}
-	if m.refreshing || visibleLink {
+	if m.refreshing || visibleLink && !m.noClick {
 		view.MouseMode = tea.MouseModeCellMotion
 	}
 	return view

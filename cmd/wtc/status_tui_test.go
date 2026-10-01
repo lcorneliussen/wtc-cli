@@ -104,6 +104,25 @@ func TestStatusTUIMouseModeRequiresVisibleValidTarget(t *testing.T) {
 	if model.View().MouseMode != tea.MouseModeNone {
 		t.Fatal("build cell without URL captured mouse input")
 	}
+	model.width = 25
+	model.snapshot.Repos = []wtc.StatusRepo{{Dir: "widget", PR: &wtc.StatusPRFacts{Number: "7", URL: valid}}}
+	if model.View().MouseMode != tea.MouseModeNone {
+		t.Fatalf("PR cell clipped outside a narrow terminal captured mouse input: %q", model.View().Content)
+	}
+}
+
+func TestStatusTUIClickTargetExcludesFooterAndOffscreenPR(t *testing.T) {
+	first := "https://example.invalid/pull/7"
+	second := "https://example.invalid/pull/8"
+	m := statusTUIModel{width: 80, height: 9, snapshot: wtc.StatusSnapshot{Collection: "fixture",
+		Repos: []wtc.StatusRepo{{Dir: "widget"}},
+		PRs:   []wtc.StatusPRRow{{Repo: "widget", Number: "7", URL: &first}, {Repo: "widget", Number: "8", URL: &second}}}}
+	if m.View().MouseMode != tea.MouseModeCellMotion || m.buildClickTarget(8, 6) != first {
+		t.Fatal("visible PR row was not clickable")
+	}
+	if got := m.buildClickTarget(8, 7); got != "" {
+		t.Fatalf("footer click opened offscreen PR: %q", got)
+	}
 }
 
 func TestStatusTUIRefreshStreamsCollectorProgressAndCompletion(t *testing.T) {

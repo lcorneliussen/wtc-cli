@@ -3,6 +3,7 @@ package main
 import (
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -18,6 +19,17 @@ const (
 	statusToneWarning = "38;5;214"
 	statusToneFailure = "38;5;203"
 )
+
+var statusTUILinkPattern = regexp.MustCompile(`\x1b]8;;https?://[^\x07\x1b]*(?:\x07|\x1b\\)(.*?)\x1b]8;;(?:\x07|\x1b\\)`)
+
+func statusTUIHasVisibleLink(line string) bool {
+	for _, match := range statusTUILinkPattern.FindAllStringSubmatch(line, -1) {
+		if strings.Trim(ansi.Strip(match[1]), " \t…") != "" {
+			return true
+		}
+	}
+	return false
+}
 
 func statusTUIStyle(value, tone string) string {
 	if value == "" || os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
