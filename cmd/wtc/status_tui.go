@@ -533,7 +533,7 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	if visibleIndex < 0 {
 		return ""
 	}
-	if x >= 7 {
+	if x >= statusTUIPRLayout(width).number {
 		return ""
 	}
 	visible, _ := statusTUIVisiblePRs(m.snapshot, m.showArchived)
@@ -618,6 +618,33 @@ func statusTUIVisiblePRs(snapshot wtc.StatusSnapshot, showArchived bool) ([]wtc.
 	return active, len(archived)
 }
 
+type statusPRLayout struct {
+	number, repo, state, title int
+	signals                    bool
+}
+
+func statusTUIPRLayout(width int) statusPRLayout {
+	l := statusPRLayout{number: 7, repo: 16, state: 10, signals: true}
+	switch {
+	case width >= 52:
+	case width >= 40:
+		l.repo, l.state = 12, 8
+	case width >= 34:
+		l.repo, l.state, l.signals = 10, 8, false
+	default:
+		l.number, l.repo, l.state, l.signals = 5, 8, 7, false
+	}
+	if width >= 100 {
+		l.repo = 20
+	}
+	prefix := l.number + 1 + l.repo + 1 + l.state + 1
+	if l.signals {
+		prefix += 6 // C M R and the separating space before TITLE.
+	}
+	l.title = max(1, width-prefix)
+	return l
+}
+
 func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styled bool) []string {
 	if snapshot.ShowCollectionColumn {
 		return nil
@@ -626,13 +653,12 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 	if styled {
 		heading = statusTUIStyle(heading, statusToneHeading)
 	}
-	const numberWidth, stateWidth = 7, 10
-	repoWidth := 16
-	if width >= 100 {
-		repoWidth = 20
+	l := statusTUIPRLayout(width)
+	header := statusTUIFit("PR", l.number) + " " + statusTUIFit("REPO", l.repo) + " " + statusTUIFit("STATE", l.state) + " "
+	if l.signals {
+		header += "C M R "
 	}
-	titleWidth := max(10, width-(numberWidth+1+repoWidth+1+stateWidth+1+1+1+1+1+1+1))
-	header := statusTUIFit("PR", numberWidth) + " " + statusTUIFit("REPO", repoWidth) + " " + statusTUIFit("STATE", stateWidth) + " C M R TITLE"
+	header += statusTUIFit("TITLE", l.title)
 	if styled {
 		header = statusTUIStyle(header, statusToneDim)
 	}
@@ -655,21 +681,21 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 		} else if merged {
 			state = "merged"
 		}
-		number := statusTUIFit("#"+row.Number, numberWidth)
-		repo := statusTUIFit(statusTUISafe(row.Repo), repoWidth)
-		stateCell := statusTUIFit(state, stateWidth)
+		number := statusTUIFit("#"+row.Number, l.number)
+		repo := statusTUIFit(statusTUISafe(row.Repo), l.repo)
+		stateCell := statusTUIFit(state, l.state)
 		checks, merge, review := statusTUIPRGlyph(row.Checks), statusTUIPRGlyph(row.Merge), statusTUIPRGlyph(row.Review)
 		if merged && !row.OnBranch {
 			checks, merge, review = "·", "·", "·"
 		}
-		title := statusTUIFit(label, titleWidth)
+		title := statusTUIFit(label, l.title)
 		if styled {
 			if row.URL != nil && statusTUIURL(*row.URL) != "" {
 				linkTone := statusToneLink
 				if merged && !row.OnBranch {
 					linkTone = "2;4;38;5;245"
 				}
-				number = statusTUIFitANSI(statusTUILinkTone("#"+row.Number+" ↗", *row.URL, linkTone), numberWidth)
+				number = statusTUIFitANSI(statusTUILinkTone("#"+row.Number+" ↗", *row.URL, linkTone), l.number)
 			}
 			rowTone := statusToneLabel
 			if merged && !row.OnBranch {
@@ -677,17 +703,20 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 			}
 			repo = statusTUIStyle(repo, rowTone)
 			title = statusTUIStyle(title, rowTone)
-			stateCell = statusTUIStyle(stateCell, statusToneDim)
 			if row.OnBranch {
 				stateCell = statusTUIStyle(stateCell, statusToneWarning)
+			} else {
+				stateCell = statusTUIStyle(stateCell, statusToneDim)
 			}
-			if !merged {
-				checks = statusTUIGlyphStyle(checks)
-				merge = statusTUIGlyphStyle(merge)
-				review = statusTUIGlyphStyle(review)
-			}
+			checks = statusTUIGlyphStyle(checks)
+			merge = statusTUIGlyphStyle(merge)
+			review = statusTUIGlyphStyle(review)
 		}
-		lines = append(lines, number+" "+repo+" "+stateCell+" "+checks+" "+merge+" "+review+" "+title)
+		line := number + " " + repo + " " + stateCell + " "
+		if l.signals {
+			line += checks + " " + merge + " " + review + " "
+		}
+		lines = append(lines, line+title)
 	}
 	if len(snapshot.PRs) == 0 {
 		lines = append(lines, "(none enlisted)")
