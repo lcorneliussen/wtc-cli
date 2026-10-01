@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -60,6 +61,7 @@ type statusTUIModel struct {
 	showLog      bool
 	progressLog  []string
 	progressStep string
+	progressKey  string
 	startedAt    time.Time
 	errorText    string
 }
@@ -105,7 +107,17 @@ func (m *statusTUIModel) startRefresh() {
 	m.refreshing = true
 	m.startedAt = time.Now()
 	m.progressStep = "Starting refresh"
+	m.progressKey = m.progressStep
 	m.progressLog = []string{"0s  Starting refresh"}
+}
+
+var statusTUIProgressCounter = regexp.MustCompile(`^(.*) [0-9]+(?:/[0-9]+)?$`)
+
+func statusTUIProgressKey(message string) string {
+	if parts := statusTUIProgressCounter.FindStringSubmatch(message); len(parts) == 2 {
+		return parts[1]
+	}
+	return message
 }
 
 func (m *statusTUIModel) focusLogTail() {
@@ -139,7 +151,14 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.startedAt = msg.at
 		}
 		m.progressStep = msg.message
-		m.progressLog = append(m.progressLog, fmt.Sprintf("%s  %s", msg.at.Sub(m.startedAt).Truncate(time.Second), msg.message))
+		entry := fmt.Sprintf("%s  %s", msg.at.Sub(m.startedAt).Truncate(time.Second), msg.message)
+		key := statusTUIProgressKey(msg.message)
+		if key == m.progressKey && len(m.progressLog) > 0 {
+			m.progressLog[len(m.progressLog)-1] = entry
+		} else {
+			m.progressLog = append(m.progressLog, entry)
+		}
+		m.progressKey = key
 		m.focusLogTail()
 		return m, statusTUIWait(msg.events)
 	case statusLoadedMsg:
@@ -544,9 +563,6 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 		return ""
 	}
 	base := 3
-	if m.refreshing && m.progressStep != "" {
-		base += 2
-	}
 	if m.showHelp {
 		base += 3
 	}
@@ -749,7 +765,7 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 			if row.URL != nil && statusTUIURL(*row.URL) != "" {
 				linkTone := statusToneLink
 				if merged && !row.OnBranch {
-					linkTone = "2;4;38;5;245"
+					linkTone = "2;38;5;245"
 				}
 				number = statusTUIFitANSI(statusTUILinkTone("#"+row.Number+" ↗", *row.URL, linkTone), l.number)
 			}
@@ -831,9 +847,6 @@ func (m statusTUIModel) headerLine() string {
 	}
 	if m.refreshing {
 		age += " · refreshing"
-		if m.progressStep != "" {
-			age += ": " + m.progressStep
-		}
 	}
 	return fmt.Sprintf("wtc status · %s · %s", name, age)
 }
@@ -845,7 +858,11 @@ func (m statusTUIModel) contentLines() []string {
 	}
 	lines := []string{statusTUIStyle(m.headerLine(), statusToneHeading), ""}
 	if m.refreshing && m.progressStep != "" {
-		lines = append(lines, statusTUIStyle(statusTUISafe(m.progressStep)+" (l: refresh log)", statusToneWarning), "")
+		elapsed := time.Since(m.startedAt).Truncate(time.Second)
+		if m.startedAt.IsZero() {
+			elapsed = 0
+		}
+		lines[1] = statusTUIStyle(fmt.Sprintf("↻ %s · %s  (l: log)", elapsed, statusTUISafe(m.progressStep)), statusToneWarning)
 	}
 	if m.showHelp {
 		keys := "r refresh   l log   a show/hide archived PRs   ? help   q quit"

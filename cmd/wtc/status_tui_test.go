@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -102,7 +103,7 @@ func TestStatusTUIRepoBranchAndBuildLinksForBothForges(t *testing.T) {
 			t.Fatalf("missing terminal link %q", target)
 		}
 	}
-	if strings.Contains(view, "\x1b[4;") || !strings.Contains(view, "T✓#42") || !strings.Contains(view, "T✓#687") {
+	if strings.Contains(view, ";4;") || !strings.Contains(view, "T✓#42") || !strings.Contains(view, "T✓#687") {
 		t.Fatalf("links are permanently underlined or build numbers missing: %q", view)
 	}
 	layout := statusTUIRepoLayout(snapshot, 100)
@@ -448,6 +449,35 @@ func TestStatusTUIRefreshLogUpdatesWhileCollectorRuns(t *testing.T) {
 	model = updated.(statusTUIModel)
 	if model.refreshing || !strings.Contains(model.View().Content, "3s  Refresh finished") {
 		t.Fatalf("refresh completion did not appear in log: %s", model.View().Content)
+	}
+}
+
+func TestStatusTUIRefreshKeepsTablePositionAndCoalescesCounts(t *testing.T) {
+	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "main"}}}, width: 36, height: 14}
+	before := model.View().Content
+	if !strings.Contains(strings.Split(before, "\n")[3], "widget") {
+		t.Fatalf("repository did not start on the expected row: %q", before)
+	}
+	model.startRefresh()
+	events := make(chan tea.Msg)
+	for i := 1; i <= 15; i++ {
+		updated, _ := model.Update(statusProgressMsg{message: fmt.Sprintf("Checked pull requests %d/15", i), at: model.startedAt.Add(time.Duration(i) * time.Second), events: events})
+		model = updated.(statusTUIModel)
+	}
+	during := model.View().Content
+	if !strings.Contains(strings.Split(during, "\n")[3], "widget") || len(model.progressLog) != 2 ||
+		!strings.Contains(model.progressLog[1], "15/15") || strings.Contains(strings.Join(model.progressLog, "\n"), "1/15") {
+		t.Fatalf("refresh shifted the table or repeated count entries: %q; log=%q", during, model.progressLog)
+	}
+	for _, line := range strings.Split(during, "\n") {
+		if ansi.StringWidth(line) > model.width {
+			t.Fatalf("refresh line exceeds terminal width: %q", line)
+		}
+	}
+	updated, _ := model.Update(statusLoadedMsg{snapshot: model.snapshot, at: model.startedAt.Add(16 * time.Second)})
+	model = updated.(statusTUIModel)
+	if !strings.Contains(strings.Split(model.View().Content, "\n")[3], "widget") {
+		t.Fatalf("repository shifted after refresh: %q", model.View().Content)
 	}
 }
 
