@@ -161,6 +161,41 @@ printf '%s\n' '{"number":7,"state":"MERGED","title":"Finished change","mergedAt"
 	}
 }
 
+func TestStatusForgePreviewRecordsMergesOnlyWhenEnabled(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	c := newWorkspaceFixture(t)
+	if _, err := c.NewCollection(NewOptions{Slug: "other", Repos: []string{"widget"}}); err != nil {
+		t.Fatal(err)
+	}
+	c.Registry.Repos = []Repo{{Name: "agent-harness", Remote: "https://github.com/example/harness.git"}}
+	if _, err := c.EnlistPR(PRRecord{Repo: "agent-harness", Number: "7", Branch: "topic"}); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	script := `#!/bin/sh
+printf '%s\n' '{"number":7,"state":"MERGED","title":"Finished change","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}'
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := c.statusForgePreview(false, false); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(c.PRFile()); err != nil || strings.Contains(string(data), "\n# merged-pr ") {
+		t.Fatalf("preview without merge recording changed registry: %s %v", data, err)
+	}
+	if _, err := c.StatusForgePreview(); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(c.PRFile()); err != nil || !strings.Contains(string(data), "# merged-pr agent-harness 7 2026-09-30T12:00:00Z SUCCESS") {
+		t.Fatalf("scoped preview did not record final merge: %s %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Workspace, "other", ".wtc-prs.lock")); !os.IsNotExist(err) {
+		t.Fatalf("preview wrote another collection's registry lock: %v", err)
+	}
+}
+
 func TestMergedPRRegistryWaitsForSettledChecks(t *testing.T) {
 	c := fixture(t)
 	if _, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "8", Branch: "topic"}); err != nil {
