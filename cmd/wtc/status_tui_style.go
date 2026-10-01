@@ -20,7 +20,7 @@ const (
 	statusToneFailure = "38;5;203"
 )
 
-var statusTUILinkPattern = regexp.MustCompile(`\x1b]8;;https?://[^\x07\x1b]*(?:\x07|\x1b\\)(.*?)\x1b]8;;(?:\x07|\x1b\\)`)
+var statusTUILinkPattern = regexp.MustCompile(`(?i)\x1b]8;;https?://[^\x07\x1b]*(?:\x07|\x1b\\)(.*?)\x1b]8;;(?:\x07|\x1b\\)`)
 
 func statusTUIHasVisibleLink(line string) bool {
 	for _, match := range statusTUILinkPattern.FindAllStringSubmatch(line, -1) {

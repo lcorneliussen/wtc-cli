@@ -109,6 +109,11 @@ func TestStatusTUIMouseModeRequiresVisibleValidTarget(t *testing.T) {
 	if model.View().MouseMode != tea.MouseModeNone {
 		t.Fatalf("PR cell clipped outside a narrow terminal captured mouse input: %q", model.View().Content)
 	}
+	model.width = 80
+	model.snapshot.Repos[0].PR.URL = "HTTPS://example.invalid/pull/7"
+	if model.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatal("valid uppercase URL scheme did not enable visible PR click")
+	}
 }
 
 func TestStatusTUIClickTargetExcludesFooterAndOffscreenPR(t *testing.T) {
