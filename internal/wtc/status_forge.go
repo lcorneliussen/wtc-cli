@@ -32,10 +32,13 @@ func statusCheckResult(rollup []struct {
 			conclusion = strings.ToUpper(check.State)
 		}
 		switch conclusion {
-		case "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR":
+		case "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE", "ERROR":
 			failed = true
 		case "SUCCESS", "NEUTRAL", "SKIPPED":
 			passed = true
+		default:
+			// A nonempty rollup with an unknown or absent conclusion is not final.
+			pending = true
 		}
 		if check.Status != "" && !strings.EqualFold(check.Status, "COMPLETED") {
 			pending = true
@@ -65,7 +68,6 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 		ReviewDecision    string            `json:"reviewDecision"`
 		MergeStateStatus  string            `json:"mergeStateStatus"`
 		MergedAt          string            `json:"mergedAt"`
-		UpdatedAt         string            `json:"updatedAt"`
 		ReviewRequests    []json.RawMessage `json:"reviewRequests"`
 		LatestReviews     []json.RawMessage `json:"latestReviews"`
 		StatusCheckRollup []struct {
@@ -93,9 +95,6 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	if d.State == "MERGED" {
 		d.Merge = "MERGED"
 		d.Review = "merged"
-		if d.MergedOn == "" {
-			d.MergedOn = p.UpdatedAt
-		}
 	} else {
 		switch strings.ToUpper(p.ReviewDecision) {
 		case "APPROVED":

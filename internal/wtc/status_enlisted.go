@@ -77,7 +77,7 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	// Reuse merged forge detail until its final facts are written to the
 	// collection registry; the registry then avoids later forge calls.
 	if cached, ok := statusReadMergedForgeCache(forge, slug, record.Number); ok {
-		if detail, err := statusParseForgeDetail(forge, cached, record); err == nil && detail.State == "MERGED" {
+		if detail, err := statusParseForgeDetail(forge, cached, record); err == nil && detail.State == "MERGED" && detail.MergedOn != "" && !detail.ChecksUnsettled && detail.Checks != "PENDING" {
 			return detail
 		}
 	}
@@ -85,7 +85,7 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	var err error
 	switch forge {
 	case "github.com":
-		raw, err = statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,reviewRequests,latestReviews,mergedAt,updatedAt")
+		raw, err = statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,reviewRequests,latestReviews,mergedAt")
 	case "bitbucket.org":
 		parts := strings.SplitN(slug, "/", 2)
 		raw, err = statusJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")

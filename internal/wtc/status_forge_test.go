@@ -185,6 +185,42 @@ func TestMergedPRRegistryWaitsForSettledChecks(t *testing.T) {
 	if count, err := c.recordMergedPRs(records, []statusPRDetail{detail}); err != nil || count != 0 {
 		t.Fatalf("failure with running checks was frozen: %d %v", count, err)
 	}
+	fallback, err := statusGHDetail([]byte(`{"number":8,"state":"MERGED","updatedAt":"2026-09-30T15:00:00Z","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}`), records[0])
+	if err != nil || fallback.MergedOn != "" {
+		t.Fatalf("mutable updatedAt used as merge timestamp: %+v %v", fallback, err)
+	}
+	if count, err := c.recordMergedPRs(records, []statusPRDetail{fallback}); err != nil || count != 0 {
+		t.Fatalf("mutable updatedAt was frozen as merge time: %d %v", count, err)
+	}
+}
+
+func TestUnsettledMergedCacheRefreshesAfterLiveAge(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	bin := t.TempDir()
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("WTC_TEST_GH_CALLS", calls)
+	script := `#!/bin/sh
+printf 'called\n' >> "$WTC_TEST_GH_CALLS"
+printf '%s\n' '{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}'
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	forge, slug, number := "github.com", "example/widget", "7"
+	statusWriteForgeCache(forge, slug, number, []byte(`{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"status":"IN_PROGRESS"}]}`))
+	old := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(statusForgeCachePath(forge, slug, number), old, old); err != nil {
+		t.Fatal(err)
+	}
+	detail := statusEnrichRecord(PRRecord{Repo: "widget", Number: number}, slug, forge)
+	if detail.Checks != "SUCCESS" || detail.ChecksUnsettled {
+		t.Fatalf("unsettled merged cache hid fresh forge result: %+v", detail)
+	}
+	data, err := os.ReadFile(calls)
+	if err != nil || strings.Count(string(data), "called") != 1 {
+		t.Fatalf("unsettled merge was not refreshed: %s %v", data, err)
+	}
 }
 
 func TestMergedPRRegistryRejectsMalformedFactsAndKeepsFinalAnnotationOnReenlist(t *testing.T) {
@@ -243,6 +279,16 @@ func TestStatusGHDetailSeparatesChecksReviewAndMerge(t *testing.T) {
 	d, err = statusGHDetail(pendingState, PRRecord{})
 	if err != nil || d.Checks != "PENDING" {
 		t.Fatalf("pending state hidden by passing check: %+v %v", d, err)
+	}
+	stale := []byte(`{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"STALE","status":"COMPLETED"}]}`)
+	d, err = statusGHDetail(stale, PRRecord{})
+	if err != nil || d.Checks != "FAILURE" || d.ChecksUnsettled {
+		t.Fatalf("stale terminal conclusion was not failed: %+v %v", d, err)
+	}
+	unknown := []byte(`{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"MYSTERY","status":"COMPLETED"}]}`)
+	d, err = statusGHDetail(unknown, PRRecord{})
+	if err != nil || d.Checks != "PENDING" || !d.ChecksUnsettled {
+		t.Fatalf("unknown conclusion treated as settled: %+v %v", d, err)
 	}
 }
 

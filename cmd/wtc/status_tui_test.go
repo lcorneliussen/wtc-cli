@@ -77,6 +77,35 @@ func TestStatusTUIRejectsTerminalControlsInLinks(t *testing.T) {
 	}
 }
 
+func TestStatusTUIMouseModeRequiresVisibleValidTarget(t *testing.T) {
+	valid := "https://example.invalid/pull/7"
+	merged := "MERGED"
+	model := statusTUIModel{width: 80, height: 16, snapshot: wtc.StatusSnapshot{Collection: "fixture",
+		PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", URL: &valid, Merge: &merged, Archived: true}}}}
+	if model.View().MouseMode != tea.MouseModeNone {
+		t.Fatal("hidden archived PR captured mouse input")
+	}
+	model.showArchived = true
+	if model.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatal("visible PR link did not enable mouse input")
+	}
+	model.reposOnly = true
+	if model.View().MouseMode != tea.MouseModeNone {
+		t.Fatal("hidden PR section captured mouse input")
+	}
+	model.reposOnly = false
+	invalid := "javascript:alert(1)"
+	model.snapshot.PRs[0].URL = &invalid
+	if model.View().MouseMode != tea.MouseModeNone {
+		t.Fatal("invalid PR URL captured mouse input")
+	}
+	model.snapshot.PRs = nil
+	model.snapshot.Repos = []wtc.StatusRepo{{Dir: "widget", Tip: &wtc.StatusBuild{}}}
+	if model.View().MouseMode != tea.MouseModeNone {
+		t.Fatal("build cell without URL captured mouse input")
+	}
+}
+
 func TestStatusTUIRefreshStreamsCollectorProgressAndCompletion(t *testing.T) {
 	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, width: 80, height: 16}
 	model.startRefresh()
