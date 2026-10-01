@@ -29,6 +29,7 @@ type StatusRepo struct {
 	Repo          string         `json:"repo"`
 	Worktree      string         `json:"worktree"`
 	Slug          string         `json:"slug"`
+	Forge         string         `json:"forge,omitempty"`
 	BranchKind    string         `json:"branch_kind"`
 	Branch        string         `json:"branch"`
 	BranchDisplay string         `json:"branch_display"`
@@ -105,7 +106,7 @@ func statusLocalRepo(t catchUpTarget) (StatusRepo, error) {
 		Worktree: t.path, Tree: "clean"}
 	remote, err := statusGit(t.path, "remote", "get-url", "origin")
 	if err == nil {
-		row.Slug, _ = catchUpForge(remote)
+		row.Slug, row.Forge = catchUpForge(remote)
 	}
 	branch, err := statusGit(t.path, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err == nil {

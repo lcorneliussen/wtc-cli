@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -367,6 +368,28 @@ func (l statusRepoLayout) tipStart() int {
 	return start + 1
 }
 
+func statusTUIRepoURL(row wtc.StatusRepo) string {
+	if row.Forge != "github.com" && row.Forge != "bitbucket.org" {
+		return ""
+	}
+	parts := strings.Split(row.Slug, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return "https://" + row.Forge + "/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1])
+}
+
+func statusTUIBranchURL(row wtc.StatusRepo) string {
+	base := statusTUIRepoURL(row)
+	if base == "" || row.Branch == "" {
+		return ""
+	}
+	if row.Forge == "bitbucket.org" {
+		return base + "/src/" + url.PathEscape(row.Branch) + "/"
+	}
+	return base + "/tree/" + strings.ReplaceAll(url.PathEscape(row.Branch), "%2F", "/")
+}
+
 func statusTUIBuildCell(prefix string, build *wtc.StatusBuild) string {
 	if build == nil {
 		return "·"
@@ -440,8 +463,14 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 		branchCell := statusTUIFit(statusTUISafe(row.BranchDisplay), l.branch)
 		prCell := statusTUIRepoPRCell(row.PR, l.pr, styled)
 		if styled {
-			nameCell = statusTUIStyle(nameCell, statusToneLabel)
-			if row.BranchKind == "detached" {
+			if target := statusTUIRepoURL(row); target != "" {
+				nameCell = statusTUILinkCell(nameCell, target)
+			} else {
+				nameCell = statusTUIStyle(nameCell, statusToneLabel)
+			}
+			if target := statusTUIBranchURL(row); target != "" {
+				branchCell = statusTUILinkCell(branchCell, target)
+			} else if row.BranchKind == "detached" {
 				branchCell = statusTUIStyle(branchCell, statusToneDim)
 			}
 		}
@@ -525,6 +554,12 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	if rowIndex < len(m.snapshot.Repos) {
 		row := m.snapshot.Repos[rowIndex]
 		layout := statusTUIRepoLayout(m.snapshot, width)
+		if x < layout.name {
+			return statusTUIURL(statusTUIRepoURL(row))
+		}
+		if x >= layout.name+1 && x < layout.prStart()-1 {
+			return statusTUIURL(statusTUIBranchURL(row))
+		}
 		prStart := layout.prStart()
 		if x >= prStart && x < prStart+layout.pr && row.PR != nil {
 			return statusTUIURL(row.PR.URL)

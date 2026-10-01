@@ -39,7 +39,7 @@ func TestStatusTUILinksColorsAndClickTargets(t *testing.T) {
 		PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", Title: "Change widget", URL: &prURL, Merge: &merged}}}}
 	view := model.View().Content
 	if strings.Count(view, ansi.SetHyperlink(prURL)) < 2 || !strings.Contains(view, ansi.SetHyperlink(buildURL)) ||
-		!strings.Contains(view, "\x1b[4;38;5;81m") || !strings.Contains(view, "\x1b[1;38;5;180m") {
+		!strings.Contains(view, "\x1b[38;5;81m") || !strings.Contains(view, "\x1b[1;38;5;180m") {
 		t.Fatalf("TUI lost terminal links or visual hierarchy: %q", view)
 	}
 	for _, line := range strings.Split(view, "\n") {
@@ -63,7 +63,7 @@ func TestStatusTUILinksColorsAndClickTargets(t *testing.T) {
 	}
 	t.Setenv("NO_COLOR", "1")
 	view = model.View().Content
-	if strings.Contains(view, "\x1b[4;38;5;81m") || !strings.Contains(view, ansi.SetHyperlink(prURL)) {
+	if strings.Contains(view, "\x1b[38;5;81m") || !strings.Contains(view, ansi.SetHyperlink(prURL)) {
 		t.Fatal("NO_COLOR suppressed links or retained styling")
 	}
 	t.Setenv("TERM", "dumb")
@@ -81,6 +81,48 @@ func TestStatusTUIRejectsTerminalControlsInLinks(t *testing.T) {
 		t.Fatalf("C1 control in terminal label: %q", got)
 	}
 }
+
+func TestStatusTUIRepoBranchAndBuildLinksForBothForges(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	passed := "SUCCESS"
+	githubBuild := "https://github.com/example/widget/actions/runs/42"
+	bitbucketBuild := "https://bitbucket.org/example/gadget/pipelines/results/687"
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{
+		{Dir: "widget", Slug: "example/widget", Forge: "github.com", Branch: "feature/topic", BranchDisplay: "feature/topic",
+			Tip: &wtc.StatusBuild{Checks: &passed, Build: statusStringPtr("42"), URL: &githubBuild}},
+		{Dir: "gadget", Slug: "example/gadget", Forge: "bitbucket.org", Branch: "main", BranchDisplay: "⌂ main",
+			Tip: &wtc.StatusBuild{Checks: &passed, Build: statusStringPtr("687"), URL: &bitbucketBuild}},
+	}}
+	model := statusTUIModel{width: 100, height: 20, snapshot: snapshot}
+	view := model.View().Content
+	for _, target := range []string{"https://github.com/example/widget", "https://github.com/example/widget/tree/feature/topic",
+		"https://bitbucket.org/example/gadget", "https://bitbucket.org/example/gadget/src/main/", githubBuild, bitbucketBuild} {
+		if !strings.Contains(view, ansi.SetHyperlink(target)) {
+			t.Fatalf("missing terminal link %q", target)
+		}
+	}
+	if strings.Contains(view, "\x1b[4;") || !strings.Contains(view, "T✓#42") || !strings.Contains(view, "T✓#687") {
+		t.Fatalf("links are permanently underlined or build numbers missing: %q", view)
+	}
+	layout := statusTUIRepoLayout(snapshot, 100)
+	for _, check := range []struct {
+		x, y int
+		url  string
+	}{{1, 3, "https://github.com/example/widget"}, {layout.name + 1, 3, "https://github.com/example/widget/tree/feature/topic"},
+		{layout.tipStart(), 3, githubBuild}, {1, 4, "https://bitbucket.org/example/gadget"},
+		{layout.name + 1, 4, "https://bitbucket.org/example/gadget/src/main/"}, {layout.tipStart(), 4, bitbucketBuild}} {
+		if got := model.buildClickTarget(check.x, check.y); got != check.url {
+			t.Fatalf("click (%d,%d) = %q, want %q", check.x, check.y, got, check.url)
+		}
+	}
+	bad := wtc.StatusRepo{Slug: "example/widget", Forge: "unknown.example", Branch: "main"}
+	if statusTUIRepoURL(bad) != "" || statusTUIBranchURL(bad) != "" {
+		t.Fatal("unsupported forge produced a link")
+	}
+}
+
+func statusStringPtr(value string) *string { return &value }
 
 func TestStatusTUIMouseModeRequiresVisibleValidTarget(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
@@ -209,7 +251,7 @@ func TestStatusTUIKeepsBuildColumnsAndMutesMergedPRs(t *testing.T) {
 	prs := statusTUIPRLines(snapshot, 100, false, true)
 	if len(prs) != 4 || !strings.Contains(ansi.Strip(prs[2]), "PR") ||
 		!strings.Contains(ansi.Strip(prs[2]), "STATE") ||
-		!strings.Contains(prs[3], "\x1b[2;4;38;5;245m") ||
+		!strings.Contains(prs[3], "\x1b[2;38;5;245m") ||
 		!strings.Contains(prs[3], "\x1b[2;38;5;245m") ||
 		!strings.Contains(prs[3], ansi.SetHyperlink(url)) ||
 		strings.Contains(ansi.Strip(prs[3]), "✓") {

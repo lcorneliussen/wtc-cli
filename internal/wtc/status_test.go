@@ -80,6 +80,25 @@ func TestStatusLocalSnapshotAllRequiresExplicitSweep(t *testing.T) {
 	}
 }
 
+func TestStatusLocalSnapshotRecordsSupportedForge(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	for _, tc := range []struct{ remote, forge string }{
+		{"git@github.com:example/widget.git", "github.com"},
+		{"git@bitbucket.org:example/widget.git", "bitbucket.org"},
+	} {
+		fixtureGit(t, "-C", c.Harness, "remote", "set-url", "origin", tc.remote)
+		snapshot, err := c.StatusLocalSnapshot(false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range snapshot.Repos {
+			if row.Dir == "harness" && (row.Slug != "example/widget" || row.Forge != tc.forge) {
+				t.Fatalf("forge identity for %q: %+v", tc.remote, row)
+			}
+		}
+	}
+}
+
 func TestStatusMarkdownKeepsRepoAndPRSignals(t *testing.T) {
 	checks, review, merge := "SUCCESS", "noreviewers", "CLEAN"
 	url := "https://github.com/example/widget/pull/7"

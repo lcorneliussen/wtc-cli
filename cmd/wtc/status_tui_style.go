@@ -14,7 +14,7 @@ const (
 	statusToneHeading = "1;38;5;180"
 	statusToneLabel   = "1;38;5;252"
 	statusToneDim     = "2"
-	statusToneLink    = "4;38;5;81"
+	statusToneLink    = "38;5;81"
 	statusToneSuccess = "38;5;114"
 	statusToneWarning = "38;5;214"
 	statusToneFailure = "38;5;203"
@@ -71,6 +71,11 @@ func statusTUILinkTone(label, rawURL, tone string) string {
 		return label
 	}
 	return ansi.SetHyperlink(target) + statusTUIStyle(label, tone) + ansi.ResetHyperlink()
+}
+
+func statusTUILinkCell(cell, rawURL string) string {
+	label := strings.TrimRight(cell, " ")
+	return statusTUILink(label, rawURL) + strings.TrimPrefix(cell, label)
 }
 
 func statusTUIFitANSI(value string, width int) string {
