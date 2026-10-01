@@ -11,13 +11,14 @@ import (
 )
 
 const (
-	statusToneHeading = "1;38;5;180"
-	statusToneLabel   = "1;38;5;252"
-	statusToneDim     = "2"
-	statusToneLink    = "38;5;81"
-	statusToneSuccess = "38;5;114"
-	statusToneWarning = "38;5;214"
-	statusToneFailure = "38;5;203"
+	statusToneHeading       = "1;38;5;180"
+	statusToneLabel         = "1;38;5;252"
+	statusToneDim           = "2"
+	statusToneLink          = "38;5;81"
+	statusToneSecondaryLink = "38;5;252"
+	statusToneSuccess       = "38;5;114"
+	statusToneWarning       = "38;5;214"
+	statusToneFailure       = "38;5;203"
 )
 
 var statusTUILinkPattern = regexp.MustCompile(`(?i)\x1b]8;;https?://[^\x07\x1b]*(?:\x07|\x1b\\)(.*?)\x1b]8;;(?:\x07|\x1b\\)`)
@@ -73,9 +74,9 @@ func statusTUILinkTone(label, rawURL, tone string) string {
 	return ansi.SetHyperlink(target) + statusTUIStyle(label, tone) + ansi.ResetHyperlink()
 }
 
-func statusTUILinkCell(cell, rawURL string) string {
+func statusTUILinkCell(cell, rawURL, tone string) string {
 	label := strings.TrimRight(cell, " ")
-	return statusTUILink(label, rawURL) + strings.TrimPrefix(cell, label)
+	return statusTUILinkTone(label, rawURL, tone) + strings.TrimPrefix(cell, label)
 }
 
 func statusTUIFitANSI(value string, width int) string {
@@ -102,7 +103,18 @@ func statusTUIBuildLink(cell string, build *wtc.StatusBuild) string {
 	label := strings.TrimRight(cell, " ")
 	padding := strings.TrimPrefix(cell, label)
 	if build.URL != nil && statusTUIURL(*build.URL) != "" {
-		return statusTUILink(label, *build.URL) + padding
+		tone := statusToneLink
+		if build.Checks != nil {
+			switch *build.Checks {
+			case "SUCCESS":
+				tone = statusToneSuccess
+			case "FAILURE", "ERROR":
+				tone = statusToneFailure
+			case "PENDING", "EXPECTED":
+				tone = statusToneWarning
+			}
+		}
+		return statusTUILinkTone(label, *build.URL, tone) + padding
 	}
 	if build.Checks != nil {
 		switch *build.Checks {
