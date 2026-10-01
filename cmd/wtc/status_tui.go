@@ -426,7 +426,7 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 }
 
 func (m statusTUIModel) buildClickTarget(x, y int) string {
-	if m.showLog {
+	if m.showLog || os.Getenv("TERM") == "dumb" {
 		return ""
 	}
 	width, height := m.width, m.height
@@ -671,8 +671,8 @@ func (m statusTUIModel) View() tea.View {
 	b.WriteString(statusTUIFitANSI(statusTUIStyle(footer, statusToneDim), width))
 	view := tea.NewView(b.String())
 	view.AltScreen = true
-	view.ReportFocus = true
-	if m.refreshing || visibleLink && !m.noClick {
+	view.ReportFocus = os.Getenv("TERM") != "dumb"
+	if os.Getenv("TERM") != "dumb" && (m.refreshing || visibleLink && !m.noClick) {
 		view.MouseMode = tea.MouseModeCellMotion
 	}
 	return view

@@ -66,6 +66,11 @@ func TestStatusTUILinksColorsAndClickTargets(t *testing.T) {
 	if strings.Contains(view, "\x1b[4;38;5;81m") || !strings.Contains(view, ansi.SetHyperlink(prURL)) {
 		t.Fatal("NO_COLOR suppressed links or retained styling")
 	}
+	t.Setenv("TERM", "dumb")
+	dumbView := model.View()
+	if strings.Contains(dumbView.Content, "\x1b") || dumbView.MouseMode != tea.MouseModeNone || dumbView.ReportFocus || model.buildClickTarget(54, 3) != "" {
+		t.Fatalf("TERM=dumb emitted terminal controls or enabled mouse input: %+v", dumbView)
+	}
 }
 
 func TestStatusTUIRejectsTerminalControlsInLinks(t *testing.T) {
@@ -78,6 +83,7 @@ func TestStatusTUIRejectsTerminalControlsInLinks(t *testing.T) {
 }
 
 func TestStatusTUIMouseModeRequiresVisibleValidTarget(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
 	valid := "https://example.invalid/pull/7"
 	merged := "MERGED"
 	model := statusTUIModel{width: 80, height: 16, snapshot: wtc.StatusSnapshot{Collection: "fixture",
@@ -117,6 +123,7 @@ func TestStatusTUIMouseModeRequiresVisibleValidTarget(t *testing.T) {
 }
 
 func TestStatusTUIClickTargetExcludesFooterAndOffscreenPR(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
 	first := "https://example.invalid/pull/7"
 	second := "https://example.invalid/pull/8"
 	m := statusTUIModel{width: 80, height: 9, snapshot: wtc.StatusSnapshot{Collection: "fixture",
@@ -212,6 +219,7 @@ func TestStatusTUIModelShowsCachedRowsAndControls(t *testing.T) {
 }
 
 func TestStatusTUIRefreshLogUpdatesWhileCollectorRuns(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
 	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, width: 80, height: 16}
 	model.startRefresh()
 	events := make(chan tea.Msg)
@@ -265,6 +273,7 @@ func TestStatusTUIRefreshLogReportsFetchFallback(t *testing.T) {
 }
 
 func TestStatusTUIClicksOnlyBuildCells(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
 	tipURL, prodURL := "https://example.invalid/build/7", "https://example.invalid/build/8"
 	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "topic",
 		Tip: &wtc.StatusBuild{Branch: "main", URL: &tipURL}, Prod: &wtc.StatusBuild{Branch: "prod", URL: &prodURL}}}}
