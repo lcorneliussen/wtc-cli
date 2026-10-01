@@ -355,6 +355,9 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 	if other()+minBranch+1 > width {
 		l.showSync = false
 	}
+	if other()+minBranch+1 > width {
+		l.showTree = false
+	}
 	l.branch = max(minBranch, min(l.branch, width-other()-1))
 	return l
 }

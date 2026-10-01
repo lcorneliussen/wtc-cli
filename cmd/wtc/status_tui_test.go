@@ -380,6 +380,22 @@ func TestStatusOneShotTablesFitNarrowTerminals(t *testing.T) {
 		if got := model.buildClickTarget(layout.prStart(), 3); got != url {
 			t.Fatalf("narrow repo PR click at width %d = %q", width, got)
 		}
+		if width == 31 || width == 40 {
+			wideTree := snapshot
+			wideTree.Repos = append([]wtc.StatusRepo(nil), snapshot.Repos...)
+			wideTree.Repos[0].Tree = "±1000"
+			for _, line := range strings.Split(strings.TrimSuffix(statusTable(wideTree, false, width), "\n"), "\n") {
+				if runewidth.StringWidth(line) > width {
+					t.Fatalf("large tree count overflows %d columns: %q", width, line)
+				}
+			}
+		}
+	}
+	compact := strings.Join(statusTUIPRLines(snapshot, 24, false, false), "\n")
+	expanded := strings.Join(statusTUIPRLines(snapshot, 24, true, false), "\n")
+	if !strings.Contains(compact, "archived (1) · a") || strings.Contains(expanded, "archived (1) · a") ||
+		!strings.Contains(expanded, "#6") {
+		t.Fatalf("archive hint or toggle wrong: compact=%q expanded=%q", compact, expanded)
 	}
 }
 
