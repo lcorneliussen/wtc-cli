@@ -147,6 +147,17 @@ func TestStatusTUIRefreshLogKeepsNewestEntryVisible(t *testing.T) {
 	}
 }
 
+func TestStatusTUIRefreshLogReportsFetchFallback(t *testing.T) {
+	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, width: 80, height: 12, showLog: true}
+	model.startRefresh()
+	updated, _ := model.Update(statusLoadedMsg{snapshot: wtc.StatusSnapshot{Collection: "fixture"},
+		fetched: wtc.StatusFetchReport{Attempted: 2, Failed: 1}, at: model.startedAt.Add(time.Second)})
+	model = updated.(statusTUIModel)
+	if !strings.Contains(model.View().Content, "1 ref refresh failed; showing local refs") {
+		t.Fatalf("failed fetch was hidden from refresh log: %s", model.View().Content)
+	}
+}
+
 func TestStatusTUIClicksOnlyBuildCells(t *testing.T) {
 	tipURL, prodURL := "https://example.invalid/build/7", "https://example.invalid/build/8"
 	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "topic",

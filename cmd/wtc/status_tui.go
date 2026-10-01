@@ -151,6 +151,12 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		outcome := "Refresh finished"
 		if msg.err != nil {
 			outcome = "Refresh failed: " + msg.err.Error()
+		} else if msg.fetched.Failed != 0 {
+			plural := "es"
+			if msg.fetched.Failed == 1 {
+				plural = ""
+			}
+			outcome = fmt.Sprintf("Refresh finished: %d ref refresh%s failed; showing local refs", msg.fetched.Failed, plural)
 		}
 		m.progressLog = append(m.progressLog, fmt.Sprintf("%s  %s", msg.at.Sub(m.startedAt).Truncate(time.Second), outcome))
 		m.focusLogTail()
