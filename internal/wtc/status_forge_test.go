@@ -164,7 +164,31 @@ printf '%s\n' '{"number":7,"state":"MERGED","title":"Finished change","mergedAt"
 func TestStatusForgePreviewRecordsMergesOnlyWhenEnabled(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	c := newWorkspaceFixture(t)
-	if _, err := c.NewCollection(NewOptions{Slug: "other", Repos: []string{"widget"}}); err != nil {
+	other, err := c.NewCollection(NewOptions{Slug: "other", Repos: []string{"widget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherContext, err := OpenCollection(other.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := otherContext.EnlistPR(PRRecord{Repo: "widget", Number: "7", Branch: "topic"}); err != nil {
+		t.Fatal(err)
+	}
+	otherRegistry := filepath.Join(other.Collection, "harness", ".harness-repos.yml")
+	registryData, err := os.ReadFile(otherRegistry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedRegistry := strings.Replace(string(registryData), c.Registry.Repos[1].Remote, "https://github.com/example/widget.git", 1)
+	if err := os.WriteFile(otherRegistry, []byte(updatedRegistry), 0644); err != nil {
+		t.Fatal(err)
+	}
+	beforeOther, err := os.ReadFile(otherContext.PRFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(otherContext.PRFile() + ".lock"); err != nil {
 		t.Fatal(err)
 	}
 	c.Registry.Repos = []Repo{{Name: "agent-harness", Remote: "https://github.com/example/harness.git"}}
@@ -184,6 +208,12 @@ printf '%s\n' '{"number":7,"state":"MERGED","title":"Finished change","mergedAt"
 	}
 	if data, err := os.ReadFile(c.PRFile()); err != nil || strings.Contains(string(data), "\n# merged-pr ") {
 		t.Fatalf("preview without merge recording changed registry: %s %v", data, err)
+	}
+	if _, _, err := c.StatusLiveSnapshot(true, true); err != nil {
+		t.Fatal(err)
+	}
+	if afterOther, err := os.ReadFile(otherContext.PRFile()); err != nil || string(afterOther) != string(beforeOther) {
+		t.Fatalf("workspace sweep changed another collection's registry: %s %v", afterOther, err)
 	}
 	if _, err := c.StatusForgePreview(); err != nil {
 		t.Fatal(err)
