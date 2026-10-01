@@ -86,28 +86,31 @@ func TestStatusTUIRejectsTerminalControlsInLinks(t *testing.T) {
 func TestStatusTUIRepoBranchAndBuildLinksForBothForges(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")
-	passed, failed := "SUCCESS", "FAILURE"
+	passed, failed, pending := "SUCCESS", "FAILURE", "PENDING"
 	githubBuild := "https://github.com/example/widget/actions/runs/42"
+	githubPending := "https://github.com/example/widget/actions/runs/43"
 	bitbucketBuild := "https://bitbucket.org/example/gadget/pipelines/results/687"
 	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{
 		{Dir: "widget", Slug: "example/widget", Forge: "github.com", Branch: "feature/topic", BranchDisplay: "feature/topic",
-			Tip: &wtc.StatusBuild{Checks: &passed, Build: statusStringPtr("42"), URL: &githubBuild}},
+			Tip:  &wtc.StatusBuild{Checks: &passed, Build: statusStringPtr("42"), URL: &githubBuild},
+			Prod: &wtc.StatusBuild{Checks: &pending, Build: statusStringPtr("43"), URL: &githubPending}},
 		{Dir: "gadget", Slug: "example/gadget", Forge: "bitbucket.org", Branch: "main", BranchDisplay: "⌂ main", BranchKind: "detached",
 			Tip: &wtc.StatusBuild{Checks: &failed, Build: statusStringPtr("687"), URL: &bitbucketBuild}},
 	}}
 	model := statusTUIModel{width: 100, height: 20, snapshot: snapshot}
 	view := model.View().Content
 	for _, target := range []string{"https://github.com/example/widget", "https://github.com/example/widget/tree/feature/topic",
-		"https://bitbucket.org/example/gadget", "https://bitbucket.org/example/gadget/src/main/", githubBuild, bitbucketBuild} {
+		"https://bitbucket.org/example/gadget", "https://bitbucket.org/example/gadget/src/main/", githubBuild, githubPending, bitbucketBuild} {
 		if !strings.Contains(view, ansi.SetHyperlink(target)) {
 			t.Fatalf("missing terminal link %q", target)
 		}
 	}
-	if strings.Contains(view, ";4;") || !strings.Contains(view, "T✓#42") || !strings.Contains(view, "T✗#687") ||
+	if strings.Contains(view, ";4;") || !strings.Contains(view, "T✓#42") || !strings.Contains(view, "P●#43") || !strings.Contains(view, "T✗#687") ||
 		!strings.Contains(view, ansi.SetHyperlink("https://github.com/example/widget")+"\x1b[1;38;5;252m") ||
 		!strings.Contains(view, ansi.SetHyperlink("https://github.com/example/widget/tree/feature/topic")+"\x1b[38;5;252m") ||
 		!strings.Contains(view, ansi.SetHyperlink("https://bitbucket.org/example/gadget/src/main/")+"\x1b[2m") ||
 		!strings.Contains(view, ansi.SetHyperlink(githubBuild)+"\x1b[38;5;114m") ||
+		!strings.Contains(view, ansi.SetHyperlink(githubPending)+"\x1b[38;5;214m") ||
 		!strings.Contains(view, ansi.SetHyperlink(bitbucketBuild)+"\x1b[38;5;203m") {
 		t.Fatalf("secondary links or build result tones missing: %q", view)
 	}
@@ -129,6 +132,29 @@ func TestStatusTUIRepoBranchAndBuildLinksForBothForges(t *testing.T) {
 }
 
 func statusStringPtr(value string) *string { return &value }
+
+func TestStatusTUIHelpKeepsClickTargetsAligned(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	repoURL := "https://github.com/example/widget"
+	branchURL := repoURL + "/tree/topic"
+	prURL := repoURL + "/pull/7"
+	buildURL := repoURL + "/actions/runs/42"
+	snapshot := wtc.StatusSnapshot{Collection: "fixture",
+		Repos: []wtc.StatusRepo{{Dir: "widget", Slug: "example/widget", Forge: "github.com", Branch: "topic", BranchDisplay: "topic",
+			PR: &wtc.StatusPRFacts{Number: "7", URL: prURL}, Tip: &wtc.StatusBuild{URL: &buildURL}}},
+		PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", URL: &prURL, Title: "Synthetic change"}}}
+	model := statusTUIModel{snapshot: snapshot, width: 100, height: 20, showHelp: true}
+	layout := statusTUIRepoLayout(snapshot, 100)
+	for _, check := range []struct {
+		x, y int
+		url  string
+	}{{1, 7, repoURL}, {layout.name + 1, 7, branchURL}, {layout.prStart(), 7, prURL},
+		{layout.tipStart(), 7, buildURL}, {1, 11, prURL}, {1, 6, ""}} {
+		if got := model.buildClickTarget(check.x, check.y); got != check.url {
+			t.Fatalf("click (%d,%d) = %q, want %q", check.x, check.y, got, check.url)
+		}
+	}
+}
 
 func TestStatusTUIMouseModeRequiresVisibleValidTarget(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
