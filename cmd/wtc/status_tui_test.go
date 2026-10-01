@@ -247,6 +247,22 @@ func TestStatusTUIResponsiveLayoutKeepsCountsAndClickColumns(t *testing.T) {
 			t.Fatalf("hidden build column at width %d was clickable: %q", width, got)
 		}
 	}
+	breakpoints := []struct {
+		width, name  int
+		builds, sync bool
+	}{{100, 20, true, true}, {72, 16, true, true}, {71, 16, false, true},
+		{55, 16, false, true}, {54, 16, false, false}, {45, 10, false, false}, {44, 10, false, false}}
+	plain := snapshot
+	plain.Repos = []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "topic", Tree: "clean",
+		PR: &wtc.StatusPRFacts{Number: "7", URL: prURL}, Tip: &wtc.StatusBuild{URL: &buildURL}}}
+	for _, want := range breakpoints {
+		layout := statusTUIRepoLayout(plain, want.width)
+		header := statusTUIRepoLines(plain, want.width, false)[0]
+		if layout.name != want.name || layout.showBuilds != want.builds || layout.showSync != want.sync ||
+			(strings.Contains(header, "TEST") != want.builds) || (strings.Contains(header, "↑") != want.sync) {
+			t.Fatalf("unexpected layout at %d: %+v %q", want.width, layout, header)
+		}
+	}
 }
 
 func TestStatusTUIPRTablePlacesActiveRowsFirstAndWarnsOnBranch(t *testing.T) {
@@ -265,6 +281,10 @@ func TestStatusTUIPRTablePlacesActiveRowsFirstAndWarnsOnBranch(t *testing.T) {
 		!strings.Contains(ansi.Strip(lines[4]), "#3") || !strings.Contains(ansi.Strip(lines[4]), "⚠ catch-up") ||
 		!strings.Contains(ansi.Strip(lines[5]), "#1") {
 		t.Fatalf("PR table did not prioritize active work: %q", lines)
+	}
+	rowText, headerText := ansi.Strip(lines[3]), ansi.Strip(lines[2])
+	if runewidth.StringWidth(strings.Split(rowText, "✓")[0]) != runewidth.StringWidth(strings.Split(headerText, "C M R")[0]) {
+		t.Fatalf("PR check glyph does not align with table header: %q", lines)
 	}
 	model := statusTUIModel{snapshot: snapshot, width: 100, height: 20}
 	if model.buildClickTarget(1, 7) != activeURL || model.buildClickTarget(1, 8) != staleURL ||
