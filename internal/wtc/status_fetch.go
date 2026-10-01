@@ -110,11 +110,13 @@ func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.
 	}
 	snapshot := StatusSnapshot{Schema: 1, GeneratedAt: time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 		ShowCollectionColumn: true, Repos: []StatusRepo{}, PRs: []StatusPRRow{}, Orphans: []StatusOrphan{}}
-	for _, dir := range collections {
+	for i, dir := range collections {
 		collection, err := OpenCollection(dir)
 		if err != nil {
 			return snapshot, report, err
 		}
+		collection.StatusProgress = c.StatusProgress
+		c.statusProgress(fmt.Sprintf("Checking collection %d/%d", i+1, len(collections)))
 		// A workspace sweep must not execute hooks from other collections.
 		part, err := collection.statusForgePreview(false)
 		if err != nil {

@@ -12,8 +12,34 @@ import (
 func TestStatusEnrichRecordsKeepsIdentityAcrossOutOfOrderReplies(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	bin := t.TempDir()
+	state := t.TempDir()
+	t.Setenv("WTC_TEST_STATE", state)
+	for _, name := range []string{"active", "max"} {
+		if err := os.WriteFile(filepath.Join(state, name), []byte("0"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	release := filepath.Join(state, "release")
+	defer os.WriteFile(release, []byte("ok"), 0644)
 	script := `#!/bin/sh
-case "$3" in 1) sleep 0.2 ;; esac
+state="$WTC_TEST_STATE"
+while ! mkdir "$state/lock" 2>/dev/null; do sleep 0.01; done
+active=$(cat "$state/active")
+active=$((active + 1))
+printf '%s' "$active" > "$state/active.$$.tmp"
+mv "$state/active.$$.tmp" "$state/active"
+maximum=$(cat "$state/max")
+if [ "$active" -gt "$maximum" ]; then
+  printf '%s' "$active" > "$state/max.$$.tmp"
+  mv "$state/max.$$.tmp" "$state/max"
+fi
+rmdir "$state/lock"
+while [ ! -f "$state/release" ]; do sleep 0.01; done
+while ! mkdir "$state/lock" 2>/dev/null; do sleep 0.01; done
+active=$(cat "$state/active")
+printf '%s' "$((active - 1))" > "$state/active.$$.tmp"
+mv "$state/active.$$.tmp" "$state/active"
+rmdir "$state/lock"
 printf '{"number":%s,"state":"OPEN","title":"Synthetic %s"}\n' "$3" "$3"
 `
 	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
@@ -27,11 +53,41 @@ printf '{"number":%s,"state":"OPEN","title":"Synthetic %s"}\n' "$3" "$3"
 	for i := range records {
 		records[i] = PRRecord{Repo: "widget", Number: fmt.Sprint(i + 1)}
 	}
-	details, err := c.statusEnrichRecords(records, nil)
-	if err != nil {
+	type result struct {
+		details []statusPRDetail
+		err     error
+	}
+	finished := make(chan result, 1)
+	go func() {
+		details, err := c.statusEnrichRecords(records, nil)
+		finished <- result{details: details, err: err}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(filepath.Join(state, "active"))
+		if err == nil && string(data) == "4" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	maximum, err := os.ReadFile(filepath.Join(state, "max"))
+	if err != nil || string(maximum) != "4" {
+		t.Fatalf("expected four overlapping calls and no fifth before release; max=%q err=%v", maximum, err)
+	}
+	if err := os.WriteFile(release, []byte("ok"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	for i, detail := range details {
+	var got result
+	select {
+	case got = <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("bounded forge calls did not finish")
+	}
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	for i, detail := range got.details {
 		want := fmt.Sprintf("Synthetic %d", i+1)
 		if detail.Number != records[i].Number || detail.Title != want {
 			t.Fatalf("detail %d crossed records: %+v", i, detail)

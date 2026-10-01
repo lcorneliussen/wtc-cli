@@ -69,6 +69,13 @@ func statusTUITick() tea.Cmd {
 }
 
 func statusTUIRefresh(c *wtc.Context, all, procs, noFetch bool, fetchAge time.Duration) tea.Cmd {
+	return statusTUIRefreshWithCollector(c, procs, func(collector *wtc.Context) statusLoadedMsg {
+		snapshot, report, err := collector.StatusLiveSnapshotWithFetchAge(all, noFetch, fetchAge)
+		return statusLoadedMsg{snapshot: snapshot, fetched: report, err: err, at: time.Now()}
+	})
+}
+
+func statusTUIRefreshWithCollector(c *wtc.Context, procs bool, collect func(*wtc.Context) statusLoadedMsg) tea.Cmd {
 	return func() tea.Msg {
 		events := make(chan tea.Msg, 128)
 		go func() {
@@ -84,8 +91,7 @@ func statusTUIRefresh(c *wtc.Context, all, procs, noFetch bool, fetchAge time.Du
 				default: // Keep collecting if the terminal cannot render every step.
 				}
 			}
-			snapshot, report, err := collector.StatusLiveSnapshotWithFetchAge(all, noFetch, fetchAge)
-			events <- statusLoadedMsg{snapshot: snapshot, fetched: report, err: err, at: time.Now()}
+			events <- collect(&collector)
 		}()
 		return statusRefreshStartedMsg{events: events}
 	}
@@ -104,7 +110,11 @@ func (m *statusTUIModel) startRefresh() {
 
 func (m *statusTUIModel) focusLogTail() {
 	if m.showLog {
-		m.scroll = max(0, len(m.progressLog)-max(1, m.height-6))
+		height := m.height
+		if height <= 0 {
+			height = 24
+		}
+		m.scroll = max(0, len(m.contentLines())-max(1, height-2))
 	}
 }
 
