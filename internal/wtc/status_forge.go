@@ -124,14 +124,11 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 
 func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	var p struct {
-		ID          int    `json:"id"`
-		State       string `json:"state"`
-		Draft       bool   `json:"draft"`
-		Title       string `json:"title"`
-		MergedOn    string `json:"merged_on"`
-		MergeCommit struct {
-			Date string `json:"date"`
-		} `json:"merge_commit"`
+		ID           int    `json:"id"`
+		State        string `json:"state"`
+		Draft        bool   `json:"draft"`
+		Title        string `json:"title"`
+		MergedOn     string `json:"merged_on"`
 		Participants []struct {
 			Approved bool   `json:"approved"`
 			State    string `json:"state"`
@@ -165,9 +162,6 @@ func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 		d.Merge = "MERGED"
 		d.Review = "merged"
 		d.MergedOn = p.MergedOn
-		if d.MergedOn == "" {
-			d.MergedOn = p.MergeCommit.Date
-		}
 	}
 	return d, nil
 }

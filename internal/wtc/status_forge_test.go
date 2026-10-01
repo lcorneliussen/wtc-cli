@@ -321,6 +321,10 @@ func TestStatusDraftMergedAndUnknownFacts(t *testing.T) {
 	if err != nil || bbMerged.MergedOn != "2026-09-20T12:00:00Z" {
 		t.Fatalf("merge time replaced by last update: %+v %v", bbMerged, err)
 	}
+	bbFallback, err := statusBBDetail([]byte(`{"id":9,"state":"MERGED","merge_commit":{"date":"2026-09-19T12:00:00Z"}}`), PRRecord{})
+	if err != nil || bbFallback.MergedOn != "" {
+		t.Fatalf("merge commit date used as merge event time: %+v %v", bbFallback, err)
+	}
 }
 
 func TestStatusArchiveCountsWeekdayHours(t *testing.T) {

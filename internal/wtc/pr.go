@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // PRRecord is the collection-local link from a branch to a forge pull request.
@@ -156,6 +158,29 @@ func formatPR(r PRRecord) string {
 }
 
 func (c *Context) rewritePRs(removeRepo, removeNumber string, add *PRRecord) error {
+	return c.withPRLock(func() error { return c.rewritePRsLocked(removeRepo, removeNumber, add) })
+}
+
+func (c *Context) withPRLock(action func() error) error {
+	path := c.PRFile() + ".lock"
+	fd, err := unix.Open(path, unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
+	if err != nil {
+		return fmt.Errorf("open PR registry lock: %w", err)
+	}
+	lock := os.NewFile(uintptr(fd), path)
+	defer lock.Close()
+	info, err := lock.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("PR registry lock is not a regular file")
+	}
+	if err := unix.Flock(fd, unix.LOCK_EX); err != nil {
+		return fmt.Errorf("lock PR registry: %w", err)
+	}
+	defer unix.Flock(fd, unix.LOCK_UN)
+	return action()
+}
+
+func (c *Context) rewritePRsLocked(removeRepo, removeNumber string, add *PRRecord) error {
 	path := c.PRFile()
 	info, err := os.Lstat(path)
 	if err == nil && !info.Mode().IsRegular() {
@@ -238,6 +263,16 @@ func (c *Context) recordMergedPRs(records []PRRecord, details []statusPRDetail) 
 	if len(updates) == 0 {
 		return 0, nil
 	}
+	count := 0
+	err := c.withPRLock(func() error {
+		var err error
+		count, err = c.recordMergedPRsLocked(records, updates)
+		return err
+	})
+	return count, err
+}
+
+func (c *Context) recordMergedPRsLocked(records []PRRecord, updates map[string]statusPRDetail) (int, error) {
 	path := c.PRFile()
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -249,6 +284,14 @@ func (c *Context) recordMergedPRs(records []PRRecord, details []statusPRDetail) 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if repo, number, _, _, ok := parseMergedPR(line); ok {
+			delete(updates, prRecordKey(repo, number))
+		}
+	}
+	if len(updates) == 0 {
+		return 0, nil
 	}
 	var out bytes.Buffer
 	seen := map[string]bool{}

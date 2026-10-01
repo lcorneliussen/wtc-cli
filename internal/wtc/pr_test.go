@@ -1,8 +1,10 @@
 package wtc
 
 import (
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -64,5 +66,59 @@ func TestPRURLOnlyForKnownForges(t *testing.T) {
 		if got := prURL(tc.remote, "7"); got != tc.want {
 			t.Errorf("prURL(%q) = %q, want %q", tc.remote, got, tc.want)
 		}
+	}
+}
+
+func TestConcurrentPRRegistryUpdatesPreserveRowsAndMergeFacts(t *testing.T) {
+	c := fixture(t)
+	if _, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "7", Branch: "done", URL: "https://example.invalid/pull/7"}); err != nil {
+		t.Fatal(err)
+	}
+	records, err := c.ListPRs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const additions = 32
+	start := make(chan struct{})
+	errors := make(chan error, additions+1)
+	var workers sync.WaitGroup
+	workers.Add(additions + 1)
+	go func() {
+		defer workers.Done()
+		<-start
+		if count, err := c.recordMergedPRs(records, []statusPRDetail{{Number: "7", State: "MERGED", MergedOn: "2026-09-30T12:00:00Z", Checks: "SUCCESS"}}); err != nil || count != 1 {
+			errors <- fmt.Errorf("record merge: count=%d err=%v", count, err)
+		}
+	}()
+	for number := 8; number < 8+additions; number++ {
+		number := number
+		go func() {
+			defer workers.Done()
+			<-start
+			id := fmt.Sprint(number)
+			_, err := c.EnlistPR(PRRecord{Repo: "widget", Number: id, Branch: "next", URL: "https://example.invalid/pull/" + id})
+			if err != nil {
+				errors <- err
+			}
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(errors)
+	for err := range errors {
+		t.Error(err)
+	}
+	records, err = c.ListPRs()
+	if err != nil || len(records) != additions+1 {
+		t.Fatalf("concurrent registry rewrite lost records: %d %v", len(records), err)
+	}
+	merged := false
+	for _, record := range records {
+		if record.Number == "7" {
+			merged = record.MergedOn == "2026-09-30T12:00:00Z" && record.FinalChecks == "SUCCESS"
+		}
+	}
+	if !merged {
+		t.Fatal("concurrent enlistment lost final merge facts")
 	}
 }
