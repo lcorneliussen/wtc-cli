@@ -10,20 +10,21 @@ import (
 )
 
 type statusPRDetail struct {
-	Number   string
-	State    string
-	Checks   string
-	Merge    string
-	Review   string
-	Title    string
-	MergedOn string
+	Number          string
+	State           string
+	Checks          string
+	Merge           string
+	Review          string
+	Title           string
+	MergedOn        string
+	ChecksUnsettled bool
 }
 
 func statusCheckResult(rollup []struct {
 	Conclusion string `json:"conclusion"`
 	State      string `json:"state"`
 	Status     string `json:"status"`
-}) string {
+}) (string, bool) {
 	failed, pending, passed := false, false, false
 	for _, check := range rollup {
 		conclusion := strings.ToUpper(check.Conclusion)
@@ -31,10 +32,13 @@ func statusCheckResult(rollup []struct {
 			conclusion = strings.ToUpper(check.State)
 		}
 		switch conclusion {
-		case "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR":
+		case "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE", "ERROR":
 			failed = true
 		case "SUCCESS", "NEUTRAL", "SKIPPED":
 			passed = true
+		default:
+			// A nonempty rollup with an unknown or absent conclusion is not final.
+			pending = true
 		}
 		if check.Status != "" && !strings.EqualFold(check.Status, "COMPLETED") {
 			pending = true
@@ -45,13 +49,13 @@ func statusCheckResult(rollup []struct {
 	}
 	switch {
 	case failed:
-		return "FAILURE"
+		return "FAILURE", pending
 	case pending:
-		return "PENDING"
+		return "PENDING", true
 	case passed:
-		return "SUCCESS"
+		return "SUCCESS", false
 	default:
-		return "NONE"
+		return "NONE", false
 	}
 }
 
@@ -64,7 +68,6 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 		ReviewDecision    string            `json:"reviewDecision"`
 		MergeStateStatus  string            `json:"mergeStateStatus"`
 		MergedAt          string            `json:"mergedAt"`
-		UpdatedAt         string            `json:"updatedAt"`
 		ReviewRequests    []json.RawMessage `json:"reviewRequests"`
 		LatestReviews     []json.RawMessage `json:"latestReviews"`
 		StatusCheckRollup []struct {
@@ -79,8 +82,9 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	if p.Number == 0 || p.State == "" {
 		return statusPRDetail{}, fmt.Errorf("missing GitHub PR identity or state")
 	}
+	checks, unsettled := statusCheckResult(p.StatusCheckRollup)
 	d := statusPRDetail{Number: fmt.Sprint(p.Number), State: strings.ToUpper(p.State),
-		Checks: statusCheckResult(p.StatusCheckRollup), Merge: p.MergeStateStatus,
+		Checks: checks, ChecksUnsettled: unsettled, Merge: p.MergeStateStatus,
 		Title: cleanPRField(p.Title), MergedOn: p.MergedAt}
 	if d.Title == "" {
 		d.Title = fallback.Title
@@ -91,9 +95,6 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	if d.State == "MERGED" {
 		d.Merge = "MERGED"
 		d.Review = "merged"
-		if d.MergedOn == "" {
-			d.MergedOn = p.UpdatedAt
-		}
 	} else {
 		switch strings.ToUpper(p.ReviewDecision) {
 		case "APPROVED":
@@ -123,14 +124,11 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 
 func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	var p struct {
-		ID          int    `json:"id"`
-		State       string `json:"state"`
-		Draft       bool   `json:"draft"`
-		Title       string `json:"title"`
-		MergedOn    string `json:"merged_on"`
-		MergeCommit struct {
-			Date string `json:"date"`
-		} `json:"merge_commit"`
+		ID           int    `json:"id"`
+		State        string `json:"state"`
+		Draft        bool   `json:"draft"`
+		Title        string `json:"title"`
+		MergedOn     string `json:"merged_on"`
 		Participants []struct {
 			Approved bool   `json:"approved"`
 			State    string `json:"state"`
@@ -164,9 +162,6 @@ func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 		d.Merge = "MERGED"
 		d.Review = "merged"
 		d.MergedOn = p.MergedOn
-		if d.MergedOn == "" {
-			d.MergedOn = p.MergeCommit.Date
-		}
 	}
 	return d, nil
 }

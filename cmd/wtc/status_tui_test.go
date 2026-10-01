@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/mattn/go-runewidth"
 )
@@ -21,6 +22,118 @@ func statusTestMessage(t *testing.T, command tea.Cmd) tea.Msg {
 	case <-time.After(3 * time.Second):
 		t.Fatal("TUI refresh event did not arrive")
 		return nil
+	}
+}
+
+func TestStatusTUILinksColorsAndClickTargets(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	prURL := "https://github.com/example/widget/pull/7"
+	buildURL := "https://example.invalid/build/42"
+	passed := "SUCCESS"
+	merged := "MERGED"
+	model := statusTUIModel{width: 100, height: 24, snapshot: wtc.StatusSnapshot{Collection: "fixture",
+		Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "feature", Tree: "clean",
+			PR:  &wtc.StatusPRFacts{Number: "7", URL: prURL, Checks: "SUCCESS"},
+			Tip: &wtc.StatusBuild{Checks: &passed, URL: &buildURL}}},
+		PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", Title: "Change widget", URL: &prURL, Merge: &merged}}}}
+	view := model.View().Content
+	if strings.Count(view, ansi.SetHyperlink(prURL)) < 2 || !strings.Contains(view, ansi.SetHyperlink(buildURL)) ||
+		!strings.Contains(view, "\x1b[4;38;5;81m") || !strings.Contains(view, "\x1b[1;38;5;180m") {
+		t.Fatalf("TUI lost terminal links or visual hierarchy: %q", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if ansi.StringWidth(line) > model.width {
+			t.Fatalf("styled line exceeded terminal width: %q", line)
+		}
+	}
+	if got := model.buildClickTarget(54, 3); got != prURL {
+		t.Fatalf("repo PR cell click = %q", got)
+	}
+	if got := model.buildClickTarget(83, 3); got != buildURL {
+		t.Fatalf("build cell click = %q", got)
+	}
+	if got := model.buildClickTarget(5, 6); got != prURL {
+		t.Fatalf("PR list row click = %q", got)
+	}
+	branchOnly := statusTUIModel{width: 80, height: 16, snapshot: wtc.StatusSnapshot{Collection: "fixture",
+		Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "feature", PR: &wtc.StatusPRFacts{Number: "7", URL: prURL}}}}}
+	if branchOnly.View().MouseMode != tea.MouseModeCellMotion || branchOnly.buildClickTarget(51, 3) != prURL {
+		t.Fatal("discovered branch PR did not enable its ordinary click target")
+	}
+	t.Setenv("NO_COLOR", "1")
+	view = model.View().Content
+	if strings.Contains(view, "\x1b[4;38;5;81m") || !strings.Contains(view, ansi.SetHyperlink(prURL)) {
+		t.Fatal("NO_COLOR suppressed links or retained styling")
+	}
+	t.Setenv("TERM", "dumb")
+	dumbView := model.View()
+	if strings.Contains(dumbView.Content, "\x1b") || dumbView.MouseMode != tea.MouseModeNone || dumbView.ReportFocus || model.buildClickTarget(54, 3) != "" {
+		t.Fatalf("TERM=dumb emitted terminal controls or enabled mouse input: %+v", dumbView)
+	}
+}
+
+func TestStatusTUIRejectsTerminalControlsInLinks(t *testing.T) {
+	if got := statusTUIURL("https://example.invalid/\u009bunsafe"); got != "" {
+		t.Fatalf("C1 control in terminal link target: %q", got)
+	}
+	if got := statusTUISafe("label\u009bcell"); got != "label cell" {
+		t.Fatalf("C1 control in terminal label: %q", got)
+	}
+}
+
+func TestStatusTUIMouseModeRequiresVisibleValidTarget(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	valid := "https://example.invalid/pull/7"
+	merged := "MERGED"
+	model := statusTUIModel{width: 80, height: 16, snapshot: wtc.StatusSnapshot{Collection: "fixture",
+		PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", URL: &valid, Merge: &merged, Archived: true}}}}
+	if model.View().MouseMode != tea.MouseModeNone {
+		t.Fatal("hidden archived PR captured mouse input")
+	}
+	model.showArchived = true
+	if model.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatal("visible PR link did not enable mouse input")
+	}
+	model.reposOnly = true
+	if model.View().MouseMode != tea.MouseModeNone {
+		t.Fatal("hidden PR section captured mouse input")
+	}
+	model.reposOnly = false
+	invalid := "javascript:alert(1)"
+	model.snapshot.PRs[0].URL = &invalid
+	if model.View().MouseMode != tea.MouseModeNone {
+		t.Fatal("invalid PR URL captured mouse input")
+	}
+	model.snapshot.PRs = nil
+	model.snapshot.Repos = []wtc.StatusRepo{{Dir: "widget", Tip: &wtc.StatusBuild{}}}
+	if model.View().MouseMode != tea.MouseModeNone {
+		t.Fatal("build cell without URL captured mouse input")
+	}
+	model.width = 25
+	model.snapshot.Repos = []wtc.StatusRepo{{Dir: "widget", PR: &wtc.StatusPRFacts{Number: "7", URL: valid}}}
+	if model.View().MouseMode != tea.MouseModeNone {
+		t.Fatalf("PR cell clipped outside a narrow terminal captured mouse input: %q", model.View().Content)
+	}
+	model.width = 80
+	model.snapshot.Repos[0].PR.URL = "HTTPS://example.invalid/pull/7"
+	if model.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatal("valid uppercase URL scheme did not enable visible PR click")
+	}
+}
+
+func TestStatusTUIClickTargetExcludesFooterAndOffscreenPR(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	first := "https://example.invalid/pull/7"
+	second := "https://example.invalid/pull/8"
+	m := statusTUIModel{width: 80, height: 9, snapshot: wtc.StatusSnapshot{Collection: "fixture",
+		Repos: []wtc.StatusRepo{{Dir: "widget"}},
+		PRs:   []wtc.StatusPRRow{{Repo: "widget", Number: "7", URL: &first}, {Repo: "widget", Number: "8", URL: &second}}}}
+	if m.View().MouseMode != tea.MouseModeCellMotion || m.buildClickTarget(8, 6) != first {
+		t.Fatal("visible PR row was not clickable")
+	}
+	if got := m.buildClickTarget(8, 7); got != "" {
+		t.Fatalf("footer click opened offscreen PR: %q", got)
 	}
 }
 
@@ -68,7 +181,7 @@ func TestStatusTUIRepoRowsKeepSignalsWithinWidth(t *testing.T) {
 		Dir: "widget", BranchDisplay: "topic", Tree: "±2", Ahead: 1, Behind: 3,
 		PR: &wtc.StatusPRFacts{Number: "7", Checks: "SUCCESS", Merge: "BEHIND", Review: "waiting"},
 	}}}
-	lines := statusTUIRepoLines(snapshot, 60)
+	lines := statusTUIRepoLines(snapshot, 60, false)
 	if len(lines) != 2 || !strings.Contains(lines[1], "#7 ✓ ↓ …") || !strings.Contains(lines[1], "±2 ↑1 ↓3") {
 		t.Fatalf("repo signals missing: %q", lines)
 	}
@@ -84,7 +197,7 @@ func TestStatusTUIModelShowsCachedRowsAndControls(t *testing.T) {
 		width: 90, height: 20, focused: true, interval: 30 * time.Second, background: 5 * time.Minute,
 		lastRefresh: time.Now().Add(-time.Minute), nextRefresh: time.Now().Add(time.Minute)}
 	view := model.View().Content
-	if !strings.Contains(view, "wtc status · fixture") || !strings.Contains(view, "widget") || !strings.Contains(view, "1 archived PR(s) hidden") || strings.Contains(view, "Old change") {
+	if !strings.Contains(view, "wtc status · fixture") || !strings.Contains(view, "widget") || !strings.Contains(view, "archived (1)") || strings.Contains(view, "Old change") {
 		t.Fatalf("cached view wrong: %s", view)
 	}
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Text: "a"}))
@@ -106,6 +219,7 @@ func TestStatusTUIModelShowsCachedRowsAndControls(t *testing.T) {
 }
 
 func TestStatusTUIRefreshLogUpdatesWhileCollectorRuns(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
 	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, width: 80, height: 16}
 	model.startRefresh()
 	events := make(chan tea.Msg)
@@ -159,6 +273,7 @@ func TestStatusTUIRefreshLogReportsFetchFallback(t *testing.T) {
 }
 
 func TestStatusTUIClicksOnlyBuildCells(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
 	tipURL, prodURL := "https://example.invalid/build/7", "https://example.invalid/build/8"
 	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "topic",
 		Tip: &wtc.StatusBuild{Branch: "main", URL: &tipURL}, Prod: &wtc.StatusBuild{Branch: "prod", URL: &prodURL}}}}

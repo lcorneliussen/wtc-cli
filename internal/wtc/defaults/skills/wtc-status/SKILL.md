@@ -54,11 +54,14 @@ running `wtc-status-tui.sh`. **Don't run a watch loop to answer a
 question** — take the snapshot, answer, stop.
 
 The collection table is clickable where both ends have a terminal — that's for
-the human reading the pane, not for you. Clicks open Bitbucket pipeline
-results (`T`/`P`, when enabled). Repo names and PR numbers are not click
-targets. `?` toggles a key and icon reference, `a` toggles merged PRs past
-48 weekday-hours, `r` and the watch interval reload in the background while
-the cached table stays visible.
+the human reading the pane, not for you. PR numbers in repo rows and PR list
+rows open their pull requests; build marks (`T`/`P`, when enabled) open build
+results. These references are terminal hyperlinks, so a terminal that captures
+mouse input for the TUI may require modifier-click. Ordinary clicks work when
+mouse targets are enabled. Repo names are not click targets. `?` toggles a key
+and icon reference, `a` toggles merged PRs past the configured archive cutoff,
+and `r` and the watch interval reload in the background while the cached table
+stays visible.
 
 ## Reading it
 

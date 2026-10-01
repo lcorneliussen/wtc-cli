@@ -13,9 +13,9 @@ func statusTable(snapshot wtc.StatusSnapshot, reposOnly bool, width int) string 
 		name = "(all)"
 	}
 	lines := []string{fmt.Sprintf("wtc status · %s · %s", name, snapshot.GeneratedAt), ""}
-	lines = append(lines, statusTUIRepoLines(snapshot, width)...)
+	lines = append(lines, statusTUIRepoLines(snapshot, width, false)...)
 	if !reposOnly {
-		lines = append(lines, statusTUIPRLines(snapshot, false)...)
+		lines = append(lines, statusTUIPRLines(snapshot, false, false)...)
 	}
 	if snapshot.StaleCount > 0 {
 		lines = append(lines, "", fmt.Sprintf("%d worktree(s) behind the development tip", snapshot.StaleCount))

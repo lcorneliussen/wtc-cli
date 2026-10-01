@@ -118,7 +118,9 @@ func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.
 		collection.StatusProgress = c.StatusProgress
 		c.statusProgress(fmt.Sprintf("Checking collection %d/%d", i+1, len(collections)))
 		// A workspace sweep must not execute hooks from other collections.
-		part, err := collection.statusForgePreview(false)
+		// A workspace sweep may read collection siblings but must not rewrite
+		// their local PR registries.
+		part, err := collection.statusForgePreview(false, false)
 		if err != nil {
 			return snapshot, report, err
 		}

@@ -93,8 +93,265 @@ printf '{"number":%s,"state":"OPEN","title":"Synthetic %s"}\n' "$3" "$3"
 			t.Fatalf("detail %d crossed records: %+v", i, detail)
 		}
 	}
-	if len(progress) != len(records) || !strings.Contains(progress[len(progress)-1], "6/6") {
+	if len(progress) != len(records)+1 || !strings.Contains(progress[len(progress)-1], "6/6") {
 		t.Fatalf("missing completion progress: %v", progress)
+	}
+}
+
+func TestMergedPRRegistryStopsRefreshingFinalFacts(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	bin := t.TempDir()
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("WTC_TEST_GH_CALLS", calls)
+	script := `#!/bin/sh
+printf 'called\n' >> "$WTC_TEST_GH_CALLS"
+printf '%s\n' '{"number":7,"state":"MERGED","title":"Finished change","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}'
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	c := fixture(t)
+	c.Registry.Repos = []Repo{{Name: "widget", Remote: "https://github.com/example/widget.git"}}
+	if _, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "7", Branch: "topic", Title: "Old title"}); err != nil {
+		t.Fatal(err)
+	}
+	records, err := c.ListPRs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	details, err := c.statusEnrichRecords(records, nil)
+	if err != nil || details[0].State != "MERGED" || details[0].Checks != "SUCCESS" {
+		t.Fatalf("initial merged detail: %+v, %v", details, err)
+	}
+	if count, err := c.recordMergedPRs(records, details); err != nil || count != 1 {
+		t.Fatalf("record final merge: count=%d err=%v", count, err)
+	}
+	data, err := os.ReadFile(c.PRFile())
+	if err != nil || !strings.Contains(string(data), "widget 7 topic https://github.com/example/widget/pull/7 Finished change") ||
+		!strings.Contains(string(data), "# merged-pr widget 7 2026-09-30T12:00:00Z SUCCESS") {
+		t.Fatalf("shell-readable registry lost final facts: %s %v", data, err)
+	}
+	if err := os.Remove(statusForgeCachePath("github.com", "example/widget", "7")); err != nil {
+		t.Fatal(err)
+	}
+	var progress []string
+	c.StatusProgress = func(message string) { progress = append(progress, message) }
+	records, err = c.ListPRs()
+	if err != nil || records[0].MergedOn != "2026-09-30T12:00:00Z" {
+		t.Fatalf("merge annotation not read: %+v %v", records, err)
+	}
+	details, err = c.statusEnrichRecords(records, nil)
+	if err != nil || details[0].State != "MERGED" || details[0].Title != "Finished change" || details[0].Checks != "SUCCESS" {
+		t.Fatalf("recorded merge facts lost: %+v %v", details, err)
+	}
+	if len(progress) != 1 || progress[0] != "Using 1 recorded merges" {
+		t.Fatalf("recorded merge was counted as a live check: %v", progress)
+	}
+	callData, err := os.ReadFile(calls)
+	if err != nil || strings.Count(string(callData), "called") != 1 {
+		t.Fatalf("merged PR was fetched again: %s %v", callData, err)
+	}
+	if err := c.UnlistPR("widget", "7"); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(c.PRFile())
+	if err != nil || strings.Contains(string(data), "merged-pr widget 7") {
+		t.Fatalf("unlist left orphaned merge annotation: %s %v", data, err)
+	}
+}
+
+func TestStatusForgePreviewRecordsMergesOnlyWhenEnabled(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	c := newWorkspaceFixture(t)
+	other, err := c.NewCollection(NewOptions{Slug: "other", Repos: []string{"widget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherContext, err := OpenCollection(other.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := otherContext.EnlistPR(PRRecord{Repo: "widget", Number: "7", Branch: "topic"}); err != nil {
+		t.Fatal(err)
+	}
+	otherRegistry := filepath.Join(other.Collection, "harness", ".harness-repos.yml")
+	registryData, err := os.ReadFile(otherRegistry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedRegistry := strings.Replace(string(registryData), c.Registry.Repos[1].Remote, "https://github.com/example/widget.git", 1)
+	if err := os.WriteFile(otherRegistry, []byte(updatedRegistry), 0644); err != nil {
+		t.Fatal(err)
+	}
+	beforeOther, err := os.ReadFile(otherContext.PRFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(otherContext.PRFile() + ".lock"); err != nil {
+		t.Fatal(err)
+	}
+	c.Registry.Repos = []Repo{{Name: "agent-harness", Remote: "https://github.com/example/harness.git"}}
+	if _, err := c.EnlistPR(PRRecord{Repo: "agent-harness", Number: "7", Branch: "topic"}); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	script := `#!/bin/sh
+printf '%s\n' '{"number":7,"state":"MERGED","title":"Finished change","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}'
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := c.statusForgePreview(false, false); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(c.PRFile()); err != nil || strings.Contains(string(data), "\n# merged-pr ") {
+		t.Fatalf("preview without merge recording changed registry: %s %v", data, err)
+	}
+	if _, _, err := c.StatusLiveSnapshot(true, true); err != nil {
+		t.Fatal(err)
+	}
+	if afterOther, err := os.ReadFile(otherContext.PRFile()); err != nil || string(afterOther) != string(beforeOther) {
+		t.Fatalf("workspace sweep changed another collection's registry: %s %v", afterOther, err)
+	}
+	if _, err := c.StatusForgePreview(); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(c.PRFile()); err != nil || !strings.Contains(string(data), "# merged-pr agent-harness 7 2026-09-30T12:00:00Z SUCCESS") {
+		t.Fatalf("scoped preview did not record final merge: %s %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Workspace, "other", ".wtc-prs.lock")); !os.IsNotExist(err) {
+		t.Fatalf("preview wrote another collection's registry lock: %v", err)
+	}
+}
+
+func TestMergedPRRegistryWaitsForSettledChecks(t *testing.T) {
+	c := fixture(t)
+	if _, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "8", Branch: "topic"}); err != nil {
+		t.Fatal(err)
+	}
+	records, err := c.ListPRs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	details := []statusPRDetail{{Number: "8", State: "MERGED", MergedOn: "2026-09-30T12:00:00Z", Checks: "PENDING"}}
+	if count, err := c.recordMergedPRs(records, details); err != nil || count != 0 {
+		t.Fatalf("pending check was frozen: %d %v", count, err)
+	}
+	records, err = c.ListPRs()
+	if err != nil || records[0].MergedOn != "" {
+		t.Fatalf("pending PR stopped being live: %+v %v", records, err)
+	}
+	detail, err := statusGHDetail([]byte(`{"number":8,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"FAILURE","status":"COMPLETED"},{"status":"IN_PROGRESS"}]}`), records[0])
+	if err != nil || detail.Checks != "FAILURE" || !detail.ChecksUnsettled {
+		t.Fatalf("failure with running checks lost pending marker: %+v %v", detail, err)
+	}
+	if count, err := c.recordMergedPRs(records, []statusPRDetail{detail}); err != nil || count != 0 {
+		t.Fatalf("failure with running checks was frozen: %d %v", count, err)
+	}
+	fallback, err := statusGHDetail([]byte(`{"number":8,"state":"MERGED","updatedAt":"2026-09-30T15:00:00Z","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}`), records[0])
+	if err != nil || fallback.MergedOn != "" {
+		t.Fatalf("mutable updatedAt used as merge timestamp: %+v %v", fallback, err)
+	}
+	if count, err := c.recordMergedPRs(records, []statusPRDetail{fallback}); err != nil || count != 0 {
+		t.Fatalf("mutable updatedAt was frozen as merge time: %d %v", count, err)
+	}
+}
+
+func TestUnsettledMergedCacheRefreshesAfterLiveAge(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	bin := t.TempDir()
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("WTC_TEST_GH_CALLS", calls)
+	script := `#!/bin/sh
+printf 'called\n' >> "$WTC_TEST_GH_CALLS"
+printf '%s\n' '{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}'
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	forge, slug, number := "github.com", "example/widget", "7"
+	statusWriteForgeCache(forge, slug, number, []byte(`{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"status":"IN_PROGRESS"}]}`))
+	old := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(statusForgeCachePath(forge, slug, number), old, old); err != nil {
+		t.Fatal(err)
+	}
+	detail := statusEnrichRecord(PRRecord{Repo: "widget", Number: number}, slug, forge)
+	if detail.Checks != "SUCCESS" || detail.ChecksUnsettled {
+		t.Fatalf("unsettled merged cache hid fresh forge result: %+v", detail)
+	}
+	data, err := os.ReadFile(calls)
+	if err != nil || strings.Count(string(data), "called") != 1 {
+		t.Fatalf("unsettled merge was not refreshed: %s %v", data, err)
+	}
+	statusWriteForgeCache(forge, slug, number, []byte(`{"number":7,"state":"MERGED","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}`))
+	if err := os.Chtimes(statusForgeCachePath(forge, slug, number), old, old); err != nil {
+		t.Fatal(err)
+	}
+	detail = statusEnrichRecord(PRRecord{Repo: "widget", Number: number}, slug, forge)
+	data, err = os.ReadFile(calls)
+	if err != nil || detail.MergedOn != "2026-09-30T12:00:00Z" || strings.Count(string(data), "called") != 2 {
+		t.Fatalf("untimed merged cache hid real merge time: %+v %s %v", detail, data, err)
+	}
+}
+
+func TestBitbucketMergeActivitySuppliesAuthoritativeTime(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	bin := t.TempDir()
+	script := `#!/bin/sh
+case "$2" in
+  view) printf '%s\n' '{"id":9,"state":"MERGED","updated_on":"2026-10-01T15:00:00Z","merge_commit":{"date":"2026-09-29T12:00:00Z"}}' ;;
+  activity) printf '%s\n' '{"activities":[{"update":{"state":"MERGED","date":"2026-09-30T12:00:00.500000+00:00"}},{"update":{"state":"OPEN","date":"2026-09-29T12:00:00Z"}}]}' ;;
+  *) exit 2 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "bb"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	detail := statusEnrichRecord(PRRecord{Repo: "widget", Number: "9"}, "example/widget", "bitbucket.org")
+	if detail.State != "MERGED" || detail.MergedOn != "2026-09-30T12:00:00Z" {
+		t.Fatalf("Bitbucket merge event was not used: %+v", detail)
+	}
+}
+
+func TestMergedPRRegistryRejectsMalformedFactsAndKeepsFinalAnnotationOnReenlist(t *testing.T) {
+	c := fixture(t)
+	registry := "widget 7 topic https://github.com/example/widget/pull/7 Previous title\n" +
+		"# merged-pr widget 7 invalid SUCCESS\n" +
+		"# merged-pr widget 7 2026-09-30T12:00:00Z BOGUS\n" +
+		"# merged-pr widget 7 2026-09-30T12:00:00Z FAILURE\n"
+	if err := os.WriteFile(c.PRFile(), []byte(registry), 0644); err != nil {
+		t.Fatal(err)
+	}
+	records, err := c.ListPRs()
+	if err != nil || len(records) != 1 || records[0].FinalChecks != "FAILURE" {
+		t.Fatalf("valid final annotation was not read: %+v %v", records, err)
+	}
+	if _, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "7", Branch: "corrected", URL: "https://github.com/example/widget/pull/7", Title: "Final title"}); err != nil {
+		t.Fatal(err)
+	}
+	records, err = c.ListPRs()
+	if err != nil || len(records) != 1 || records[0].Branch != "corrected" || records[0].MergedOn != "2026-09-30T12:00:00Z" {
+		t.Fatalf("re-enlist lost final annotation: %+v %v", records, err)
+	}
+	if _, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "8", Branch: "next", URL: "https://github.com/example/widget/pull/8"}); err != nil {
+		t.Fatal(err)
+	}
+	records, err = c.ListPRs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, err := c.recordMergedPRs(records, []statusPRDetail{{Number: "7", State: "MERGED", Checks: "FAILURE"},
+		{Number: "8", State: "MERGED", MergedOn: "2026-09-30T13:00:00Z", Checks: "BOGUS"}})
+	if err != nil || count != 0 {
+		t.Fatalf("unknown checks were frozen: %d %v", count, err)
+	}
+	records, err = c.ListPRs()
+	if err != nil || records[1].MergedOn != "" {
+		t.Fatalf("unknown check state was recorded: %+v %v", records, err)
 	}
 }
 
@@ -117,6 +374,16 @@ func TestStatusGHDetailSeparatesChecksReviewAndMerge(t *testing.T) {
 	if err != nil || d.Checks != "PENDING" {
 		t.Fatalf("pending state hidden by passing check: %+v %v", d, err)
 	}
+	stale := []byte(`{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"STALE","status":"COMPLETED"}]}`)
+	d, err = statusGHDetail(stale, PRRecord{})
+	if err != nil || d.Checks != "FAILURE" || d.ChecksUnsettled {
+		t.Fatalf("stale terminal conclusion was not failed: %+v %v", d, err)
+	}
+	unknown := []byte(`{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","statusCheckRollup":[{"conclusion":"MYSTERY","status":"COMPLETED"}]}`)
+	d, err = statusGHDetail(unknown, PRRecord{})
+	if err != nil || d.Checks != "PENDING" || !d.ChecksUnsettled {
+		t.Fatalf("unknown conclusion treated as settled: %+v %v", d, err)
+	}
 }
 
 func TestStatusDraftMergedAndUnknownFacts(t *testing.T) {
@@ -138,6 +405,10 @@ func TestStatusDraftMergedAndUnknownFacts(t *testing.T) {
 	bbMerged, err := statusBBDetail([]byte(`{"id":9,"state":"MERGED","updated_on":"2026-09-30T12:00:00Z","merged_on":"2026-09-20T12:00:00Z"}`), PRRecord{})
 	if err != nil || bbMerged.MergedOn != "2026-09-20T12:00:00Z" {
 		t.Fatalf("merge time replaced by last update: %+v %v", bbMerged, err)
+	}
+	bbFallback, err := statusBBDetail([]byte(`{"id":9,"state":"MERGED","merge_commit":{"date":"2026-09-19T12:00:00Z"}}`), PRRecord{})
+	if err != nil || bbFallback.MergedOn != "" {
+		t.Fatalf("merge commit date used as merge event time: %+v %v", bbFallback, err)
 	}
 }
 

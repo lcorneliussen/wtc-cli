@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -338,7 +337,29 @@ func statusTUIBuildCell(prefix string, build *wtc.StatusBuild) string {
 	return cell
 }
 
-func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int) []string {
+func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, styled bool) string {
+	plain := statusTUIPR(pr)
+	if !styled || pr == nil || pr.Number == "" {
+		return statusTUIFit(plain, 15)
+	}
+	label := "#" + pr.Number
+	if statusTUIURL(pr.URL) != "" {
+		label = statusTUILink(label+" ↗", pr.URL)
+	} else {
+		label = statusTUIStyle(label, statusToneLabel)
+	}
+	suffix := strings.TrimPrefix(plain, "#"+pr.Number)
+	if strings.Contains(suffix, "✗") {
+		suffix = statusTUIStyle(suffix, statusToneFailure)
+	} else if strings.Contains(suffix, "✓") {
+		suffix = statusTUIStyle(suffix, statusToneSuccess)
+	} else if strings.Contains(suffix, "●") || strings.Contains(suffix, "↓") {
+		suffix = statusTUIStyle(suffix, statusToneWarning)
+	}
+	return statusTUIFitANSI(label+suffix, 15)
+}
+
+func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []string {
 	if width < 40 {
 		width = 40
 	}
@@ -350,6 +371,9 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int) []string {
 		header += statusTUIFit("LOCAL", 12) + " " + statusTUIFit("TIP", 8) + " " + statusTUIFit("PROD", 8)
 	} else {
 		header += "LOCAL"
+	}
+	if styled {
+		header = statusTUIStyle(header, statusToneHeading)
 	}
 	lines := []string{header}
 	for _, row := range snapshot.Repos {
@@ -367,10 +391,30 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int) []string {
 		if row.Behind > 0 {
 			local += fmt.Sprintf(" ↓%d", row.Behind)
 		}
-		line := statusTUIFit(name, nameWidth) + " " + statusTUIFit(row.BranchDisplay, branchWidth) + " " + statusTUIFit(statusTUIPR(row.PR), 15) + " "
+		nameCell := statusTUIFit(statusTUISafe(name), nameWidth)
+		branchCell := statusTUIFit(statusTUISafe(row.BranchDisplay), branchWidth)
+		prCell := statusTUIRepoPRCell(row.PR, styled)
+		if styled {
+			nameCell = statusTUIStyle(nameCell, statusToneLabel)
+			if row.BranchKind == "detached" {
+				branchCell = statusTUIStyle(branchCell, statusToneDim)
+			}
+		}
+		line := nameCell + " " + branchCell + " " + prCell + " "
 		if builds {
-			line += statusTUIFit(local, 12) + " " + statusTUIFit(statusTUIBuildCell("T", row.Tip), 8) + " " + statusTUIFit(statusTUIBuildCell("P", row.Prod), 8)
+			localCell := statusTUIFit(local, 12)
+			tipCell := statusTUIFit(statusTUIBuildCell("T", row.Tip), 8)
+			prodCell := statusTUIFit(statusTUIBuildCell("P", row.Prod), 8)
+			if styled {
+				localCell = statusTUILocalCell(localCell, row)
+				tipCell = statusTUIBuildLink(tipCell, row.Tip)
+				prodCell = statusTUIBuildLink(prodCell, row.Prod)
+			}
+			line += localCell + " " + tipCell + " " + prodCell
 		} else {
+			if styled {
+				local = statusTUILocalCell(local, row)
+			}
 			line += local
 		}
 		lines = append(lines, line)
@@ -382,7 +426,17 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int) []string {
 }
 
 func (m statusTUIModel) buildClickTarget(x, y int) string {
-	if m.showLog || !statusTUIBuildColumns(m.snapshot) {
+	if m.showLog || os.Getenv("TERM") == "dumb" {
+		return ""
+	}
+	width, height := m.width, m.height
+	if width <= 0 {
+		width = 80
+	}
+	if height <= 0 {
+		height = 24
+	}
+	if x < 0 || x >= width || y < 0 || y >= max(1, height-2) {
 		return ""
 	}
 	base := 3
@@ -393,24 +447,47 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 		base += 3
 	}
 	rowIndex := y + m.effectiveScroll() - base
-	if rowIndex < 0 || rowIndex >= len(m.snapshot.Repos) {
+	if rowIndex < 0 {
 		return ""
 	}
-	tipStart := 47 + statusTUIBranchWidth(max(40, m.width), true)
-	var build *wtc.StatusBuild
-	if x >= tipStart && x < tipStart+8 {
-		build = m.snapshot.Repos[rowIndex].Tip
-	} else if x >= tipStart+9 && x < tipStart+17 {
-		build = m.snapshot.Repos[rowIndex].Prod
-	}
-	if build == nil || build.URL == nil {
+	if rowIndex < len(m.snapshot.Repos) {
+		row := m.snapshot.Repos[rowIndex]
+		prStart := 18 + statusTUIBranchWidth(max(40, m.width), statusTUIBuildColumns(m.snapshot))
+		if x >= prStart && x < prStart+15 && row.PR != nil {
+			return statusTUIURL(row.PR.URL)
+		}
+		if !statusTUIBuildColumns(m.snapshot) {
+			return ""
+		}
+		tipStart := 47 + statusTUIBranchWidth(max(40, m.width), true)
+		var build *wtc.StatusBuild
+		if x >= tipStart && x < tipStart+8 {
+			build = row.Tip
+		} else if x >= tipStart+9 && x < tipStart+17 {
+			build = row.Prod
+		}
+		if build != nil && build.URL != nil {
+			return statusTUIURL(*build.URL)
+		}
 		return ""
 	}
-	parsed, err := url.Parse(*build.URL)
-	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" {
+	if m.reposOnly || m.snapshot.ShowCollectionColumn {
 		return ""
 	}
-	return *build.URL
+	visibleIndex := rowIndex - max(1, len(m.snapshot.Repos)) - 2
+	if visibleIndex < 0 {
+		return ""
+	}
+	for _, row := range m.snapshot.PRs {
+		if row.Archived && !m.showArchived {
+			continue
+		}
+		if visibleIndex == 0 && row.URL != nil {
+			return statusTUIURL(*row.URL)
+		}
+		visibleIndex--
+	}
+	return ""
 }
 
 func (m statusTUIModel) effectiveScroll() int {
@@ -429,24 +506,28 @@ func statusOpenURL(target string) tea.Cmd {
 		}
 		command := exec.Command(tool, target)
 		if err := command.Run(); err != nil {
-			return statusOpenedMsg{err: fmt.Errorf("open build URL: %w", err)}
+			return statusOpenedMsg{err: fmt.Errorf("open status URL: %w", err)}
 		}
 		return statusOpenedMsg{}
 	}
 }
 
-func statusTUIPRLines(snapshot wtc.StatusSnapshot, showArchived bool) []string {
+func statusTUIPRLines(snapshot wtc.StatusSnapshot, showArchived, styled bool) []string {
 	if snapshot.ShowCollectionColumn {
 		return nil
 	}
-	lines := []string{"", "PRs"}
+	heading := "PRs"
+	if styled {
+		heading = statusTUIStyle(heading, statusToneHeading)
+	}
+	lines := []string{"", heading}
 	archived := 0
 	for _, row := range snapshot.PRs {
 		if row.Archived && !showArchived {
 			archived++
 			continue
 		}
-		label := row.Title
+		label := statusTUISafe(row.Title)
 		if label == "" {
 			label = "PR #" + row.Number
 		}
@@ -458,16 +539,39 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, showArchived bool) []string {
 		} else if row.Merge != nil && *row.Merge == "MERGED" {
 			state = " merged"
 		}
-		lines = append(lines, fmt.Sprintf("%s #%s%s  %s", row.Repo, row.Number, state, label))
+		if styled {
+			number := "#" + row.Number
+			if row.URL != nil && statusTUIURL(*row.URL) != "" {
+				number = statusTUILink(number+" ↗", *row.URL)
+			}
+			stateCell := statusTUIStyle(state, statusToneDim)
+			if row.OnBranch {
+				stateCell = statusTUIStyle(state, statusToneWarning)
+			}
+			if row.Merge != nil && *row.Merge == "MERGED" {
+				label = statusTUIStyle(label, statusToneDim)
+			}
+			lines = append(lines, statusTUIStyle(statusTUISafe(row.Repo), statusToneLabel)+" "+number+stateCell+"  "+label)
+		} else {
+			lines = append(lines, fmt.Sprintf("%s #%s%s  %s", row.Repo, row.Number, state, label))
+		}
 	}
 	if len(snapshot.PRs) == 0 {
 		lines = append(lines, "(none enlisted)")
 	}
 	if archived > 0 {
-		lines = append(lines, fmt.Sprintf("%d archived PR(s) hidden; press a", archived))
+		hint := fmt.Sprintf("%d archived PR(s) hidden; press a", archived)
+		if styled {
+			hint = statusTUIStyle(fmt.Sprintf("▸ archived (%d) · a to show", archived), statusToneDim)
+		}
+		lines = append(lines, hint)
 	}
 	for _, orphan := range snapshot.Orphans {
-		lines = append(lines, fmt.Sprintf("⚠ %s on %s: PR %s; catch-up", orphan.Repo, orphan.Branch, orphan.State))
+		warning := fmt.Sprintf("⚠ %s on %s: PR %s; catch-up", orphan.Repo, orphan.Branch, orphan.State)
+		if styled {
+			warning = statusTUIStyle(warning, statusToneWarning)
+		}
+		lines = append(lines, warning)
 	}
 	return lines
 }
@@ -498,35 +602,35 @@ func (m statusTUIModel) contentLines() []string {
 	if width <= 0 {
 		width = 80
 	}
-	lines := []string{m.headerLine(), ""}
+	lines := []string{statusTUIStyle(m.headerLine(), statusToneHeading), ""}
 	if m.refreshing && m.progressStep != "" {
-		lines = append(lines, m.progressStep+" (l: refresh log)", "")
+		lines = append(lines, statusTUIStyle(statusTUISafe(m.progressStep)+" (l: refresh log)", statusToneWarning), "")
 	}
 	if m.showHelp {
 		keys := "r refresh   l log   a show/hide archived PRs   ? help   q quit"
 		if m.procs {
 			keys = "r refresh   l log   ? help   q quit"
 		}
-		lines = append(lines, keys, "↑/↓ scroll   PgUp/PgDn scroll faster", "")
+		lines = append(lines, keys, "↗ link: modifier-click   PR/T/P: click   ↑/↓ scroll   PgUp/PgDn faster", "")
 	}
 	if m.showLog {
-		lines = append(lines, "Refresh log", "")
+		lines = append(lines, statusTUIStyle("Refresh log", statusToneHeading), "")
 		lines = append(lines, m.progressLog...)
 		return lines
 	}
 	if m.procs {
 		lines = append(lines, strings.Split(strings.TrimSuffix(wtc.StatusProcessesText(m.processes), "\n"), "\n")...)
 	} else {
-		lines = append(lines, statusTUIRepoLines(m.snapshot, width)...)
+		lines = append(lines, statusTUIRepoLines(m.snapshot, width, true)...)
 		if !m.reposOnly {
-			lines = append(lines, statusTUIPRLines(m.snapshot, m.showArchived)...)
+			lines = append(lines, statusTUIPRLines(m.snapshot, m.showArchived, true)...)
 		}
 		if m.snapshot.StaleCount > 0 {
 			lines = append(lines, "", fmt.Sprintf("%d worktree(s) behind the development tip", m.snapshot.StaleCount))
 		}
 	}
 	if m.errorText != "" {
-		lines = append(lines, "", "warning: "+m.errorText)
+		lines = append(lines, "", statusTUIStyle("warning: "+statusTUISafe(m.errorText), statusToneWarning))
 	}
 	return lines
 }
@@ -541,7 +645,7 @@ func (m statusTUIModel) View() tea.View {
 		height = 24
 	}
 	lines := m.contentLines()
-	footer := "r refresh · l log · a archived · ? help · q quit"
+	footer := "r refresh · l log · a archived · ↗ link · ? help · q quit"
 	if m.procs {
 		footer = "r refresh · l log · ? help · q quit"
 	}
@@ -552,18 +656,23 @@ func (m statusTUIModel) View() tea.View {
 	scroll := m.effectiveScroll()
 	end := min(len(lines), scroll+bodyHeight)
 	var b strings.Builder
+	visibleLink := false
 	for _, line := range lines[scroll:end] {
-		b.WriteString(statusTUIFit(line, width))
+		fitted := statusTUIFitANSI(line, width)
+		b.WriteString(fitted)
 		b.WriteByte('\n')
+		if statusTUIHasVisibleLink(fitted) {
+			visibleLink = true
+		}
 	}
 	for i := end - scroll; i < bodyHeight; i++ {
 		b.WriteByte('\n')
 	}
-	b.WriteString(statusTUIFit(footer, width))
+	b.WriteString(statusTUIFitANSI(statusTUIStyle(footer, statusToneDim), width))
 	view := tea.NewView(b.String())
 	view.AltScreen = true
-	view.ReportFocus = true
-	if m.refreshing || (!m.noClick && statusTUIBuildColumns(m.snapshot)) {
+	view.ReportFocus = os.Getenv("TERM") != "dumb"
+	if os.Getenv("TERM") != "dumb" && (m.refreshing || visibleLink && !m.noClick) {
 		view.MouseMode = tea.MouseModeCellMotion
 	}
 	return view
