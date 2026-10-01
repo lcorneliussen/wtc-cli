@@ -752,6 +752,8 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 			state = "◇ draft"
 		} else if merged {
 			state = "merged"
+		} else if row.State == "UNKNOWN" {
+			state = "unknown"
 		}
 		number := statusTUIFit("#"+row.Number, l.number)
 		repo := statusTUIFit(statusTUISafe(row.Repo), l.repo)

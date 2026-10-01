@@ -61,6 +61,7 @@ type StatusBuild struct {
 type StatusPRRow struct {
 	Repo            string  `json:"repo"`
 	Number          string  `json:"number"`
+	State           string  `json:"state,omitempty"`
 	Checks          *string `json:"checks"`
 	Merge           *string `json:"merge"`
 	Review          *string `json:"review"`

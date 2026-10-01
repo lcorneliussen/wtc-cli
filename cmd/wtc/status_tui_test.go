@@ -338,6 +338,14 @@ func TestStatusTUIPRTablePlacesActiveRowsFirstAndWarnsOnBranch(t *testing.T) {
 	}
 }
 
+func TestStatusTUIPRTableShowsUnavailableForgeState(t *testing.T) {
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", State: "UNKNOWN", Title: "Synthetic change"}}}
+	lines := statusTUIPRLines(snapshot, 80, false, false)
+	if len(lines) != 4 || !strings.Contains(lines[3], "unknown") || strings.Contains(lines[3], "open") {
+		t.Fatalf("unavailable forge state was shown as open: %q", lines)
+	}
+}
+
 func TestStatusTUIPRTableFitsNarrowOneShotWidths(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	url := "https://example.invalid/pull/7"

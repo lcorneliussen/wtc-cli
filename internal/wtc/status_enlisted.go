@@ -277,7 +277,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		if url == "" && forge != "" {
 			url = prURL("https://"+forge+"/"+slug, record.Number)
 		}
-		row := StatusPRRow{Repo: record.Repo, Number: detail.Number, Checks: statusString(detail.Checks),
+		row := StatusPRRow{Repo: record.Repo, Number: detail.Number, State: detail.State, Checks: statusString(detail.Checks),
 			Merge: statusString(detail.Merge), Review: statusString(detail.Review), Title: detail.Title,
 			DisplayTitle: detail.Title, Slug: slug, URL: statusString(url), MergedOn: statusString(detail.MergedOn),
 			Draft: detail.State == "DRAFT", OnBranch: detail.State == "MERGED" && branchRow >= 0,

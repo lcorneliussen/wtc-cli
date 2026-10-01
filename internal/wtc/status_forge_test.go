@@ -438,7 +438,7 @@ func TestStatusEnlistedSnapshotPreservesUnknownForgeState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.PRs) != 1 || snapshot.PRs[0].Merge == nil || *snapshot.PRs[0].Merge != "UNKNOWN" || snapshot.PRs[0].Title != "Synthetic change" {
+	if len(snapshot.PRs) != 1 || snapshot.PRs[0].State != "UNKNOWN" || snapshot.PRs[0].Merge == nil || *snapshot.PRs[0].Merge != "UNKNOWN" || snapshot.PRs[0].Title != "Synthetic change" {
 		t.Fatalf("unknown forge state was not preserved: %+v", snapshot.PRs)
 	}
 	for _, repo := range snapshot.Repos {
