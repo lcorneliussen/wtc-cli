@@ -486,12 +486,16 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 		prCell := statusTUIRepoPRCell(row.PR, l.pr, styled)
 		if styled {
 			if target := statusTUIRepoURL(row); target != "" {
-				nameCell = statusTUILinkCell(nameCell, target)
+				nameCell = statusTUILinkCell(nameCell, target, statusToneLabel)
 			} else {
 				nameCell = statusTUIStyle(nameCell, statusToneLabel)
 			}
 			if target := statusTUIBranchURL(row); target != "" {
-				branchCell = statusTUILinkCell(branchCell, target)
+				tone := statusToneSecondaryLink
+				if row.BranchKind == "detached" {
+					tone = statusToneDim
+				}
+				branchCell = statusTUILinkCell(branchCell, target, tone)
 			} else if row.BranchKind == "detached" {
 				branchCell = statusTUIStyle(branchCell, statusToneDim)
 			}
@@ -564,7 +568,7 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	}
 	base := 3
 	if m.showHelp {
-		base += 3
+		base += 4
 	}
 	rowIndex := y + m.effectiveScroll() - base
 	if rowIndex < 0 {
@@ -883,7 +887,8 @@ func (m statusTUIModel) contentLines() []string {
 		if m.procs {
 			keys = "r refresh   l log   ? help   q quit"
 		}
-		lines = append(lines, keys, "↗ link: modifier-click   PR/T/P: click   ↑/↓ scroll   PgUp/PgDn faster", "")
+		lines = append(lines, keys, "↗ link: modifier-click   PR/T/P: click   ↑/↓ scroll   PgUp/PgDn faster",
+			"PRs: C checks · M mergeability · R reviews", "")
 	}
 	if m.showLog {
 		lines = append(lines, statusTUIStyle("Refresh log", statusToneHeading), "")

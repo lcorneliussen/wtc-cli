@@ -86,14 +86,14 @@ func TestStatusTUIRejectsTerminalControlsInLinks(t *testing.T) {
 func TestStatusTUIRepoBranchAndBuildLinksForBothForges(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")
-	passed := "SUCCESS"
+	passed, failed := "SUCCESS", "FAILURE"
 	githubBuild := "https://github.com/example/widget/actions/runs/42"
 	bitbucketBuild := "https://bitbucket.org/example/gadget/pipelines/results/687"
 	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{
 		{Dir: "widget", Slug: "example/widget", Forge: "github.com", Branch: "feature/topic", BranchDisplay: "feature/topic",
 			Tip: &wtc.StatusBuild{Checks: &passed, Build: statusStringPtr("42"), URL: &githubBuild}},
-		{Dir: "gadget", Slug: "example/gadget", Forge: "bitbucket.org", Branch: "main", BranchDisplay: "⌂ main",
-			Tip: &wtc.StatusBuild{Checks: &passed, Build: statusStringPtr("687"), URL: &bitbucketBuild}},
+		{Dir: "gadget", Slug: "example/gadget", Forge: "bitbucket.org", Branch: "main", BranchDisplay: "⌂ main", BranchKind: "detached",
+			Tip: &wtc.StatusBuild{Checks: &failed, Build: statusStringPtr("687"), URL: &bitbucketBuild}},
 	}}
 	model := statusTUIModel{width: 100, height: 20, snapshot: snapshot}
 	view := model.View().Content
@@ -103,8 +103,13 @@ func TestStatusTUIRepoBranchAndBuildLinksForBothForges(t *testing.T) {
 			t.Fatalf("missing terminal link %q", target)
 		}
 	}
-	if strings.Contains(view, ";4;") || !strings.Contains(view, "T✓#42") || !strings.Contains(view, "T✓#687") {
-		t.Fatalf("links are permanently underlined or build numbers missing: %q", view)
+	if strings.Contains(view, ";4;") || !strings.Contains(view, "T✓#42") || !strings.Contains(view, "T✗#687") ||
+		!strings.Contains(view, ansi.SetHyperlink("https://github.com/example/widget")+"\x1b[1;38;5;252m") ||
+		!strings.Contains(view, ansi.SetHyperlink("https://github.com/example/widget/tree/feature/topic")+"\x1b[38;5;252m") ||
+		!strings.Contains(view, ansi.SetHyperlink("https://bitbucket.org/example/gadget/src/main/")+"\x1b[2m") ||
+		!strings.Contains(view, ansi.SetHyperlink(githubBuild)+"\x1b[38;5;114m") ||
+		!strings.Contains(view, ansi.SetHyperlink(bitbucketBuild)+"\x1b[38;5;203m") {
+		t.Fatalf("secondary links or build result tones missing: %q", view)
 	}
 	layout := statusTUIRepoLayout(snapshot, 100)
 	for _, check := range []struct {
@@ -425,7 +430,8 @@ func TestStatusTUIModelShowsCachedRowsAndControls(t *testing.T) {
 	}
 	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: '?', Text: "?"}))
 	model = updated.(statusTUIModel)
-	if !model.showHelp || !strings.Contains(model.View().Content, "PgUp/PgDn") {
+	if !model.showHelp || !strings.Contains(model.View().Content, "PgUp/PgDn") ||
+		!strings.Contains(model.View().Content, "C checks · M mergeability · R reviews") {
 		t.Fatal("help toggle failed")
 	}
 	model.refreshing = true
