@@ -1,9 +1,46 @@
 package wtc
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestStatusEnrichRecordsKeepsIdentityAcrossOutOfOrderReplies(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	bin := t.TempDir()
+	script := `#!/bin/sh
+case "$3" in 1) sleep 0.2 ;; esac
+printf '{"number":%s,"state":"OPEN","title":"Synthetic %s"}\n' "$3" "$3"
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var progress []string
+	c := &Context{Registry: Registry{Repos: []Repo{{Name: "widget", Remote: "https://github.com/example/widget.git"}}},
+		StatusProgress: func(message string) { progress = append(progress, message) }}
+	records := make([]PRRecord, 6)
+	for i := range records {
+		records[i] = PRRecord{Repo: "widget", Number: fmt.Sprint(i + 1)}
+	}
+	details, err := c.statusEnrichRecords(records, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, detail := range details {
+		want := fmt.Sprintf("Synthetic %d", i+1)
+		if detail.Number != records[i].Number || detail.Title != want {
+			t.Fatalf("detail %d crossed records: %+v", i, detail)
+		}
+	}
+	if len(progress) != len(records) || !strings.Contains(progress[len(progress)-1], "6/6") {
+		t.Fatalf("missing completion progress: %v", progress)
+	}
+}
 
 func TestStatusGHDetailSeparatesChecksReviewAndMerge(t *testing.T) {
 	raw := []byte(`{"number":7,"state":"OPEN","title":"Change widget","isDraft":false,"reviewDecision":"REVIEW_REQUIRED","mergeStateStatus":"BEHIND","reviewRequests":[{"login":"reviewer"}],"statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"},{"status":"IN_PROGRESS"}]}`)

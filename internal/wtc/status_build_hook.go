@@ -121,6 +121,7 @@ func (c *Context) statusBuildFacts(snapshot *StatusSnapshot) error {
 			// The build provider only has a branch contract for registered repos.
 			continue
 		}
+		c.statusProgress(fmt.Sprintf("Checking builds %d/%d", i+1, len(snapshot.Repos)))
 		tip := strings.TrimPrefix(repo.DefaultRef, "origin/")
 		if tip == "" {
 			tip = "main"

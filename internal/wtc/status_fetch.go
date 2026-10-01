@@ -37,6 +37,7 @@ func (c *Context) StatusRefreshRefsWithAge(all bool, maxAge time.Duration) (Stat
 		return report, fmt.Errorf("cannot read status worktree inventory")
 	}
 	seen := map[string]bool{}
+	c.statusProgress("Checking remote refs")
 	for _, target := range targets {
 		common, err := statusCommonDir(target.path)
 		if err != nil {
@@ -52,6 +53,7 @@ func (c *Context) StatusRefreshRefsWithAge(all bool, maxAge time.Duration) (Stat
 			continue
 		}
 		report.Attempted++
+		c.statusProgress(fmt.Sprintf("Fetching remote refs %d", report.Attempted))
 		if _, err := statusJSON("git", "--git-dir="+common, "fetch", "--prune", "origin"); err != nil {
 			report.Failed++
 		}
@@ -99,6 +101,7 @@ func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.
 		if err != nil {
 			return snapshot, report, err
 		}
+		c.statusProgress("Writing status snapshot")
 		return snapshot, report, c.WriteStatusSnapshot(snapshot)
 	}
 	collections, err := WorkspaceCollections(c.Workspace)

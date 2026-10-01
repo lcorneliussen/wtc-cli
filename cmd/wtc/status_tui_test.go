@@ -52,6 +52,29 @@ func TestStatusTUIModelShowsCachedRowsAndControls(t *testing.T) {
 	}
 }
 
+func TestStatusTUIRefreshLogUpdatesWhileCollectorRuns(t *testing.T) {
+	model := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, width: 80, height: 16}
+	model.startRefresh()
+	events := make(chan tea.Msg)
+	updated, next := model.Update(statusProgressMsg{message: "Checked pull requests 2/4", at: model.startedAt.Add(2 * time.Second), events: events})
+	model = updated.(statusTUIModel)
+	if next == nil || !strings.Contains(model.View().Content, "Checked pull requests 2/4") ||
+		model.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("refresh progress was not visible or clickable: %s", model.View().Content)
+	}
+	refreshAt := runewidth.StringWidth(strings.Split(model.headerLine(), "refreshing")[0])
+	updated, _ = model.Update(tea.MouseClickMsg{X: refreshAt, Y: 0})
+	model = updated.(statusTUIModel)
+	if !model.showLog || !strings.Contains(model.View().Content, "2s  Checked pull requests 2/4") {
+		t.Fatalf("refresh click did not open log: %s", model.View().Content)
+	}
+	updated, _ = model.Update(statusLoadedMsg{snapshot: wtc.StatusSnapshot{Collection: "fixture"}, at: model.startedAt.Add(3 * time.Second)})
+	model = updated.(statusTUIModel)
+	if model.refreshing || !strings.Contains(model.View().Content, "3s  Refresh finished") {
+		t.Fatalf("refresh completion did not appear in log: %s", model.View().Content)
+	}
+}
+
 func TestStatusTUIClicksOnlyBuildCells(t *testing.T) {
 	tipURL, prodURL := "https://example.invalid/build/7", "https://example.invalid/build/8"
 	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "topic",
