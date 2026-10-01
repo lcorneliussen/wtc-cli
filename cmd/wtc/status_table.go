@@ -12,13 +12,13 @@ func statusTable(snapshot wtc.StatusSnapshot, reposOnly bool, width int) string 
 	if name == "" {
 		name = "(all)"
 	}
-	lines := []string{fmt.Sprintf("wtc status · %s · %s", name, snapshot.GeneratedAt), ""}
+	lines := []string{statusTUIFit(fmt.Sprintf("wtc status · %s · %s", name, snapshot.GeneratedAt), width), ""}
 	lines = append(lines, statusTUIRepoLines(snapshot, width, false)...)
 	if !reposOnly {
-		lines = append(lines, statusTUIPRLines(snapshot, false, false)...)
+		lines = append(lines, statusTUIPRLines(snapshot, width, false, false)...)
 	}
 	if snapshot.StaleCount > 0 {
-		lines = append(lines, "", fmt.Sprintf("%d worktree(s) behind the development tip", snapshot.StaleCount))
+		lines = append(lines, "", statusTUIFit(fmt.Sprintf("%d worktree(s) behind the development tip", snapshot.StaleCount), width))
 	}
 	return strings.Join(lines, "\n") + "\n"
 }

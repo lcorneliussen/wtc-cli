@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -59,6 +61,7 @@ type statusTUIModel struct {
 	showLog      bool
 	progressLog  []string
 	progressStep string
+	progressKey  string
 	startedAt    time.Time
 	errorText    string
 }
@@ -104,7 +107,17 @@ func (m *statusTUIModel) startRefresh() {
 	m.refreshing = true
 	m.startedAt = time.Now()
 	m.progressStep = "Starting refresh"
+	m.progressKey = m.progressStep
 	m.progressLog = []string{"0s  Starting refresh"}
+}
+
+var statusTUIProgressCounter = regexp.MustCompile(`^(.*) [0-9]+(?:/[0-9]+)?$`)
+
+func statusTUIProgressKey(message string) string {
+	if parts := statusTUIProgressCounter.FindStringSubmatch(message); len(parts) == 2 {
+		return parts[1]
+	}
+	return message
 }
 
 func (m *statusTUIModel) focusLogTail() {
@@ -138,7 +151,14 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.startedAt = msg.at
 		}
 		m.progressStep = msg.message
-		m.progressLog = append(m.progressLog, fmt.Sprintf("%s  %s", msg.at.Sub(m.startedAt).Truncate(time.Second), msg.message))
+		entry := fmt.Sprintf("%s  %s", msg.at.Sub(m.startedAt).Truncate(time.Second), msg.message)
+		key := statusTUIProgressKey(msg.message)
+		if key == m.progressKey && len(m.progressLog) > 0 {
+			m.progressLog[len(m.progressLog)-1] = entry
+		} else {
+			m.progressLog = append(m.progressLog, entry)
+		}
+		m.progressKey = key
 		m.focusLogTail()
 		return m, statusTUIWait(msg.events)
 	case statusLoadedMsg:
@@ -299,20 +319,97 @@ func statusTUIPR(pr *wtc.StatusPRFacts) string {
 	return strings.Join(parts, " ")
 }
 
-func statusTUIBuildColumns(snapshot wtc.StatusSnapshot) bool {
-	for _, row := range snapshot.Repos {
-		if row.Tip != nil || row.Prod != nil {
-			return true
-		}
-	}
-	return false
+type statusRepoLayout struct {
+	name, branch, pr, tree, ahead, behind, tip, prod int
+	showTree, showSync, showBuilds                   bool
 }
 
-func statusTUIBranchWidth(width int, builds bool) int {
-	if builds {
-		return max(14, width-64)
+func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayout {
+	l := statusRepoLayout{name: 16, branch: 30, pr: 15, tree: 4, ahead: 3, behind: 3, tip: 8, prod: 8,
+		showTree: true, showSync: true, showBuilds: true}
+	for _, row := range snapshot.Repos {
+		if row.Tree != "clean" {
+			l.tree = max(l.tree, runewidth.StringWidth(row.Tree))
+		}
+		l.ahead = max(l.ahead, len(fmt.Sprint(row.Ahead)))
+		l.behind = max(l.behind, len(fmt.Sprint(row.Behind)))
 	}
-	return max(14, width-48)
+	if width >= 100 {
+		l.name = 20
+	}
+	if width < 72 {
+		l.showBuilds = false
+	}
+	if width < 55 {
+		l.showSync = false
+	}
+	if width < 46 {
+		l.name = 10
+	}
+	if width < 40 {
+		l.name, l.pr = 8, 8
+		l.showSync, l.showBuilds = false, false
+		l.showTree = width >= 31
+	}
+	other := func() int {
+		n := l.name + 1 + l.pr
+		if l.showTree {
+			n += 1 + l.tree
+		}
+		if l.showSync {
+			n += 1 + l.ahead + 1 + l.behind
+		}
+		if l.showBuilds {
+			n += 1 + l.tip + 1 + l.prod
+		}
+		return n
+	}
+	minBranch := 8
+	if width < 31 {
+		minBranch = 6
+	}
+	if other()+minBranch+1 > width {
+		l.showBuilds = false
+	}
+	if other()+minBranch+1 > width {
+		l.showSync = false
+	}
+	if other()+minBranch+1 > width {
+		l.showTree = false
+	}
+	l.branch = max(minBranch, min(l.branch, width-other()-1))
+	return l
+}
+
+func (l statusRepoLayout) prStart() int { return l.name + 1 + l.branch + 1 }
+func (l statusRepoLayout) tipStart() int {
+	start := l.prStart() + l.pr + 1 + l.tree
+	if l.showSync {
+		start += 1 + l.ahead + 1 + l.behind
+	}
+	return start + 1
+}
+
+func statusTUIRepoURL(row wtc.StatusRepo) string {
+	if row.Forge != "github.com" && row.Forge != "bitbucket.org" {
+		return ""
+	}
+	parts := strings.Split(row.Slug, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return "https://" + row.Forge + "/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1])
+}
+
+func statusTUIBranchURL(row wtc.StatusRepo) string {
+	base := statusTUIRepoURL(row)
+	if base == "" || row.Branch == "" {
+		return ""
+	}
+	if row.Forge == "bitbucket.org" {
+		return base + "/src/" + url.PathEscape(row.Branch) + "/"
+	}
+	return base + "/tree/" + strings.ReplaceAll(url.PathEscape(row.Branch), "%2F", "/")
 }
 
 func statusTUIBuildCell(prefix string, build *wtc.StatusBuild) string {
@@ -337,10 +434,10 @@ func statusTUIBuildCell(prefix string, build *wtc.StatusBuild) string {
 	return cell
 }
 
-func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, styled bool) string {
+func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, width int, styled bool) string {
 	plain := statusTUIPR(pr)
 	if !styled || pr == nil || pr.Number == "" {
-		return statusTUIFit(plain, 15)
+		return statusTUIFit(plain, width)
 	}
 	label := "#" + pr.Number
 	if statusTUIURL(pr.URL) != "" {
@@ -356,21 +453,20 @@ func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, styled bool) string {
 	} else if strings.Contains(suffix, "●") || strings.Contains(suffix, "↓") {
 		suffix = statusTUIStyle(suffix, statusToneWarning)
 	}
-	return statusTUIFitANSI(label+suffix, 15)
+	return statusTUIFitANSI(label+suffix, width)
 }
 
 func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []string {
-	if width < 40 {
-		width = 40
+	l := statusTUIRepoLayout(snapshot, width)
+	header := statusTUIFit("REPO", l.name) + " " + statusTUIFit("BRANCH", l.branch) + " " + statusTUIFit("PR", l.pr)
+	if l.showTree {
+		header += " " + statusTUIFit("±", l.tree)
 	}
-	nameWidth := 16
-	builds := statusTUIBuildColumns(snapshot)
-	branchWidth := statusTUIBranchWidth(width, builds)
-	header := statusTUIFit("REPO", nameWidth) + " " + statusTUIFit("BRANCH", branchWidth) + " " + statusTUIFit("PR", 15) + " "
-	if builds {
-		header += statusTUIFit("LOCAL", 12) + " " + statusTUIFit("TIP", 8) + " " + statusTUIFit("PROD", 8)
-	} else {
-		header += "LOCAL"
+	if l.showSync {
+		header += " " + statusTUIFit("↑", l.ahead) + " " + statusTUIFit("↓", l.behind)
+	}
+	if l.showBuilds {
+		header += " " + statusTUIFit("TEST", l.tip) + " " + statusTUIFit("PROD", l.prod)
 	}
 	if styled {
 		header = statusTUIStyle(header, statusToneHeading)
@@ -381,41 +477,68 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 		if snapshot.ShowCollectionColumn {
 			name = row.Collection + "/" + row.Dir
 		}
-		local := "·"
+		tree := "·"
 		if row.Tree != "" && row.Tree != "clean" {
-			local = row.Tree
+			tree = row.Tree
 		}
-		if row.Ahead > 0 {
-			local += fmt.Sprintf(" ↑%d", row.Ahead)
-		}
-		if row.Behind > 0 {
-			local += fmt.Sprintf(" ↓%d", row.Behind)
-		}
-		nameCell := statusTUIFit(statusTUISafe(name), nameWidth)
-		branchCell := statusTUIFit(statusTUISafe(row.BranchDisplay), branchWidth)
-		prCell := statusTUIRepoPRCell(row.PR, styled)
+		nameCell := statusTUIFit(statusTUISafe(name), l.name)
+		branchCell := statusTUIFit(statusTUISafe(row.BranchDisplay), l.branch)
+		prCell := statusTUIRepoPRCell(row.PR, l.pr, styled)
 		if styled {
-			nameCell = statusTUIStyle(nameCell, statusToneLabel)
-			if row.BranchKind == "detached" {
+			if target := statusTUIRepoURL(row); target != "" {
+				nameCell = statusTUILinkCell(nameCell, target)
+			} else {
+				nameCell = statusTUIStyle(nameCell, statusToneLabel)
+			}
+			if target := statusTUIBranchURL(row); target != "" {
+				branchCell = statusTUILinkCell(branchCell, target)
+			} else if row.BranchKind == "detached" {
 				branchCell = statusTUIStyle(branchCell, statusToneDim)
 			}
 		}
-		line := nameCell + " " + branchCell + " " + prCell + " "
-		if builds {
-			localCell := statusTUIFit(local, 12)
-			tipCell := statusTUIFit(statusTUIBuildCell("T", row.Tip), 8)
-			prodCell := statusTUIFit(statusTUIBuildCell("P", row.Prod), 8)
+		treeCell := statusTUIFit(tree, l.tree)
+		if styled {
+			if tree == "·" {
+				treeCell = statusTUIStyle(treeCell, statusToneDim)
+			} else {
+				treeCell = statusTUIStyle(treeCell, statusToneWarning)
+			}
+		}
+		line := nameCell + " " + branchCell + " " + prCell
+		if l.showTree {
+			line += " " + treeCell
+		}
+		if l.showSync {
+			ahead, behind := "·", "·"
+			if row.Ahead > 0 {
+				ahead = fmt.Sprint(row.Ahead)
+			}
+			if row.Behind > 0 {
+				behind = fmt.Sprint(row.Behind)
+			}
+			aheadCell, behindCell := statusTUIFit(ahead, l.ahead), statusTUIFit(behind, l.behind)
 			if styled {
-				localCell = statusTUILocalCell(localCell, row)
+				if row.Ahead > 0 {
+					aheadCell = statusTUIStyle(aheadCell, statusToneSuccess)
+				} else {
+					aheadCell = statusTUIStyle(aheadCell, statusToneDim)
+				}
+				if row.Behind > 0 {
+					behindCell = statusTUIStyle(behindCell, statusToneWarning)
+				} else {
+					behindCell = statusTUIStyle(behindCell, statusToneDim)
+				}
+			}
+			line += " " + aheadCell + " " + behindCell
+		}
+		if l.showBuilds {
+			tipCell := statusTUIFit(statusTUIBuildCell("T", row.Tip), l.tip)
+			prodCell := statusTUIFit(statusTUIBuildCell("P", row.Prod), l.prod)
+			if styled {
 				tipCell = statusTUIBuildLink(tipCell, row.Tip)
 				prodCell = statusTUIBuildLink(prodCell, row.Prod)
 			}
-			line += localCell + " " + tipCell + " " + prodCell
-		} else {
-			if styled {
-				local = statusTUILocalCell(local, row)
-			}
-			line += local
+			line += " " + tipCell + " " + prodCell
 		}
 		lines = append(lines, line)
 	}
@@ -440,9 +563,6 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 		return ""
 	}
 	base := 3
-	if m.refreshing && m.progressStep != "" {
-		base += 2
-	}
 	if m.showHelp {
 		base += 3
 	}
@@ -452,18 +572,25 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	}
 	if rowIndex < len(m.snapshot.Repos) {
 		row := m.snapshot.Repos[rowIndex]
-		prStart := 18 + statusTUIBranchWidth(max(40, m.width), statusTUIBuildColumns(m.snapshot))
-		if x >= prStart && x < prStart+15 && row.PR != nil {
+		layout := statusTUIRepoLayout(m.snapshot, width)
+		if x < layout.name {
+			return statusTUIURL(statusTUIRepoURL(row))
+		}
+		if x >= layout.name+1 && x < layout.prStart()-1 {
+			return statusTUIURL(statusTUIBranchURL(row))
+		}
+		prStart := layout.prStart()
+		if x >= prStart && x < prStart+layout.pr && row.PR != nil {
 			return statusTUIURL(row.PR.URL)
 		}
-		if !statusTUIBuildColumns(m.snapshot) {
+		if !layout.showBuilds {
 			return ""
 		}
-		tipStart := 47 + statusTUIBranchWidth(max(40, m.width), true)
+		tipStart := layout.tipStart()
 		var build *wtc.StatusBuild
-		if x >= tipStart && x < tipStart+8 {
+		if x >= tipStart && x < tipStart+layout.tip {
 			build = row.Tip
-		} else if x >= tipStart+9 && x < tipStart+17 {
+		} else if x >= tipStart+layout.tip+1 && x < tipStart+layout.tip+1+layout.prod {
 			build = row.Prod
 		}
 		if build != nil && build.URL != nil {
@@ -474,14 +601,15 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	if m.reposOnly || m.snapshot.ShowCollectionColumn {
 		return ""
 	}
-	visibleIndex := rowIndex - max(1, len(m.snapshot.Repos)) - 2
+	visibleIndex := rowIndex - max(1, len(m.snapshot.Repos)) - 3
 	if visibleIndex < 0 {
 		return ""
 	}
-	for _, row := range m.snapshot.PRs {
-		if row.Archived && !m.showArchived {
-			continue
-		}
+	if x >= statusTUIPRLayout(width).number {
+		return ""
+	}
+	visible, _ := statusTUIVisiblePRs(m.snapshot, m.showArchived)
+	for _, row := range visible {
 		if visibleIndex == 0 && row.URL != nil {
 			return statusTUIURL(*row.URL)
 		}
@@ -512,7 +640,84 @@ func statusOpenURL(target string) tea.Cmd {
 	}
 }
 
-func statusTUIPRLines(snapshot wtc.StatusSnapshot, showArchived, styled bool) []string {
+func statusTUIPRGlyph(value *string) string {
+	if value == nil {
+		return "·"
+	}
+	switch *value {
+	case "SUCCESS", "approved", "MERGEABLE":
+		return "✓"
+	case "FAILURE", "ERROR", "changes", "CONFLICTING":
+		return "✗"
+	case "PENDING", "EXPECTED", "waiting":
+		return "●"
+	case "BEHIND":
+		return "↓"
+	case "DIRTY":
+		return "⚠"
+	case "BLOCKED":
+		return "⊘"
+	case "commented":
+		return "✎"
+	case "noreviewers":
+		return "∅"
+	}
+	return "·"
+}
+
+func statusTUIMergedPR(row wtc.StatusPRRow) bool {
+	return row.Merge != nil && *row.Merge == "MERGED" || row.MergedOn != nil && *row.MergedOn != ""
+}
+
+func statusTUIVisiblePRs(snapshot wtc.StatusSnapshot, showArchived bool) ([]wtc.StatusPRRow, int) {
+	active := make([]wtc.StatusPRRow, 0, len(snapshot.PRs))
+	merged := make([]wtc.StatusPRRow, 0)
+	archived := make([]wtc.StatusPRRow, 0)
+	for _, row := range snapshot.PRs {
+		switch {
+		case row.Archived:
+			archived = append(archived, row)
+		case statusTUIMergedPR(row) && !row.OnBranch:
+			merged = append(merged, row)
+		default:
+			active = append(active, row)
+		}
+	}
+	active = append(active, merged...)
+	if showArchived {
+		active = append(active, archived...)
+	}
+	return active, len(archived)
+}
+
+type statusPRLayout struct {
+	number, repo, state, title int
+	signals                    bool
+}
+
+func statusTUIPRLayout(width int) statusPRLayout {
+	l := statusPRLayout{number: 7, repo: 16, state: 10, signals: true}
+	switch {
+	case width >= 52:
+	case width >= 40:
+		l.repo, l.state = 12, 8
+	case width >= 34:
+		l.repo, l.state, l.signals = 10, 8, false
+	default:
+		l.number, l.repo, l.state, l.signals = 5, 8, 7, false
+	}
+	if width >= 100 {
+		l.repo = 20
+	}
+	prefix := l.number + 1 + l.repo + 1 + l.state + 1
+	if l.signals {
+		prefix += 6 // C M R and the separating space before TITLE.
+	}
+	l.title = max(1, width-prefix)
+	return l
+}
+
+func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styled bool) []string {
 	if snapshot.ShowCollectionColumn {
 		return nil
 	}
@@ -520,60 +725,114 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, showArchived, styled bool) []
 	if styled {
 		heading = statusTUIStyle(heading, statusToneHeading)
 	}
-	lines := []string{"", heading}
-	archived := 0
-	for _, row := range snapshot.PRs {
-		if row.Archived && !showArchived {
-			archived++
-			continue
+	l := statusTUIPRLayout(width)
+	header := statusTUIFit("PR", l.number) + " " + statusTUIFit("REPO", l.repo) + " " + statusTUIFit("STATE", l.state) + " "
+	if l.signals {
+		header += "C M R "
+	}
+	header += statusTUIFit("TITLE", l.title)
+	if styled {
+		header = statusTUIStyle(header, statusToneDim)
+	}
+	lines := []string{"", heading, header}
+	visible, archived := statusTUIVisiblePRs(snapshot, showArchived)
+	for _, row := range visible {
+		label := statusTUISafe(row.DisplayTitle)
+		if label == "" {
+			label = statusTUISafe(row.Title)
 		}
-		label := statusTUISafe(row.Title)
 		if label == "" {
 			label = "PR #" + row.Number
 		}
-		state := ""
+		state := "open"
+		merged := statusTUIMergedPR(row)
 		if row.OnBranch {
-			state = " ⚠ merged; catch-up"
+			state = "⚠ catch-up"
 		} else if row.Draft {
-			state = " ◇ draft"
-		} else if row.Merge != nil && *row.Merge == "MERGED" {
-			state = " merged"
+			state = "◇ draft"
+		} else if merged {
+			state = "merged"
+		} else if row.State == "UNKNOWN" {
+			state = "unknown"
 		}
+		number := statusTUIFit("#"+row.Number, l.number)
+		repo := statusTUIFit(statusTUISafe(row.Repo), l.repo)
+		stateCell := statusTUIFit(state, l.state)
+		checks, merge, review := statusTUIPRGlyph(row.Checks), statusTUIPRGlyph(row.Merge), statusTUIPRGlyph(row.Review)
+		if merged && !row.OnBranch {
+			checks, merge, review = "·", "·", "·"
+		}
+		title := statusTUIFit(label, l.title)
 		if styled {
-			number := "#" + row.Number
 			if row.URL != nil && statusTUIURL(*row.URL) != "" {
-				number = statusTUILink(number+" ↗", *row.URL)
+				linkTone := statusToneLink
+				if merged && !row.OnBranch {
+					linkTone = "2;38;5;245"
+				}
+				number = statusTUIFitANSI(statusTUILinkTone("#"+row.Number+" ↗", *row.URL, linkTone), l.number)
 			}
-			stateCell := statusTUIStyle(state, statusToneDim)
+			rowTone := statusToneLabel
+			if merged && !row.OnBranch {
+				rowTone = "2;38;5;245"
+			}
+			repo = statusTUIStyle(repo, rowTone)
+			title = statusTUIStyle(title, rowTone)
 			if row.OnBranch {
-				stateCell = statusTUIStyle(state, statusToneWarning)
+				stateCell = statusTUIStyle(stateCell, statusToneWarning)
+			} else {
+				stateCell = statusTUIStyle(stateCell, statusToneDim)
 			}
-			if row.Merge != nil && *row.Merge == "MERGED" {
-				label = statusTUIStyle(label, statusToneDim)
-			}
-			lines = append(lines, statusTUIStyle(statusTUISafe(row.Repo), statusToneLabel)+" "+number+stateCell+"  "+label)
-		} else {
-			lines = append(lines, fmt.Sprintf("%s #%s%s  %s", row.Repo, row.Number, state, label))
+			checks = statusTUIGlyphStyle(checks)
+			merge = statusTUIGlyphStyle(merge)
+			review = statusTUIGlyphStyle(review)
 		}
+		line := number + " " + repo + " " + stateCell + " "
+		if l.signals {
+			line += checks + " " + merge + " " + review + " "
+		}
+		lines = append(lines, line+title)
 	}
 	if len(snapshot.PRs) == 0 {
 		lines = append(lines, "(none enlisted)")
 	}
-	if archived > 0 {
+	if archived > 0 && !showArchived {
 		hint := fmt.Sprintf("%d archived PR(s) hidden; press a", archived)
+		if width < 40 {
+			hint = fmt.Sprintf("archived (%d) · a", archived)
+		}
 		if styled {
-			hint = statusTUIStyle(fmt.Sprintf("▸ archived (%d) · a to show", archived), statusToneDim)
+			if width >= 40 {
+				hint = fmt.Sprintf("▸ archived (%d) · a to show", archived)
+			}
+			hint = statusTUIStyle(statusTUIFit(hint, width), statusToneDim)
+		} else {
+			hint = statusTUIFit(hint, width)
 		}
 		lines = append(lines, hint)
 	}
 	for _, orphan := range snapshot.Orphans {
 		warning := fmt.Sprintf("⚠ %s on %s: PR %s; catch-up", orphan.Repo, orphan.Branch, orphan.State)
 		if styled {
-			warning = statusTUIStyle(warning, statusToneWarning)
+			warning = statusTUIStyle(statusTUIFit(warning, width), statusToneWarning)
+		} else {
+			warning = statusTUIFit(warning, width)
 		}
 		lines = append(lines, warning)
 	}
 	return lines
+}
+
+func statusTUIGlyphStyle(glyph string) string {
+	switch glyph {
+	case "✓":
+		return statusTUIStyle(glyph, statusToneSuccess)
+	case "✗":
+		return statusTUIStyle(glyph, statusToneFailure)
+	case "●", "↓", "⚠":
+		return statusTUIStyle(glyph, statusToneWarning)
+	default:
+		return statusTUIStyle(glyph, statusToneDim)
+	}
 }
 
 func (m statusTUIModel) headerLine() string {
@@ -590,11 +849,20 @@ func (m statusTUIModel) headerLine() string {
 	}
 	if m.refreshing {
 		age += " · refreshing"
-		if m.progressStep != "" {
-			age += ": " + m.progressStep
-		}
 	}
 	return fmt.Sprintf("wtc status · %s · %s", name, age)
+}
+
+func statusTUIProgressLine(step string, elapsed time.Duration, width int) string {
+	full := fmt.Sprintf("↻ %s · %s  (l: log)", elapsed, statusTUISafe(step))
+	if runewidth.StringWidth(full) <= width {
+		return full
+	}
+	if parts := statusTUIProgressCounter.FindStringSubmatch(step); len(parts) == 2 {
+		count := strings.TrimPrefix(step, parts[1]+" ")
+		return fmt.Sprintf("↻ %s · %s", count, statusTUISafe(parts[1]))
+	}
+	return "↻ " + statusTUISafe(step)
 }
 
 func (m statusTUIModel) contentLines() []string {
@@ -604,7 +872,11 @@ func (m statusTUIModel) contentLines() []string {
 	}
 	lines := []string{statusTUIStyle(m.headerLine(), statusToneHeading), ""}
 	if m.refreshing && m.progressStep != "" {
-		lines = append(lines, statusTUIStyle(statusTUISafe(m.progressStep)+" (l: refresh log)", statusToneWarning), "")
+		elapsed := time.Since(m.startedAt).Truncate(time.Second)
+		if m.startedAt.IsZero() {
+			elapsed = 0
+		}
+		lines[1] = statusTUIStyle(statusTUIProgressLine(m.progressStep, elapsed, width), statusToneWarning)
 	}
 	if m.showHelp {
 		keys := "r refresh   l log   a show/hide archived PRs   ? help   q quit"
@@ -623,7 +895,7 @@ func (m statusTUIModel) contentLines() []string {
 	} else {
 		lines = append(lines, statusTUIRepoLines(m.snapshot, width, true)...)
 		if !m.reposOnly {
-			lines = append(lines, statusTUIPRLines(m.snapshot, m.showArchived, true)...)
+			lines = append(lines, statusTUIPRLines(m.snapshot, width, m.showArchived, true)...)
 		}
 		if m.snapshot.StaleCount > 0 {
 			lines = append(lines, "", fmt.Sprintf("%d worktree(s) behind the development tip", m.snapshot.StaleCount))

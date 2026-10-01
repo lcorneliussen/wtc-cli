@@ -14,7 +14,7 @@ const (
 	statusToneHeading = "1;38;5;180"
 	statusToneLabel   = "1;38;5;252"
 	statusToneDim     = "2"
-	statusToneLink    = "4;38;5;81"
+	statusToneLink    = "38;5;81"
 	statusToneSuccess = "38;5;114"
 	statusToneWarning = "38;5;214"
 	statusToneFailure = "38;5;203"
@@ -59,6 +59,10 @@ func statusTUIURL(raw string) string {
 }
 
 func statusTUILink(label, rawURL string) string {
+	return statusTUILinkTone(label, rawURL, statusToneLink)
+}
+
+func statusTUILinkTone(label, rawURL, tone string) string {
 	if os.Getenv("TERM") == "dumb" {
 		return label
 	}
@@ -66,7 +70,12 @@ func statusTUILink(label, rawURL string) string {
 	if target == "" {
 		return label
 	}
-	return ansi.SetHyperlink(target) + statusTUIStyle(label, statusToneLink) + ansi.ResetHyperlink()
+	return ansi.SetHyperlink(target) + statusTUIStyle(label, tone) + ansi.ResetHyperlink()
+}
+
+func statusTUILinkCell(cell, rawURL string) string {
+	label := strings.TrimRight(cell, " ")
+	return statusTUILink(label, rawURL) + strings.TrimPrefix(cell, label)
 }
 
 func statusTUIFitANSI(value string, width int) string {
@@ -84,17 +93,6 @@ func statusTUIFitANSI(value string, width int) string {
 		return ansi.Truncate(value, width, "…")
 	}
 	return ansi.Truncate(value, width, "…") + ansi.ResetHyperlink() + "\x1b[0m"
-}
-
-func statusTUILocalCell(cell string, row wtc.StatusRepo) string {
-	switch {
-	case row.Behind > 0 || row.Tree != "" && row.Tree != "clean":
-		return statusTUIStyle(cell, statusToneWarning)
-	case row.Ahead > 0:
-		return statusTUIStyle(cell, statusToneSuccess)
-	default:
-		return statusTUIStyle(cell, statusToneDim)
-	}
 }
 
 func statusTUIBuildLink(cell string, build *wtc.StatusBuild) string {
