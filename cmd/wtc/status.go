@@ -90,7 +90,8 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 				return err
 			}
 		}
-		if !interactive && !silent && !cached && !procs && !*asJSON && !md &&
+		if (!interactive || (watchSeconds == 0 && statusIntervalSetting(c, "WTC_STATUS_WATCH", 30) == 0)) &&
+			!silent && !cached && !procs && !*asJSON && !md &&
 			term.IsTerminal(os.Stdout.Fd()) && term.IsTerminal(os.Stderr.Fd()) {
 			started := time.Now()
 			c.StatusProgress = func(message string) {
