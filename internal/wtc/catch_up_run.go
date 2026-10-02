@@ -489,8 +489,14 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt CatchUpOptions) {
 	targetDir := filepath.Join(c.Workspace, t.collection)
 	harnessRepo := ""
+	// The harness updates first and may have changed registry membership, so
+	// decide from the current target registry; keep the inventory answer only
+	// when the target cannot be opened.
+	managed := t.managed
 	if target, err := OpenCollection(targetDir); err == nil {
 		harnessRepo, _ = target.catchUpHarnessRepo()
+		_, repoErr := target.Repository(t.repo)
+		managed = t.harness || repoErr == nil
 	}
 	run := func(script, label string, args ...string) {
 		path := filepath.Join(targetDir, "harness", "tools", script)
@@ -521,7 +527,11 @@ func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt Catch
 		}
 	}
 	if !opt.NoSecrets {
-		run("link-secrets.sh", "secrets:"+t.repo, "--repo", filepath.Base(t.path))
+		if managed {
+			run("link-secrets.sh", "secrets:"+t.repo, "--repo", filepath.Base(t.path))
+		} else {
+			report.add("hook", t.collection, "secrets:"+t.repo, "skipped", "unmanaged sibling; no registry secrets to link", "", "", "")
+		}
 	}
 	if !t.harness {
 		return
