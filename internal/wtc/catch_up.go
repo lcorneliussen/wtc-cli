@@ -60,9 +60,10 @@ type catchUpTarget struct {
 	owner      string
 	ref        string
 	harness    bool
-	// managed is false for an unmanaged ext. sibling: no registry entry, so
-	// the control root holds nothing for it and the secret linker would
-	// reject its directory name.
+	// managed records registry membership at inventory time. An unmanaged
+	// ext. sibling has no entry, so the control root holds nothing for it and
+	// the secret linker would reject its directory name. Hooks re-resolve it
+	// from the current registry, since a harness self-update may change it.
 	managed bool
 }
 
