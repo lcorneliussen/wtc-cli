@@ -149,6 +149,19 @@ func TestRetireCollectionRejectsSelfAndEscapes(t *testing.T) {
 	if _, err := os.Stat(c.Harness); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := c.RetireCollection(RetireOptions{Name: "main", Self: true}); err == nil || !strings.Contains(err.Error(), "workspace ID") {
+		t.Fatalf("self-retirement without a verified workspace was accepted: %v", err)
+	}
+	sibling, err := c.NewCollection(NewOptions{Slug: "sibling"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RetireCollection(RetireOptions{Name: "sibling", Self: true, WorkspaceID: "source-id"}); err == nil || !strings.Contains(err.Error(), "current collection") {
+		t.Fatalf("sibling retirement via self worker was accepted: %v", err)
+	}
+	if _, err := os.Stat(sibling.Collection); err != nil {
+		t.Fatalf("sibling was removed by rejected self-retirement: %v", err)
+	}
 }
 
 func TestRetireCollectionSelfWorkerKeepsRemoteRefs(t *testing.T) {

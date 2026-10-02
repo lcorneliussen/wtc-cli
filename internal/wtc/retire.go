@@ -37,6 +37,14 @@ type retireWorktree struct {
 // RetireCollection first inspects every worktree, then removes only the named
 // collection. Remote branches and bare owners are never changed.
 func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
+	if opt.Self {
+		if opt.Name != filepath.Base(c.Collection) {
+			return RetireResult{}, fmt.Errorf("self-retirement target must be the current collection")
+		}
+		if opt.WorkspaceID == "" {
+			return RetireResult{}, fmt.Errorf("self-retirement requires a verified Herdr workspace ID")
+		}
+	}
 	result, worktrees, err := c.retirePreflight(opt)
 	if err != nil {
 		return result, err
@@ -44,7 +52,7 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 	target := result.Collection
 	// Close the source workspace before hooks or worktree removal. Once closed,
 	// no new pane or agent turn can start against a collection being deleted.
-	if opt.Self && opt.WorkspaceID != "" {
+	if opt.Self {
 		closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
 		if !closed {
 			if warning == "" {
