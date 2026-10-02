@@ -62,6 +62,36 @@ func TestStatusLocalSnapshotTracksDirtyBranchAndDevelopmentTip(t *testing.T) {
 	}
 }
 
+func TestStatusLocalSnapshotShowsUnresolvedMerge(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	fixtureGit(t, "-C", c.Harness, "switch", "-qc", "topic")
+	fixtureFile(t, filepath.Join(c.Harness, "README.md"), "local\n", 0644)
+	fixtureGit(t, "-C", c.Harness, "add", "README.md")
+	fixtureGit(t, "-C", c.Harness, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "local")
+	source := filepath.Join(c.Workspace, "source-agent-harness")
+	fixtureFile(t, filepath.Join(source, "README.md"), "upstream\n", 0644)
+	fixtureGit(t, "-C", source, "add", "README.md")
+	fixtureGit(t, "-C", source, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "upstream")
+	owner := filepath.Join(c.Workspace, ".bare", "agent-harness.git")
+	fixtureGit(t, "--git-dir="+owner, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+	if _, err := catchUpGit(c.Harness, "merge", "--no-edit", "origin/main"); err == nil {
+		t.Fatal("fixture merge unexpectedly succeeded")
+	}
+	snapshot, err := c.StatusLocalSnapshot(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range snapshot.Repos {
+		if row.Dir == "harness" {
+			if !row.Conflict || row.Operation != "MERGE_HEAD" || !strings.Contains(snapshot.Markdown(), "unresolved conflicts") {
+				t.Fatalf("unresolved merge hidden: %+v", row)
+			}
+			return
+		}
+	}
+	t.Fatal("missing harness row")
+}
+
 func TestStatusLocalSnapshotAllRequiresExplicitSweep(t *testing.T) {
 	c := newWorkspaceFixture(t)
 	if _, err := c.NewCollection(NewOptions{Slug: "other"}); err != nil {

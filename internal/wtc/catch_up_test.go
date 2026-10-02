@@ -46,6 +46,27 @@ func TestCatchUpInventoryUsesTargetIdentityAndRejectsUnknownSelector(t *testing.
 	}
 }
 
+func TestCatchUpUsesOpenPRMergeTarget(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	for _, tc := range []struct {
+		pr   catchUpPR
+		want string
+		err  bool
+	}{
+		{catchUpPR{state: "NONE"}, "origin/main", false},
+		{catchUpPR{state: "MERGED"}, "origin/main", false},
+		{catchUpPR{state: "OPEN", base: "release/next"}, "origin/release/next", false},
+		{catchUpPR{state: "DRAFT", base: "develop"}, "origin/develop", false},
+		{catchUpPR{state: "OPEN"}, "", true},
+		{catchUpPR{state: "OPEN", base: "../../bad"}, "", true},
+	} {
+		got, err := catchUpRefForPR(c.Harness, "origin/main", tc.pr)
+		if got != tc.want || (err != nil) != tc.err {
+			t.Fatalf("PR %+v: ref %q, error %v", tc.pr, got, err)
+		}
+	}
+}
+
 func TestCatchUpInventorySelectsSymlinkedWorktreeDirectory(t *testing.T) {
 	c := newWorkspaceFixture(t)
 	owner := filepath.Join(c.Workspace, ".bare", "widget.git")
@@ -63,8 +84,12 @@ func TestCatchUpReportKeepsRowsWhenPersistenceFails(t *testing.T) {
 	c := newWorkspaceFixture(t)
 	report := CatchUpReport{SchemaVersion: 1, Initiator: c.Collection, Outcomes: []CatchUpRow{}}
 	report.add("repo", "main", "widget", "needs-owner", "café | 日本", "old", "new", "old")
+	report.add("repo", "main", "widget", "needs-owner", "merge conflict; aborted to original tree; paths: README.md", "old", "new", "old")
 	if report.ExitStatus != 1 || !strings.Contains(report.Markdown(), "café \\| 日本") {
 		t.Fatalf("incomplete readable report: %+v", report)
+	}
+	if !strings.Contains(report.Markdown(), "resolve conflicts") || !strings.Contains(report.Outcomes[1].NextAction, "push only if its PR is open or draft") {
+		t.Fatalf("conflict handoff missing: %+v", report)
 	}
 	path := filepath.Join(c.Collection, "report.json")
 	if err := SaveCatchUpReport(&report, path); err != nil {
@@ -75,7 +100,7 @@ func TestCatchUpReportKeepsRowsWhenPersistenceFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	var persisted CatchUpReport
-	if err := json.Unmarshal(data, &persisted); err != nil || len(persisted.Outcomes) != 1 {
+	if err := json.Unmarshal(data, &persisted); err != nil || len(persisted.Outcomes) != 2 {
 		t.Fatalf("unreadable persisted report: %v", err)
 	}
 	blockedPath := filepath.Join(c.Collection, "blocked.json")
@@ -202,10 +227,10 @@ func TestCatchUpReadsEnlistedBitbucketStateWithoutGuessing(t *testing.T) {
 	fixtureGit(t, "--git-dir="+owner, "remote", "set-url", "origin", "git@bitbucket.org:example/agent-harness.git")
 	fixtureFile(t, filepath.Join(c.Collection, ".wtc-prs"), "agent-harness 7 topic - fixture\n", 0644)
 	bin := filepath.Join(c.Workspace, "bin")
-	fixtureFile(t, filepath.Join(bin, "bb"), "#!/bin/sh\nprintf '%s\\n' '{\"state\":\"OPEN\",\"draft\":true,\"source\":{\"commit\":{\"hash\":\"abc\"}}}'\n", 0755)
+	fixtureFile(t, filepath.Join(bin, "bb"), "#!/bin/sh\nprintf '%s\\n' '{\"state\":\"OPEN\",\"draft\":true,\"source\":{\"commit\":{\"hash\":\"abc\"}},\"destination\":{\"branch\":{\"name\":\"release/next\"}}}'\n", 0755)
 	t.Setenv("PATH", bin+":/usr/bin:/bin")
 	target := catchUpTarget{collection: "main", path: c.Harness, repo: "agent-harness", harness: true}
-	if got := c.catchUpPRState(target, "topic"); got.state != "DRAFT" {
+	if got := c.catchUpPRState(target, "topic"); got.state != "DRAFT" || got.base != "release/next" {
 		t.Fatalf("draft was not protected: %+v", got)
 	}
 	if got := c.catchUpPRState(target, "other"); got.state != "UNKNOWN" {

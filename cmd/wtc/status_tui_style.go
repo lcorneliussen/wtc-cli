@@ -11,14 +11,14 @@ import (
 )
 
 const (
-	statusToneHeading       = "1;38;5;180"
-	statusToneLabel         = "1;38;5;252"
+	statusToneHeading       = "1"
+	statusToneLabel         = "1"
 	statusToneDim           = "2"
-	statusToneLink          = "38;5;81"
-	statusToneSecondaryLink = "38;5;252"
-	statusToneSuccess       = "38;5;114"
-	statusToneWarning       = "38;5;214"
-	statusToneFailure       = "38;5;203"
+	statusToneLink          = "36"
+	statusToneSecondaryLink = "0"
+	statusToneSuccess       = "32"
+	statusToneWarning       = "33"
+	statusToneFailure       = "31"
 )
 
 var statusTUILinkPattern = regexp.MustCompile(`(?i)\x1b]8;;https?://[^\x07\x1b]*(?:\x07|\x1b\\)(.*?)\x1b]8;;(?:\x07|\x1b\\)`)

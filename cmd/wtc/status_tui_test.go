@@ -40,7 +40,7 @@ func TestStatusTUILinksColorsAndClickTargets(t *testing.T) {
 		PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", Title: "Change widget", URL: &prURL, Merge: &merged}}}}
 	view := model.View().Content
 	if strings.Count(view, ansi.SetHyperlink(prURL)) < 2 || !strings.Contains(view, ansi.SetHyperlink(buildURL)) ||
-		!strings.Contains(view, "\x1b[38;5;81m") || !strings.Contains(view, "\x1b[1;38;5;180m") {
+		!strings.Contains(view, "\x1b[36m") || !strings.Contains(view, "\x1b[1m") {
 		t.Fatalf("TUI lost terminal links or visual hierarchy: %q", view)
 	}
 	for _, line := range strings.Split(view, "\n") {
@@ -64,7 +64,7 @@ func TestStatusTUILinksColorsAndClickTargets(t *testing.T) {
 	}
 	t.Setenv("NO_COLOR", "1")
 	view = model.View().Content
-	if strings.Contains(view, "\x1b[38;5;81m") || !strings.Contains(view, ansi.SetHyperlink(prURL)) {
+	if strings.Contains(view, "\x1b[36m") || !strings.Contains(view, ansi.SetHyperlink(prURL)) {
 		t.Fatal("NO_COLOR suppressed links or retained styling")
 	}
 	t.Setenv("TERM", "dumb")
@@ -106,12 +106,12 @@ func TestStatusTUIRepoBranchAndBuildLinksForBothForges(t *testing.T) {
 		}
 	}
 	if strings.Contains(view, ";4;") || !strings.Contains(view, "T✓#42") || !strings.Contains(view, "P●#43") || !strings.Contains(view, "T✗#687") ||
-		!strings.Contains(view, ansi.SetHyperlink("https://github.com/example/widget")+"\x1b[1;38;5;252m") ||
-		!strings.Contains(view, ansi.SetHyperlink("https://github.com/example/widget/tree/feature/topic")+"\x1b[38;5;252m") ||
+		!strings.Contains(view, ansi.SetHyperlink("https://github.com/example/widget")+"\x1b[1m") ||
+		!strings.Contains(view, ansi.SetHyperlink("https://github.com/example/widget/tree/feature/topic")+"\x1b[0m") ||
 		!strings.Contains(view, ansi.SetHyperlink("https://bitbucket.org/example/gadget/src/main/")+"\x1b[2m") ||
-		!strings.Contains(view, ansi.SetHyperlink(githubBuild)+"\x1b[38;5;114m") ||
-		!strings.Contains(view, ansi.SetHyperlink(githubPending)+"\x1b[38;5;214m") ||
-		!strings.Contains(view, ansi.SetHyperlink(bitbucketBuild)+"\x1b[38;5;203m") {
+		!strings.Contains(view, ansi.SetHyperlink(githubBuild)+"\x1b[32m") ||
+		!strings.Contains(view, ansi.SetHyperlink(githubPending)+"\x1b[33m") ||
+		!strings.Contains(view, ansi.SetHyperlink(bitbucketBuild)+"\x1b[31m") {
 		t.Fatalf("secondary links or build result tones missing: %q", view)
 	}
 	layout := statusTUIRepoLayout(snapshot, 100)
@@ -265,6 +265,29 @@ func TestStatusTUIRepoRowsKeepSignalsWithinWidth(t *testing.T) {
 	}
 }
 
+func TestStatusTUIConflictsUseThemeColorsWithoutExtraColumn(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	conflicting := "DIRTY"
+	other := "CONFLICTING"
+	if got := statusTUIPRGlyph(&other); got != "✗" {
+		t.Fatalf("conflicting merge glyph = %q", got)
+	}
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{
+		Dir: "widget", BranchDisplay: "topic", Behind: 3, Tree: "±2", Conflict: true, Operation: "MERGE_HEAD",
+		PR: &wtc.StatusPRFacts{Number: "7", Merge: conflicting},
+	}}, PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", Merge: &conflicting}}}
+	lines := statusTUIRepoLines(snapshot, 60, true)
+	if !strings.Contains(ansi.Strip(lines[1]), "#7 ✗") || !strings.Contains(ansi.Strip(lines[1]), "✗") ||
+		strings.Count(lines[1], "\x1b[31m") < 2 || strings.Contains(lines[1], "38;5;") {
+		t.Fatalf("repo conflict missing or color not themeable: %q", lines)
+	}
+	prs := statusTUIPRLines(snapshot, 60, false, true)
+	if !strings.Contains(ansi.Strip(prs[3]), "✗ conflict") || !strings.Contains(prs[3], "\x1b[31m") {
+		t.Fatalf("PR conflict missing: %q", prs)
+	}
+}
+
 func TestStatusTUIKeepsBuildColumnsAndMutesMergedPRs(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")
@@ -283,8 +306,8 @@ func TestStatusTUIKeepsBuildColumnsAndMutesMergedPRs(t *testing.T) {
 	prs := statusTUIPRLines(snapshot, 100, false, true)
 	if len(prs) != 4 || !strings.Contains(ansi.Strip(prs[2]), "PR") ||
 		!strings.Contains(ansi.Strip(prs[2]), "STATE") ||
-		!strings.Contains(prs[3], "\x1b[2;38;5;245m") ||
-		!strings.Contains(prs[3], "\x1b[2;38;5;245m") ||
+		!strings.Contains(prs[3], "\x1b[2m") ||
+		!strings.Contains(prs[3], "\x1b[2m") ||
 		!strings.Contains(prs[3], ansi.SetHyperlink(url)) ||
 		strings.Contains(ansi.Strip(prs[3]), "✓") {
 		t.Fatalf("merged PR row was not aligned, muted and linked: %q", prs)
@@ -354,7 +377,7 @@ func TestStatusTUIPRTablePlacesActiveRowsFirstAndWarnsOnBranch(t *testing.T) {
 	if !strings.Contains(ansi.Strip(lines[3]), "#2") || !strings.Contains(ansi.Strip(lines[3]), "Display title") ||
 		!strings.Contains(ansi.Strip(lines[3]), "◇ draft") ||
 		!strings.Contains(ansi.Strip(lines[4]), "#3") || !strings.Contains(ansi.Strip(lines[4]), "⚠ catch-up") ||
-		!strings.Contains(lines[4], "\x1b[38;5;114m✓") ||
+		!strings.Contains(lines[4], "\x1b[32m✓") ||
 		!strings.Contains(ansi.Strip(lines[5]), "#1") {
 		t.Fatalf("PR table did not prioritize active work: %q", lines)
 	}
