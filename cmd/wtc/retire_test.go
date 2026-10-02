@@ -189,9 +189,12 @@ args = sys.argv[3:]
 with open(os.environ["RETIRE_TEST_LOG"], "a") as out: out.write(" ".join(args) + "\n")
 def emit(value): print(json.dumps({"result": value}))
 if args == ["workspace", "list"]:
-    emit({"workspaces":[{"label":"finished","workspace_id":"source-id"},{"label":"--cleanup--","workspace_id":"cleanup-id"}]})
+    cleanup_label = "wrong-label" if os.environ.get("RETIRE_TEST_BAD_LABEL") else "--cleanup--"
+    emit({"workspaces":[{"label":"finished","workspace_id":"source-id"},{"label":cleanup_label,"workspace_id":"cleanup-id"}]})
 elif args[:2] == ["pane", "list"]:
-    panes = [{"pane_id":"source:p1","agent":"codex","agent_status":"done"}]
+    with open(os.environ["RETIRE_TEST_LOG"]) as stream: count = sum(line.startswith("pane list ") for line in stream)
+    status = "working" if os.environ.get("RETIRE_TEST_WORKING_FIRST") and count == 1 else "done"
+    panes = [{"pane_id":"source:p1","agent":"codex","agent_status":status}]
     if os.environ.get("RETIRE_TEST_EXTRA_AGENT"): panes.append({"pane_id":"source:p2","agent":"claude","agent_status":"working"})
     emit({"panes":panes})
 elif args[:2] == ["workspace", "close"]:
@@ -272,5 +275,54 @@ func TestRetireWorkerClosesVerifiedWorkspaceAndKeepsBareOwner(t *testing.T) {
 	}
 	if !strings.Contains(string(calls), "workspace close source-id") {
 		t.Fatalf("verified workspace was not closed: %s", calls)
+	}
+}
+
+func TestRetireWorkerWaitsForSourceAgent(t *testing.T) {
+	target, log := retireWorkerFixture(t)
+	t.Setenv("RETIRE_TEST_WORKING_FIRST", "1")
+	if err := runRetireWorker("finished", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("target remains after agent finished: %v", err)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(calls), "pane list ") < 3 {
+		t.Fatalf("worker did not wait for agent completion: %s", calls)
+	}
+}
+
+func TestRetireWorkerRechecksIdentityAndPreflight(t *testing.T) {
+	for _, scenario := range []string{"same-workspace", "wrong-label", "inside-target", "dirty-target"} {
+		t.Run(scenario, func(t *testing.T) {
+			target, log := retireWorkerFixture(t)
+			switch scenario {
+			case "same-workspace":
+				t.Setenv("HERDR_WORKSPACE_ID", "source-id")
+			case "wrong-label":
+				t.Setenv("RETIRE_TEST_BAD_LABEL", "1")
+			case "inside-target":
+				if err := os.Chdir(target); err != nil {
+					t.Fatal(err)
+				}
+			case "dirty-target":
+				if err := os.WriteFile(filepath.Join(target, "harness", "untracked.txt"), []byte("keep"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := runRetireWorker("finished", false, false); err == nil {
+				t.Fatal("changed context was accepted")
+			}
+			if _, err := os.Stat(target); err != nil {
+				t.Fatalf("target was removed: %v", err)
+			}
+			if calls, err := os.ReadFile(log); err == nil && strings.Contains(string(calls), "workspace close") {
+				t.Fatalf("workspace closed after refusal: %s", calls)
+			}
+		})
 	}
 }
