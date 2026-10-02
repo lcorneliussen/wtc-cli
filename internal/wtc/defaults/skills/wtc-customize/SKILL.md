@@ -15,7 +15,7 @@ Inspect the target harness or repository before editing: its existing hooks,
 - Put application setup and cleanup in that application's `harness:init` and
   `harness:teardown` mise tasks or `.harness/init.sh` and
   `.harness/teardown.sh`. Keep them safe to rerun.
-- Use `wtc env --dry-run` to inspect generated changes. Verify the hook in a
+- Use `wtc env setup --dry-run` to inspect generated changes. Verify the hook in a
   disposable collection, then run the relevant harness or repository tests.
 - For an embedded instruction or skill that needs local wording, run
   `wtc eject <path>` and edit the copied file. Eject refuses overwrites.

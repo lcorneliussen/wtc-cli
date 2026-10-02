@@ -28,8 +28,8 @@ prepend_paths = ["tools/bin"]
 ```
 
 The committed `.wtc-cli-version` supplies the exact `wtc` version. Do not add
-`github:lcorneliussen/wtc-cli` to `[mise.tools]`. `wtc env --dry-run` previews
-`.env.collection` and `mise.toml`; `wtc env` regenerates them. Put local values
+`github:lcorneliussen/wtc-cli` to `[mise.tools]`. `wtc env setup --dry-run` previews
+`.env.collection` and `mise.toml`; `wtc env setup` regenerates them. Put local values
 and credentials in `.env.collection.local`, which the generator preserves.
 
 ## Harness hooks
@@ -42,7 +42,7 @@ CLI sends one JSON object on stdin with `event`, `collection`, `harness`,
 
 | Action | Before | After |
 |---|---|---|
-| `wtc env` | `env.pre.sh` | `env.post.sh` |
+| `wtc env setup` | `env.pre.sh` | `env.post.sh` |
 | `wtc pr enlist` | `pr.enlist.pre.sh` | `pr.enlist.post.sh` |
 | `wtc pr unlist` | `pr.unlist.pre.sh` | `pr.unlist.post.sh` |
 | `wtc registry refresh` | `registry.refresh.pre.sh` | `registry.refresh.post.sh` |
