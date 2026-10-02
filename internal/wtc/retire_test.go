@@ -153,7 +153,7 @@ func TestRetireCollectionRejectsSelfAndEscapes(t *testing.T) {
 
 func TestRetireCollectionSelfWorkerKeepsRemoteRefs(t *testing.T) {
 	c := newWorkspaceFixture(t)
-	created, err := c.NewCollection(NewOptions{Slug: "self-retire"})
+	created, err := c.NewCollection(NewOptions{Slug: "self-retire", Repos: []string{"widget"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,23 +162,39 @@ func TestRetireCollectionSelfWorkerKeepsRemoteRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 	harness := filepath.Join(created.Collection, "harness")
-	fixtureFile(t, filepath.Join(harness, "hooks", "wtc", "retire.post.sh"), "#!/bin/sh\n[ -d \"$PWD/harness\" ] || exit 13\nprintf 'post\\n' >> \"$(dirname \"$PWD\")/post-hook.log\"\n", 0755)
-	fixtureGit(t, "-C", harness, "add", "hooks/wtc/retire.post.sh")
+	widget := filepath.Join(created.Collection, "widget")
+	if err := os.Remove(filepath.Join(widget, "init-ran")); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(widget, ".harness", "teardown.sh"), "#!/bin/sh\nprintf 'product torn down\\n' > \"$(dirname \"$(dirname \"$PWD\")\")/product-teardown.log\"\n", 0755)
+	fixtureGit(t, "-C", widget, "add", ".harness/teardown.sh")
+	fixtureGit(t, "-C", widget, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "product teardown fixture")
+	widgetHead := fixtureGit(t, "-C", widget, "rev-parse", "HEAD")
+	widgetOwner := filepath.Join(c.Workspace, ".bare", "widget.git")
+	fixtureGit(t, "--git-dir="+widgetOwner, "update-ref", "refs/remotes/origin/self-retire-teardown", widgetHead)
+	fixtureFile(t, filepath.Join(harness, "hooks", "wtc", "retire.pre.sh"), "#!/bin/sh\n[ -f \"$(dirname \"$PWD\")/workspace-closed.log\" ] || exit 15\n", 0755)
+	fixtureFile(t, filepath.Join(harness, "hooks", "wtc", "retire.post.sh"), "#!/bin/sh\n[ -d \"$PWD/harness\" ] || exit 13\n[ -f \"$(dirname \"$PWD\")/product-teardown.log\" ] || exit 14\nprintf 'post\\n' >> \"$(dirname \"$PWD\")/post-hook.log\"\n", 0755)
+	fixtureGit(t, "-C", harness, "add", "hooks/wtc/retire.pre.sh", "hooks/wtc/retire.post.sh")
 	fixtureGit(t, "-C", harness, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "self-retire post hook")
 	head := fixtureGit(t, "-C", harness, "rev-parse", "HEAD")
 	owner := filepath.Join(c.Workspace, ".bare", "agent-harness.git")
 	fixtureGit(t, "--git-dir="+owner, "update-ref", "refs/remotes/origin/self-retire-hook", head)
+	bin := filepath.Join(c.Workspace, "bin")
+	fixtureFile(t, filepath.Join(bin, "herdr"), "#!/bin/sh\ncase \"$*\" in\n  *'workspace list') printf '%s\\n' '{\"result\":{\"workspaces\":[{\"label\":\"self-retire\",\"workspace_id\":\"source-id\"}]}}' ;;\n  *'workspace close source-id') printf 'closed\\n' > \"$RETIRE_TEST_CLOSED_MARKER\" ;;\n  *) exit 2 ;;\nesac\n", 0755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HARNESS_HERDR_SESSION", "fixture")
+	t.Setenv("RETIRE_TEST_CLOSED_MARKER", filepath.Join(c.Workspace, "workspace-closed.log"))
 	if _, err := target.RetirePreflight(RetireOptions{Name: "self-retire"}); err == nil {
 		t.Fatal("ordinary caller bypassed the self-retire guard")
 	}
 	if _, err := target.RetirePreflight(RetireOptions{Name: "self-retire", Self: true}); err != nil {
 		t.Fatal(err)
 	}
-	retired, err := target.RetireCollection(RetireOptions{Name: "self-retire", Self: true})
+	retired, err := target.RetireCollection(RetireOptions{Name: "self-retire", Self: true, WorkspaceID: "source-id"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !retired.FolderRemoved || len(retired.Removed) != 1 {
+	if !retired.FolderRemoved || !retired.WorkspaceClosed || len(retired.Removed) != 2 {
 		t.Fatalf("unexpected self-retirement: %+v", retired)
 	}
 	if _, err := os.Stat(created.Collection); !os.IsNotExist(err) {

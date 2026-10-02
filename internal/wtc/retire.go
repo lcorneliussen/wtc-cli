@@ -42,6 +42,18 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 		return result, err
 	}
 	target := result.Collection
+	// Close the source workspace before hooks or worktree removal. Once closed,
+	// no new pane or agent turn can start against a collection being deleted.
+	if opt.Self && opt.WorkspaceID != "" {
+		closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
+		if !closed {
+			if warning == "" {
+				warning = "source workspace was not found or Herdr is unavailable"
+			}
+			return result, fmt.Errorf("cannot close source workspace before retirement: %s", warning)
+		}
+		result.WorkspaceClosed = true
+	}
 	values := map[string]string{"target": target, "force": strconv.FormatBool(opt.Force)}
 	if err := c.RunHook("retire.pre", values); err != nil {
 		return result, err
@@ -75,10 +87,12 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 			return result, err
 		}
 	}
-	closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
-	result.WorkspaceClosed = closed
-	if warning != "" {
-		result.Warnings = append(result.Warnings, warning)
+	if !result.WorkspaceClosed {
+		closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
+		result.WorkspaceClosed = closed
+		if warning != "" {
+			result.Warnings = append(result.Warnings, warning)
+		}
 	}
 	stopRetiredStatusWatchers(target)
 	if err := removeRetiredGeneratedFiles(target); err != nil {

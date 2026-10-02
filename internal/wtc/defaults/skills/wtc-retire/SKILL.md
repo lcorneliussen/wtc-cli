@@ -61,7 +61,8 @@ It runs teardown hooks for every repo, refuses on dirty or unpushed work,
 removes the worktrees, closes the collection's herdr workspace if one is open,
 and deletes the folder when it contains no other files. It leaves unexpected
 files visible for inspection. A self-retire waits for the initiating agent to
-finish its turn before closing that workspace; another live agent pane blocks
+finish its turn. After a final pane check, it closes the source workspace
+before running hooks or removing worktrees; another live agent pane blocks
 the handoff. Inspect the `--cleanup--` pane for the final result. Its post hook
 runs after product teardown and before the harness worktree is removed.
 `harness/tools/retire.sh` is the compatibility entry point in older harnesses.

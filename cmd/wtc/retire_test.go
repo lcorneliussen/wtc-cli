@@ -201,6 +201,7 @@ elif args[:2] == ["pane", "list"]:
     if os.environ.get("RETIRE_TEST_EXTRA_AGENT"): panes.append({"pane_id":"source:p2","agent":"claude","agent_status":"working"})
     emit({"panes":panes})
 elif args[:2] == ["workspace", "close"]:
+    if os.environ.get("RETIRE_TEST_CLOSE_FAIL"): sys.exit(3)
     emit({})
 else:
     sys.exit(2)
@@ -278,6 +279,21 @@ func TestRetireWorkerClosesVerifiedWorkspaceAndKeepsBareOwner(t *testing.T) {
 	}
 	if !strings.Contains(string(calls), "workspace close source-id") {
 		t.Fatalf("verified workspace was not closed: %s", calls)
+	}
+}
+
+func TestRetireWorkerStopsIfSourceWorkspaceCannotClose(t *testing.T) {
+	target, log := retireWorkerFixture(t)
+	t.Setenv("RETIRE_TEST_CLOSE_FAIL", "1")
+	if err := runRetireWorker("finished", false, false); err == nil || !strings.Contains(err.Error(), "cannot close source workspace") {
+		t.Fatalf("workspace close failure did not stop retirement: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "harness")); err != nil {
+		t.Fatalf("target was removed after workspace close failure: %v", err)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil || !strings.Contains(string(calls), "workspace close source-id") {
+		t.Fatalf("workspace close was not attempted: %q (%v)", calls, err)
 	}
 }
 
