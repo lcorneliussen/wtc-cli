@@ -148,7 +148,10 @@ func TestSelfRetireRequiresMatchingHerdrPane(t *testing.T) {
 
 func retireWorkerFixture(t *testing.T) (string, string) {
 	t.Helper()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "finished") // Same basename as the collection is valid.
+	if err := os.MkdirAll(root, 0755); err != nil {
+		t.Fatal(err)
+	}
 	git := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command("git", args...).CombinedOutput()

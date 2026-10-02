@@ -175,7 +175,7 @@ func runRetireWorker(name string, force, asJSON bool) error {
 	if err != nil {
 		return err
 	}
-	if filepath.Base(root) == name {
+	if current, err := wtc.Discover(root); err == nil && current.Collection == root {
 		return errors.New("retire worker is still inside the target collection")
 	}
 	c, err := wtc.OpenCollection(filepath.Join(root, name))
