@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"text/tabwriter"
 
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -58,5 +59,49 @@ func addSecretsCommands(root *cobra.Command, asJSON *bool) {
 		return linkErr
 	}
 	secrets.AddCommand(link)
+	list := &cobra.Command{Use: "list", Short: "List control-root file names and their link state without reading contents", Args: cobra.NoArgs}
+	var listRepo string
+	list.Flags().StringVar(&listRepo, "repo", "", "Only list files under this repository's control-root directory")
+	list.RunE = func(cmd *cobra.Command, args []string) error {
+		var c *wtc.Context
+		var err error
+		if collection == "" {
+			var cwd string
+			cwd, err = os.Getwd()
+			if err == nil {
+				c, err = wtc.Discover(cwd)
+			}
+		} else {
+			c, err = wtc.OpenCollection(collection)
+		}
+		if err != nil {
+			return err
+		}
+		result, err := c.ListSecrets(listRepo)
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return emit(envelope{OK: true, Data: result, Summary: fmt.Sprintf("%d file(s)", len(result.Files))}, true)
+		}
+		out := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(out, "PATH\tSCOPE\tTARGET\tSTATE\tIGNORED\tPROD")
+		for _, file := range result.Files {
+			prod := ""
+			if file.Production {
+				prod = "yes"
+			}
+			ignored := ""
+			if file.Ignored != nil {
+				ignored = "no"
+				if *file.Ignored {
+					ignored = "yes"
+				}
+			}
+			fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\n", file.Path, file.Scope, file.Target, file.State, ignored, prod)
+		}
+		return out.Flush()
+	}
+	secrets.AddCommand(list)
 	root.AddCommand(secrets)
 }

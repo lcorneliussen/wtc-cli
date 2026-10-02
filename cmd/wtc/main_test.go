@@ -64,4 +64,14 @@ func TestEnvPreflightsPinAndShowsMiseDryRun(t *testing.T) {
 	if err != nil || !strings.Contains(string(out), `"github:lcorneliussen/wtc-cli" = "0.1.1"`) {
 		t.Fatalf("dry run did not show pin: %s, %v", out, err)
 	}
+	cmd = exec.Command("go", "run", ".", "env")
+	out, err = cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "list") || !strings.Contains(string(out), "setup") {
+		t.Fatalf("bare env did not show its commands: %s, %v", out, err)
+	}
+	cmd = exec.Command("go", "run", ".", "env", "setup", "--collection", collection, "--dry-run")
+	out, err = cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), `"github:lcorneliussen/wtc-cli" = "0.1.1"`) {
+		t.Fatalf("named setup dry run did not show pin: %s, %v", out, err)
+	}
 }

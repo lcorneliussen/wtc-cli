@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"text/tabwriter"
 
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
+	"github.com/spf13/cobra"
 )
 
 type envResult struct {
@@ -81,4 +83,49 @@ func printEnvPreview(result envResult) {
 	fmt.Print(result.Env)
 	fmt.Print("\n# mise.toml\n")
 	fmt.Print(result.Mise)
+}
+
+func addEnvListCommand(envCmd *cobra.Command, asJSON *bool, cwd func() (*wtc.Context, error)) {
+	var collection string
+	list := &cobra.Command{Use: "list", Short: "List environment variable names, scopes, and overrides without values", Args: cobra.NoArgs}
+	list.Flags().StringVar(&collection, "collection", "", "Collection directory (default: current)")
+	list.RunE = func(cmd *cobra.Command, args []string) error {
+		var c *wtc.Context
+		var err error
+		if collection == "" {
+			c, err = cwd()
+		} else {
+			c, err = wtc.OpenCollection(collection)
+		}
+		if err != nil {
+			return err
+		}
+		result, err := c.ListEnv()
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return emit(envelope{OK: true, Data: result, Summary: fmt.Sprintf("%d variable name(s)", len(result.Variables))}, true)
+		}
+		out := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(out, "SOURCE\tSCOPE\tFILE")
+		for _, file := range result.Files {
+			state := "present"
+			if !file.Exists {
+				state = "absent"
+			}
+			fmt.Fprintf(out, "%s\t%s\t%s\n", file.Path, file.Scope, state)
+		}
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "KEY\tSOURCE\tSCOPE\tOVERRIDES")
+		for _, variable := range result.Variables {
+			override := ""
+			if variable.Overrides {
+				override = "yes"
+			}
+			fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", variable.Name, variable.Source, variable.Scope, override)
+		}
+		return out.Flush()
+	}
+	envCmd.AddCommand(list)
 }
