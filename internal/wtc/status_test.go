@@ -74,6 +74,8 @@ func TestStatusLocalSnapshotShowsUnresolvedMerge(t *testing.T) {
 	fixtureGit(t, "-C", source, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "upstream")
 	owner := filepath.Join(c.Workspace, ".bare", "agent-harness.git")
 	fixtureGit(t, "--git-dir="+owner, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+	fixtureGit(t, "-C", c.Harness, "config", "user.name", "fixture")
+	fixtureGit(t, "-C", c.Harness, "config", "user.email", "fixture@example.invalid")
 	if _, err := catchUpGit(c.Harness, "merge", "--no-edit", "origin/main"); err == nil {
 		t.Fatal("fixture merge unexpectedly succeeded")
 	}
