@@ -49,4 +49,22 @@ func TestInventoryTUISelectionKeepsRowAndDetailsVisible(t *testing.T) {
 	if m.selected != 16 || m.top > m.selected || m.selected >= m.top+m.bodyHeight() {
 		t.Fatalf("down movement lost selection: top=%d selected=%d", m.top, m.selected)
 	}
+	m.height = 18
+	m.keepSelectionVisible()
+	if want := len(rows) - m.bodyHeight(); m.top != want {
+		t.Fatalf("larger viewport left blank space: top=%d want=%d", m.top, want)
+	}
+}
+
+func TestInventoryTUINarrowStateHeadingAligns(t *testing.T) {
+	for _, width := range []int{32, 40, 56} {
+		m := inventoryTUIModel{title: "inventory", heading: "PATH", width: width, height: 10,
+			rows: []inventoryTUIRow{{name: "example", state: "present"}}}
+		lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+		got := ansi.StringWidth(lines[2][:strings.Index(lines[2], "STATE")])
+		want := ansi.StringWidth(lines[3][:strings.Index(lines[3], "present")])
+		if got != want {
+			t.Fatalf("width %d: heading column %d, state column %d", width, got, want)
+		}
+	}
 }

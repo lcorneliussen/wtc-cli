@@ -94,7 +94,8 @@ func addSecretsCommands(root *cobra.Command, asJSON *bool) {
 		if *asJSON {
 			return emit(envelope{OK: true, Data: result, Summary: fmt.Sprintf("%d file(s)", len(result.Files))}, true)
 		}
-		if tui || !noTUI && term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd()) {
+		if tui || !cmd.Flags().Changed("tui") && !noTUI &&
+			term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd()) {
 			return secretInventoryTUI(c, result)
 		}
 		out := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)

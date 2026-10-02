@@ -117,7 +117,8 @@ func addEnvListCommand(envCmd *cobra.Command, asJSON *bool, cwd func() (*wtc.Con
 		if *asJSON {
 			return emit(envelope{OK: true, Data: result, Summary: fmt.Sprintf("%d variable name(s)", len(result.Variables))}, true)
 		}
-		if tui || !noTUI && term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd()) {
+		if tui || !cmd.Flags().Changed("tui") && !noTUI &&
+			term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd()) {
 			return envInventoryTUI(c, result)
 		}
 		out := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)

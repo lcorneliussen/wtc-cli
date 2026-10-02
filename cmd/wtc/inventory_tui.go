@@ -128,12 +128,14 @@ func (m *inventoryTUIModel) keepSelectionVisible() {
 		return
 	}
 	m.selected = max(0, min(m.selected, len(m.rows)-1))
+	m.top = min(m.top, max(0, len(m.rows)-m.bodyHeight()))
 	if m.selected < m.top {
 		m.top = m.selected
 	}
 	if m.selected >= m.top+m.bodyHeight() {
 		m.top = m.selected - m.bodyHeight() + 1
 	}
+	m.top = min(m.top, max(0, len(m.rows)-m.bodyHeight()))
 }
 
 func (m inventoryTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -206,7 +208,7 @@ func (m inventoryTUIModel) View() tea.View {
 	if width >= 57 {
 		header = statusTUIFit(header, width-29) + "  SCOPE     STATE"
 	} else if width >= 32 {
-		header = statusTUIFit(header, width-19) + "  STATE"
+		header = statusTUIFit(header, width-17) + "  STATE"
 	}
 	lines = append(lines, fit(statusTUIStyle(header, statusToneLabel)))
 	end := min(len(m.rows), m.top+m.bodyHeight())
