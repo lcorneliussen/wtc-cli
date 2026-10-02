@@ -16,7 +16,7 @@ const cleanupWorkspaceLabel = "--cleanup--"
 
 func addRetireCommand(root *cobra.Command, asJSON *bool) {
 	var force bool
-	cmd := &cobra.Command{Use: "retire [collection]", Short: "Retire a finished worktree collection", Args: cobra.MaximumNArgs(1)}
+	cmd := &cobra.Command{Use: "retire <collection>", Short: "Retire a finished worktree collection", Args: cobra.ExactArgs(1)}
 	cmd.Flags().BoolVar(&force, "force", false, "Allow dirty or unpushed work after checking that it is disposable")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		cwd, err := os.Getwd()
@@ -28,7 +28,7 @@ func addRetireCommand(root *cobra.Command, asJSON *bool) {
 			return err
 		}
 		name := filepath.Base(c.Collection)
-		if len(args) > 0 && args[0] != "." {
+		if args[0] != "." {
 			name = args[0]
 		}
 		if name == filepath.Base(c.Collection) {

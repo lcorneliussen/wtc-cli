@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -122,5 +123,134 @@ func TestSelfRetireRefusesToCloseAnotherAgent(t *testing.T) {
 	}
 	if strings.Contains(string(calls), "workspace create") || strings.Contains(string(calls), "pane run") {
 		t.Fatalf("cleanup was scheduled despite another agent: %s", calls)
+	}
+}
+
+func retireWorkerFixture(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	owner := filepath.Join(root, ".bare", "harness.git")
+	if err := os.MkdirAll(filepath.Dir(owner), 0755); err != nil {
+		t.Fatal(err)
+	}
+	git("init", "--bare", "--initial-branch=main", owner)
+	seed := filepath.Join(root, "seed")
+	git("clone", owner, seed)
+	registry := "repos:\n  - name: harness\n    remote: https://github.com/example/harness.git\n    default_ref: main\n"
+	if err := os.WriteFile(filepath.Join(seed, ".harness-repos.yml"), []byte(registry), 0644); err != nil {
+		t.Fatal(err)
+	}
+	git("-C", seed, "add", ".harness-repos.yml")
+	git("-C", seed, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "synthetic harness")
+	git("-C", seed, "push", "origin", "HEAD:main")
+	head := git("--git-dir="+owner, "rev-parse", "main")
+	git("--git-dir="+owner, "update-ref", "refs/remotes/origin/main", head)
+	target := filepath.Join(root, "finished")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	git("--git-dir="+owner, "worktree", "add", "--detach", filepath.Join(target, "harness"), "main")
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(root, "worker-herdr.log")
+	fixture := `#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[3:]
+with open(os.environ["RETIRE_TEST_LOG"], "a") as out: out.write(" ".join(args) + "\n")
+def emit(value): print(json.dumps({"result": value}))
+if args == ["workspace", "list"]:
+    emit({"workspaces":[{"label":"finished","workspace_id":"source-id"},{"label":"--cleanup--","workspace_id":"cleanup-id"}]})
+elif args[:2] == ["pane", "list"]:
+    panes = [{"pane_id":"source:p1","agent":"codex","agent_status":"done"}]
+    if os.environ.get("RETIRE_TEST_EXTRA_AGENT"): panes.append({"pane_id":"source:p2","agent":"claude","agent_status":"working"})
+    emit({"panes":panes})
+elif args[:2] == ["workspace", "close"]:
+    emit({})
+else:
+    sys.exit(2)
+`
+	if err := os.WriteFile(filepath.Join(bin, "herdr"), []byte(fixture), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RETIRE_TEST_LOG", log)
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_SESSION", "fixture")
+	t.Setenv("HERDR_WORKSPACE_ID", "cleanup-id")
+	t.Setenv("WTC_RETIRE_SESSION", "fixture")
+	t.Setenv("WTC_RETIRE_SOURCE_WORKSPACE", "source-id")
+	t.Setenv("WTC_RETIRE_SOURCE_PANE", "source:p1")
+	t.Setenv("WTC_RETIRE_TARGET", "finished")
+	t.Setenv("HARNESS_HERDR_SESSION", "fixture")
+	prior, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prior) })
+	return target, log
+}
+
+func TestRetireWorkerRejectsWrongIdentityBeforeDeletion(t *testing.T) {
+	target, log := retireWorkerFixture(t)
+	t.Setenv("WTC_RETIRE_TARGET", "another")
+	if err := runRetireWorker("finished", false, false); err == nil || !strings.Contains(err.Error(), "not in its scheduled") {
+		t.Fatalf("wrong worker identity was accepted: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("target was removed: %v", err)
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		t.Fatalf("worker contacted Herdr before identity validation: %v", err)
+	}
+}
+
+func TestRetireWorkerRefusesNewAgent(t *testing.T) {
+	target, log := retireWorkerFixture(t)
+	t.Setenv("RETIRE_TEST_EXTRA_AGENT", "1")
+	if err := runRetireWorker("finished", false, false); err == nil || !strings.Contains(err.Error(), "another agent appeared") {
+		t.Fatalf("second agent was not protected: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("target was removed: %v", err)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(calls), "workspace close") {
+		t.Fatalf("workspace closed despite second agent: %s", calls)
+	}
+}
+
+func TestRetireWorkerClosesVerifiedWorkspaceAndKeepsBareOwner(t *testing.T) {
+	target, log := retireWorkerFixture(t)
+	if err := runRetireWorker("finished", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("target remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(target), ".bare", "harness.git")); err != nil {
+		t.Fatalf("bare owner was removed: %v", err)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "workspace close source-id") {
+		t.Fatalf("verified workspace was not closed: %s", calls)
 	}
 }

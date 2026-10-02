@@ -159,10 +159,14 @@ func inspectRetireWorktrees(target string) ([]retireWorktree, []string, error) {
 			continue
 		}
 		path := filepath.Join(target, entry.Name())
-		if _, err := os.Lstat(filepath.Join(path, ".git")); os.IsNotExist(err) {
+		gitEntry, err := os.Lstat(filepath.Join(path, ".git"))
+		if os.IsNotExist(err) {
 			continue
 		} else if err != nil {
 			return nil, nil, err
+		}
+		if !gitEntry.Mode().IsRegular() {
+			return nil, nil, fmt.Errorf("%s is not a linked Git worktree", path)
 		}
 		top, err := gitOutput("-C", path, "rev-parse", "--show-toplevel")
 		resolvedTop, topErr := filepath.EvalSymlinks(top)
