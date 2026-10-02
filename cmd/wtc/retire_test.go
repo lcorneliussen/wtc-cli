@@ -202,6 +202,8 @@ elif args[:2] == ["pane", "list"]:
     emit({"panes":panes})
 elif args[:2] == ["workspace", "close"]:
     if os.environ.get("RETIRE_TEST_CLOSE_FAIL"): sys.exit(3)
+    if os.environ.get("RETIRE_TEST_DIRTY_ON_CLOSE"):
+        with open(os.path.join(os.environ["RETIRE_TEST_TARGET"], "harness", "new-work.txt"), "w") as out: out.write("agent work\n")
     emit({})
 else:
     sys.exit(2)
@@ -211,6 +213,7 @@ else:
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("RETIRE_TEST_LOG", log)
+	t.Setenv("RETIRE_TEST_TARGET", target)
 	t.Setenv("HERDR_ENV", "1")
 	t.Setenv("HERDR_SESSION", "fixture")
 	t.Setenv("HERDR_WORKSPACE_ID", "cleanup-id")
@@ -294,6 +297,21 @@ func TestRetireWorkerStopsIfSourceWorkspaceCannotClose(t *testing.T) {
 	calls, err := os.ReadFile(log)
 	if err != nil || !strings.Contains(string(calls), "workspace close source-id") {
 		t.Fatalf("workspace close was not attempted: %q (%v)", calls, err)
+	}
+}
+
+func TestRetireWorkerRechecksWorkAfterSourceWorkspaceCloses(t *testing.T) {
+	target, log := retireWorkerFixture(t)
+	t.Setenv("RETIRE_TEST_DIRTY_ON_CLOSE", "1")
+	if err := runRetireWorker("finished", false, false); err == nil || !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Fatalf("new work after first preflight did not block retirement: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "harness", "new-work.txt")); err != nil {
+		t.Fatalf("new work was removed after the second preflight: %v", err)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil || !strings.Contains(string(calls), "workspace close source-id") {
+		t.Fatalf("workspace was not closed before the final preflight: %q (%v)", calls, err)
 	}
 }
 

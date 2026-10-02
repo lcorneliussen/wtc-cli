@@ -53,6 +53,16 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 			return result, fmt.Errorf("cannot close source workspace before retirement: %s", warning)
 		}
 		result.WorkspaceClosed = true
+		// Agent work may have changed the collection after the first preflight
+		// but before Herdr closed its workspace. Inspect it again once no new
+		// source-pane activity can begin, and use this fresh worktree list.
+		checked, current, err := c.retirePreflight(opt)
+		if err != nil {
+			checked.WorkspaceClosed = true
+			return checked, err
+		}
+		result, worktrees = checked, current
+		result.WorkspaceClosed = true
 	}
 	values := map[string]string{"target": target, "force": strconv.FormatBool(opt.Force)}
 	if err := c.RunHook("retire.pre", values); err != nil {
