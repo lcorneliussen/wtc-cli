@@ -4,8 +4,8 @@ Machine-local secrets and per-repo local config live in a single **control
 root** outside every repo and collection:
 
 ```text
-~/.config/wtc/                 # $WTC_CONFIG_ROOT (this is the default)
-  wtc.env                            # machine-wide tool defaults (not secrets)
+<workspace-root>/.config/                 # $WTC_CONFIG_ROOT (this is the default)
+  wtc.env                            # workspace-wide tool defaults (not secrets)
   <repo-name>/<repo-relative-path>   # e.g. api/.env,
                                      #      console/.env.local
   certificates/                      # signing material not owned by any repo
@@ -48,8 +48,15 @@ for the machine → control root; belongs to this piece of work →
 collection-scoped.**
 
 `WTC_CONFIG_ROOT` is exported in every collection's `.env.collection`
-(default `~/.config/wtc`). Files are stored at their repo-relative
+(default `<workspace-root>/.config`). Files are stored at their repo-relative
 path, so linking is mechanical.
+
+## Workspace boundary
+
+Existing generated environments retain their old root until refreshed. To
+migrate, explicitly set `WTC_CONFIG_ROOT` to the intended workspace's `.config`
+and run `harness/tools/refresh-env.sh` in the target collection. Existing panes
+must reload the environment. Existing credentials are not moved or copied.
 
 ## Wiring a worktree
 

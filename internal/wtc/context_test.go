@@ -47,3 +47,28 @@ func TestRegistrySectionsRejectDuplicateNames(t *testing.T) {
 		t.Fatalf("accepted duplicate names across sections: %v", err)
 	}
 }
+
+func TestConfigRootDefaultsToWorkspaceConfigDirectory(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	t.Setenv("WTC_CONFIG_ROOT", "")
+	if err := os.Remove(filepath.Join(c.Collection, ".env.collection")); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	opened, err := OpenCollection(c.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(c.Workspace, ".config"); opened.ConfigRoot != want {
+		t.Fatalf("default control root %q, want %q", opened.ConfigRoot, want)
+	}
+	fixtureFile(t, filepath.Join(c.Collection, ".env.collection"), "WTC_CONFIG_ROOT=/generated/root\n", 0644)
+	opened, err = OpenCollection(c.Collection)
+	if err != nil || opened.ConfigRoot != "/generated/root" {
+		t.Fatalf("generated environment did not win: %q %v", opened.ConfigRoot, err)
+	}
+	t.Setenv("WTC_CONFIG_ROOT", "/explicit/root")
+	opened, err = OpenCollection(c.Collection)
+	if err != nil || opened.ConfigRoot != "/explicit/root" {
+		t.Fatalf("explicit override did not win: %q %v", opened.ConfigRoot, err)
+	}
+}
