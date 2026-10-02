@@ -67,6 +67,32 @@ func TestCatchUpUsesOpenPRMergeTarget(t *testing.T) {
 	}
 }
 
+func TestCatchUpHandsOffMissingOpenPRTarget(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	fixtureGit(t, "-C", c.Harness, "switch", "-qc", "topic")
+	before := fixtureGit(t, "-C", c.Harness, "rev-parse", "HEAD")
+	owner := filepath.Join(c.Workspace, ".bare", "agent-harness.git")
+	fixtureGit(t, "--git-dir="+owner, "remote", "set-url", "origin", "git@github.com:example/agent-harness.git")
+	fixtureFile(t, filepath.Join(c.Collection, ".wtc-prs"), "agent-harness 7 topic - fixture\n", 0644)
+	bin := filepath.Join(c.Workspace, "bin")
+	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' '{\"state\":\"OPEN\",\"baseRefName\":\"release/missing\"}'\n", 0755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	report, _ := c.CatchUp(CatchUpOptions{Repos: []string{"harness"}, DryRun: true, NoSkills: true, NoMCP: true, NoEnv: true, NoSecrets: true})
+	for _, row := range report.Outcomes {
+		if row.Kind == "repo" {
+			if row.Outcome != "needs-owner" || row.TargetRef != "origin/release/missing" || row.NextAction == "" ||
+				!strings.Contains(row.Reason, "merge target") {
+				t.Fatalf("missing PR target not handed off: %+v", row)
+			}
+			if after := fixtureGit(t, "-C", c.Harness, "rev-parse", "HEAD"); after != before {
+				t.Fatal("missing PR target moved the branch")
+			}
+			return
+		}
+	}
+	t.Fatalf("missing repo outcome: %+v", report)
+}
+
 func TestCatchUpInventorySelectsSymlinkedWorktreeDirectory(t *testing.T) {
 	c := newWorkspaceFixture(t)
 	owner := filepath.Join(c.Workspace, ".bare", "widget.git")

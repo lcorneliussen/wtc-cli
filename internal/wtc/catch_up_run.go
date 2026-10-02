@@ -456,6 +456,8 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		outcome, reason := "failed", ref+" unavailable"
 		if fetched[t.owner] == "failed" {
 			reason = "owner fetch failed; stale refs not used"
+		} else if targetErr != nil && (pr.state == "OPEN" || pr.state == "DRAFT") {
+			outcome, reason = "needs-owner", "open PR merge target "+ref+" is unavailable; branch left untouched"
 		} else if targetErr == nil {
 			outcome, reason = c.catchUpReconcile(t, ref, target, pr, opt)
 		}
