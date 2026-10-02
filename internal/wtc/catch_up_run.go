@@ -521,7 +521,11 @@ func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt Catch
 		}
 	}
 	if !opt.NoSecrets {
-		run("link-secrets.sh", "secrets:"+t.repo, "--repo", filepath.Base(t.path))
+		if t.managed {
+			run("link-secrets.sh", "secrets:"+t.repo, "--repo", filepath.Base(t.path))
+		} else {
+			report.add("hook", t.collection, "secrets:"+t.repo, "skipped", "unmanaged sibling; no registry secrets to link", "", "", "")
+		}
 	}
 	if !t.harness {
 		return

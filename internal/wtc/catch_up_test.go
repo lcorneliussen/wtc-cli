@@ -396,3 +396,33 @@ func TestCatchUpPinsStashWhenRestoreConflicts(t *testing.T) {
 		t.Fatalf("missing stash recovery row: %+v", report.Outcomes)
 	}
 }
+
+func TestCatchUpSkipsSecretsHookForUnmanagedSibling(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	owner := filepath.Join(c.Workspace, ".bare", "widget.git")
+	fixtureGit(t, "--git-dir="+owner, "worktree", "add", "--detach", filepath.Join(c.Collection, "widget"), "origin/main")
+	fixtureGit(t, "--git-dir="+owner, "worktree", "add", "--detach", filepath.Join(c.Collection, "ext.thing"), "origin/main")
+	calls := filepath.Join(c.Workspace, "secrets-calls")
+	t.Setenv("MOCK_SECRETS_LOG", calls)
+	fixtureFile(t, filepath.Join(c.Harness, "tools", "link-secrets.sh"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MOCK_SECRETS_LOG\"\n", 0755)
+	report, err := c.CatchUp(CatchUpOptions{Repos: []string{"widget", "ext.thing"}, NoSkills: true, NoMCP: true, NoEnv: true})
+	if err != nil || report.ExitStatus != 0 {
+		t.Fatalf("catch-up with an unmanaged sibling failed: %+v %v", report, err)
+	}
+	logged, _ := os.ReadFile(calls)
+	if !strings.Contains(string(logged), "--repo widget") || strings.Contains(string(logged), "ext.thing") {
+		t.Fatalf("secrets hook calls: %q", logged)
+	}
+	seen := false
+	for _, row := range report.Outcomes {
+		if row.Kind == "hook" && row.Repo == "secrets:ext.thing" {
+			if row.Outcome != "skipped" || !strings.Contains(row.Reason, "unmanaged") {
+				t.Fatalf("unmanaged sibling secrets row: %+v", row)
+			}
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatalf("missing skipped secrets row: %+v", report.Outcomes)
+	}
+}
