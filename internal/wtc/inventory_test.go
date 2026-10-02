@@ -61,11 +61,11 @@ func TestInventoriesExposeNamesScopesAndLinkStateWithoutValues(t *testing.T) {
 	if got := byPath["app/visible.txt"]; got.State != "not-ignored" || got.Ignored == nil || *got.Ignored {
 		t.Fatalf("unignored file: %+v", got)
 	}
-	if got := byPath["gh/hosts.yml"]; got.Scope != "all collections (machine config)" || got.State != "control-only" {
-		t.Fatalf("machine config: %+v", got)
+	if got := byPath["gh/hosts.yml"]; got.Scope != "all collections using this control root (workspace config)" || got.State != "control-only" {
+		t.Fatalf("workspace config: %+v", got)
 	}
-	if got := byPath["wtc.env"]; got.Scope != "all collections (machine config)" {
-		t.Fatalf("machine defaults: %+v", got)
+	if got := byPath["wtc.env"]; got.Scope != "all collections using this control root (workspace config)" {
+		t.Fatalf("workspace defaults file: %+v", got)
 	}
 	if _, err := c.LinkSecrets(SecretLinkOptions{}); err == nil { // visible.txt is deliberately not ignored.
 		t.Fatal("expected link refusal for an unignored file")
@@ -99,7 +99,13 @@ func TestInventoriesExposeNamesScopesAndLinkStateWithoutValues(t *testing.T) {
 	if len(env.Files) != 3 || len(env.Variables) != 5 {
 		t.Fatalf("env inventory: %+v", env)
 	}
+	if env.Files[0].Path != "wtc.env" || env.Files[0].Scope != "all collections using this control root (workspace defaults)" {
+		t.Fatalf("workspace defaults file scope: %+v", env.Files[0])
+	}
 	for _, variable := range env.Variables {
+		if variable.Source == "wtc.env" && variable.Scope != "all collections using this control root (workspace defaults)" {
+			t.Fatalf("workspace defaults scope: %+v", variable)
+		}
 		if variable.Name == "SHARED_NAME" && variable.Source == ".env.collection.local" && !variable.Overrides {
 			t.Fatalf("missing local override marker: %+v", variable)
 		}

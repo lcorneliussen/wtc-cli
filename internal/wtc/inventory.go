@@ -53,7 +53,7 @@ func (c *Context) ListEnv() (EnvInventory, error) {
 	for _, source := range []struct {
 		path, label, scope string
 	}{
-		{filepath.Join(c.ConfigRoot, "wtc.env"), "wtc.env", "all collections (machine defaults)"},
+		{filepath.Join(c.ConfigRoot, "wtc.env"), "wtc.env", "all collections using this control root (workspace defaults)"},
 		{filepath.Join(c.Collection, ".env.collection"), ".env.collection", "this collection (generated)"},
 		{filepath.Join(c.Collection, ".env.collection.local"), ".env.collection.local", "this collection (local override)"},
 	} {
@@ -142,7 +142,7 @@ func (c *Context) ListSecrets(repoFilter string) (SecretInventory, error) {
 		}
 		if !entry.IsDir() {
 			if repoFilter == "" && (entry.Type().IsRegular() || entry.Type()&os.ModeSymlink != 0) {
-				result.Files = append(result.Files, SecretInventoryFile{Path: name, Scope: "all collections (machine config)", State: "control-only"})
+				result.Files = append(result.Files, SecretInventoryFile{Path: name, Scope: "all collections using this control root (workspace config)", State: "control-only"})
 			}
 			continue
 		}
@@ -180,7 +180,7 @@ func (c *Context) ListSecrets(repoFilter string) (SecretInventory, error) {
 					row.State = "prod-excluded"
 				}
 			} else if machineConfig || !validRepoName.MatchString(name) {
-				row.Scope = "all collections (machine config)"
+				row.Scope = "all collections using this control root (workspace config)"
 				row.State = "control-only"
 			}
 			result.Files = append(result.Files, row)

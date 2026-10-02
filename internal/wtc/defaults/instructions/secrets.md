@@ -76,10 +76,11 @@ wtc env list                     # variable names and override sources
 `wtc secrets list` labels control-root files as available to every collection
 containing that repository, then shows whether each target is linked, locally
 overridden, not ignored, or excluded as production-capable in this collection.
-Machine config files are control-only. `.env.collection.local` is this
+Workspace control files are control-only. `.env.collection.local` is this
 collection's local secret-variable file; `wtc env list` shows its key names
-and which ones override generated keys. `wtc.env` holds machine defaults for
-all collections, while `.env.collection` is generated for this collection.
+and which ones override generated keys. `wtc.env` holds workspace defaults for
+collections using that control root, while `.env.collection` is generated for
+this collection.
 These commands report file paths and variable names only.
 In an interactive terminal they open a scrollable view sized to the pane.
 Use arrow keys or `j`/`k` to inspect rows and `q` to exit. Pass `--no-tui`
