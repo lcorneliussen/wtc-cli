@@ -69,6 +69,9 @@ collection's local secret-variable file; `wtc env list` shows its key names
 and which ones override generated keys. `wtc.env` holds machine defaults for
 all collections, while `.env.collection` is generated for this collection.
 These commands report file paths and variable names only.
+In an interactive terminal they open a scrollable view sized to the pane.
+Use arrow keys or `j`/`k` to inspect rows and `q` to exit. Pass `--no-tui`
+for a compact one-shot table or `--json` for complete metadata.
 
 `tools/link-secrets.sh` does it, for every checked-out repo in a collection:
 
