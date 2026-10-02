@@ -127,7 +127,7 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	var err error
 	switch forge {
 	case "github.com":
-		raw, err = statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,reviewRequests,latestReviews,mergedAt")
+		raw, err = statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,reviewRequests,latestReviews,mergedAt,baseRefName")
 	case "bitbucket.org":
 		parts := strings.SplitN(slug, "/", 2)
 		raw, err = statusJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
@@ -258,6 +258,17 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 			}
 		}
 		if detail.State == "OPEN" || detail.State == "DRAFT" {
+			if branchRow >= 0 && detail.Base != "" && catchUpGitOK(snapshot.Repos[branchRow].Worktree, "check-ref-format", "--branch", detail.Base) {
+				if behind, countErr := statusCount(snapshot.Repos[branchRow].Worktree, "HEAD..origin/"+detail.Base); countErr == nil {
+					if snapshot.Repos[branchRow].Behind > 0 {
+						snapshot.StaleCount--
+					}
+					snapshot.Repos[branchRow].Behind = behind
+					if behind > 0 {
+						snapshot.StaleCount++
+					}
+				}
+			}
 			if branchRow >= 0 && snapshot.Repos[branchRow].PR == nil {
 				prURL := record.URL
 				if prURL == "" && forge != "" {

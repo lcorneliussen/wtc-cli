@@ -35,6 +35,7 @@ type CatchUpRow struct {
 	Reason         string  `json:"reason"`
 	SourceSHA      *string `json:"source_sha"`
 	TargetSHA      *string `json:"target_sha"`
+	TargetRef      string  `json:"target_ref,omitempty"`
 	ResultSHA      *string `json:"result_sha"`
 	NextActor      string  `json:"next_actor,omitempty"`
 	Handoff        string  `json:"handoff,omitempty"`
@@ -71,6 +72,13 @@ func (r *CatchUpReport) add(kind, collection, repo, outcome, reason, source, tar
 		row.NextActor = "owning agent for collection " + collection
 		row.Handoff = "needed; no notification sent"
 		row.NextAction = "Resume in target collection " + row.CollectionPath + "; read this report and inspect current state before fixing or pushing."
+		if strings.HasPrefix(reason, "merge conflict;") {
+			row.NextAction = "Resume in target collection " + row.CollectionPath + "; inspect the listed paths and current branch, merge the target ref, resolve conflicts, run relevant checks, commit the merge, and push only if its PR is open or draft."
+		} else if strings.HasPrefix(reason, "in-progress MERGE_HEAD;") {
+			row.NextAction = "Resume in target collection " + row.CollectionPath + "; inspect git status and unmerged paths, resolve or abort the existing merge, then run relevant checks and push only if its PR is open or draft."
+		} else if strings.HasPrefix(reason, "merge abort failed;") {
+			row.NextAction = "Resume in target collection " + row.CollectionPath + "; preserve the in-progress merge, inspect git status and unmerged paths, then resolve and commit or safely abort it before any retry."
+		}
 	}
 	if outcome == "failed" || outcome == "needs-owner" {
 		r.ExitStatus = 1
@@ -88,13 +96,19 @@ func catchUpMaybeSHA(value string) *string {
 func (r CatchUpReport) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Catch-up report\n\nInitiated from: %s\n\n", r.Initiator)
-	b.WriteString("| Collection | Repo / step | Outcome | Reason |\n| --- | --- | --- | --- |\n")
+	b.WriteString("| Collection | Repo / step | Target ref | Outcome | Reason |\n| --- | --- | --- | --- | --- |\n")
 	for _, row := range r.Outcomes {
-		fields := []string{row.Collection, row.Repo, row.Outcome, row.Reason}
+		fields := []string{row.Collection, row.Repo, row.TargetRef, row.Outcome, row.Reason}
 		for i, field := range fields {
 			fields[i] = strings.ReplaceAll(strings.ReplaceAll(field, "|", "\\|"), "\n", " ")
 		}
 		fmt.Fprintf(&b, "| %s |\n", strings.Join(fields, " | "))
+	}
+	for _, row := range r.Outcomes {
+		if row.NextAction == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "\n### %s / %s\n\n%s\n", row.Collection, row.Repo, row.NextAction)
 	}
 	b.WriteString("\nneeds-owner: hand the named collection its row and source/target SHAs. This report does not wake an idle agent or authorize edits in that collection.\n")
 	return b.String()

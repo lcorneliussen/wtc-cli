@@ -37,6 +37,8 @@ type StatusRepo struct {
 	Behind        int            `json:"behind"`
 	Tree          string         `json:"tree"`
 	Changed       int            `json:"changed"`
+	Conflict      bool           `json:"conflict,omitempty"`
+	Operation     string         `json:"operation,omitempty"`
 	PR            *StatusPRFacts `json:"pr"`
 	Tip           *StatusBuild   `json:"tip"`
 	Prod          *StatusBuild   `json:"prod"`
@@ -140,6 +142,10 @@ func statusLocalRepo(t catchUpTarget) (StatusRepo, error) {
 	if porcelain != "" {
 		row.Changed = len(strings.Split(porcelain, "\n"))
 		row.Tree = fmt.Sprintf("±%d", row.Changed)
+	}
+	row.Operation = catchUpOperation(t)
+	if unmerged, err := statusGit(t.path, "diff", "--name-only", "--diff-filter=U"); err == nil && unmerged != "" {
+		row.Conflict = true
 	}
 	return row, nil
 }

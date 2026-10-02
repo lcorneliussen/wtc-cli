@@ -296,14 +296,12 @@ func statusTUIPR(pr *wtc.StatusPRFacts) string {
 		switch token {
 		case "SUCCESS", "approved":
 			parts = append(parts, "✓")
-		case "FAILURE", "ERROR":
+		case "FAILURE", "ERROR", "CONFLICTING", "DIRTY":
 			parts = append(parts, "✗")
 		case "PENDING", "EXPECTED":
 			parts = append(parts, "●")
 		case "BEHIND":
 			parts = append(parts, "↓")
-		case "DIRTY":
-			parts = append(parts, "⚠")
 		case "BLOCKED":
 			parts = append(parts, "⊘")
 		case "changes":
@@ -478,7 +476,11 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 			name = row.Collection + "/" + row.Dir
 		}
 		tree := "·"
-		if row.Tree != "" && row.Tree != "clean" {
+		if row.Conflict {
+			tree = "✗"
+		} else if row.Operation != "" {
+			tree = "⚠"
+		} else if row.Tree != "" && row.Tree != "clean" {
 			tree = row.Tree
 		}
 		nameCell := statusTUIFit(statusTUISafe(name), l.name)
@@ -504,6 +506,8 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 		if styled {
 			if tree == "·" {
 				treeCell = statusTUIStyle(treeCell, statusToneDim)
+			} else if row.Conflict {
+				treeCell = statusTUIStyle(treeCell, statusToneFailure)
 			} else {
 				treeCell = statusTUIStyle(treeCell, statusToneWarning)
 			}
@@ -519,6 +523,8 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 			}
 			if row.Behind > 0 {
 				behind = fmt.Sprint(row.Behind)
+			} else if row.Conflict || row.PR != nil && (row.PR.Merge == "CONFLICTING" || row.PR.Merge == "DIRTY") {
+				behind = "✗"
 			}
 			aheadCell, behindCell := statusTUIFit(ahead, l.ahead), statusTUIFit(behind, l.behind)
 			if styled {
@@ -527,7 +533,9 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 				} else {
 					aheadCell = statusTUIStyle(aheadCell, statusToneDim)
 				}
-				if row.Behind > 0 {
+				if row.Conflict || row.PR != nil && (row.PR.Merge == "CONFLICTING" || row.PR.Merge == "DIRTY") {
+					behindCell = statusTUIStyle(behindCell, statusToneFailure)
+				} else if row.Behind > 0 {
 					behindCell = statusTUIStyle(behindCell, statusToneWarning)
 				} else {
 					behindCell = statusTUIStyle(behindCell, statusToneDim)
@@ -651,14 +659,12 @@ func statusTUIPRGlyph(value *string) string {
 	switch *value {
 	case "SUCCESS", "approved", "MERGEABLE":
 		return "✓"
-	case "FAILURE", "ERROR", "changes", "CONFLICTING":
+	case "FAILURE", "ERROR", "changes", "CONFLICTING", "DIRTY":
 		return "✗"
 	case "PENDING", "EXPECTED", "waiting":
 		return "●"
 	case "BEHIND":
 		return "↓"
-	case "DIRTY":
-		return "⚠"
 	case "BLOCKED":
 		return "⊘"
 	case "commented":
@@ -750,7 +756,9 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 		}
 		state := "open"
 		merged := statusTUIMergedPR(row)
-		if row.OnBranch {
+		if row.Merge != nil && (*row.Merge == "CONFLICTING" || *row.Merge == "DIRTY") {
+			state = "✗ conflict"
+		} else if row.OnBranch {
 			state = "⚠ catch-up"
 		} else if row.Draft {
 			state = "◇ draft"
@@ -771,17 +779,19 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 			if row.URL != nil && statusTUIURL(*row.URL) != "" {
 				linkTone := statusToneLink
 				if merged && !row.OnBranch {
-					linkTone = "2;38;5;245"
+					linkTone = statusToneDim
 				}
 				number = statusTUIFitANSI(statusTUILinkTone("#"+row.Number+" ↗", *row.URL, linkTone), l.number)
 			}
 			rowTone := statusToneLabel
 			if merged && !row.OnBranch {
-				rowTone = "2;38;5;245"
+				rowTone = statusToneDim
 			}
 			repo = statusTUIStyle(repo, rowTone)
 			title = statusTUIStyle(title, rowTone)
-			if row.OnBranch {
+			if row.Merge != nil && (*row.Merge == "CONFLICTING" || *row.Merge == "DIRTY") {
+				stateCell = statusTUIStyle(stateCell, statusToneFailure)
+			} else if row.OnBranch {
 				stateCell = statusTUIStyle(stateCell, statusToneWarning)
 			} else {
 				stateCell = statusTUIStyle(stateCell, statusToneDim)

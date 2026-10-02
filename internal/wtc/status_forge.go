@@ -17,6 +17,7 @@ type statusPRDetail struct {
 	Review          string
 	Title           string
 	MergedOn        string
+	Base            string
 	ChecksUnsettled bool
 }
 
@@ -68,6 +69,7 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 		ReviewDecision    string            `json:"reviewDecision"`
 		MergeStateStatus  string            `json:"mergeStateStatus"`
 		MergedAt          string            `json:"mergedAt"`
+		BaseRefName       string            `json:"baseRefName"`
 		ReviewRequests    []json.RawMessage `json:"reviewRequests"`
 		LatestReviews     []json.RawMessage `json:"latestReviews"`
 		StatusCheckRollup []struct {
@@ -85,7 +87,7 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	checks, unsettled := statusCheckResult(p.StatusCheckRollup)
 	d := statusPRDetail{Number: fmt.Sprint(p.Number), State: strings.ToUpper(p.State),
 		Checks: checks, ChecksUnsettled: unsettled, Merge: p.MergeStateStatus,
-		Title: cleanPRField(p.Title), MergedOn: p.MergedAt}
+		Title: cleanPRField(p.Title), MergedOn: p.MergedAt, Base: p.BaseRefName}
 	if d.Title == "" {
 		d.Title = fallback.Title
 	}
@@ -124,11 +126,16 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 
 func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	var p struct {
-		ID           int    `json:"id"`
-		State        string `json:"state"`
-		Draft        bool   `json:"draft"`
-		Title        string `json:"title"`
-		MergedOn     string `json:"merged_on"`
+		ID          int    `json:"id"`
+		State       string `json:"state"`
+		Draft       bool   `json:"draft"`
+		Title       string `json:"title"`
+		MergedOn    string `json:"merged_on"`
+		Destination struct {
+			Branch struct {
+				Name string `json:"name"`
+			} `json:"branch"`
+		} `json:"destination"`
 		Participants []struct {
 			Approved bool   `json:"approved"`
 			State    string `json:"state"`
@@ -141,7 +148,7 @@ func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 		return statusPRDetail{}, fmt.Errorf("missing Bitbucket PR identity or state")
 	}
 	d := statusPRDetail{Number: fmt.Sprint(p.ID), State: strings.ToUpper(p.State),
-		Checks: "NONE", Merge: "UNKNOWN", Review: "none", Title: cleanPRField(p.Title)}
+		Checks: "NONE", Merge: "UNKNOWN", Review: "none", Title: cleanPRField(p.Title), Base: p.Destination.Branch.Name}
 	if d.Title == "" {
 		d.Title = fallback.Title
 	}

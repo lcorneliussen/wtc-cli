@@ -10,7 +10,7 @@ import (
 )
 
 type catchUpPR struct {
-	state, mergeCommit, head string
+	state, mergeCommit, head, base string
 }
 
 func catchUpGit(path string, args ...string) (string, error) {
@@ -60,6 +60,16 @@ func catchUpValidPRState(state string) bool {
 	return false
 }
 
+func catchUpRefForPR(worktree, defaultRef string, pr catchUpPR) (string, error) {
+	if pr.state != "OPEN" && pr.state != "DRAFT" {
+		return defaultRef, nil
+	}
+	if pr.base == "" || !catchUpGitOK(worktree, "check-ref-format", "--branch", pr.base) {
+		return "", fmt.Errorf("open PR merge target unavailable or invalid")
+	}
+	return "origin/" + pr.base, nil
+}
+
 func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 	target, err := OpenCollection(filepath.Join(c.Workspace, t.collection))
 	if err != nil {
@@ -87,13 +97,14 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 		if forge != "github.com" {
 			return catchUpPR{state: "UNKNOWN"} // No bounded branch lookup on this forge.
 		}
-		out, err := catchUpJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "all", "--json", "state,isDraft")
+		out, err := catchUpJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "all", "--json", "state,isDraft,baseRefName")
 		if err != nil {
 			return catchUpPR{state: "UNKNOWN"}
 		}
 		var rows []struct {
-			State   string `json:"state"`
-			IsDraft bool   `json:"isDraft"`
+			State       string `json:"state"`
+			IsDraft     bool   `json:"isDraft"`
+			BaseRefName string `json:"baseRefName"`
 		}
 		if json.Unmarshal(out, &rows) != nil {
 			return catchUpPR{state: "UNKNOWN"}
@@ -101,17 +112,32 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 		if len(rows) == 0 {
 			return catchUpPR{state: "NONE"}
 		}
-		state := rows[0].State
-		if !catchUpValidPRState(state) {
-			return catchUpPR{state: "UNKNOWN"}
+		chosen := catchUpPR{state: "NONE"}
+		for _, row := range rows {
+			state := row.State
+			if !catchUpValidPRState(state) {
+				return catchUpPR{state: "UNKNOWN"}
+			}
+			if row.IsDraft && state == "OPEN" {
+				state = "DRAFT"
+			}
+			if state == "OPEN" || state == "DRAFT" {
+				if chosen.state == "OPEN" || chosen.state == "DRAFT" {
+					if chosen.base != row.BaseRefName {
+						return catchUpPR{state: "UNKNOWN"}
+					}
+				} else {
+					chosen = catchUpPR{state: state, base: row.BaseRefName}
+				}
+			} else if chosen.state == "NONE" {
+				chosen = catchUpPR{state: state}
+			}
 		}
-		if rows[0].IsDraft && state == "OPEN" {
-			state = "DRAFT"
-		}
-		return catchUpPR{state: state}
+		return chosen
 	}
 	chosen := catchUpPR{state: "UNKNOWN"}
 	liveState := ""
+	liveBase := ""
 	for _, record := range selected {
 		if forge == "bitbucket.org" {
 			parts := strings.SplitN(slug, "/", 2)
@@ -130,6 +156,11 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 						Hash string `json:"hash"`
 					} `json:"commit"`
 				} `json:"source"`
+				Destination struct {
+					Branch struct {
+						Name string `json:"name"`
+					} `json:"branch"`
+				} `json:"destination"`
 			}
 			if json.Unmarshal(out, &facts) != nil {
 				return catchUpPR{state: "UNKNOWN"}
@@ -142,6 +173,11 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 				return catchUpPR{state: "UNKNOWN"}
 			}
 			if state == "OPEN" || state == "DRAFT" {
+				base := facts.Destination.Branch.Name
+				if liveState != "" && liveBase != base {
+					return catchUpPR{state: "UNKNOWN"}
+				}
+				liveBase = base
 				if state == "DRAFT" || liveState == "" {
 					liveState = state
 				}
@@ -152,15 +188,16 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 			}
 			continue
 		}
-		out, err := catchUpJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "state,isDraft,headRefOid,mergeCommit")
+		out, err := catchUpJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "state,isDraft,headRefOid,mergeCommit,baseRefName")
 		if err != nil {
 			return catchUpPR{state: "UNKNOWN"}
 		}
 		var facts struct {
-			State      string `json:"state"`
-			IsDraft    bool   `json:"isDraft"`
-			HeadRefOid string `json:"headRefOid"`
-			Merge      struct {
+			State       string `json:"state"`
+			IsDraft     bool   `json:"isDraft"`
+			HeadRefOid  string `json:"headRefOid"`
+			BaseRefName string `json:"baseRefName"`
+			Merge       struct {
 				OID string `json:"oid"`
 			} `json:"mergeCommit"`
 		}
@@ -172,6 +209,10 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 			state = "DRAFT"
 		}
 		if state == "OPEN" || state == "DRAFT" {
+			if liveState != "" && liveBase != facts.BaseRefName {
+				return catchUpPR{state: "UNKNOWN"}
+			}
+			liveBase = facts.BaseRefName
 			if state == "DRAFT" || liveState == "" {
 				liveState = state
 			}
@@ -182,7 +223,7 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 		}
 	}
 	if liveState != "" {
-		return catchUpPR{state: liveState}
+		return catchUpPR{state: liveState, base: liveBase}
 	}
 	return chosen
 }
@@ -248,9 +289,15 @@ func catchUpRestoreStash(t catchUpTarget, stash string) (string, bool) {
 	return "", true
 }
 
-func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, opt CatchUpOptions) (string, string) {
+func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, pr catchUpPR, opt CatchUpOptions) (string, string) {
 	if marker := catchUpOperation(t); marker != "" {
-		return "needs-owner", "in-progress " + marker + "; untouched"
+		reason := "in-progress " + marker + "; untouched"
+		if marker == "MERGE_HEAD" {
+			if paths, err := catchUpGit(t.path, "diff", "--name-only", "--diff-filter=U"); err == nil && paths != "" {
+				reason += "; unmerged: " + strings.ReplaceAll(paths, "\n", ", ")
+			}
+		}
+		return "needs-owner", reason
 	}
 	status, err := catchUpGit(t.path, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
@@ -263,10 +310,6 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, opt Catc
 	if branch == "" && !catchUpGitOK(t.path, "merge-base", "--is-ancestor", "HEAD", target) {
 		return "needs-owner", "detached commits not contained in default tip; preserve them on an owner branch"
 	}
-	pr := catchUpPR{state: "NONE"}
-	if branch != "" && branch != strings.TrimPrefix(ref, "origin/") {
-		pr = c.catchUpPRState(t, branch)
-	}
 	switch pr.state {
 	case "UNKNOWN":
 		return "needs-owner", "PR state unavailable; branch left untouched"
@@ -278,7 +321,7 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, opt Catc
 		}
 	default:
 		if branch != "" && catchUpGitOK(t.path, "merge-base", "--is-ancestor", target, "HEAD") {
-			return "current", "already contains default tip"
+			return "current", "already contains " + ref
 		}
 	}
 	if branch == "" {
@@ -287,7 +330,7 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, opt Catc
 		}
 	}
 	if opt.DryRun {
-		return "planned", "would update against local default ref (remote not fetched)"
+		return "planned", "would update against local " + ref + " (remote not fetched)"
 	}
 	stash := ""
 	if status != "" {
@@ -325,14 +368,18 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, opt Catc
 	} else if !catchUpGitOK(t.path, "merge", "--no-edit", target) {
 		outcome, reason = "needs-owner", "merge refused before creating merge state"
 		if catchUpGitOK(t.path, "rev-parse", "-q", "--verify", "MERGE_HEAD") {
+			paths, _ := catchUpGit(t.path, "diff", "--name-only", "--diff-filter=U")
 			if catchUpGitOK(t.path, "merge", "--abort") {
 				reason = "merge conflict; aborted to original tree"
+				if paths != "" {
+					reason += "; paths: " + strings.ReplaceAll(paths, "\n", ", ")
+				}
 			} else {
 				reason = "merge abort failed; owner must restore worktree"
 			}
 		}
 	} else {
-		reason = "merged default tip into " + branch
+		reason = "merged " + ref + " into " + branch
 		if (pr.state == "OPEN" || pr.state == "DRAFT") && !catchUpGitOK(t.path, "push") {
 			outcome, reason = "needs-owner", "merge succeeded but push refused"
 		}
@@ -395,18 +442,35 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 			report.add("repo", t.collection, t.repo, "failed", "target harness registry unavailable after update", source, "", source)
 			continue
 		}
+		pr := catchUpPR{state: "NONE"}
+		branch, _ := catchUpGit(t.path, "symbolic-ref", "-q", "--short", "HEAD")
+		if branch != "" && branch != strings.TrimPrefix(ref, "origin/") && catchUpOperation(t) == "" {
+			pr = c.catchUpPRState(t, branch)
+		}
+		ref, refErr = catchUpRefForPR(t.path, ref, pr)
+		if refErr != nil {
+			report.add("repo", t.collection, t.repo, "needs-owner", refErr.Error()+"; branch left untouched", source, "", source)
+			continue
+		}
 		target, targetErr := catchUpGit(t.path, "rev-parse", "--verify", ref+"^{commit}")
-		outcome, reason := "failed", "default ref unavailable"
+		outcome, reason := "failed", ref+" unavailable"
 		if fetched[t.owner] == "failed" {
 			reason = "owner fetch failed; stale refs not used"
+		} else if targetErr != nil && (pr.state == "OPEN" || pr.state == "DRAFT") {
+			outcome, reason = "needs-owner", "open PR merge target "+ref+" is unavailable; branch left untouched"
 		} else if targetErr == nil {
-			outcome, reason = c.catchUpReconcile(t, ref, target, opt)
+			outcome, reason = c.catchUpReconcile(t, ref, target, pr, opt)
 		}
 		result, resultErr := catchUpGit(t.path, "rev-parse", "--verify", "HEAD")
 		if resultErr != nil {
 			outcome, reason = "failed", "worktree HEAD unreadable after update"
 		}
 		report.add("repo", t.collection, t.repo, outcome, reason, source, target, result)
+		row := &report.Outcomes[len(report.Outcomes)-1]
+		row.TargetRef = ref
+		if strings.HasPrefix(reason, "merge conflict;") {
+			row.NextAction = strings.Replace(row.NextAction, "merge the target ref", "merge "+ref, 1)
+		}
 		if outcome == "updated" || outcome == "current" || outcome == "planned" {
 			c.catchUpHooks(&report, t, opt)
 		} else if t.harness && opt.ReloadStatus {

@@ -36,8 +36,8 @@ func statusMergeGlyph(value string) string {
 	switch value {
 	case "BEHIND":
 		return "↓"
-	case "DIRTY":
-		return "⚠"
+	case "CONFLICTING", "DIRTY":
+		return "✗ conflict"
 	case "BLOCKED":
 		return "⊘"
 	case "FOLLOW":
@@ -114,6 +114,11 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 		}
 		if row.Behind > 0 {
 			parts = append(parts, fmt.Sprintf("↓%d", row.Behind))
+		}
+		if row.Conflict {
+			parts = append(parts, "✗ unresolved conflicts")
+		} else if row.Operation != "" {
+			parts = append(parts, "⚠ in-progress "+row.Operation)
 		}
 		if row.PR != nil && row.PR.Number != "" {
 			bits := []string{"#" + row.PR.Number}
