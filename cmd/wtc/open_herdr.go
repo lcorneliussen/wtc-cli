@@ -36,8 +36,11 @@ type openHerdrResponse struct {
 		Panes       []openPaneInfo      `json:"panes"`
 		Tabs        []openTabInfo       `json:"tabs"`
 		WorkspaceID string              `json:"workspace_id"`
-		PaneID      string              `json:"pane_id"`
-		RootPane    struct {
+		Workspace   struct {
+			ID string `json:"workspace_id"`
+		} `json:"workspace"`
+		PaneID   string `json:"pane_id"`
+		RootPane struct {
 			ID string `json:"pane_id"`
 		} `json:"root_pane"`
 		Pane struct {

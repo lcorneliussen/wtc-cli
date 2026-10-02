@@ -129,6 +129,38 @@ func TestRetireCollectionRejectsSelfAndEscapes(t *testing.T) {
 	}
 }
 
+func TestRetireCollectionSelfWorkerKeepsRemoteRefs(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	created, err := c.NewCollection(NewOptions{Slug: "self-retire"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := OpenCollection(created.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.RetirePreflight(RetireOptions{Name: "self-retire"}); err == nil {
+		t.Fatal("ordinary caller bypassed the self-retire guard")
+	}
+	if _, err := target.RetirePreflight(RetireOptions{Name: "self-retire", Self: true}); err != nil {
+		t.Fatal(err)
+	}
+	retired, err := target.RetireCollection(RetireOptions{Name: "self-retire", Self: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !retired.FolderRemoved || len(retired.Removed) != 1 {
+		t.Fatalf("unexpected self-retirement: %+v", retired)
+	}
+	if _, err := os.Stat(created.Collection); !os.IsNotExist(err) {
+		t.Fatalf("self-retired collection remains: %v", err)
+	}
+	owner := filepath.Join(c.Workspace, ".bare", "agent-harness.git")
+	if _, err := os.Stat(owner); err != nil {
+		t.Fatalf("bare owner was removed: %v", err)
+	}
+}
+
 func TestRetireCollectionBlocksUnpushedCommitAndPreHookCanVeto(t *testing.T) {
 	c := newWorkspaceFixture(t)
 	result, err := c.NewCollection(NewOptions{Slug: "unpushed"})
