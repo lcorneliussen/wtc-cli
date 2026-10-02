@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -87,9 +88,18 @@ func printEnvPreview(result envResult) {
 
 func addEnvListCommand(envCmd *cobra.Command, asJSON *bool, cwd func() (*wtc.Context, error)) {
 	var collection string
+	var tui, noTUI bool
 	list := &cobra.Command{Use: "list", Short: "List environment variable names, scopes, and overrides without values", Args: cobra.NoArgs}
 	list.Flags().StringVar(&collection, "collection", "", "Collection directory (default: current)")
+	list.Flags().BoolVar(&tui, "tui", false, "Open the interactive inventory view")
+	list.Flags().BoolVar(&noTUI, "no-tui", false, "Print one table and exit")
 	list.RunE = func(cmd *cobra.Command, args []string) error {
+		if tui && noTUI {
+			return fmt.Errorf("--tui and --no-tui cannot be combined")
+		}
+		if tui && *asJSON {
+			return fmt.Errorf("--tui and --json cannot be combined")
+		}
 		var c *wtc.Context
 		var err error
 		if collection == "" {
@@ -107,6 +117,10 @@ func addEnvListCommand(envCmd *cobra.Command, asJSON *bool, cwd func() (*wtc.Con
 		if *asJSON {
 			return emit(envelope{OK: true, Data: result, Summary: fmt.Sprintf("%d variable name(s)", len(result.Variables))}, true)
 		}
+		if tui || !cmd.Flags().Changed("tui") && !noTUI &&
+			term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd()) {
+			return envInventoryTUI(c, result)
+		}
 		out := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(out, "SOURCE\tSCOPE\tFILE")
 		for _, file := range result.Files {
@@ -114,7 +128,7 @@ func addEnvListCommand(envCmd *cobra.Command, asJSON *bool, cwd func() (*wtc.Con
 			if !file.Exists {
 				state = "absent"
 			}
-			fmt.Fprintf(out, "%s\t%s\t%s\n", file.Path, file.Scope, state)
+			fmt.Fprintf(out, "%s\t%s\t%s\n", file.Path, shortInventoryScope(file.Scope), state)
 		}
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "KEY\tSOURCE\tSCOPE\tOVERRIDES")
@@ -123,7 +137,7 @@ func addEnvListCommand(envCmd *cobra.Command, asJSON *bool, cwd func() (*wtc.Con
 			if variable.Overrides {
 				override = "yes"
 			}
-			fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", variable.Name, variable.Source, variable.Scope, override)
+			fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", variable.Name, variable.Source, shortInventoryScope(variable.Scope), override)
 		}
 		return out.Flush()
 	}

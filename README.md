@@ -5,7 +5,7 @@ entry points as compatibility shims; their normal paths use the pinned binary.
 
 ## Commands
 
-- `wtc env list` shows variable names, source files, and whether a collection-local entry overrides an earlier one. It never prints values. Bare `wtc env` shows help.
+- `wtc env list` shows variable names, source files, and whether a collection-local entry overrides an earlier one. It opens a scrollable, width-aware view in an interactive terminal; `--no-tui` prints a compact table and `--json` emits structured data. It never prints values. Bare `wtc env` shows help.
 - `wtc env setup [--collection DIR] [--dry-run]` regenerates `.env.collection`, preserving its port base. It leaves `.env.collection.local` intact, writes the collection's mise environment file, and trusts the generated mise config when mise is installed. Existing flagged `wtc env` invocations remain supported.
 - `wtc doctor` checks the collection registry and local tool availability.
 - `wtc commands --json` lists the command surface for agents.
@@ -14,7 +14,7 @@ entry points as compatibility shims; their normal paths use the pinned binary.
 - `wtc registry refresh` regenerates the local bare-owner map and reports registry mismatches.
 - `wtc mcp render [--dry-run]` renders the harness MCP registry into Claude, Cursor, and Codex config files for this collection.
 - `wtc secrets link [--repo <name>] [--dry-run] [--include-prod]` links gitignored control-root files into checked-out worktrees, preserving displaced local files in collection backups.
-- `wtc secrets list [--repo <name>]` inventories control-root file paths and their state in this collection (linked, available, locally overridden, not ignored, or excluded as production-capable). It also identifies the collection-local secret-variable file. It never reads control-root file contents; use `wtc env list` to see variable names without values.
+- `wtc secrets list [--repo <name>]` inventories control-root file paths and their state in this collection (linked, available, locally overridden, not ignored, or excluded as production-capable). In an interactive terminal it opens a scrollable, width-aware view with selected-row details; use `--no-tui` for a compact table or `--json` for complete metadata. It also identifies the collection-local secret-variable file. It never reads control-root file contents; use `wtc env list` to see variable names without values.
 - `wtc agent-env` prints shell exports for sibling mise toolchains and configured collection-local bins; `--write` refreshes `.env.toolchain`, `--print-path` prints its bin list, and `--wrap` handles PreToolUse JSON from stdin.
 - `wtc skills render [--seed-scope] [--dry-run]` exposes embedded skills and harness overrides to agent clients, wires the collection entry point and hooks, and refreshes agent shell files. `--all` explicitly renders every collection in the workspace.
 - `wtc skills diff [--changes] [--json]` reports skill overrides, H2 section patches, and drift from a recorded base digest.
