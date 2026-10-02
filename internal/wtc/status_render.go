@@ -2,8 +2,30 @@ package wtc
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
+
+// StatusPRsByPriority keeps enlisted order within each visible group while
+// putting review-ready PRs ahead of drafts and completed work.
+func StatusPRsByPriority(rows []StatusPRRow) []StatusPRRow {
+	ordered := append([]StatusPRRow(nil), rows...)
+	priority := func(row StatusPRRow) int {
+		if row.Draft || row.State == "DRAFT" {
+			return 1
+		}
+		if row.OnBranch {
+			return 2
+		}
+		if row.State == "MERGED" || row.Archived || row.MergedOn != nil ||
+			(row.Merge != nil && *row.Merge == "MERGED") {
+			return 3
+		}
+		return 0
+	}
+	sort.SliceStable(ordered, func(i, j int) bool { return priority(ordered[i]) < priority(ordered[j]) })
+	return ordered
+}
 
 var statusGlyphs = map[string]string{
 	"SUCCESS": "✓", "FAILURE": "✗", "ERROR": "✗", "PENDING": "●",
@@ -159,7 +181,7 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 	}
 	b.WriteString("\n## PRs\n\n")
 	active, archived := []StatusPRRow{}, []StatusPRRow{}
-	for _, row := range s.PRs {
+	for _, row := range StatusPRsByPriority(s.PRs) {
 		if row.Archived {
 			archived = append(archived, row)
 		} else {
