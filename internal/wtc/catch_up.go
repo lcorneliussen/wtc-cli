@@ -60,6 +60,11 @@ type catchUpTarget struct {
 	owner      string
 	ref        string
 	harness    bool
+	// managed records registry membership at inventory time. An unmanaged
+	// ext. sibling has no entry, so the control root holds nothing for it and
+	// the secret linker would reject its directory name. Hooks re-resolve it
+	// from the current registry, since a harness self-update may change it.
+	managed bool
 }
 
 var catchUpSelector = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
@@ -247,12 +252,13 @@ func (c *Context) CatchUpInventory(opt CatchUpOptions) (CatchUpReport, []catchUp
 			}
 			// Unmanaged ext. siblings are valid worktrees too. Their default
 			// development ref follows the shell contract's origin/main fallback.
-			repo, _ := target.Repository(repoName)
+			repo, repoErr := target.Repository(repoName)
 			ref := repo.DefaultRef
 			if ref == "" {
 				ref = "origin/main"
 			}
-			targets = append(targets, catchUpTarget{collection: name, path: path, repo: repoName, owner: owner, ref: ref, harness: label == "harness"})
+			targets = append(targets, catchUpTarget{collection: name, path: path, repo: repoName, owner: owner, ref: ref,
+				harness: label == "harness", managed: repoErr == nil || label == "harness"})
 		}
 	}
 	var unmatched []string

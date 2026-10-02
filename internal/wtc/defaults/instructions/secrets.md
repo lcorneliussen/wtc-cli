@@ -65,6 +65,26 @@ must reload the environment. Existing credentials are not moved or copied.
 
 ## Wiring a worktree
 
+Inspect names and scope without displaying values:
+
+```sh
+wtc secrets list                 # control-root files and their state here
+wtc secrets list --repo api      # one repository
+wtc env list                     # variable names and override sources
+```
+
+`wtc secrets list` labels control-root files as available to every collection
+containing that repository, then shows whether each target is linked, locally
+overridden, not ignored, or excluded as production-capable in this collection.
+Machine config files are control-only. `.env.collection.local` is this
+collection's local secret-variable file; `wtc env list` shows its key names
+and which ones override generated keys. `wtc.env` holds machine defaults for
+all collections, while `.env.collection` is generated for this collection.
+These commands report file paths and variable names only.
+In an interactive terminal they open a scrollable view sized to the pane.
+Use arrow keys or `j`/`k` to inspect rows and `q` to exit. Pass `--no-tui`
+for a compact one-shot table or `--json` for complete metadata.
+
 `tools/link-secrets.sh` does it, for every checked-out repo in a collection:
 
 ```sh

@@ -396,3 +396,70 @@ func TestCatchUpPinsStashWhenRestoreConflicts(t *testing.T) {
 		t.Fatalf("missing stash recovery row: %+v", report.Outcomes)
 	}
 }
+
+func TestCatchUpSkipsSecretsHookForUnmanagedSibling(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	owner := filepath.Join(c.Workspace, ".bare", "widget.git")
+	fixtureGit(t, "--git-dir="+owner, "worktree", "add", "--detach", filepath.Join(c.Collection, "widget"), "origin/main")
+	fixtureGit(t, "--git-dir="+owner, "worktree", "add", "--detach", filepath.Join(c.Collection, "ext.thing"), "origin/main")
+	calls := filepath.Join(c.Workspace, "secrets-calls")
+	t.Setenv("MOCK_SECRETS_LOG", calls)
+	fixtureFile(t, filepath.Join(c.Harness, "tools", "link-secrets.sh"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MOCK_SECRETS_LOG\"\n", 0755)
+	report, err := c.CatchUp(CatchUpOptions{Repos: []string{"widget", "ext.thing"}, NoSkills: true, NoMCP: true, NoEnv: true})
+	if err != nil || report.ExitStatus != 0 {
+		t.Fatalf("catch-up with an unmanaged sibling failed: %+v %v", report, err)
+	}
+	logged, _ := os.ReadFile(calls)
+	if !strings.Contains(string(logged), "--repo widget") || strings.Contains(string(logged), "ext.thing") {
+		t.Fatalf("secrets hook calls: %q", logged)
+	}
+	seen := false
+	for _, row := range report.Outcomes {
+		if row.Kind == "hook" && row.Repo == "secrets:ext.thing" {
+			if row.Outcome != "skipped" || !strings.Contains(row.Reason, "unmanaged") {
+				t.Fatalf("unmanaged sibling secrets row: %+v", row)
+			}
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatalf("missing skipped secrets row: %+v", report.Outcomes)
+	}
+}
+
+func TestCatchUpRunsSecretsHookForSiblingRegisteredByHarnessUpdate(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	created, err := c.NewCollection(NewOptions{Slug: "other", Repos: []string{"widget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// gadget is a sibling the registry does not know yet; the harness update
+	// that catch-up applies first registers it and ships the secrets hook.
+	widgetOwner := filepath.Join(c.Workspace, ".bare", "widget.git")
+	fixtureGit(t, "--git-dir="+widgetOwner, "worktree", "add", "--detach", filepath.Join(created.Collection, "gadget"), "origin/main")
+	harnessSource := filepath.Join(c.Workspace, "source-agent-harness")
+	registryPath := filepath.Join(harnessSource, ".harness-repos.yml")
+	registry, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, registryPath, string(registry)+"  - name: gadget\n    remote: "+filepath.Join(c.Workspace, "source-widget")+"\n    default_ref: origin/main\n    port_offset: 2\n", 0644)
+	fixtureFile(t, filepath.Join(harnessSource, "tools", "link-secrets.sh"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MOCK_SECRETS_LOG\"\n", 0755)
+	fixtureGit(t, "-C", harnessSource, "add", "-A")
+	fixtureGit(t, "-C", harnessSource, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "register gadget")
+	calls := filepath.Join(c.Workspace, "secrets-calls")
+	t.Setenv("MOCK_SECRETS_LOG", calls)
+	report, err := c.CatchUp(CatchUpOptions{Collections: []string{"other"}, Repos: []string{"harness", "gadget"}, NoSkills: true, NoMCP: true, NoEnv: true})
+	if err != nil || report.ExitStatus != 0 {
+		t.Fatalf("catch-up across a registering harness update failed: %+v %v", report, err)
+	}
+	logged, _ := os.ReadFile(calls)
+	if !strings.Contains(string(logged), "--repo gadget") {
+		t.Fatalf("newly registered sibling did not receive the secrets hook: %q", logged)
+	}
+	for _, row := range report.Outcomes {
+		if row.Kind == "hook" && row.Repo == "secrets:gadget" && row.Outcome != "ok" {
+			t.Fatalf("stale membership decided the hook: %+v", row)
+		}
+	}
+}
