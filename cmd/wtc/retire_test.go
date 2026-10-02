@@ -126,6 +126,26 @@ func TestSelfRetireRefusesToCloseAnotherAgent(t *testing.T) {
 	}
 }
 
+func TestSelfRetireRequiresMatchingHerdrPane(t *testing.T) {
+	c, log := retireHandoffFixture(t, "source-id")
+	t.Setenv("HERDR_ENV", "")
+	if err := handoffSelfRetire(c, "finished", false, true); err == nil || !strings.Contains(err.Error(), "requires its Herdr pane") {
+		t.Fatalf("non-Herdr caller was accepted: %v", err)
+	}
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_PANE_ID", "other-pane")
+	if err := handoffSelfRetire(c, "finished", false, true); err == nil || !strings.Contains(err.Error(), "not in the target workspace") {
+		t.Fatalf("unmatched pane was accepted: %v", err)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(calls), "workspace create") || strings.Contains(string(calls), "pane run") {
+		t.Fatalf("invalid caller scheduled cleanup: %s", calls)
+	}
+}
+
 func retireWorkerFixture(t *testing.T) (string, string) {
 	t.Helper()
 	root := t.TempDir()

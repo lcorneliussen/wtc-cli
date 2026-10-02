@@ -93,12 +93,15 @@ func handoffSelfRetire(c *wtc.Context, name string, force, asJSON bool) error {
 	for _, pane := range panes {
 		if pane.ID == sourcePane {
 			sourcePaneFound = true
-		} else if pane.Agent != "" {
-			return fmt.Errorf("another agent is active in pane %s; close it before retiring", pane.ID)
 		}
 	}
 	if !sourcePaneFound {
 		return errors.New("current Herdr pane is not in the target workspace")
+	}
+	for _, pane := range panes {
+		if pane.ID != sourcePane && pane.Agent != "" {
+			return fmt.Errorf("another agent is active in pane %s; close it before retiring", pane.ID)
+		}
 	}
 	settings := []string{
 		"--cwd", c.Workspace, "--no-focus",
