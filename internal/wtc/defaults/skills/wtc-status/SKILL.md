@@ -19,8 +19,13 @@ or `retire.sh`.
 ## One collection
 
 ```bash
-harness/tools/wtc-status.sh
+wtc status
+wtc status --no-watch
 ```
+
+In an interactive terminal, bare `wtc status` opens the live view. Use
+`--no-watch` for one status pass in a terminal; captured output is already
+one-shot. The compatibility script selects the pinned CLI where available.
 
 Prints, per repo in the collection: branch, open PR with its check rollup
 (`✓ ✗ ● —`), and working-tree state. Bare is the command to reach for: scope
