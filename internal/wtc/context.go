@@ -175,11 +175,9 @@ func (c *Context) load() error {
 		}
 	}
 	if c.ConfigRoot == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return err
-		}
-		c.ConfigRoot = filepath.Join(home, ".config", "wtc")
+		// The control root is workspace-shared: it sits beside .bare/ and the
+		// collections, so each workspace keeps its own secrets and gh identity.
+		c.ConfigRoot = filepath.Join(c.Workspace, ".config")
 	}
 	return nil
 }
