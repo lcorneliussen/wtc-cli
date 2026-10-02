@@ -117,6 +117,28 @@ func TestRetireCollectionHonorsHerdrSessionOverride(t *testing.T) {
 	}
 }
 
+func TestRetireWorkspaceClosureUsesVerifiedID(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	bin := filepath.Join(c.Workspace, "bin")
+	log := filepath.Join(c.Workspace, "herdr-id.log")
+	fixtureFile(t, filepath.Join(bin, "herdr"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \""+log+"\"\ncase \"$*\" in *'workspace list') printf '%s\\n' '{\"result\":{\"workspaces\":[{\"label\":\"finished\",\"workspace_id\":\"wrong-id\"},{\"label\":\"finished\",\"workspace_id\":\"source-id\"}]}}';; esac\n", 0755)
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	if closed, warning := c.closeRetiredWorkspaceID("finished", "source-id"); !closed || warning != "" {
+		t.Fatalf("verified workspace was not closed: %v %q", closed, warning)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil || !strings.Contains(string(data), "workspace close source-id") || strings.Contains(string(data), "workspace close wrong-id") {
+		t.Fatalf("closed wrong workspace: %q (%v)", data, err)
+	}
+	if closed, warning := c.closeRetiredWorkspaceID("finished", "missing-id"); closed || !strings.Contains(warning, "identity changed") {
+		t.Fatalf("missing pinned workspace was accepted: %v %q", closed, warning)
+	}
+	after, err := os.ReadFile(log)
+	if err != nil || strings.Count(string(after), "workspace close ") != 1 {
+		t.Fatalf("missing pinned workspace closed another workspace: %q (%v)", after, err)
+	}
+}
+
 func TestRetireCollectionRejectsSelfAndEscapes(t *testing.T) {
 	c := newWorkspaceFixture(t)
 	for _, name := range []string{"main", "../source-widget", "missing"} {
@@ -126,6 +148,86 @@ func TestRetireCollectionRejectsSelfAndEscapes(t *testing.T) {
 	}
 	if _, err := os.Stat(c.Harness); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := c.RetireCollection(RetireOptions{Name: "main", Self: true}); err == nil || !strings.Contains(err.Error(), "workspace ID") {
+		t.Fatalf("self-retirement without a verified workspace was accepted: %v", err)
+	}
+	sibling, err := c.NewCollection(NewOptions{Slug: "sibling"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RetireCollection(RetireOptions{Name: "sibling", Self: true, WorkspaceID: "source-id"}); err == nil || !strings.Contains(err.Error(), "current collection") {
+		t.Fatalf("sibling retirement via self worker was accepted: %v", err)
+	}
+	if _, err := os.Stat(sibling.Collection); err != nil {
+		t.Fatalf("sibling was removed by rejected self-retirement: %v", err)
+	}
+}
+
+func TestRetireCollectionSelfWorkerKeepsRemoteRefs(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	created, err := c.NewCollection(NewOptions{Slug: "self-retire", Repos: []string{"widget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := OpenCollection(created.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := filepath.Join(created.Collection, "harness")
+	widget := filepath.Join(created.Collection, "widget")
+	if err := os.Remove(filepath.Join(widget, "init-ran")); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(widget, ".harness", "teardown.sh"), "#!/bin/sh\nprintf 'product torn down\\n' > \"$(dirname \"$(dirname \"$PWD\")\")/product-teardown.log\"\n", 0755)
+	fixtureGit(t, "-C", widget, "add", ".harness/teardown.sh")
+	fixtureGit(t, "-C", widget, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "product teardown fixture")
+	widgetHead := fixtureGit(t, "-C", widget, "rev-parse", "HEAD")
+	widgetOwner := filepath.Join(c.Workspace, ".bare", "widget.git")
+	fixtureGit(t, "--git-dir="+widgetOwner, "update-ref", "refs/remotes/origin/self-retire-teardown", widgetHead)
+	fixtureFile(t, filepath.Join(harness, "hooks", "wtc", "retire.pre.sh"), "#!/bin/sh\n[ -f \"$(dirname \"$PWD\")/workspace-closed.log\" ] || exit 15\n", 0755)
+	fixtureFile(t, filepath.Join(harness, "hooks", "wtc", "retire.post.sh"), "#!/bin/sh\n[ -d \"$PWD/harness\" ] || exit 13\n[ -f \"$(dirname \"$PWD\")/product-teardown.log\" ] || exit 14\nprintf 'post\\n' >> \"$(dirname \"$PWD\")/post-hook.log\"\n", 0755)
+	fixtureGit(t, "-C", harness, "add", "hooks/wtc/retire.pre.sh", "hooks/wtc/retire.post.sh")
+	fixtureGit(t, "-C", harness, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "self-retire post hook")
+	head := fixtureGit(t, "-C", harness, "rev-parse", "HEAD")
+	owner := filepath.Join(c.Workspace, ".bare", "agent-harness.git")
+	fixtureGit(t, "--git-dir="+owner, "update-ref", "refs/remotes/origin/self-retire-hook", head)
+	bin := filepath.Join(c.Workspace, "bin")
+	fixtureFile(t, filepath.Join(bin, "herdr"), "#!/bin/sh\ncase \"$*\" in\n  *'workspace list') printf '%s\\n' '{\"result\":{\"workspaces\":[{\"label\":\"self-retire\",\"workspace_id\":\"source-id\"}]}}' ;;\n  *'workspace close source-id') printf 'closed\\n' > \"$RETIRE_TEST_CLOSED_MARKER\" ;;\n  *) exit 2 ;;\nesac\n", 0755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HARNESS_HERDR_SESSION", "fixture")
+	t.Setenv("RETIRE_TEST_CLOSED_MARKER", filepath.Join(c.Workspace, "workspace-closed.log"))
+	if _, err := target.RetirePreflight(RetireOptions{Name: "self-retire"}); err == nil {
+		t.Fatal("ordinary caller bypassed the self-retire guard")
+	}
+	if _, err := target.RetirePreflight(RetireOptions{Name: "self-retire", Self: true}); err != nil {
+		t.Fatal(err)
+	}
+	retired, err := target.RetireCollection(RetireOptions{Name: "self-retire", Self: true, WorkspaceID: "source-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !retired.FolderRemoved || !retired.WorkspaceClosed || len(retired.Removed) != 2 {
+		t.Fatalf("unexpected self-retirement: %+v", retired)
+	}
+	if _, err := os.Stat(created.Collection); !os.IsNotExist(err) {
+		t.Fatalf("self-retired collection remains: %v", err)
+	}
+	if _, err := os.Stat(owner); err != nil {
+		t.Fatalf("bare owner was removed: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(c.Workspace, "post-hook.log")); err != nil || string(data) != "post\n" {
+		t.Fatalf("post hook did not run exactly once while harness existed: %q (%v)", data, err)
+	}
+}
+
+func TestRetirePreflightRejectsMainCheckout(t *testing.T) {
+	target := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(target, "harness", ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := inspectRetireWorktrees(target); err == nil || !strings.Contains(err.Error(), "linked Git worktree") {
+		t.Fatalf("main checkout was not rejected before deletion: %v", err)
 	}
 }
 

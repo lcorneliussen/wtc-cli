@@ -14,6 +14,11 @@ import (
 type RetireOptions struct {
 	Name  string
 	Force bool
+	// Self is reserved for the cleanup workspace worker. Interactive callers
+	// must hand off before retiring their own collection.
+	Self bool
+	// WorkspaceID pins the Herdr workspace selected during a self handoff.
+	WorkspaceID string
 }
 
 type RetireResult struct {
@@ -32,44 +37,55 @@ type retireWorktree struct {
 // RetireCollection first inspects every worktree, then removes only the named
 // collection. Remote branches and bare owners are never changed.
 func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
-	result := RetireResult{Removed: []string{}}
-	if !collectionNamePattern.MatchString(opt.Name) {
-		return result, fmt.Errorf("invalid collection name %q", opt.Name)
+	if opt.Self {
+		if opt.Name != filepath.Base(c.Collection) {
+			return RetireResult{}, fmt.Errorf("self-retirement target must be the current collection")
+		}
+		if opt.WorkspaceID == "" {
+			return RetireResult{}, fmt.Errorf("self-retirement requires a verified Herdr workspace ID")
+		}
 	}
-	if opt.Name == filepath.Base(c.Collection) {
-		return result, fmt.Errorf("cannot retire the collection running this command")
-	}
-	target := filepath.Join(c.Workspace, opt.Name)
-	if info, err := os.Lstat(target); err != nil {
-		return result, err
-	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return result, fmt.Errorf("collection path must be a directory: %s", target)
-	}
-	if _, err := OpenCollection(target); err != nil {
-		return result, err
-	}
-	result.Collection = target
-	worktrees, problems, err := inspectRetireWorktrees(target)
+	result, worktrees, err := c.retirePreflight(opt)
 	if err != nil {
 		return result, err
 	}
-	if len(problems) > 0 && !opt.Force {
-		return result, fmt.Errorf("retirement blocked: %s (use --force only after confirming the work is disposable)", strings.Join(problems, "; "))
-	}
-	if len(problems) > 0 {
-		result.Warnings = append(result.Warnings, problems...)
-	}
-	if _, err := os.Stat(filepath.Join(target, "HANDOFF.md")); err == nil {
-		result.Warnings = append(result.Warnings, "unconsumed HANDOFF.md is being removed")
-	}
-	if _, err := os.Stat(filepath.Join(target, ".harness-backups")); err == nil {
-		result.Warnings = append(result.Warnings, ".harness-backups remains in the collection folder")
+	target := result.Collection
+	// Close the source workspace before hooks or worktree removal. Once closed,
+	// no new pane or agent turn can start against a collection being deleted.
+	if opt.Self {
+		closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
+		if !closed {
+			if warning == "" {
+				warning = "source workspace was not found or Herdr is unavailable"
+			}
+			return result, fmt.Errorf("cannot close source workspace before retirement: %s", warning)
+		}
+		result.WorkspaceClosed = true
+		// Agent work may have changed the collection after the first preflight
+		// but before Herdr closed its workspace. Inspect it again once no new
+		// source-pane activity can begin, and use this fresh worktree list.
+		checked, current, err := c.retirePreflight(opt)
+		if err != nil {
+			checked.WorkspaceClosed = true
+			return checked, err
+		}
+		result, worktrees = checked, current
+		result.WorkspaceClosed = true
 	}
 	values := map[string]string{"target": target, "force": strconv.FormatBool(opt.Force)}
 	if err := c.RunHook("retire.pre", values); err != nil {
 		return result, err
 	}
+	postRan := false
 	for _, wt := range worktrees {
+		// A self-retire loses its harness hook source when that final worktree
+		// goes away. Run the post hook after product teardown, while it exists.
+		if opt.Self && wt.name == "harness" {
+			if err := c.RunHook("retire.post", values); err != nil {
+				return result, err
+			}
+			postRan = true
+		}
 		RunRepoTeardown(wt.path)
 		args := []string{"--git-dir=" + wt.owner, "worktree", "remove"}
 		if opt.Force {
@@ -84,10 +100,17 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 		}
 		result.Removed = append(result.Removed, wt.name)
 	}
-	closed, warning := c.closeRetiredWorkspace(opt.Name)
-	result.WorkspaceClosed = closed
-	if warning != "" {
-		result.Warnings = append(result.Warnings, warning)
+	if opt.Self && !postRan {
+		if err := c.RunHook("retire.post", values); err != nil {
+			return result, err
+		}
+	}
+	if !result.WorkspaceClosed {
+		closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
+		result.WorkspaceClosed = closed
+		if warning != "" {
+			result.Warnings = append(result.Warnings, warning)
+		}
 	}
 	stopRetiredStatusWatchers(target)
 	if err := removeRetiredGeneratedFiles(target); err != nil {
@@ -104,10 +127,56 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 			result.Leftovers = append(result.Leftovers, entry.Name())
 		}
 	}
-	if err := c.RunHook("retire.post", values); err != nil {
-		return result, err
+	if !opt.Self {
+		if err := c.RunHook("retire.post", values); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
+}
+
+// RetirePreflight checks the same deletion blockers as RetireCollection without
+// running hooks or removing files. The cleanup worker repeats it before acting.
+func (c *Context) RetirePreflight(opt RetireOptions) (RetireResult, error) {
+	result, _, err := c.retirePreflight(opt)
+	return result, err
+}
+
+func (c *Context) retirePreflight(opt RetireOptions) (RetireResult, []retireWorktree, error) {
+	result := RetireResult{Removed: []string{}}
+	if !collectionNamePattern.MatchString(opt.Name) {
+		return result, nil, fmt.Errorf("invalid collection name %q", opt.Name)
+	}
+	if opt.Name == filepath.Base(c.Collection) && !opt.Self {
+		return result, nil, fmt.Errorf("cannot retire the collection running this command")
+	}
+	target := filepath.Join(c.Workspace, opt.Name)
+	if info, err := os.Lstat(target); err != nil {
+		return result, nil, err
+	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return result, nil, fmt.Errorf("collection path must be a directory: %s", target)
+	}
+	if _, err := OpenCollection(target); err != nil {
+		return result, nil, err
+	}
+	result.Collection = target
+	worktrees, problems, err := inspectRetireWorktrees(target)
+	if err != nil {
+		return result, nil, err
+	}
+	if len(problems) > 0 && !opt.Force {
+		return result, nil, fmt.Errorf("retirement blocked: %s (use --force only after confirming the work is disposable)", strings.Join(problems, "; "))
+	}
+	if len(problems) > 0 {
+		result.Warnings = append(result.Warnings, problems...)
+	}
+	if _, err := os.Stat(filepath.Join(target, "HANDOFF.md")); err == nil {
+		result.Warnings = append(result.Warnings, "unconsumed HANDOFF.md is being removed")
+	}
+	if _, err := os.Stat(filepath.Join(target, ".harness-backups")); err == nil {
+		result.Warnings = append(result.Warnings, ".harness-backups remains in the collection folder")
+	}
+	return result, worktrees, nil
 }
 
 func inspectRetireWorktrees(target string) ([]retireWorktree, []string, error) {
@@ -122,10 +191,14 @@ func inspectRetireWorktrees(target string) ([]retireWorktree, []string, error) {
 			continue
 		}
 		path := filepath.Join(target, entry.Name())
-		if _, err := os.Lstat(filepath.Join(path, ".git")); os.IsNotExist(err) {
+		gitEntry, err := os.Lstat(filepath.Join(path, ".git"))
+		if os.IsNotExist(err) {
 			continue
 		} else if err != nil {
 			return nil, nil, err
+		}
+		if !gitEntry.Mode().IsRegular() {
+			return nil, nil, fmt.Errorf("%s is not a linked Git worktree", path)
 		}
 		top, err := gitOutput("-C", path, "rev-parse", "--show-toplevel")
 		resolvedTop, topErr := filepath.EvalSymlinks(top)
@@ -171,6 +244,10 @@ func inspectRetireWorktrees(target string) ([]retireWorktree, []string, error) {
 }
 
 func (c *Context) closeRetiredWorkspace(name string) (bool, string) {
+	return c.closeRetiredWorkspaceID(name, "")
+}
+
+func (c *Context) closeRetiredWorkspaceID(name, expectedID string) (bool, string) {
 	herdr, err := exec.LookPath("herdr")
 	if err != nil {
 		return false, ""
@@ -198,13 +275,16 @@ func (c *Context) closeRetiredWorkspace(name string) (bool, string) {
 		return false, fmt.Sprintf("could not read herdr workspaces: %v", err)
 	}
 	for _, workspace := range listing.Result.Workspaces {
-		if workspace.Label != name {
+		if workspace.Label != name || expectedID != "" && workspace.ID != expectedID {
 			continue
 		}
 		if output, err := exec.Command(herdr, "--session", session, "workspace", "close", workspace.ID).CombinedOutput(); err != nil {
 			return false, fmt.Sprintf("could not close herdr workspace %s: %v: %s", workspace.ID, err, strings.TrimSpace(string(output)))
 		}
 		return true, ""
+	}
+	if expectedID != "" {
+		return false, "target Herdr workspace identity changed; no workspace closed"
 	}
 	return false, ""
 }
