@@ -74,6 +74,21 @@ func TestStatusTUILinksColorsAndClickTargets(t *testing.T) {
 	}
 }
 
+func TestStatusTUIShowsOpenPRsBeforeDrafts(t *testing.T) {
+	snapshot := wtc.StatusSnapshot{PRs: []wtc.StatusPRRow{
+		{Number: "1", State: "DRAFT", Draft: true},
+		{Number: "2", State: "OPEN"},
+		{Number: "3", State: "DRAFT", Draft: true},
+		{Number: "4", State: "OPEN"},
+	}}
+	visible, _ := statusTUIVisiblePRs(snapshot, false)
+	for i, want := range []string{"2", "4", "1", "3"} {
+		if visible[i].Number != want {
+			t.Fatalf("visible PR order = %+v", visible)
+		}
+	}
+}
+
 func TestStatusTUIRejectsTerminalControlsInLinks(t *testing.T) {
 	if got := statusTUIURL("https://example.invalid/\u009bunsafe"); got != "" {
 		t.Fatalf("C1 control in terminal link target: %q", got)

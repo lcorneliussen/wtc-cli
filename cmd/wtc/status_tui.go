@@ -683,7 +683,7 @@ func statusTUIVisiblePRs(snapshot wtc.StatusSnapshot, showArchived bool) ([]wtc.
 	active := make([]wtc.StatusPRRow, 0, len(snapshot.PRs))
 	merged := make([]wtc.StatusPRRow, 0)
 	archived := make([]wtc.StatusPRRow, 0)
-	for _, row := range snapshot.PRs {
+	for _, row := range wtc.StatusPRsByPriority(snapshot.PRs) {
 		switch {
 		case row.Archived:
 			archived = append(archived, row)

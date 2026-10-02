@@ -157,3 +157,21 @@ func TestStatusMarkdownKeepsRepoAndPRSignals(t *testing.T) {
 		t.Fatalf("repository-only Markdown retained PR section: %s", reposOnly)
 	}
 }
+
+func TestStatusMarkdownShowsOpenPRsBeforeDrafts(t *testing.T) {
+	snapshot := StatusSnapshot{Collection: "fixture", PRs: []StatusPRRow{
+		{Repo: "widget", Number: "1", State: "DRAFT", Draft: true, Title: "Draft first"},
+		{Repo: "widget", Number: "2", State: "OPEN", Title: "Open first"},
+		{Repo: "widget", Number: "3", State: "DRAFT", Draft: true, Title: "Draft second"},
+		{Repo: "widget", Number: "4", State: "OPEN", Title: "Open second"},
+	}}
+	md := snapshot.Markdown()
+	previous := -1
+	for _, title := range []string{"Open first", "Open second", "Draft first", "Draft second"} {
+		at := strings.Index(md, title)
+		if at <= previous {
+			t.Fatalf("PR ordering lost near %q: %s", title, md)
+		}
+		previous = at
+	}
+}
