@@ -47,22 +47,9 @@ func (c *Context) LinkSecrets(opt SecretLinkOptions) (SecretLinkResult, error) {
 	if err != nil {
 		return result, err
 	}
-	prod := map[string]bool{}
-	for _, path := range c.Config.Secrets.ProdPaths {
-		clean, err := validSecretPath(path)
-		if err != nil || !strings.Contains(clean, "/") {
-			return result, fmt.Errorf("invalid secrets.prod_paths entry %q", path)
-		}
-		prod[clean] = true
-	}
-	for _, repo := range c.Registry.Repos {
-		for _, path := range repo.ProdPaths {
-			clean, err := validSecretPath(path)
-			if err != nil {
-				return result, fmt.Errorf("invalid prod_paths entry for %s: %q", repo.Name, path)
-			}
-			prod[repo.Name+"/"+clean] = true
-		}
+	prod, err := c.secretProdPaths()
+	if err != nil {
+		return result, err
 	}
 	for _, entry := range entries {
 		name := entry.Name()
@@ -182,6 +169,27 @@ func (c *Context) LinkSecrets(opt SecretLinkOptions) (SecretLinkResult, error) {
 		return result, fmt.Errorf("%d secret targets are not gitignored", result.Refused)
 	}
 	return result, nil
+}
+
+func (c *Context) secretProdPaths() (map[string]bool, error) {
+	prod := map[string]bool{}
+	for _, path := range c.Config.Secrets.ProdPaths {
+		clean, err := validSecretPath(path)
+		if err != nil || !strings.Contains(clean, "/") {
+			return nil, fmt.Errorf("invalid secrets.prod_paths entry %q", path)
+		}
+		prod[clean] = true
+	}
+	for _, repo := range c.Registry.Repos {
+		for _, path := range repo.ProdPaths {
+			clean, err := validSecretPath(path)
+			if err != nil {
+				return nil, fmt.Errorf("invalid prod_paths entry for %s: %q", repo.Name, path)
+			}
+			prod[repo.Name+"/"+clean] = true
+		}
+	}
+	return prod, nil
 }
 
 func validSecretPath(path string) (string, error) {
