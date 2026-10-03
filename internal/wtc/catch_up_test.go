@@ -411,12 +411,15 @@ func TestCatchUpSkipsSecretsHookForUnmanagedSibling(t *testing.T) {
 	if err != nil || report.ExitStatus != 0 {
 		t.Fatalf("catch-up with an unmanaged sibling failed: %+v %v", report, err)
 	}
-	logged, _ := os.ReadFile(calls)
-	if !strings.Contains(string(logged), "--repo widget") || strings.Contains(string(logged), "ext.thing") {
-		t.Fatalf("secrets hook calls: %q", logged)
+	if logged, _ := os.ReadFile(calls); len(logged) != 0 {
+		t.Fatalf("legacy secrets script was invoked: %q", logged)
 	}
 	seen := false
+	managed := false
 	for _, row := range report.Outcomes {
+		if row.Kind == "hook" && row.Repo == "secrets:widget" && row.Outcome == "ok" {
+			managed = true
+		}
 		if row.Kind == "hook" && row.Repo == "secrets:ext.thing" {
 			if row.Outcome != "skipped" || !strings.Contains(row.Reason, "unmanaged") {
 				t.Fatalf("unmanaged sibling secrets row: %+v", row)
@@ -424,8 +427,30 @@ func TestCatchUpSkipsSecretsHookForUnmanagedSibling(t *testing.T) {
 			seen = true
 		}
 	}
-	if !seen {
+	if !seen || !managed {
 		t.Fatalf("missing skipped secrets row: %+v", report.Outcomes)
+	}
+}
+
+func TestCatchUpRefreshesCollectionWithoutShellEntryPoints(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	for _, name := range []string{".env.collection", "mise.toml", "AGENTS.md"} {
+		if err := os.Remove(filepath.Join(c.Collection, name)); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
+	target := catchUpTarget{collection: filepath.Base(c.Collection), path: c.Harness, repo: "agent-harness", harness: true, managed: true}
+	report := CatchUpReport{Initiator: c.Collection}
+	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true})
+	for _, name := range []string{".env.collection", "mise.toml", "AGENTS.md"} {
+		if _, err := os.Lstat(filepath.Join(c.Collection, name)); err != nil {
+			t.Fatalf("native catch-up did not regenerate %s: %v; %+v", name, err, report.Outcomes)
+		}
+	}
+	for _, row := range report.Outcomes {
+		if row.Kind == "hook" && (row.Repo == "env" || row.Repo == "skills") && row.Outcome != "ok" {
+			t.Fatalf("native catch-up action failed: %+v", row)
+		}
 	}
 }
 
@@ -455,9 +480,8 @@ func TestCatchUpRunsSecretsHookForSiblingRegisteredByHarnessUpdate(t *testing.T)
 	if err != nil || report.ExitStatus != 0 {
 		t.Fatalf("catch-up across a registering harness update failed: %+v %v", report, err)
 	}
-	logged, _ := os.ReadFile(calls)
-	if !strings.Contains(string(logged), "--repo gadget") {
-		t.Fatalf("newly registered sibling did not receive the secrets hook: %q", logged)
+	if logged, _ := os.ReadFile(calls); len(logged) != 0 {
+		t.Fatalf("legacy secrets script was invoked: %q", logged)
 	}
 	for _, row := range report.Outcomes {
 		if row.Kind == "hook" && row.Repo == "secrets:gadget" && row.Outcome != "ok" {

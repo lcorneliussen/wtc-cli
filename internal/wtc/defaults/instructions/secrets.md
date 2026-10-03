@@ -249,10 +249,9 @@ Not "everywhere", and the difference bites:
 - **An already-open herdr pane keeps the environment it started with.**
   `wtc open` skips the env block when it reuses an existing workspace, so
   re-running it refreshes nothing. Close and reopen the workspace.
-- **Existing collections stay stale until refreshed.** Only `branch-off` (new
-  collection) and `add-repo` (when the file is missing) generate this file, so
-  `wtc env setup` is what carries a generator change to collections that
-  already exist. Catch-up runs it.
+- **Existing collections stay stale until refreshed.** `wtc new` generates
+  the file for new collections; `wtc env setup` applies generator changes to
+  an existing collection. Catch-up runs the same native environment action.
 
 Check where you actually stand with `echo "$GH_CONFIG_DIR"` — empty means
 either you have not opted in or one of the rows above is not satisfied, and

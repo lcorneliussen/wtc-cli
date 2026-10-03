@@ -27,8 +27,7 @@ wtc add-repo <repo> [<repo> …]
 
 Run from this collection. An explicitly requested other collection can be
 selected with `--collection <name>`, where the name is its directory under
-the same workspace root. On an older pin, use
-`wtc add-repo <repo> [<repo> …]` from this collection.
+the same workspace root.
 
 Default: the new worktree is **detached at the repo's `default_ref`** — no
 branch. A repo added purely for context (reading a sibling's code, checking an

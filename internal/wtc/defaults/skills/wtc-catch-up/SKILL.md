@@ -64,11 +64,10 @@ collection. Keep the existing stash/update/restore behavior for a local
 invocation unless `--clean-only` is requested. Never remove untracked files
 to make a rollout proceed.
 
-Collection-root skills, MCP and environment hooks run only when the selected
-harness updates successfully or is already current. Secret linking is scoped
-to each successful selected repo. Missing optional target hooks are reported
-as skipped; do not substitute another collection's generator. This keeps
-older forks usable without assuming they ship `wtc env setup` or every hook.
+Collection-root skills, MCP and environment actions run through the installed
+CLI only when the selected harness updates successfully or is already current.
+Secret linking is scoped to each successful managed repo. Target-specific
+extension hooks still run when present; an absent MCP registry is skipped.
 
 `--reload-status` is explicit authorization to interrupt and restart eligible
 status panes. It finds the configured herdr session and workspace, verifies

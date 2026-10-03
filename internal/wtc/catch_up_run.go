@@ -488,47 +488,41 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 
 func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt CatchUpOptions) {
 	targetDir := filepath.Join(c.Workspace, t.collection)
-	harnessRepo := ""
 	// The harness updates first and may have changed registry membership, so
-	// decide from the current target registry; keep the inventory answer only
-	// when the target cannot be opened.
+	// decide from the current target registry.
 	managed := t.managed
-	if target, err := OpenCollection(targetDir); err == nil {
-		harnessRepo, _ = target.catchUpHarnessRepo()
+	target, openErr := OpenCollection(targetDir)
+	if openErr == nil {
 		_, repoErr := target.Repository(t.repo)
 		managed = t.harness || repoErr == nil
 	}
-	run := func(script, label string, args ...string) {
-		path := filepath.Join(targetDir, "harness", "tools", script)
-		info, err := os.Stat(path)
-		if err != nil || info.Mode()&0111 == 0 {
-			report.add("hook", t.collection, label, "skipped", "optional hook unavailable in target harness", "", "", "")
+	run := func(label string, action func(*Context) error) {
+		if openErr != nil {
+			report.add("hook", t.collection, label, "failed", "cannot open target collection: "+openErr.Error(), "", "", "")
 			return
 		}
 		if opt.DryRun {
-			report.add("hook", t.collection, label, "planned", "would run target harness hook", "", "", "")
+			report.add("hook", t.collection, label, "planned", "would run native collection action", "", "", "")
 			return
 		}
-		cmd := exec.Command(path, append([]string{"--collection", targetDir}, args...)...)
-		cmd.Dir = targetDir
-		cmd.Env = make([]string, 0, len(os.Environ())+1)
-		for _, item := range os.Environ() {
-			if !strings.HasPrefix(item, "WTC_HARNESS_REPO=") {
-				cmd.Env = append(cmd.Env, item)
-			}
-		}
-		if harnessRepo != "" {
-			cmd.Env = append(cmd.Env, "WTC_HARNESS_REPO="+harnessRepo)
-		}
-		if err := cmd.Run(); err != nil {
-			report.add("hook", t.collection, label, "failed", "target hook failed: "+err.Error(), "", "", "")
+		if err := action(target); err != nil {
+			report.add("hook", t.collection, label, "failed", "native collection action failed: "+err.Error(), "", "", "")
 		} else {
 			report.add("hook", t.collection, label, "ok", "completed", "", "", "")
 		}
 	}
 	if !opt.NoSecrets {
 		if managed {
-			run("link-secrets.sh", "secrets:"+t.repo, "--repo", filepath.Base(t.path))
+			run("secrets:"+t.repo, func(target *Context) error {
+				values := map[string]string{"repo": t.repo, "include_prod": "false"}
+				if err := target.RunHook("secrets.link.pre", values); err != nil {
+					return err
+				}
+				if _, err := target.LinkSecrets(SecretLinkOptions{Repo: t.repo}); err != nil {
+					return err
+				}
+				return target.RunHook("secrets.link.post", values)
+			})
 		} else {
 			report.add("hook", t.collection, "secrets:"+t.repo, "skipped", "unmanaged sibling; no registry secrets to link", "", "", "")
 		}
@@ -537,13 +531,58 @@ func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt Catch
 		return
 	}
 	if !opt.NoEnv {
-		run("refresh-env.sh", "env")
+		run("env", func(target *Context) error {
+			data, err := target.RenderEnv()
+			if err != nil {
+				return err
+			}
+			if err := target.ValidateEnvSupport(); err != nil {
+				return err
+			}
+			if err := target.RunHook("env.pre", nil); err != nil {
+				return err
+			}
+			if err := target.WriteEnv(data); err != nil {
+				return err
+			}
+			if err := target.EnsureEnvSupport(); err != nil {
+				return err
+			}
+			if err := target.TrustMise(); err != nil {
+				return err
+			}
+			return target.RunHook("env.post", nil)
+		})
 	}
 	if !opt.NoSkills {
-		run("link-skills.sh", "skills")
+		run("skills", func(target *Context) error {
+			if err := target.RunHook("skills.render.pre", nil); err != nil {
+				return err
+			}
+			if _, err := target.RenderSkills(SkillRenderOptions{}); err != nil {
+				return err
+			}
+			return target.RunHook("skills.render.post", nil)
+		})
 	}
 	if !opt.NoMCP {
-		run("link-mcp.sh", "mcp")
+		if _, err := os.Stat(filepath.Join(targetDir, "harness", ".mcp-servers.yml")); os.IsNotExist(err) {
+			report.add("hook", t.collection, "mcp", "skipped", "no MCP registry in target harness", "", "", "")
+		} else {
+			run("mcp", func(target *Context) error {
+				outputs, err := target.RenderMCP()
+				if err != nil {
+					return err
+				}
+				if err := target.RunHook("mcp.render.pre", nil); err != nil {
+					return err
+				}
+				if _, err := target.WriteMCP(outputs, false); err != nil {
+					return err
+				}
+				return target.RunHook("mcp.render.post", nil)
+			})
+		}
 	}
 	if opt.ReloadStatus {
 		c.catchUpReloadStatus(report, t, opt)

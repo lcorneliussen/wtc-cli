@@ -105,16 +105,11 @@ git --git-dir=.bare/agent-harness.git worktree add --detach \
   main/harness origin/main
 
 cd main/harness
-wtc registry refresh     # writes local .harness-repos from .bare/
 ```
 
-`wtc registry refresh` walks up until it finds `.bare/`. If it errors
-`no .bare/ found`, you are not under the workspace root.
-
-Then author the **registry**, `.harness-repos.yml` — the tracked statement
+Now author the **registry**, `.harness-repos.yml` — the tracked statement
 of which repos are yours. This repository ships none, because the list is
-yours; `wtc registry refresh` only warns about it, but every other tool
-refuses to run without one. Start with the harness itself:
+yours; native commands require it. Start with the harness itself:
 
 ```yaml
 schema_version: 1
@@ -130,7 +125,8 @@ One block per repo as you adopt it: `default_ref:` wherever the tip is not
 `origin/main`, and `port_offset:` for anything that serves a port (the
 collection env turns those into `<REPO>_PORT`). The name has to match the
 bare in `.bare/`; if you renamed your fork, set `WTC_HARNESS_REPO` to it.
-Commit it — it is the one file in this fork that is genuinely yours.
+Commit it — it is the one file in this fork that is genuinely yours. Then run
+`wtc registry refresh` to generate the local registry from the bare owners.
 
 Now finish wiring the collection:
 
