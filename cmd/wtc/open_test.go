@@ -204,6 +204,9 @@ else:
 		t.Fatalf("normal start failed: %+v", first)
 	}
 	before, _ := os.ReadFile(log)
+	if !strings.Contains(string(before), "wtc browse --here") || !strings.Contains(string(before), "wtc status --tui") {
+		t.Fatalf("browse and status panes did not launch native commands: %s", before)
+	}
 	second := openCollection(c, "sample", enabled, "narrow", true, true)
 	after, _ := os.ReadFile(log)
 	if second.Error != "" || strings.Count(string(after), "agent start ") != strings.Count(string(before), "agent start ") || strings.Count(string(after), "pane run ") != strings.Count(string(before), "pane run ") {

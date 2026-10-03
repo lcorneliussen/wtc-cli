@@ -1,7 +1,7 @@
 # Lifecycle hooks and collection env
 
 Collections have a lifecycle git knows nothing about: worktrees get created
-(`branch-off.sh`, `add-repo.sh`) and torn down (`retire.sh`). Repos can hook
+(`wtc new`, `wtc add-repo`) and torn down (`wtc retire`). Repos can hook
 into that, and every collection carries a small shared environment (ports
 etc.) that all siblings inherit.
 
@@ -21,7 +21,7 @@ before it is removed, its **teardown** hook. Resolution order per repo:
 3. Neither → no-op.
 
 Because hooks are checked into each repo, a repo brought into a collection
-later (via `add-repo.sh`) carries its own setup with it. Hooks must be
+later (via `wtc add-repo`) carries its own setup with it. Hooks must be
 idempotent and must not assume which siblings exist — check
 `../<repo>`/`$<REPO>_PORT` and degrade gracefully.
 
@@ -39,7 +39,7 @@ the collection env, link secrets from the machine's control root
 (`$WTC_CONFIG_ROOT` — see `secrets.md`). Typical teardown: stop
 containers, deregister local services. Keep hooks fast.
 
-For secrets, hooks **call `tools/link-secrets.sh --repo <name>`** rather than
+For secrets, hooks **call `wtc secrets link --repo <name>`** rather than
 writing their own `ln` lines — one implementation, so the ignore-check and
 prod-path rules cannot drift per repo. The hook locates the harness worktree
 as a sibling and degrades to a printed note when there is none (a repo cloned
@@ -52,12 +52,12 @@ that already exist. Catch-up closes it by re-running the same tool
 
 `.env.collection` has the same gap for the same reason — it is generated at
 collection creation and never revisited, so a variable the generator learned
-afterwards reaches new collections only. `tools/refresh-env.sh` is that file's
+afterwards reaches new collections only. `wtc env setup` is that file's
 version of the same "run it again" tool, and catch-up runs it too.
 
 ## Collection env and ports
 
-`branch-off.sh` allocates each collection a **port block** — the lowest free
+`wtc new` allocates each collection a **port block** — the lowest free
 `42000 + 100·n` across existing collections — and writes two generated,
 uncommitted files at the collection root:
 
@@ -100,10 +100,10 @@ agent shell command sees repo-pinned tools on PATH, independent of cwd:
 
 | Surface | What it does |
 |---|---|
-| `tools/agent-env.sh` | trusts sibling `mise.toml` files, caches bins as `.env.toolchain`, prints `export PATH=…` |
+| `wtc agent-env` | trusts sibling `mise.toml` files, caches bins as `.env.toolchain`, prints `export PATH=…` |
 | `hooks/agent-env.json` | SessionStart refreshes the cache; PreToolUse wraps `Bash` / `run_terminal_command` with `eval "$(agent-env.sh)"` |
 | collection-root `.envrc` | Grok `load_envrc` (and direnv) prepend PATH without needing project hook trust |
-| `wtc-open.sh` | new herdr workspaces get `WTC_TOOLCHAIN_PATH` and `BASH_ENV` at create time |
+| `wtc open` | new herdr workspaces get `WTC_TOOLCHAIN_PATH` and `BASH_ENV` at create time |
 
 ### Why none of these sets PATH directly
 
@@ -120,7 +120,7 @@ does not touch — and every surface that turns it into a `PATH` runs *after* th
 profile:
 
 * `BASH_ENV` — bash sources it for every **non-interactive** shell, which is
-  precisely what an agent CLI spawns. `agent-env.sh` detects being sourced and
+  precisely what an agent CLI spawns. `wtc agent-env` detects being sourced and
   applies to the calling shell silently. This is the surface that needs no hook
   trust and no per-CLI config.
 
@@ -137,7 +137,7 @@ Interactive human panes never needed this: a login shell that runs `mise
 activate` from `.zshrc` already resolves per-directory pins correctly. The
 problem was only ever the non-login shells agents spawn.
 
-`link-skills.sh` installs the hook JSON at `.grok/hooks/`, `.claude/settings.json`,
+`wtc skills render` installs the hook JSON at `.grok/hooks/`, `.claude/settings.json`,
 and `.cursor/hooks.json` (symlinks; a real file there is left as a local
 override) and regenerates `.envrc` / `.env.toolchain`. Catch-up re-runs it.
 Grok skips project hooks until `/hooks-trust`; `.envrc` and herdr PATH still
@@ -158,7 +158,7 @@ system interpreters once PATH is injected.
 
 | Event | Tool | Hooks run |
 |---|---|---|
-| Collection created | `tools/branch-off.sh` | `init` for every included repo (after env is written and skills are linked) |
-| Repo added later | `tools/add-repo.sh` | `init` for the new repos only |
-| Collection retired | `wtc retire` (`tools/retire.sh` compatibility entry) | `teardown` for every repo, then worktrees removed (pre-flight refuses on dirty/unpushed work unless `--force`; branches are never deleted) |
-| Generator or registry changed | `tools/refresh-env.sh` | none — regenerates `.env.collection`, preserving the port base |
+| Collection created | `wtc new` | `init` for every included repo (after env is written and skills are linked) |
+| Repo added later | `wtc add-repo` | `init` for the new repos only |
+| Collection retired | `wtc retire` | `teardown` for every repo, then worktrees removed (pre-flight refuses on dirty/unpushed work unless `--force`; branches are never deleted) |
+| Generator or registry changed | `wtc env setup` | none — regenerates `.env.collection`, preserving the port base |

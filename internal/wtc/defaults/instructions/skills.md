@@ -17,9 +17,9 @@ markdown at a stable path.
 |---|---|
 | `instructions/*.md` | **Canon** — the rule, the geometry, the rationale. One source of truth. |
 | `skills/wtc-*/SKILL.md` | **Procedure** — what to do, in order, with the judgement calls named. Links to canon rather than restating it. |
-| `tools/*.sh` | **Mechanism** — the steps a script should own. |
+| `wtc` CLI | **Mechanism** — collection commands and their stable flags. |
 
-A skill that only wraps one script invocation is not worth a file; the value
+A skill that only wraps one command invocation is not worth a file; the value
 is the surrounding judgement (which flag, what to check first, what to do with
 the result). When a skill and an instruction disagree, the instruction wins
 and the skill is the bug.
@@ -34,7 +34,7 @@ and the skill is the bug.
 
 So **two directory names cover all three**: `.claude/skills` and
 `.agents/skills`. `wtc skills render` creates both at the collection root,
-one symlink per skill; `tools/link-skills.sh` remains a bootstrap entry point:
+one symlink per skill; `wtc skills render` also creates the collection entry point:
 
 ```text
 <collection>/AGENTS.md              -> harness/collection-AGENTS.md
@@ -65,7 +65,7 @@ directories are invisible to git and no product repo needs an ignore rule for
 them. Why symlinks and not copies: one authored copy, versioned in this repo;
 collections stay disposable and carry no durable state.
 
-The renderer runs at collection creation (`branch-off.sh`, `add-repo.sh`) and
+The renderer runs at collection creation (`wtc new`, `wtc add-repo`) and
 again at catch-up, which is how a collection created before a skill existed
 picks it up.
 
@@ -148,13 +148,13 @@ product repo, which is exactly the coupling this layout avoids.
 ```bash
 mkdir -p skills/wtc-<name>
 $EDITOR skills/wtc-<name>/SKILL.md     # frontmatter: name + description
-tools/link-skills.sh                   # link it into this collection
+wtc skills render                   # link it into this collection
 ```
 
 Then add it to the table in `AGENTS.md`. Other collections pick it up at their
 next catch-up, once the change has merged — or in one pass with
-`tools/link-skills.sh --all` after those worktrees are current. Removing a
-skill is the reverse: delete the directory, and `link-skills.sh` prunes the
+`wtc skills render --all` after those worktrees are current. Removing a
+skill is the reverse: delete the directory, and `wtc skills render` prunes the
 dangling links on its next run.
 
 Live reload varies by CLI — Claude Code picks up edits within the session, but

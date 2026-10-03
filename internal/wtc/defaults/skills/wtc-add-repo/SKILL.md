@@ -17,7 +17,7 @@ name you pass is the registry `name`, not the GitHub slug.
 
 If the repo is not in the registry at all, this is a different job — it has to
 be registered first (remote, `default_ref`, a unique `port_offset` if it
-serves, `issues_prefix` if it owns issues), then `refresh-configs.sh` re-run.
+serves, `issues_prefix` if it owns issues), then `wtc registry refresh` re-run.
 
 ## 2. Add it
 
@@ -28,7 +28,7 @@ wtc add-repo <repo> [<repo> …]
 Run from this collection. An explicitly requested other collection can be
 selected with `--collection <name>`, where the name is its directory under
 the same workspace root. On an older pin, use
-`harness/tools/add-repo.sh <repo> [<repo> …]` from this collection.
+`wtc add-repo <repo> [<repo> …]` from this collection.
 
 Default: the new worktree is **detached at the repo's `default_ref`** — no
 branch. A repo added purely for context (reading a sibling's code, checking an
@@ -48,9 +48,8 @@ repo's port, so nothing needs re-wiring.
 
 ## 3. Wire the rest
 
-The native command links secrets before init. If the shell fallback was used,
-run `harness/tools/link-secrets.sh --repo <repo>` afterwards. A nonzero exit
-means a target is not gitignored — fix the ignore rule in that repo first.
+`wtc add-repo` links secrets before init. A nonzero exit means a target is
+not gitignored — fix the ignore rule in that repo first.
 
 ## 4. Before changing anything in it
 

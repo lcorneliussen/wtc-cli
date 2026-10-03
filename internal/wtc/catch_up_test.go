@@ -198,7 +198,6 @@ func TestCatchUpStatusReloadOnlyTouchesVerifiedStatusPane(t *testing.T) {
 	bin := filepath.Join(c.Workspace, "bin")
 	log := filepath.Join(c.Workspace, "herdr.log")
 	state := filepath.Join(c.Workspace, "pane-state")
-	fixtureFile(t, filepath.Join(c.Harness, "tools", "wtc-status-tui.sh"), "#!/bin/sh\n", 0755)
 	fixtureFile(t, filepath.Join(bin, "herdr"), `#!/bin/sh
 printf '%s\n' "$*" >> "$MOCK_HERDR_LOG"
 shift 2
@@ -206,10 +205,10 @@ case "$1 $2" in
   'workspace list') printf '%s\n' '{"result":{"workspaces":[{"label":"main","workspace_id":"w1"}]}}' ;;
   'pane list') printf '%s\n' '{"result":{"panes":[{"label":"status","pane_id":"w1:p3"},{"label":"agent","pane_id":"w1:p1","agent":"codex"}]}}' ;;
   'pane process-info')
-    if [ -f "$MOCK_HERDR_STATE/restarted" ]; then args='["bash","./harness/tools/wtc-status-tui.sh"]'
+    if [ -f "$MOCK_HERDR_STATE/restarted" ]; then args='["wtc","status","--tui"]'
     elif [ -f "$MOCK_HERDR_STATE/interrupted" ]; then args='["zsh"]'
     elif [ -f "$MOCK_HERDR_STATE/unrelated" ]; then args='["nvim"]'
-    else args='["bash","./harness/tools/wtc-status-tui.sh"]'; fi
+    else args='["wtc","status","--tui"]'; fi
     printf '{"result":{"process_info":{"foreground_process_group_id":42,"foreground_processes":[{"pid":43,"argv":["renderer"]},{"pid":42,"argv":%s}]}}}\n' "$args" ;;
   'pane send-keys') touch "$MOCK_HERDR_STATE/interrupted" ;;
   'pane run') touch "$MOCK_HERDR_STATE/restarted" ;;

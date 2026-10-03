@@ -1,7 +1,7 @@
 # wtc
 
-A versioned CLI for worktree collections. The reference harness keeps shell
-entry points as compatibility shims; their normal paths use the pinned binary.
+A versioned CLI for worktree collections. Invoke `wtc` directly from a
+collection; its harness pins the released version.
 
 ## Commands
 

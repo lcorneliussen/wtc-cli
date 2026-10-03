@@ -134,7 +134,7 @@ esac
 	}
 }
 
-func TestBrowsePaneCommandPrefersTargetHarnessShim(t *testing.T) {
+func TestBrowsePaneCommandUsesCLIWhenLegacyShimExists(t *testing.T) {
 	root := t.TempDir()
 	c := &wtc.Context{Collection: filepath.Join(root, "target"), Harness: filepath.Join(root, "target", "harness")}
 	shim := filepath.Join(c.Harness, "tools", "wtc-browse.sh")
@@ -145,8 +145,8 @@ func TestBrowsePaneCommandPrefersTargetHarnessShim(t *testing.T) {
 		t.Fatal(err)
 	}
 	command, err := browsePaneCommand(c)
-	if err != nil || command != "'"+shim+"' --here" {
-		t.Fatalf("target harness shim was not used: %q, %v", command, err)
+	if err != nil || command != "cd '"+c.Collection+"' && wtc browse --here" {
+		t.Fatalf("browse pane did not use the CLI: %q, %v", command, err)
 	}
 }
 

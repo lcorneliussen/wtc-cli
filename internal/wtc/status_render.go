@@ -190,7 +190,7 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 	}
 	if len(active) == 0 && len(archived) == 0 {
 		if s.PRsEmptyHint {
-			b.WriteString("- (none enlisted — `tools/wtc-pr.sh enlist <repo> <n>`)\n")
+			b.WriteString("- (none enlisted — `wtc pr enlist <repo> <n>`)\n")
 		} else {
 			b.WriteString("- (none)\n")
 		}

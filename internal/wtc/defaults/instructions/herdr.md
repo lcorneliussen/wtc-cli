@@ -84,7 +84,7 @@ herdr --session <project>                  # attach
 Opening is idempotent and repairs a wtc whose agent exited. The session starts
 headless on demand, so opening never steals a terminal. `wtc new` joins
 a **running** session automatically (`--open` starts one, `--no-open` skips),
-and `retire.sh` closes the workspace with the collection.
+and `wtc retire` closes the workspace with the collection.
 
 Claude panes start with `--dangerously-skip-permissions`: a wtc is an isolated
 worktree on its own branch with no production credentials. `--agent-args`
@@ -92,7 +92,7 @@ overrides, `--no-agent` skips the agent.
 
 ## Status
 
-`tools/wtc-status.sh` prints each collection's branch, open PR with its check
+`wtc status --no-watch` prints each collection's branch, open PR with its check
 rollup (`✓ ✗ ● —`), and working-tree state, then the processes running under
 the session with CPU and memory.
 
@@ -101,8 +101,8 @@ including wtcs opened before the pane existed, so re-running adds it without
 disturbing the agent. For the process view, run it wherever you want it:
 
 ```bash
-tools/wtc-status.sh --procs --watch 5
-tools/wtc-status.sh --repos --watch 120   # all collections at once
+wtc status --no-watch --procs --watch 5
+wtc status --no-watch --repos --watch 120   # all collections at once
 ```
 
 The collection table is **clickable** wherever it has a terminal on both
@@ -178,15 +178,15 @@ you act on — tests, builds, git — runs directly in the agent's own shell.
 
 Panes are for processes that outlive the turn or that a human should watch:
 dev servers, `docker compose up`, watch-mode runners, log tails, and TUIs
-(`wtc-browse.sh`, lazygit) which belong in `browse`. A dev server in a pane is
+(`wtc browse`, lazygit) which belong in `browse`. A dev server in a pane is
 also findable via `herdr pane list`, so the next agent doesn't start a
 second copy on the same port.
 
 ### Write it relative
 
 Every command a tool types into a pane is **relative to the collection root**,
-which is that pane's cwd: `./harness/tools/wtc-status.sh --repos`,
-`./harness/tools/wtc-browse.sh --here`, a bare `lazygit` in a pane opened at
+which is that pane's cwd: `wtc status --no-watch --repos`,
+`wtc browse --here`, a bare `lazygit` in a pane opened at
 the worktree. No absolute paths, and no collection argument where the tool
 already defaults to the collection it runs from. A pane's shell history is
 then a set of commands anyone can re-run in any collection, rather than a
@@ -229,7 +229,7 @@ entry looking submitted. `wtc open` waits for the agent to be seen working and
 supplies the missing Enter when herdr reports the submission stalled.
 
 ```bash
-tools/branch-off.sh --issue api-1234 paging-clamp --open
+wtc new --issue api-1234 paging-clamp --open
 herdr --session <project> agent prompt api-1234-paging-clamp \
   "Read HANDOFF.md at the wtc root, then start." --wait
 ```

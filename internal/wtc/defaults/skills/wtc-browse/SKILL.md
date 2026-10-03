@@ -25,7 +25,7 @@ From a terminal (including the herdr `shell` pane) this opens nvim **in
 this window**. From an agent pane it sends nvim to the workspace `browse`
 pane — never into the agent itself — and opens a `pr` herdr tab with
 `gh dash` if that extension is installed. `--here` forces this terminal.
-The harness's `wtc-browse.sh` entry point uses this command when its exact
+The harness's `wtc browse` entry point uses this command when its exact
 release is installed and retains the shell path for bootstrap.
 
 Do not pass `--here` from an agent pane unless the user asked to take it over.

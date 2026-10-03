@@ -312,9 +312,9 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 					continue
 				}
 			}
-			command := "./harness/tools/wtc-status-tui.sh"
+			command := "wtc status --tui"
 			if label == "browse" {
-				command = "./harness/tools/wtc-browse.sh --here"
+				command = "wtc browse --here"
 			}
 			if !openWaitIdle(opt.Session, pane.ID, 0) {
 				item.Actions = append(item.Actions, label+" busy — left alone")

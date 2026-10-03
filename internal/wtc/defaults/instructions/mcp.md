@@ -20,7 +20,7 @@ its marked block in TOML; other agent settings and manually added servers stay
 in place. It validates every output before writing and replaces each changed
 file atomically. They sit at the **collection root** because it is not a git repo —
 the files are invisible to git and no repo needs an ignore rule for them
-(same reasoning as `tools/link-skills.sh`), and it is where `AGENTS.md` says
+(same reasoning as `wtc skills render`), and it is where `AGENTS.md` says
 to start an agent.
 
 ## Credentials are named, never valued
@@ -68,17 +68,15 @@ opaque auth error inside an agent later.
 Then run `wtc mcp render` in this collection. For an argument containing
 spaces, set `args` to a quoted JSON string array, for example
 `args: '["one argument", "--flag"]'`. The renderer validates the registry
-schema and arguments before writing any files. The shell wrapper remains for
-collections that have not adopted the CLI.
+schema and arguments before writing any files.
 
 ## What is deliberately not an MCP server
 
 **`gh` stays a CLI.** The GitHub MCP server was considered and rejected for
 this harness, for reasons worth not relitigating:
 
-1. `gh` runs inside `tools/*.sh` — `wtc-status.sh`, `lib.sh`, `branch-off.sh`.
-   MCP cannot reach a shell script, so adopting it would *add* a second path
-   with its own credentials rather than replace anything.
+1. `gh` is already a CLI that both humans and agents use alongside `wtc`.
+   An MCP path would duplicate the same operations and credentials.
 2. Four `gh api graphql` calls have no MCP equivalent; the official server
    exposes no arbitrary-GraphQL tool. `resolveReviewThread` (`wtc-pr` §6.4)
    is one of them.
@@ -98,7 +96,7 @@ rule above answers it directly, and a second Atlassian path would only have
 meant two credentials for one system. See `jira.md`.
 
 That leaves the registry empty, which is a working state rather than a gap:
-`link-mcp.sh` renders empty configs from it, and that is how a server removed
+`wtc mcp render` renders empty configs from it, and that is how a server removed
 from the registry gets pruned out of every collection.
 
 ## Per-agent caveats
@@ -116,9 +114,9 @@ from the registry gets pruned out of every collection.
 
 ## Where this is wired in
 
-Same lifecycle as `link-skills.sh`, and for the same reason — a collection is
+Same lifecycle as `wtc skills render`, and for the same reason — a collection is
 generated and disposable, so it is re-rendered rather than maintained:
 
-- `branch-off.sh` and `add-repo.sh` call it at creation, before the init hooks
+- `wtc new` and `wtc add-repo` call it at creation, before the init hooks
 - `wtc-catch-up` §4.1 re-renders, picking up registry changes since
 - `--all` rolls a landed registry change across every caught-up collection

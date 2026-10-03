@@ -319,12 +319,6 @@ func browseShellQuote(value string) string {
 }
 
 func browsePaneCommand(c *wtc.Context) (string, error) {
-	shim := filepath.Join(c.Harness, "tools", "wtc-browse.sh")
-	if info, err := os.Stat(shim); err == nil && info.Mode().IsRegular() && info.Mode()&0111 != 0 {
-		return browseShellQuote(shim) + " --here", nil
-	} else if err != nil && !os.IsNotExist(err) {
-		return "", err
-	}
 	return "cd " + browseShellQuote(c.Collection) + " && wtc browse --here", nil
 }
 
