@@ -101,11 +101,11 @@ agent shell command sees repo-pinned tools on PATH, independent of cwd:
 | Surface | What it does |
 |---|---|
 | `wtc agent-env` | trusts sibling `mise.toml` files, caches bins as `.env.toolchain`, prints `export PATH=…` |
-| `hooks/agent-env.json` | SessionStart refreshes the cache; PreToolUse wraps `Bash` / `run_terminal_command` with `eval "$(agent-env.sh)"` |
+| `hooks/agent-env.json` | SessionStart refreshes the cache; PreToolUse wraps `Bash` / `run_terminal_command` with inline exports from `wtc agent-env --wrap` |
 | collection-root `.envrc` | Grok `load_envrc` (and direnv) prepend PATH without needing project hook trust |
-| `wtc open` | new herdr workspaces get `WTC_TOOLCHAIN_PATH` and `BASH_ENV` at create time |
+| `wtc open` | new herdr workspaces get `WTC_TOOLCHAIN_PATH` at create time |
 
-### Why none of these sets PATH directly
+### Why the toolchain is applied after shell startup
 
 Anything that sets `PATH` *before* a login shell starts loses on macOS.
 `/etc/zprofile` and `/etc/profile` run `path_helper`, which rebuilds `PATH`
@@ -116,21 +116,10 @@ system 2.6. Measured: a prefix passed at position 1 lands at position 18, with
 purpose, silently.
 
 So the harness passes `WTC_TOOLCHAIN_PATH` — an ordinary variable `path_helper`
-does not touch — and every surface that turns it into a `PATH` runs *after* the
-profile:
+does not touch — and the agent hook and `.envrc` apply it after the profile:
 
-* `BASH_ENV` — bash sources it for every **non-interactive** shell, which is
-  precisely what an agent CLI spawns. `wtc agent-env` detects being sourced and
-  applies to the calling shell silently. This is the surface that needs no hook
-  trust and no per-CLI config.
-
-  It has one hole, found by the test suite. When **stdin is a socket**, bash
-  decides it was started by a remote shell daemon and sources `~/.bashrc`
-  instead of `$BASH_ENV` — silently, so the prefix simply never arrives. An
-  agent CLI that talks to its host over a socket on fd 0 is exactly that case.
-  This is why `BASH_ENV` is one of four surfaces rather than the answer: the
-  PreToolUse hook wraps the command itself and does not care what stdin is.
-* the PreToolUse hook — wraps the agent's own tool calls.
+* the PreToolUse hook — adds the cached toolchain path to each agent shell
+  command, independent of how its stdin is connected.
 * `.envrc` — direnv and Grok `load_envrc`.
 
 Interactive human panes never needed this: a login shell that runs `mise

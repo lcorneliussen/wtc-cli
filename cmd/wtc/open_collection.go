@@ -192,9 +192,6 @@ func openCreateWorkspace(target *wtc.Context, session, name string) error {
 	path, err := target.AgentToolchainPath(true)
 	if err == nil && path != "" {
 		args = append(args, "--env", "WTC_TOOLCHAIN_PATH="+path)
-		if _, err := os.Stat(filepath.Join(target.Harness, "tools", "agent-env.sh")); err == nil {
-			args = append(args, "--env", "BASH_ENV="+filepath.Join(target.Harness, "tools", "agent-env.sh"))
-		}
 	}
 	args = append(args, "--env", "WTC_AGENT_NAME="+openAgentName(session, name))
 	_, err = openHerdr(session, args...)

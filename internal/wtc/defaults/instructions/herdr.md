@@ -93,16 +93,16 @@ overrides, `--no-agent` skips the agent.
 ## Status
 
 `wtc status --no-watch` prints each collection's branch, open PR with its check
-rollup (`✓ ✗ ● —`), and working-tree state, then the processes running under
-the session with CPU and memory.
+rollup (`✓ ✗ ● —`), and working-tree state. Add `--procs` for processes running
+under the session with CPU and memory.
 
 `wtc open` puts a `status` pane in every wtc, scoped to that collection —
 including wtcs opened before the pane existed, so re-running adds it without
 disturbing the agent. For the process view, run it wherever you want it:
 
 ```bash
-wtc status --no-watch --procs --watch 5
-wtc status --no-watch --repos --watch 120   # all collections at once
+wtc status --procs --watch 5
+wtc status --all --watch 120   # all collections at once
 ```
 
 The collection table is **clickable** wherever it has a terminal on both

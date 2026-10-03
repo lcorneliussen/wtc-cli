@@ -244,6 +244,9 @@ esac
 	if strings.Contains(string(data), "w1:p1") || !strings.Contains(string(data), "pane send-keys w1:p3 ctrl+c") || !strings.Contains(string(data), "pane run w1:p3") {
 		t.Fatalf("wrong pane activity: %s", data)
 	}
+	if !strings.Contains(string(data), "cd '"+c.Collection+"' && wtc status --tui") {
+		t.Fatalf("native status command was not restarted: %s", data)
+	}
 }
 
 func TestCatchUpReadsEnlistedBitbucketStateWithoutGuessing(t *testing.T) {

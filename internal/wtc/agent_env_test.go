@@ -123,7 +123,7 @@ func TestAgentEnvEvalAndWrap(t *testing.T) {
 		t.Fatalf("unsafe or incomplete eval: %s", eval)
 	}
 	raw := []byte(`{"toolInput":{"command":"ruby -v","other":1}}`)
-	wrapped := AgentEnvWrap(raw, "/tmp/harness/tools/agent-env.sh")
+	wrapped := AgentEnvWrap(raw, "/tmp/path with spaces/a'b")
 	var result struct {
 		HookSpecificOutput struct {
 			HookEventName string `json:"hookEventName"`
@@ -136,13 +136,13 @@ func TestAgentEnvEvalAndWrap(t *testing.T) {
 	if err := json.Unmarshal(wrapped, &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.HookSpecificOutput.HookEventName != "PreToolUse" || result.HookSpecificOutput.UpdatedInput.Other != 1 || !strings.Contains(result.HookSpecificOutput.UpdatedInput.Command, "ruby -v") {
+	if result.HookSpecificOutput.HookEventName != "PreToolUse" || result.HookSpecificOutput.UpdatedInput.Other != 1 || !strings.Contains(result.HookSpecificOutput.UpdatedInput.Command, "ruby -v") || !strings.Contains(result.HookSpecificOutput.UpdatedInput.Command, "WTC_TOOLCHAIN_PATH='/tmp/path with spaces/a'") || strings.Contains(result.HookSpecificOutput.UpdatedInput.Command, "agent-env.sh") {
 		t.Fatalf("unexpected hook output: %s", wrapped)
 	}
-	if len(AgentEnvWrap(wrapped, "/tmp/harness/tools/agent-env.sh")) != 0 {
+	if len(AgentEnvWrap(wrapped, "/tmp/path")) != 0 {
 		t.Fatal("wrapped command twice")
 	}
-	if len(AgentEnvWrap(raw, "/tmp/path with spaces/agent-env.sh")) != 0 || len(AgentEnvWrap([]byte("bad"), "/tmp/a")) != 0 {
-		t.Fatal("unsafe or invalid hook input was rewritten")
+	if len(AgentEnvWrap(raw, "")) != 0 || len(AgentEnvWrap([]byte("bad"), "/tmp/a")) != 0 {
+		t.Fatal("empty path or invalid hook input was rewritten")
 	}
 }

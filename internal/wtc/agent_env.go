@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -156,12 +155,10 @@ func AgentEnvEval(path string) string {
 		"esac\nexport WTC_AGENT_ENV WTC_TOOLCHAIN_PATH PATH\n"
 }
 
-var safeAgentEnvPath = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
-
 // AgentEnvWrap rewrites a PreToolUse command. Invalid or unsupported input is
 // deliberately ignored so tool hooks fail open.
-func AgentEnvWrap(raw []byte, script string) []byte {
-	if !safeAgentEnvPath.MatchString(script) {
+func AgentEnvWrap(raw []byte, path string) []byte {
+	if path == "" {
 		return nil
 	}
 	var event map[string]json.RawMessage
@@ -183,7 +180,7 @@ func AgentEnvWrap(raw []byte, script string) []byte {
 	if strings.HasPrefix(strings.TrimLeft(command, " \t\n"), "# wtc-agent-env") || strings.Contains(firstN(command, 400), "WTC_AGENT_ENV=1") {
 		return nil
 	}
-	wrapped := "# wtc-agent-env\neval \"$(bash " + script + ")\"\n" + command
+	wrapped := AgentEnvEval(path) + command
 	value, _ := json.Marshal(wrapped)
 	input["command"] = value
 	output := map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PreToolUse", "updatedInput": input}}
@@ -199,12 +196,4 @@ func firstN(s string, n int) string {
 		return s[:n]
 	}
 	return s
-}
-
-func AgentEnvScriptPath(collection string) (string, error) {
-	script := filepath.Join(collection, "harness", "tools", "agent-env.sh")
-	if !safeAgentEnvPath.MatchString(script) {
-		return "", fmt.Errorf("agent-env wrapper requires a shell-safe collection path")
-	}
-	return script, nil
 }
