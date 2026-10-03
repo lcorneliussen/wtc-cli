@@ -106,6 +106,27 @@ func TestCatchUpInventorySelectsSymlinkedWorktreeDirectory(t *testing.T) {
 	}
 }
 
+func TestCatchUpReportsUnopenableTargetActions(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	target := catchUpTarget{collection: "missing", path: filepath.Join(c.Workspace, "missing", "harness"), repo: "agent-harness", harness: true, managed: true}
+	report := CatchUpReport{Initiator: c.Collection}
+	c.catchUpHooks(&report, target, CatchUpOptions{})
+	if report.ExitStatus == 0 {
+		t.Fatalf("unopenable target did not fail catch-up: %+v", report.Outcomes)
+	}
+	for _, name := range []string{"secrets:agent-harness", "env", "skills"} {
+		found := false
+		for _, row := range report.Outcomes {
+			if row.Kind == "hook" && row.Repo == name && row.Outcome == "failed" && strings.Contains(row.Reason, "cannot open target collection") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("missing failed %s action: %+v", name, report.Outcomes)
+		}
+	}
+}
+
 func TestCatchUpReportKeepsRowsWhenPersistenceFails(t *testing.T) {
 	c := newWorkspaceFixture(t)
 	report := CatchUpReport{SchemaVersion: 1, Initiator: c.Collection, Outcomes: []CatchUpRow{}}
@@ -447,6 +468,7 @@ func TestCatchUpRefreshesCollectionWithoutShellEntryPoints(t *testing.T) {
 			t.Fatalf("native catch-up did not regenerate %s: %v; %+v", name, err, report.Outcomes)
 		}
 	}
+	mcpRows := 0
 	for _, row := range report.Outcomes {
 		if row.Kind == "hook" && (row.Repo == "env" || row.Repo == "skills") && row.Outcome != "ok" {
 			t.Fatalf("native catch-up action failed: %+v", row)
@@ -454,6 +476,12 @@ func TestCatchUpRefreshesCollectionWithoutShellEntryPoints(t *testing.T) {
 		if row.Kind == "hook" && row.Repo == "mcp" && (row.Outcome != "skipped" || !strings.Contains(row.Reason, "no MCP registry")) {
 			t.Fatalf("missing MCP registry was not reported: %+v", row)
 		}
+		if row.Kind == "hook" && row.Repo == "mcp" {
+			mcpRows++
+		}
+	}
+	if mcpRows != 1 {
+		t.Fatalf("expected one skipped MCP action: %+v", report.Outcomes)
 	}
 }
 

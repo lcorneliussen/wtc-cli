@@ -75,8 +75,8 @@ explicitly. Full rule: `harness/instructions/collection-context.md`.
   already has them.
 - **Toolchain PATH** is injected for agent shells that never ran `mise
   activate`. Do not spend turns on `mise trust`, `mise exec`, or prepending
-  `mise where ruby` — a SessionStart/PreToolUse hook, `.envrc`, and herdr
-  workspace env all prepend sibling bins so `/usr/bin/env ruby` cannot fall
+  `mise where ruby` — a PreToolUse hook and `.envrc` prepend sibling bins;
+  herdr passes the cached path for those surfaces so `/usr/bin/env ruby` cannot fall
   through to macOS system Ruby. If `ruby -v` still shows 2.6, once:
   `eval "$(wtc agent-env)"`. Grok project hooks need `/hooks-trust`
   the first time you open a collection.

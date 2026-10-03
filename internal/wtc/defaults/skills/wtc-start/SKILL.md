@@ -109,7 +109,7 @@ checked out here. Point absent services at a shared dev instance.
 
 Do **not** diagnose `mise trust` / `mise exec` / `mise where ruby` as a first
 step. Agent shells get sibling toolchain bins on PATH from `.env.toolchain`
-(via a PreToolUse hook, `.envrc`, and herdr). If `ruby -v` is macOS 2.6,
+(via a PreToolUse hook or `.envrc`; herdr passes the cached path). If `ruby -v` is macOS 2.6,
 `eval "$(wtc agent-env)"` once and continue — full rule in
 `harness/instructions/hooks-and-env.md` → Agent shells and PATH.
 

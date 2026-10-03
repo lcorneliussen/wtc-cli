@@ -84,7 +84,7 @@ File: `<collection>/.wtc-prs` (dies with `wtc retire`). Catch-up's "has this
 PR merged?" check reads it first; `gh` only enriches state/title when asked,
 and is the fallback for a branch that was never enlisted.
 
-Procedure: skill `wtc-catch-up`. Script: `wtc catch-up`.
+Procedure: skill `wtc-catch-up`. Command: `wtc catch-up`.
 
 ## Ownership after push and merge
 
