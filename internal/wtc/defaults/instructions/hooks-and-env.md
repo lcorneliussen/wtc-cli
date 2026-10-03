@@ -129,8 +129,8 @@ problem was only ever the non-login shells agents spawn.
 `wtc skills render` installs the hook JSON at `.grok/hooks/`, `.claude/settings.json`,
 and `.cursor/hooks.json` (symlinks; a real file there is left as a local
 override) and regenerates `.envrc` / `.env.toolchain`. Catch-up re-runs it.
-Grok skips project hooks until `/hooks-trust`; `.envrc` and herdr PATH still
-apply.
+Grok skips project hooks until `/hooks-trust`; `.envrc` still prepends PATH,
+while herdr carries `WTC_TOOLCHAIN_PATH` for the hook.
 
 `mise exec` remains correct **inside a sibling**. It is not required to dodge
 system interpreters once PATH is injected.
