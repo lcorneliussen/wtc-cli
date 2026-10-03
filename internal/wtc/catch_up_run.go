@@ -1,6 +1,7 @@
 package wtc
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -536,14 +537,23 @@ func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt Catch
 			if err != nil {
 				return err
 			}
+			mise, err := target.RenderMise()
+			if err != nil {
+				return err
+			}
+			oldEnv, _ := os.ReadFile(filepath.Join(target.Collection, ".env.collection"))
+			oldMise, _ := os.ReadFile(filepath.Join(target.Collection, "mise.toml"))
+			changed := !bytes.Equal(oldEnv, data) || !bytes.Equal(oldMise, mise)
 			if err := target.ValidateEnvSupport(); err != nil {
 				return err
 			}
 			if err := target.RunHook("env.pre", nil); err != nil {
 				return err
 			}
-			if err := target.WriteEnv(data); err != nil {
-				return err
+			if changed {
+				if err := target.WriteEnv(data); err != nil {
+					return err
+				}
 			}
 			if err := target.EnsureEnvSupport(); err != nil {
 				return err

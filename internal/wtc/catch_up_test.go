@@ -451,7 +451,54 @@ func TestCatchUpRefreshesCollectionWithoutShellEntryPoints(t *testing.T) {
 		if row.Kind == "hook" && (row.Repo == "env" || row.Repo == "skills") && row.Outcome != "ok" {
 			t.Fatalf("native catch-up action failed: %+v", row)
 		}
+		if row.Kind == "hook" && row.Repo == "mcp" && (row.Outcome != "skipped" || !strings.Contains(row.Reason, "no MCP registry")) {
+			t.Fatalf("missing MCP registry was not reported: %+v", row)
+		}
 	}
+}
+
+func TestCatchUpRendersMCPWithoutShellEntryPoint(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	fixtureFile(t, filepath.Join(c.Harness, ".mcp-servers.yml"), "schema_version: 1\nservers: []\n", 0644)
+	legacy := filepath.Join(c.Workspace, "legacy-mcp-called")
+	fixtureFile(t, filepath.Join(c.Harness, "tools", "link-mcp.sh"), "#!/bin/sh\ntouch '"+legacy+"'\n", 0755)
+	target := catchUpTarget{collection: filepath.Base(c.Collection), path: c.Harness, repo: "agent-harness", harness: true, managed: true}
+	report := CatchUpReport{Initiator: c.Collection}
+	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true, NoEnv: true, NoSkills: true})
+	if _, err := os.Stat(filepath.Join(c.Collection, ".mcp.json")); err != nil {
+		t.Fatalf("native MCP output missing: %v; %+v", err, report.Outcomes)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatal("legacy MCP script was invoked")
+	}
+	for _, row := range report.Outcomes {
+		if row.Kind == "hook" && row.Repo == "mcp" {
+			if row.Outcome != "ok" {
+				t.Fatalf("native MCP action failed: %+v", row)
+			}
+			return
+		}
+	}
+	t.Fatal("MCP catch-up outcome missing")
+}
+
+func TestCatchUpRejectsInvalidPinBeforeWritingEnv(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	path := filepath.Join(c.Collection, ".env.collection")
+	fixtureFile(t, path, "existing environment\n", 0644)
+	fixtureFile(t, filepath.Join(c.Harness, ".wtc-cli-version"), "invalid pin\n", 0644)
+	target := catchUpTarget{collection: filepath.Base(c.Collection), path: c.Harness, repo: "agent-harness", harness: true, managed: true}
+	report := CatchUpReport{Initiator: c.Collection}
+	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true, NoSkills: true, NoMCP: true})
+	if data, err := os.ReadFile(path); err != nil || string(data) != "existing environment\n" {
+		t.Fatalf("failed environment validation replaced the old file: %q, %v", data, err)
+	}
+	for _, row := range report.Outcomes {
+		if row.Kind == "hook" && row.Repo == "env" && row.Outcome == "failed" {
+			return
+		}
+	}
+	t.Fatalf("missing failed env outcome: %+v", report.Outcomes)
 }
 
 func TestCatchUpRunsSecretsHookForSiblingRegisteredByHarnessUpdate(t *testing.T) {
