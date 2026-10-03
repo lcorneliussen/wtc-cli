@@ -120,7 +120,7 @@ exists before using it.
 Keep teardown limited to resources owned by that worktree. The harness warns
 and continues if a repository hook fails, so the hook should report incomplete
 setup clearly on stderr. To link control-root files, call
-`wtc secrets link --repo <name>` or the harness's compatibility shim rather
+`wtc secrets link --repo <name>` rather
 than making links independently. The command refuses a target without a git
 ignore rule and backs up an existing regular file before replacing it.
 

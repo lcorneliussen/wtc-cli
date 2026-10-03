@@ -131,13 +131,13 @@ gh pr create --base <working-branch> --fill --title "<issue-id>: <what changed>"
 
 ```bash
 gh pr view --json number --jq .number   # the number gh just created
-tools/wtc-pr.sh enlist <repo> <n> --branch <working-branch>
+wtc pr enlist <repo> <n> --branch <working-branch>
 ```
 
 This is how `wtc-catch-up` and `wtc-status` find this PR later — a local
 mapping in `<collection>/.wtc-prs`, not a forge label.
 It survives everything a label would, for the one thing that actually matters
-here: this collection's own tools reading it back. `tools/wtc-pr.sh list`
+here: this collection's own tools reading it back. `wtc pr list`
 shows what is currently enlisted. Keep merged PRs enlisted while main checks
 or required delivery steps remain; returning the worktree to the tip does not
 end those obligations. Recent merged rows can age into the status archive.
@@ -156,7 +156,7 @@ gh pr edit <n> --add-label "wtc:$WTC_COLLECTION"
 
 If enlisting fails for some reason, **open the PR anyway** and say so. A PR
 missing from local bookkeeping is a smaller problem than a PR that was never
-opened — `tools/wtc-pr.sh enlist` afterwards fixes it.
+opened — `wtc pr enlist` afterwards fixes it.
 
 ### 5.2 Ready for review
 

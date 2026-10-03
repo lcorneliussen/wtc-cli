@@ -5,7 +5,7 @@ description: Open or reshape a worktree collection in herdr — ensure the agent
 
 # Open a collection in herdr
 
-Mechanism: `wtc open` (the matching-pin `harness/tools/wtc-open.sh` is a compatibility entry point). Canon: `harness/instructions/herdr.md`.
+Mechanism: `wtc open`. Canon: `harness/instructions/herdr.md`.
 
 A workspace is ergonomics only — worktrees already exist. Opening is
 idempotent: reuse the workspace, keep a live agent, fill idle panes, and

@@ -106,6 +106,27 @@ func TestCatchUpInventorySelectsSymlinkedWorktreeDirectory(t *testing.T) {
 	}
 }
 
+func TestCatchUpReportsUnopenableTargetActions(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	target := catchUpTarget{collection: "missing", path: filepath.Join(c.Workspace, "missing", "harness"), repo: "agent-harness", harness: true, managed: true}
+	report := CatchUpReport{Initiator: c.Collection}
+	c.catchUpHooks(&report, target, CatchUpOptions{})
+	if report.ExitStatus == 0 {
+		t.Fatalf("unopenable target did not fail catch-up: %+v", report.Outcomes)
+	}
+	for _, name := range []string{"secrets:agent-harness", "env", "skills"} {
+		found := false
+		for _, row := range report.Outcomes {
+			if row.Kind == "hook" && row.Repo == name && row.Outcome == "failed" && strings.Contains(row.Reason, "cannot open target collection") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("missing failed %s action: %+v", name, report.Outcomes)
+		}
+	}
+}
+
 func TestCatchUpReportKeepsRowsWhenPersistenceFails(t *testing.T) {
 	c := newWorkspaceFixture(t)
 	report := CatchUpReport{SchemaVersion: 1, Initiator: c.Collection, Outcomes: []CatchUpRow{}}
@@ -198,7 +219,6 @@ func TestCatchUpStatusReloadOnlyTouchesVerifiedStatusPane(t *testing.T) {
 	bin := filepath.Join(c.Workspace, "bin")
 	log := filepath.Join(c.Workspace, "herdr.log")
 	state := filepath.Join(c.Workspace, "pane-state")
-	fixtureFile(t, filepath.Join(c.Harness, "tools", "wtc-status-tui.sh"), "#!/bin/sh\n", 0755)
 	fixtureFile(t, filepath.Join(bin, "herdr"), `#!/bin/sh
 printf '%s\n' "$*" >> "$MOCK_HERDR_LOG"
 shift 2
@@ -206,10 +226,10 @@ case "$1 $2" in
   'workspace list') printf '%s\n' '{"result":{"workspaces":[{"label":"main","workspace_id":"w1"}]}}' ;;
   'pane list') printf '%s\n' '{"result":{"panes":[{"label":"status","pane_id":"w1:p3"},{"label":"agent","pane_id":"w1:p1","agent":"codex"}]}}' ;;
   'pane process-info')
-    if [ -f "$MOCK_HERDR_STATE/restarted" ]; then args='["bash","./harness/tools/wtc-status-tui.sh"]'
+    if [ -f "$MOCK_HERDR_STATE/restarted" ]; then args='["wtc","status","--tui"]'
     elif [ -f "$MOCK_HERDR_STATE/interrupted" ]; then args='["zsh"]'
     elif [ -f "$MOCK_HERDR_STATE/unrelated" ]; then args='["nvim"]'
-    else args='["bash","./harness/tools/wtc-status-tui.sh"]'; fi
+    else args='["wtc","status","--tui"]'; fi
     printf '{"result":{"process_info":{"foreground_process_group_id":42,"foreground_processes":[{"pid":43,"argv":["renderer"]},{"pid":42,"argv":%s}]}}}\n' "$args" ;;
   'pane send-keys') touch "$MOCK_HERDR_STATE/interrupted" ;;
   'pane run') touch "$MOCK_HERDR_STATE/restarted" ;;
@@ -244,6 +264,9 @@ esac
 	data, _ = os.ReadFile(log)
 	if strings.Contains(string(data), "w1:p1") || !strings.Contains(string(data), "pane send-keys w1:p3 ctrl+c") || !strings.Contains(string(data), "pane run w1:p3") {
 		t.Fatalf("wrong pane activity: %s", data)
+	}
+	if !strings.Contains(string(data), "cd '"+c.Collection+"' && wtc status --tui") {
+		t.Fatalf("native status command was not restarted: %s", data)
 	}
 }
 
@@ -409,12 +432,15 @@ func TestCatchUpSkipsSecretsHookForUnmanagedSibling(t *testing.T) {
 	if err != nil || report.ExitStatus != 0 {
 		t.Fatalf("catch-up with an unmanaged sibling failed: %+v %v", report, err)
 	}
-	logged, _ := os.ReadFile(calls)
-	if !strings.Contains(string(logged), "--repo widget") || strings.Contains(string(logged), "ext.thing") {
-		t.Fatalf("secrets hook calls: %q", logged)
+	if logged, _ := os.ReadFile(calls); len(logged) != 0 {
+		t.Fatalf("legacy secrets script was invoked: %q", logged)
 	}
 	seen := false
+	managed := false
 	for _, row := range report.Outcomes {
+		if row.Kind == "hook" && row.Repo == "secrets:widget" && row.Outcome == "ok" {
+			managed = true
+		}
 		if row.Kind == "hook" && row.Repo == "secrets:ext.thing" {
 			if row.Outcome != "skipped" || !strings.Contains(row.Reason, "unmanaged") {
 				t.Fatalf("unmanaged sibling secrets row: %+v", row)
@@ -422,9 +448,85 @@ func TestCatchUpSkipsSecretsHookForUnmanagedSibling(t *testing.T) {
 			seen = true
 		}
 	}
-	if !seen {
+	if !seen || !managed {
 		t.Fatalf("missing skipped secrets row: %+v", report.Outcomes)
 	}
+}
+
+func TestCatchUpRefreshesCollectionWithoutShellEntryPoints(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	for _, name := range []string{".env.collection", "mise.toml", "AGENTS.md"} {
+		if err := os.Remove(filepath.Join(c.Collection, name)); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
+	target := catchUpTarget{collection: filepath.Base(c.Collection), path: c.Harness, repo: "agent-harness", harness: true, managed: true}
+	report := CatchUpReport{Initiator: c.Collection}
+	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true})
+	for _, name := range []string{".env.collection", "mise.toml", "AGENTS.md"} {
+		if _, err := os.Lstat(filepath.Join(c.Collection, name)); err != nil {
+			t.Fatalf("native catch-up did not regenerate %s: %v; %+v", name, err, report.Outcomes)
+		}
+	}
+	mcpRows := 0
+	for _, row := range report.Outcomes {
+		if row.Kind == "hook" && (row.Repo == "env" || row.Repo == "skills") && row.Outcome != "ok" {
+			t.Fatalf("native catch-up action failed: %+v", row)
+		}
+		if row.Kind == "hook" && row.Repo == "mcp" && (row.Outcome != "skipped" || !strings.Contains(row.Reason, "no MCP registry")) {
+			t.Fatalf("missing MCP registry was not reported: %+v", row)
+		}
+		if row.Kind == "hook" && row.Repo == "mcp" {
+			mcpRows++
+		}
+	}
+	if mcpRows != 1 {
+		t.Fatalf("expected one skipped MCP action: %+v", report.Outcomes)
+	}
+}
+
+func TestCatchUpRendersMCPWithoutShellEntryPoint(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	fixtureFile(t, filepath.Join(c.Harness, ".mcp-servers.yml"), "schema_version: 1\nservers: []\n", 0644)
+	legacy := filepath.Join(c.Workspace, "legacy-mcp-called")
+	fixtureFile(t, filepath.Join(c.Harness, "tools", "link-mcp.sh"), "#!/bin/sh\ntouch '"+legacy+"'\n", 0755)
+	target := catchUpTarget{collection: filepath.Base(c.Collection), path: c.Harness, repo: "agent-harness", harness: true, managed: true}
+	report := CatchUpReport{Initiator: c.Collection}
+	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true, NoEnv: true, NoSkills: true})
+	if _, err := os.Stat(filepath.Join(c.Collection, ".mcp.json")); err != nil {
+		t.Fatalf("native MCP output missing: %v; %+v", err, report.Outcomes)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatal("legacy MCP script was invoked")
+	}
+	for _, row := range report.Outcomes {
+		if row.Kind == "hook" && row.Repo == "mcp" {
+			if row.Outcome != "ok" {
+				t.Fatalf("native MCP action failed: %+v", row)
+			}
+			return
+		}
+	}
+	t.Fatal("MCP catch-up outcome missing")
+}
+
+func TestCatchUpRejectsInvalidPinBeforeWritingEnv(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	path := filepath.Join(c.Collection, ".env.collection")
+	fixtureFile(t, path, "existing environment\n", 0644)
+	fixtureFile(t, filepath.Join(c.Harness, ".wtc-cli-version"), "invalid pin\n", 0644)
+	target := catchUpTarget{collection: filepath.Base(c.Collection), path: c.Harness, repo: "agent-harness", harness: true, managed: true}
+	report := CatchUpReport{Initiator: c.Collection}
+	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true, NoSkills: true, NoMCP: true})
+	if data, err := os.ReadFile(path); err != nil || string(data) != "existing environment\n" {
+		t.Fatalf("failed environment validation replaced the old file: %q, %v", data, err)
+	}
+	for _, row := range report.Outcomes {
+		if row.Kind == "hook" && row.Repo == "env" && row.Outcome == "failed" {
+			return
+		}
+	}
+	t.Fatalf("missing failed env outcome: %+v", report.Outcomes)
 }
 
 func TestCatchUpRunsSecretsHookForSiblingRegisteredByHarnessUpdate(t *testing.T) {
@@ -453,9 +555,8 @@ func TestCatchUpRunsSecretsHookForSiblingRegisteredByHarnessUpdate(t *testing.T)
 	if err != nil || report.ExitStatus != 0 {
 		t.Fatalf("catch-up across a registering harness update failed: %+v %v", report, err)
 	}
-	logged, _ := os.ReadFile(calls)
-	if !strings.Contains(string(logged), "--repo gadget") {
-		t.Fatalf("newly registered sibling did not receive the secrets hook: %q", logged)
+	if logged, _ := os.ReadFile(calls); len(logged) != 0 {
+		t.Fatalf("legacy secrets script was invoked: %q", logged)
 	}
 	for _, row := range report.Outcomes {
 		if row.Kind == "hook" && row.Repo == "secrets:gadget" && row.Outcome != "ok" {

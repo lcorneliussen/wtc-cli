@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -137,17 +136,12 @@ func catchUpStatusProcess(argv []string) bool {
 		return false
 	}
 	switch filepath.Base(argv[0]) {
+	case "wtc":
+		return len(argv) > 1 && argv[1] == "status"
 	case "wtc-status-tui.sh", "wtc-status.sh", "wtc-status-legacy-tui.sh", "wtc-status-legacy.sh":
 		return true
 	}
 	return false
-}
-
-func catchUpQuoteShell(path string, argv []string) string {
-	if len(argv) != 0 && (filepath.Base(argv[0]) == "nu" || filepath.Base(argv[0]) == "nushell") {
-		return "bash " + strconv.Quote(path)
-	}
-	return "bash '" + strings.ReplaceAll(path, "'", "'\"'\"'") + "'"
 }
 
 func (c *Context) catchUpReloadStatus(report *CatchUpReport, t catchUpTarget, opt CatchUpOptions) {
@@ -186,12 +180,6 @@ func (c *Context) catchUpReloadStatus(report *CatchUpReport, t catchUpTarget, op
 		add("needs-owner", "status pane runs an unrelated process; untouched")
 		return
 	}
-	script := filepath.Join(target.Harness, "tools", "wtc-status-tui.sh")
-	info, err := os.Stat(script)
-	if err != nil || info.Mode()&0111 == 0 {
-		add("skipped", "target status entrypoint unavailable")
-		return
-	}
 	if opt.DryRun {
 		add("planned", "would reload "+pane)
 		return
@@ -228,7 +216,7 @@ func (c *Context) catchUpReloadStatus(report *CatchUpReport, t catchUpTarget, op
 		add("needs-owner", "agent appeared in status pane "+pane+"; no command sent")
 		return
 	}
-	command := catchUpQuoteShell(script, argv)
+	command := "cd '" + strings.ReplaceAll(target.Collection, "'", "'\"'\"'") + "' && wtc status --tui"
 	if _, err := catchUpHerdr(session, "pane", "run", pane, command); err != nil {
 		add("failed", "restart failed for "+pane)
 		return

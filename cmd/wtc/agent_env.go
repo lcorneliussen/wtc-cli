@@ -51,11 +51,7 @@ func addAgentEnvCommand(root *cobra.Command, asJSON *bool) {
 			if err != nil {
 				return err
 			}
-			script, err := wtc.AgentEnvScriptPath(c.Collection)
-			if err != nil {
-				return nil // fail open for a hook in a path it cannot quote
-			}
-			if output := wtc.AgentEnvWrap(raw, script); len(output) > 0 {
+			if output := wtc.AgentEnvWrap(raw, path); len(output) > 0 {
 				fmt.Println(string(output))
 			}
 			return nil

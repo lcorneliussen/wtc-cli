@@ -22,6 +22,18 @@ func TestOpenCreatesWideWorkspaceWithoutStartingDisabledProcesses(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(collection, ".env.collection"), []byte("# generated\nWTC_COLLECTION='sample'\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(collection, "tools", "bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(harness, "wtc.toml"), []byte("[agent_env]\nprepend_paths = [\"tools/bin\"]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(harness, "tools"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(harness, "tools", "agent-env.sh"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	bin := filepath.Join(root, "bin")
 	if err := os.MkdirAll(bin, 0755); err != nil {
 		t.Fatal(err)
@@ -148,6 +160,9 @@ else:
 	if strings.Count(calls, "pane split ") != 3 || !strings.Contains(calls, "workspace create --cwd "+collection) || !strings.Contains(calls, "--env WTC_COLLECTION='sample'") {
 		t.Fatalf("incorrect workspace setup:\n%s", calls)
 	}
+	if !strings.Contains(calls, "--env WTC_TOOLCHAIN_PATH=") || strings.Contains(calls, "BASH_ENV=") {
+		t.Fatalf("workspace depends on a shell entry point:\n%s", calls)
+	}
 	if strings.Contains(calls, "agent start") || strings.Contains(calls, "pane run") {
 		t.Fatalf("disabled processes were started:\n%s", calls)
 	}
@@ -204,6 +219,9 @@ else:
 		t.Fatalf("normal start failed: %+v", first)
 	}
 	before, _ := os.ReadFile(log)
+	if !strings.Contains(string(before), "wtc browse --here") || !strings.Contains(string(before), "wtc status --tui") {
+		t.Fatalf("browse and status panes did not launch native commands: %s", before)
+	}
 	second := openCollection(c, "sample", enabled, "narrow", true, true)
 	after, _ := os.ReadFile(log)
 	if second.Error != "" || strings.Count(string(after), "agent start ") != strings.Count(string(before), "agent start ") || strings.Count(string(after), "pane run ") != strings.Count(string(before), "pane run ") {
