@@ -105,6 +105,9 @@ func (c *Context) AddRepositories(opt AddRepoOptions) (AddRepoResult, error) {
 	}
 	// A repository may have been added to the registry after this collection
 	// was created. Refresh the environment before its init hook needs its port.
+	if err := target.RunHook("env.pre", nil); err != nil {
+		return result, err
+	}
 	env, err := target.RenderEnv()
 	if err != nil {
 		return result, err
@@ -122,6 +125,9 @@ func (c *Context) AddRepositories(opt AddRepoOptions) (AddRepoResult, error) {
 		return result, err
 	}
 	if err := target.TrustMise(); err != nil {
+		return result, err
+	}
+	if err := target.RunHook("env.post", nil); err != nil {
 		return result, err
 	}
 	if err := target.RunHook("secrets.link.pre", nil); err != nil {
