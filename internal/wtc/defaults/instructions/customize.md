@@ -53,6 +53,11 @@ CLI sends one JSON object on stdin with `event`, `collection`, `harness`,
 | `wtc add-repo` | `add-repo.pre.sh` | `add-repo.post.sh` |
 | `wtc retire` | `retire.pre.sh` | `retire.post.sh` |
 
+`wtc new` and `wtc add-repo` also run `env.pre.sh` and `env.post.sh`
+around their environment generation, before secrets linking and repository
+initialization. Environment aliases added by a post-hook are therefore
+available to each repository's init hook.
+
 A pre-hook can stop the action by exiting nonzero. A post-hook failure is
 reported as a warning; the completed action remains complete. Dry runs and
 read-only commands do not run hooks. Hooks should be idempotent and avoid

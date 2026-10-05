@@ -191,6 +191,9 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	if err := target.ValidateEnvSupport(); err != nil {
 		return result, err
 	}
+	if err := target.RunHook("env.pre", nil); err != nil {
+		return result, err
+	}
 	env, err := target.RenderEnv()
 	if err != nil {
 		return result, err
@@ -202,6 +205,9 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 		return result, err
 	}
 	if err := target.TrustMise(); err != nil {
+		return result, err
+	}
+	if err := target.RunHook("env.post", nil); err != nil {
 		return result, err
 	}
 	if err := target.RunHook("secrets.link.pre", nil); err != nil {
