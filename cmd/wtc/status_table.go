@@ -14,6 +14,7 @@ func statusTable(snapshot wtc.StatusSnapshot, reposOnly bool, width int) string 
 	}
 	lines := []string{statusTUIFit(fmt.Sprintf("wtc status · %s · %s", name, snapshot.GeneratedAt), width), ""}
 	lines = append(lines, statusTUIRepoLines(snapshot, width, false)...)
+	lines = append(lines, statusTUIRuntimeLines(snapshot, width, false)...)
 	if !reposOnly {
 		lines = append(lines, statusTUIPRLines(snapshot, width, false, false)...)
 	}

@@ -23,6 +23,7 @@ collection; its harness pins the released version.
 - `wtc open [collection ...]` opens or repairs herdr workspaces with agent, browse, shell, and status panes. Use `--list` or `--dry-run` to inspect them, `--wide` or `--narrow` to set the layout, and `--all` only when intentionally opening every collection. `wtc new --open` uses this native command.
 - `wtc status` opens the live TUI in an interactive terminal. `--no-watch` prints one pass, with `--silent` suppressing collector progress. `--json`, `--md`, `--ansi`, `--cached`, previews, and piped output remain one-shot. The TUI shows the current step while refreshing; click “refreshing” or press `l` to inspect its refresh log. Repository names, branches, PR numbers, and build references are colored terminal hyperlinks (modifier-click in terminals that use mouse reporting); ordinary clicks also open them unless `--no-click` is set. Build providers can supply a build number and direct HTTP(S) URL for GitHub or Bitbucket through `harness/hooks/wtc/status.build.sh`. Active PR details use a 90-second forge cache. On first seeing a merge, status records its merge time and final check result in `.wtc-prs` and skips that PR on later forge refreshes; old merged entries appear under the `a` archive toggle after the configured cutoff. `WTC_FORGE_CACHE_AGE` overrides the live cache age.
 - `wtc add-repo <repo> [repo ...]` adds detached worktrees to the current collection, prepares secrets and generated files, and runs each new repository's init hook. `--collection NAME` explicitly selects another collection.
+- `wtc up`, `wtc down`, `wtc restart`, `wtc runtime render|status|provision|teardown`, and `wtc logs <repo/task>` manage an opt-in dekit 0.10 runtime independent of agents. Service/tunnel groups and resource-hook facts appear in status. See the [experimental onboarding guide](internal/wtc/defaults/instructions/runtime.md); stable CLI pins do not include this candidate yet.
 - `wtc retire <collection>` checks for dirty or unpushed work, runs repository teardown hooks, removes the collection's worktrees and generated files, and leaves remote branches intact. From the target's Herdr workspace, `wtc retire .` delegates cleanup to a visible `--cleanup--` workspace. Use `--force` only after checking that local work is disposable.
 - `wtc review status <repo> [pr-number] [--trusted-local]` reads the newest local review status comment and checks whether it covers the current PR head.
 - `wtc review bundle <repo> [pr-number]` checks out the PR branch and catches up the current collection when a PR is known, then builds a private review bundle with concern overlays, related PR patches, and registry-defined repository snapshots. Branch-only reviews use the current local refs. `--no-catch-up` skips the PR catch-up; `--public` excludes local overlays and other repositories. Public rounds keep prior context from public bundles only. Inspect the exact bundle before giving it to an external reviewer or posting its summary.
@@ -56,3 +57,23 @@ The customization guide is embedded in the binary (`wtc customize`), and a harne
 categorized `non_default` entries. Harness-specific per-repository metadata is
 preserved for commands that understand it; basic commands such as `doctor`
 do not reject unknown metadata fields.
+
+## Runtime candidate validation
+
+The Go suite covers opt-in configuration, read-only status, resource ownership,
+lifecycle failures and retirement. Native runtime and shared-Docker tests are
+explicitly enabled locally; CI installs dekit 0.10.0 with a checked archive
+checksum and a pinned Postgres image, then runs them alongside the suite:
+
+```sh
+WTC_TEST_DEKIT=/absolute/path/to/dekit go test ./internal/wtc -run TestDekitRuntimeIntegration -v
+WTC_TEST_DEKIT=/absolute/path/to/dekit WTC_TEST_DOCKER_IMAGE=postgres:17-alpine go test ./internal/wtc -run TestDekitSharedDockerPostgres -v
+```
+
+The Docker test requires the supplied image to be installed. It creates one
+uniquely named disposable container with no host ports and two synthetic
+collection-owned databases, then removes that container. It does not use an
+existing shared database. Actual Azure provisioning and connectivity across
+machines remain repo-specific onboarding checks; the synthetic tunnel fixture
+is a loopback relay. See the [guide](internal/wtc/defaults/instructions/runtime.md)
+and [integration fixtures](internal/wtc/testdata/runtime).

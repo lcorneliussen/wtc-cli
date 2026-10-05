@@ -21,6 +21,7 @@ type StatusSnapshot struct {
 	PRs                  []StatusPRRow  `json:"prs"`
 	Orphans              []StatusOrphan `json:"orphans"`
 	PRsEmptyHint         bool           `json:"prs_empty_hint,omitempty"`
+	Runtime              []RuntimeItem  `json:"runtime,omitempty"`
 }
 
 type StatusRepo struct {
@@ -42,6 +43,7 @@ type StatusRepo struct {
 	PR            *StatusPRFacts `json:"pr"`
 	Tip           *StatusBuild   `json:"tip"`
 	Prod          *StatusBuild   `json:"prod"`
+	Runtime       string         `json:"runtime,omitempty"`
 }
 
 type StatusPRFacts struct {
@@ -178,5 +180,6 @@ func (c *Context) StatusLocalSnapshot(all bool) (StatusSnapshot, error) {
 		}
 		snapshot.Repos = append(snapshot.Repos, row)
 	}
+	c.statusRuntime(&snapshot, all)
 	return snapshot, nil
 }

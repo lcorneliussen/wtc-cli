@@ -53,6 +53,10 @@ type Config struct {
 	Secrets struct {
 		ProdPaths []string `toml:"prod_paths"`
 	} `toml:"secrets"`
+	Runtime struct {
+		Backend string `toml:"backend"`
+		Binary  string `toml:"binary"`
+	} `toml:"runtime"`
 }
 type Context struct {
 	Collection string   `json:"collection"`

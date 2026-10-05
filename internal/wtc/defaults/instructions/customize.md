@@ -178,3 +178,9 @@ diff reports `untracked`. `--json` provides the same findings for automation.
 embedded default into the harness for editing; eject refuses to overwrite an
 existing file. Keep repository-specific agent instructions in that
 repository's `AGENTS.md` and hooks in its `.harness/` directory.
+
+## Opt-in services and resources
+
+See [runtime.md](runtime.md) for the experimental dekit adapter, repo-owned
+service/tunnel groups, resource hooks, agent logs and verified retirement.
+Keep each repo's existing standalone launch command and toolchain unchanged.
