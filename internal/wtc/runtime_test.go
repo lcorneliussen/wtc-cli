@@ -376,6 +376,8 @@ func TestRuntimeLogURLReadsTunnelClientOutput(t *testing.T) {
 			`t=2026-01-01T00:00:00+0000 lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://localhost:3000 url=https://1a2b-203-0-113-7.ngrok-free.app` + "\n", "https://1a2b-203-0-113-7.ngrok-free.app"},
 		"devtunnel host": {`Connect via browser: (https://\S+)`,
 			"Hosting port: 3000\nConnect via browser: https://abc123xy-3000.euw.devtunnels.ms\nInspect network activity: https://abc123xy-3000-inspect.euw.devtunnels.ms\n", "https://abc123xy-3000.euw.devtunnels.ms"},
+		"tailscale serve": {`Available within your tailnet:\s+(https://\S+?)/?\s`,
+			"Available within your tailnet:\n\nhttps://workstation.example-tailnet.ts.net/\n|-- proxy http://127.0.0.1:3000\n", "https://workstation.example-tailnet.ts.net"},
 		"newest run wins":         {`url=(https://\S+)`, "url=https://old.example.invalid\nrestarted\nurl=https://new.example.invalid\n", "https://new.example.invalid"},
 		"unsafe match is skipped": {`url=(\S+)`, "url=https://ok.example.invalid\nurl=https://user:secret@bad.example.invalid\n", "https://ok.example.invalid"},
 		"no match":                {`url=(https://\S+)`, "starting\n", ""},
