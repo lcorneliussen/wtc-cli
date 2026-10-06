@@ -1,6 +1,6 @@
 # Command reference
 
-Use `wtc <command> --help` for flags, or `wtc commands --json` for the machine-readable surface. `harness init` and `docs` on this branch are candidates, not included in v0.1.38.
+Use `wtc <command> --help` for flags, or `wtc commands --json` for the machine-readable surface. `harness init`, `docs`, and `release-notes` on main are candidates, not included in v0.1.38.
 
 - `wtc env list` shows variable names, source files, and whether a collection-local entry overrides an earlier one. It opens a scrollable, width-aware view in an interactive terminal; `--no-tui` prints a compact table and `--json` emits structured data. It never prints values. Bare `wtc env` shows help.
 - `wtc env setup [--collection DIR] [--dry-run]` regenerates `.env.collection`, preserving its port base. It leaves `.env.collection.local` intact, writes the collection's mise environment file, and trusts the generated mise config when mise is installed. Existing flagged `wtc env` invocations remain supported.
@@ -32,3 +32,4 @@ Use `wtc <command> --help` for flags, or `wtc commands --json` for the machine-r
 
 - `wtc harness init <directory> --remote <git-remote> --cli-version <version>` scaffolds six project-owned files, without Git initialization, network access, installs, or hooks. Existing output files are never overwritten; use `--dry-run` to preview.
 - `wtc docs [path]` lists or prints the guidance embedded in the installed binary, even outside a collection. Inside a collection, read `.wtc/instructions/` for the effective guidance including harness overrides.
+- `wtc release-notes [version|unreleased]` reads embedded Markdown offline, defaulting to the latest numbered release. `--since <old-pin>` reads newer numbered releases in upgrade order; `--list` lists available versions. Use the target binary when preparing a harness upgrade. See [release notes and upgrades](release-notes.md).

@@ -123,6 +123,7 @@ migration boundary and the role of the boilerplate.
 | Guide | What's inside |
 | --- | --- |
 | [Command reference](docs/commands.md) | Collection operations and CLI options |
+| [Release notes and upgrades](docs/release-notes.md) | Offline change history and harness adoption steps (preview) |
 | [Configuration and hooks](internal/wtc/defaults/instructions/customize.md) | Adapt the harness to your project |
 | [Workspace geometry](internal/wtc/defaults/instructions/worktree-workspace.md) | Collections, sibling repos, and shared Git owners |
 | [Environment and ports](internal/wtc/defaults/instructions/hooks-and-env.md) | Collection environment, mise, and port assignments |
