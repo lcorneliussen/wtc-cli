@@ -366,3 +366,66 @@ func TestRuntimeManifestSurvivesSymlinkedCollectionPath(t *testing.T) {
 		t.Fatalf("second spelling changed the binary: %s %v", binary, err)
 	}
 }
+
+// Output shapes are modelled on the real clients; the hosts are illustrative.
+func TestRuntimeLogURLReadsTunnelClientOutput(t *testing.T) {
+	for name, c := range map[string]struct{ pattern, log, want string }{
+		"cloudflared quick tunnel": {`https://[a-z0-9-]+\.trycloudflare\.com`,
+			"INF |  Your quick Tunnel has been created! Visit it at:  |\nINF |  https://calm-river-example.trycloudflare.com  |\n", "https://calm-river-example.trycloudflare.com"},
+		"ngrok logfmt": {`msg="started tunnel".* url=(https://\S+)`,
+			`t=2026-01-01T00:00:00+0000 lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://localhost:3000 url=https://1a2b-203-0-113-7.ngrok-free.app` + "\n", "https://1a2b-203-0-113-7.ngrok-free.app"},
+		"devtunnel host": {`Connect via browser: (https://\S+)`,
+			"Hosting port: 3000\nConnect via browser: https://abc123xy-3000.euw.devtunnels.ms\nInspect network activity: https://abc123xy-3000-inspect.euw.devtunnels.ms\n", "https://abc123xy-3000.euw.devtunnels.ms"},
+		"newest run wins":         {`url=(https://\S+)`, "url=https://old.example.invalid\nrestarted\nurl=https://new.example.invalid\n", "https://new.example.invalid"},
+		"unsafe match is skipped": {`url=(\S+)`, "url=https://ok.example.invalid\nurl=https://user:secret@bad.example.invalid\n", "https://ok.example.invalid"},
+		"no match":                {`url=(https://\S+)`, "starting\n", ""},
+	} {
+		path := filepath.Join(t.TempDir(), "tunnel.log")
+		fixtureFile(t, path, c.log, 0600)
+		if got := runtimeLogURL(path, c.pattern); got != c.want {
+			t.Errorf("%s: got %q, want %q", name, got, c.want)
+		}
+	}
+	big := filepath.Join(t.TempDir(), "big.log")
+	fixtureFile(t, big, "url=https://early.example.invalid\n"+strings.Repeat("noise\n", 100000)+"url=https://late.example.invalid\n", 0600)
+	if got := runtimeLogURL(big, `url=(https://\S+)`); got != "https://late.example.invalid" {
+		t.Fatalf("large log: %q", got)
+	}
+}
+
+func TestRuntimeStatusShowsDiscoveredURLOnlyWhenReady(t *testing.T) {
+	c := runtimeFixture(t)
+	fragment := filepath.Join(c.Collection, "widget/.harness/dekit.tasks.yaml")
+	data, _ := os.ReadFile(fragment)
+	fixtureFile(t, fragment, string(data)+"  x-wtc: {url_log: 'url=(https://\\S+)'}\n", 0644)
+	if _, err := c.RuntimeAction("up", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := c.runtimeManifest()
+	tasks := filepath.Join(c.runtimeRoot(), "fake-tasks.json")
+	url := func() string {
+		for _, item := range c.RuntimeStatus() {
+			if item.Path == "widget/web/tunnel" {
+				return item.URL
+			}
+		}
+		return "missing"
+	}
+	fixtureFile(t, m.Tasks[1].Log, "url=https://first.example.invalid\n", 0600)
+	fixtureFile(t, tasks, `{"tasks":[{"path":"widget/web/server","state":"ready"},{"path":"widget/web/tunnel","state":"starting"}]}`, 0600)
+	if got := url(); got != "" {
+		t.Fatalf("showed a URL before readiness: %q", got)
+	}
+	fixtureFile(t, tasks, `{"tasks":[{"path":"widget/web/server","state":"ready"},{"path":"widget/web/tunnel","state":"ready"}]}`, 0600)
+	if got := url(); got != "https://first.example.invalid" {
+		t.Fatalf("did not discover the URL: %q", got)
+	}
+	fixtureFile(t, m.Tasks[1].Log, "url=https://first.example.invalid\nurl=https://second.example.invalid\n", 0600)
+	if got := url(); got != "https://second.example.invalid" {
+		t.Fatalf("kept the old URL after a restart: %q", got)
+	}
+	fixtureFile(t, fragment, string(data)+"  x-wtc: {url_log: '(a)(b)'}\n", 0644)
+	if _, _, err := c.runtimePlan("dekit"); err == nil {
+		t.Fatal("accepted an ambiguous url_log")
+	}
+}

@@ -285,3 +285,102 @@ func TestDekitRuntimeIntegration(t *testing.T) {
 		t.Fatal("removed shared resource", err)
 	}
 }
+
+// A tunnel whose URL exists only after startup: each client output shape is
+// discovered from the task log, serves through that URL, and a tunnel restart
+// replaces it. Loopback only.
+func TestDekitTunnelURLDiscovery(t *testing.T) {
+	binary := os.Getenv("WTC_TEST_DEKIT")
+	if binary == "" {
+		runtimeToolsSkip(t, "set WTC_TEST_DEKIT to the pinned dekit 0.10.0 binary")
+	}
+	binary, err := filepath.Abs(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := newWorkspaceFixture(t)
+	for style, pattern := range map[string]string{
+		"cloudflared": `INF \|\s+(http://127\.0\.0\.1:\d+)\s+\|`,
+		"ngrok":       `msg="started tunnel".* url=(\S+)`,
+		"devtunnel":   `Connect via browser: (\S+)`,
+	} {
+		t.Run(style, func(t *testing.T) {
+			result, err := owner.NewCollection(NewOptions{Slug: "tunnel-" + style, Repos: []string{"widget"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := OpenCollection(result.Collection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.Config.Runtime.Backend, c.Config.Runtime.Binary = "dekit", binary
+			t.Cleanup(func() {
+				if err := c.RetireRuntime(); err != nil {
+					t.Errorf("cleanup: %v", err)
+				}
+			})
+			app := filepath.Join(c.Collection, "widget")
+			for _, file := range []string{"dev.py", "server.py", "tunnel.py"} {
+				data, err := os.ReadFile(filepath.Join("testdata/runtime", file))
+				if err != nil {
+					t.Fatal(err)
+				}
+				fixtureFile(t, filepath.Join(app, file), string(data), 0644)
+			}
+			fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), fmt.Sprintf("PORT=%d\nTUNNEL_STYLE=%s\n", runtimeFreePort(t), style), 0600)
+			fixtureFile(t, filepath.Join(app, ".harness/dekit.tasks.yaml"), fmt.Sprintf(`tasks:
+ web/server:
+  cmd: [%q, dev.py]
+  autostart: true
+  ready: {log: WEB_READY, timeout: 3s}
+ web/tunnel:
+  cmd: [%q, tunnel.py]
+  deps: [web/server]
+  autostart: true
+  tags: [endpoint]
+  ready: {log: TUNNEL_READY, timeout: 3s}
+  x-wtc: {url_log: '%s'}
+`, python, python, pattern), 0644)
+			endpoint := func() RuntimeItem {
+				for _, item := range c.RuntimeStatus() {
+					if item.Path == "widget/web/tunnel" {
+						return item
+					}
+				}
+				t.Fatal("tunnel missing from status")
+				return RuntimeItem{}
+			}
+			through := func(url string) string {
+				response, err := (&http.Client{Timeout: time.Second}).Get(url + "/")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				body, _ := io.ReadAll(response.Body)
+				return string(body)
+			}
+			if _, err := c.RuntimeAction("up", "", 5*time.Second); err != nil {
+				t.Fatal(err)
+			}
+			first := endpoint()
+			if first.State != "ready" || first.Kind != "endpoint" || !strings.HasPrefix(first.URL, "http://127.0.0.1:") {
+				t.Fatalf("URL not discovered: %+v", first)
+			}
+			if got := through(first.URL); got != "tunnel-"+style {
+				t.Fatalf("tunnel served %q", got)
+			}
+			if _, err := c.RuntimeAction("restart", "widget/web/tunnel", 5*time.Second); err != nil {
+				t.Fatal(err)
+			}
+			second := endpoint()
+			if second.URL == first.URL || second.State != "ready" || through(second.URL) != "tunnel-"+style {
+				t.Fatalf("restart kept %q, now %+v", first.URL, second)
+			}
+			t.Logf("%s: %s then %s", style, first.URL, second.URL)
+		})
+	}
+}

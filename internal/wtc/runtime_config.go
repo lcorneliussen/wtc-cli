@@ -130,7 +130,7 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 			item.Label, _ = task["label"].(string)
 			if metadata, ok := task["x-wtc"].(map[string]any); ok {
 				for key := range metadata {
-					if key != "url" && key != "url_env" {
+					if key != "url" && key != "url_env" && key != "url_log" {
 						return nil, nil, fmt.Errorf("%s: unsupported x-wtc field %s", full, key)
 					}
 				}
@@ -145,6 +145,11 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 							return nil, nil, err
 						}
 						item.URL = value
+					}
+				}
+				if item.URLLog, _ = metadata["url_log"].(string); item.URLLog != "" {
+					if re, err := regexp.Compile(item.URLLog); err != nil || re.NumSubexp() > 1 {
+						return nil, nil, fmt.Errorf("%s: url_log must be a regular expression with at most one group", full)
 					}
 				}
 				if item.URL != "" {

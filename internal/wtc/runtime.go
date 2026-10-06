@@ -3,8 +3,10 @@ package wtc
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -32,6 +34,8 @@ type runtimeTask struct {
 	Ready     bool     `json:"ready"`
 	Autostart bool     `json:"autostart"`
 	Deps      []string `json:"deps,omitempty"`
+	// URLLog finds an endpoint URL that is only known after startup.
+	URLLog string `json:"url_log,omitempty"`
 }
 
 type runtimeResource struct {
@@ -224,11 +228,52 @@ func (c *Context) runtimeStatus(m *runtimeManifest) []RuntimeItem {
 		}
 		if task, ok := states[item.Path]; ok {
 			item.State, item.ExitCode, item.Signal, item.Reason = task.State, task.ExitCode, task.Signal, task.Reason
+			// Only a ready task's log is trusted: an append-mode log still holds earlier URLs.
+			if pattern := m.Tasks[i].URLLog; pattern != "" && item.State == "ready" {
+				if found := runtimeLogURL(m.Tasks[i].Log, pattern); found != "" {
+					item.URL = found
+				}
+			}
 		} else {
 			item.State = "missing"
 		}
 	}
 	return items
+}
+
+// runtimeLogURL returns the newest safe URL matching pattern near the end of a
+// task log: the first capture group when there is one, otherwise the match.
+func runtimeLogURL(path, pattern string) string {
+	re, err := regexp.Compile(pattern)
+	if err != nil || runtimeRegular(path) != nil {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	const window = 256 << 10
+	if info, err := f.Stat(); err == nil && info.Size() > window {
+		if _, err := f.Seek(-window, io.SeekEnd); err != nil {
+			return ""
+		}
+	}
+	data, err := io.ReadAll(io.LimitReader(f, window))
+	if err != nil {
+		return ""
+	}
+	matches := re.FindAllSubmatch(data, -1)
+	for i := len(matches) - 1; i >= 0; i-- {
+		found := string(matches[i][len(matches[i])-1])
+		if len(matches[i]) > 1 {
+			found = string(matches[i][1])
+		}
+		if runtimeURLSafe(found) == nil {
+			return found
+		}
+	}
+	return ""
 }
 
 func runtimeSelect(m *runtimeManifest, target string) (string, []runtimeTask, error) {
