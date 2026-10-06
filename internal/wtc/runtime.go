@@ -36,8 +36,6 @@ type runtimeTask struct {
 	Deps      []string `json:"deps,omitempty"`
 	// URLLog finds an endpoint URL that is only known after startup.
 	URLLog string `json:"url_log,omitempty"`
-	// URLScheme completes a logged host:port, as TCP tunnel clients print.
-	URLScheme string `json:"url_scheme,omitempty"`
 }
 
 type runtimeResource struct {
@@ -232,7 +230,7 @@ func (c *Context) runtimeStatus(m *runtimeManifest) []RuntimeItem {
 			item.State, item.ExitCode, item.Signal, item.Reason = task.State, task.ExitCode, task.Signal, task.Reason
 			// Only a ready task's log is trusted: an append-mode log still holds earlier URLs.
 			if pattern := m.Tasks[i].URLLog; pattern != "" && item.State == "ready" {
-				if found := runtimeLogURL(m.Tasks[i].Log, pattern, m.Tasks[i].URLScheme); found != "" {
+				if found := runtimeLogURL(m.Tasks[i].Log, pattern); found != "" {
 					item.URL = found
 				}
 			}
@@ -245,8 +243,7 @@ func (c *Context) runtimeStatus(m *runtimeManifest) []RuntimeItem {
 
 // runtimeLogURL returns the newest safe URL matching pattern near the end of a
 // task log: the first capture group when there is one, otherwise the match.
-// A match without a scheme, such as host:port, takes the given one.
-func runtimeLogURL(path, pattern, scheme string) string {
+func runtimeLogURL(path, pattern string) string {
 	re, err := regexp.Compile(pattern)
 	if err != nil || runtimeRegular(path) != nil {
 		return ""
@@ -271,9 +268,6 @@ func runtimeLogURL(path, pattern, scheme string) string {
 		found := string(matches[i][len(matches[i])-1])
 		if len(matches[i]) > 1 {
 			found = string(matches[i][1])
-		}
-		if scheme != "" && !strings.Contains(found, "://") {
-			found = scheme + "://" + found
 		}
 		if runtimeURLSafe(found) == nil {
 			return found

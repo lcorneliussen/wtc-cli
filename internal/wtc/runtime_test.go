@@ -378,23 +378,19 @@ func TestRuntimeLogURLReadsTunnelClientOutput(t *testing.T) {
 			"Hosting port: 3000\nConnect via browser: https://abc123xy-3000.euw.devtunnels.ms\nInspect network activity: https://abc123xy-3000-inspect.euw.devtunnels.ms\n", "https://abc123xy-3000.euw.devtunnels.ms"},
 		"tailscale serve": {`Available within your tailnet:\s+(https://\S+?)/?\s`,
 			"Available within your tailnet:\n\nhttps://workstation.example-tailnet.ts.net/\n|-- proxy http://127.0.0.1:3000\n", "https://workstation.example-tailnet.ts.net"},
-		// Captured from bore 0.6.0, including its colour codes.
-		"bore host and port": {`listening at (\S+)`,
-			"\x1b[2m2026-10-06T13:44:26.779399Z\x1b[0m \x1b[32m INFO\x1b[0m \x1b[2mbore_cli::client\x1b[0m\x1b[2m:\x1b[0m listening at 127.0.0.1:42493\n", "http://127.0.0.1:42493"},
-		"host and port without a scheme": {`listening at (\S+)`, "listening at 127.0.0.1:42493\n", ""},
-		"newest run wins":                {`url=(https://\S+)`, "url=https://old.example.invalid\nrestarted\nurl=https://new.example.invalid\n", "https://new.example.invalid"},
-		"unsafe match is skipped":        {`url=(\S+)`, "url=https://ok.example.invalid\nurl=https://user:secret@bad.example.invalid\n", "https://ok.example.invalid"},
-		"no match":                       {`url=(https://\S+)`, "starting\n", ""},
+		"newest run wins":         {`url=(https://\S+)`, "url=https://old.example.invalid\nrestarted\nurl=https://new.example.invalid\n", "https://new.example.invalid"},
+		"unsafe match is skipped": {`url=(\S+)`, "url=https://ok.example.invalid\nurl=https://user:secret@bad.example.invalid\n", "https://ok.example.invalid"},
+		"no match":                {`url=(https://\S+)`, "starting\n", ""},
 	} {
 		path := filepath.Join(t.TempDir(), "tunnel.log")
 		fixtureFile(t, path, c.log, 0600)
-		if got := runtimeLogURL(path, c.pattern, map[string]string{"bore host and port": "http"}[name]); got != c.want {
+		if got := runtimeLogURL(path, c.pattern); got != c.want {
 			t.Errorf("%s: got %q, want %q", name, got, c.want)
 		}
 	}
 	big := filepath.Join(t.TempDir(), "big.log")
 	fixtureFile(t, big, "url=https://early.example.invalid\n"+strings.Repeat("noise\n", 100000)+"url=https://late.example.invalid\n", 0600)
-	if got := runtimeLogURL(big, `url=(https://\S+)`, ""); got != "https://late.example.invalid" {
+	if got := runtimeLogURL(big, `url=(https://\S+)`); got != "https://late.example.invalid" {
 		t.Fatalf("large log: %q", got)
 	}
 }
