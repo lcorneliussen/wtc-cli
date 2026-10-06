@@ -1,7 +1,7 @@
 # Recorded WTC demos
 
 These terminal recordings run real commands against fresh synthetic Git repos.
-The candidate adds a small harness scaffold; v0.1.38 does not contain it. No
+The small harness scaffold requires v0.1.39 or newer. No
 service runner, forge account, desktop session, or agent is needed.
 
 ## One task, two repositories
@@ -24,7 +24,7 @@ credential contents are never shown; the fixture files contain synthetic data.
 
 [Transcript](inventories.txt) · [Asciicast](inventories.cast)
 
-## Small harness scaffold — preview
+## Small harness scaffold
 
 Create six project-owned files without initializing Git, contacting a remote,
 installing tools, or running hooks. The harness owns its registry and pins;
@@ -37,7 +37,7 @@ are required: the remote to record and the exact CLI version to pin.
 
 ## Reproduce
 
-Build the candidate, then supply Python 3, Git, and `pyte` 0.8.2 for capturing
+Build the CLI, then supply Python 3, Git, and `pyte` 0.8.2 for capturing
 readable TUI screen transcripts. The optional
 [agg](https://github.com/asciinema/agg) 1.9.0 executable converts casts to GIFs:
 
@@ -59,7 +59,7 @@ recording; the script sends `q` and waits for the process to exit afterward.
 TUI transcripts contain the actual screen just before quitting, with repeated
 blank rows collapsed, rather than raw cursor-control sequences.
 
-The v0.1.38 pin is fixture metadata only: every command uses the supplied
-candidate binary. No pin is installed or changed in your projects. Captures
+The v0.1.39 pin is fixture metadata only: every command uses the supplied
+source-built binary. No pin is installed or changed in your projects. Captures
 replace only their own temporary sandbox path with `~/wtc-demo`; transcripts
 also normalize terminal whitespace. Inspect all captures before publishing.

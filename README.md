@@ -32,7 +32,7 @@ run commands.
 
 ## See it in action
 
-Real commands, recorded with the candidate binary against synthetic local repos.
+Real commands, recorded against synthetic local repos.
 
 ### One task, two repositories
 
@@ -57,9 +57,8 @@ variable names, source scopes, and secret link states; values stay hidden.
 Scaffold the registry, CLI pin, configuration, and entry points your project
 owns. Standard collection guidance comes from the CLI.
 
-**Preview:** the small harness scaffold is being tested on this branch and is
-not available in v0.1.38. Follow [getting started](docs/getting-started.md) for
-the released setup path.
+The minimal harness path is available from **v0.1.39**. Follow
+[getting started](docs/getting-started.md) to create your first workspace.
 
 [![Recording: create and inspect the six-file harness scaffold](docs/demos/harness.gif)](docs/demos/harness.gif)
 
@@ -71,7 +70,7 @@ Install a [published release](https://github.com/lcorneliussen/wtc-cli/releases)
 for macOS or Linux. With mise:
 
 ```sh
-mise use -g github:lcorneliussen/wtc-cli@0.1.38
+mise use -g github:lcorneliussen/wtc-cli@0.1.39
 ```
 
 Then follow [getting started](docs/getting-started.md) to set up your first
@@ -123,7 +122,7 @@ migration boundary and the role of the boilerplate.
 | Guide | What's inside |
 | --- | --- |
 | [Command reference](docs/commands.md) | Collection operations and CLI options |
-| [Release notes and upgrades](docs/release-notes.md) | Offline change history and harness adoption steps (preview) |
+| [Release notes and upgrades](docs/release-notes.md) | Offline change history and harness adoption steps |
 | [Configuration and hooks](internal/wtc/defaults/instructions/customize.md) | Adapt the harness to your project |
 | [Workspace geometry](internal/wtc/defaults/instructions/worktree-workspace.md) | Collections, sibling repos, and shared Git owners |
 | [Environment and ports](internal/wtc/defaults/instructions/hooks-and-env.md) | Collection environment, mise, and port assignments |
@@ -132,4 +131,4 @@ migration boundary and the role of the boilerplate.
 | [Development and validation](docs/development.md) | Build, test, and contribute to WTC |
 
 The installed customization guide is available with `wtc customize`.
-The candidate also exposes all embedded guidance through `wtc docs`.
+All embedded guidance is also available through `wtc docs`.

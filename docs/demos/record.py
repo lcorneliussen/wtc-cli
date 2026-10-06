@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record real candidate commands against fresh, offline, synthetic Git repos."""
+"""Record real WTC commands against fresh, offline, synthetic Git repos."""
 import argparse
 import codecs
 import fcntl
@@ -207,11 +207,11 @@ def main():
                                 str(cast), str(OUT / (self.name + '.gif'))], check=True)
 
     try:
-        # The scaffold is exercised here, outside a collection. The published pin
-        # is fixture metadata only: every command uses the supplied candidate.
+        # The scaffold is exercised here, outside a collection. The pin
+        # is fixture metadata only: every command uses the supplied binary.
         harness = sources / 'agent-harness'
         rec = Recording('harness', 'WTC / a small, project-owned harness')
-        rec.command('wtc harness init agent-harness \\\n  --remote https://example.invalid/h.git \\\n  --cli-version 0.1.38', sources, pause=1.5)
+        rec.command('wtc harness init agent-harness \\\n  --remote https://example.invalid/h.git \\\n  --cli-version 0.1.39', sources, pause=1.5)
         rec.command('cd agent-harness', sources, pause=0.4)
         rec.command('ls -A', harness, pause=1.5)
         rec.command('cat wtc.toml', harness, pause=2)

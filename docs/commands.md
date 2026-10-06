@@ -1,6 +1,6 @@
 # Command reference
 
-Use `wtc <command> --help` for flags, or `wtc commands --json` for the machine-readable surface. `harness init`, `docs`, and `release-notes` on main are candidates, not included in v0.1.38.
+Use `wtc <command> --help` for flags, or `wtc commands --json` for the machine-readable surface. `harness init`, `docs`, and `release-notes` require v0.1.39 or newer.
 
 - `wtc env list` shows variable names, source files, and whether a collection-local entry overrides an earlier one. It opens a scrollable, width-aware view in an interactive terminal; `--no-tui` prints a compact table and `--json` emits structured data. It never prints values. Bare `wtc env` shows help.
 - `wtc env setup [--collection DIR] [--dry-run]` regenerates `.env.collection`, preserving its port base. It leaves `.env.collection.local` intact, writes the collection's mise environment file, and trusts the generated mise config when mise is installed. Existing flagged `wtc env` invocations remain supported.
