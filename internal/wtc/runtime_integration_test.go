@@ -331,7 +331,7 @@ func TestDekitTunnelURLDiscovery(t *testing.T) {
 				}
 				fixtureFile(t, filepath.Join(app, file), string(data), 0644)
 			}
-			fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), fmt.Sprintf("PORT=%d\nTUNNEL_STYLE=%s\n", runtimeFreePort(t), style), 0600)
+			fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), fmt.Sprintf("PORT=%d\nTUNNEL_STYLE=%s\nTUNNEL_WARMUP=1.5\n", runtimeFreePort(t), style), 0600)
 			fixtureFile(t, filepath.Join(app, ".harness/dekit.tasks.yaml"), fmt.Sprintf(`tasks:
  web/server:
   cmd: [%q, dev.py]
@@ -363,7 +363,11 @@ func TestDekitTunnelURLDiscovery(t *testing.T) {
 				body, _ := io.ReadAll(response.Body)
 				return string(body)
 			}
-			if _, err := c.RuntimeAction("up", "", 5*time.Second); err != nil {
+			// The fixture announces its URL 1.5s before it answers.
+			if _, err := c.RuntimeAction("up", "", 500*time.Millisecond); err == nil || !strings.Contains(err.Error(), "endpoint URL not reachable yet") {
+				t.Fatalf("up returned before the tunnel answered: %v", err)
+			}
+			if _, err := c.RuntimeAction("up", "", 10*time.Second); err != nil {
 				t.Fatal(err)
 			}
 			first := endpoint()
@@ -373,7 +377,7 @@ func TestDekitTunnelURLDiscovery(t *testing.T) {
 			if got := through(first.URL); got != "tunnel-"+style {
 				t.Fatalf("tunnel served %q", got)
 			}
-			if _, err := c.RuntimeAction("restart", "widget/web/tunnel", 5*time.Second); err != nil {
+			if _, err := c.RuntimeAction("restart", "widget/web/tunnel", 10*time.Second); err != nil {
 				t.Fatal(err)
 			}
 			second := endpoint()
@@ -382,7 +386,7 @@ func TestDekitTunnelURLDiscovery(t *testing.T) {
 			}
 			// The tunnel depends on the service, so dekit restarts it with the
 			// service and a URL assigned at startup changes. Status must follow.
-			if _, err := c.RuntimeAction("restart", "widget/web/server", 5*time.Second); err != nil {
+			if _, err := c.RuntimeAction("restart", "widget/web/server", 10*time.Second); err != nil {
 				t.Fatal(err)
 			}
 			third := endpoint()

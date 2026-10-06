@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"golang.org/x/sys/unix"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -237,6 +238,7 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 		if err != nil {
 			return err
 		}
+		live := map[string]bool{}
 		switch action {
 		case "up", "provision":
 			if err := c.runtimeHooks(m, runtimeDependencies(m, tasks), "provision"); err != nil {
@@ -277,6 +279,11 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 			}
 			if selector == "" {
 				selector = "**"
+			}
+			for _, item := range c.runtimeStatus(m) {
+				if item.State == "ready" || item.State == "running" || item.State == "starting" {
+					live[item.Path] = true
+				}
 			}
 			if _, err := runtimeCommand(m, false, "restart", selector); err != nil {
 				return err
@@ -347,10 +354,23 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 					wanted[task.Path] = true
 				}
 			}
+			// dekit restarts running dependents with their dependency, such as a
+			// tunnel with its service; wait for those too.
+			for changed := action == "restart"; changed; {
+				changed = false
+				for _, task := range m.Tasks {
+					for _, dep := range task.Deps {
+						if wanted[dep] && live[task.Path] && !wanted[task.Path] {
+							wanted[task.Path], changed = true, true
+						}
+					}
+				}
+			}
 			deadline := time.Now().Add(wait)
+			reachable := map[string]bool{}
 			for {
 				items := c.RuntimeStatus()
-				ready := true
+				ready, pending := true, ""
 				observed := map[string]bool{}
 				for _, item := range items {
 					if !wanted[item.Path] {
@@ -359,6 +379,14 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 					observed[item.Path] = true
 					switch item.State {
 					case "ready", "done":
+						// A tunnel can announce its URL before it serves through it.
+						for _, task := range m.Tasks {
+							if task.Path == item.Path && task.URLLog != "" && !reachable[item.Path] {
+								if reachable[item.Path] = item.URL != "" && runtimeURLReachable(item.URL, time.Until(deadline)); !reachable[item.Path] {
+									ready, pending = false, item.Path+": endpoint URL not reachable yet"
+								}
+							}
+						}
 					case "running":
 						for _, task := range tasks {
 							if task.Path == item.Path && (task.Ready || task.Kind == "job") {
@@ -380,6 +408,9 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 					break
 				}
 				if time.Now().After(deadline) {
+					if pending != "" {
+						return fmt.Errorf("%s after %s; inspect wtc status and wtc logs", pending, wait)
+					}
 					return fmt.Errorf("runtime readiness timed out after %s; inspect wtc status and wtc logs", wait)
 				}
 				time.Sleep(100 * time.Millisecond)
@@ -389,6 +420,19 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 	})
 	result.Items = c.RuntimeStatus()
 	return result, err
+}
+
+// runtimeURLReachable reports whether an endpoint answers through its URL. Any
+// response short of a gateway error counts; the page itself is the project's.
+// One attempt never outlasts the caller's remaining wait by much.
+func runtimeURLReachable(url string, budget time.Duration) bool {
+	client := http.Client{Timeout: max(100*time.Millisecond, min(2*time.Second, budget)), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	response, err := client.Get(url)
+	if err != nil {
+		return false
+	}
+	response.Body.Close()
+	return response.StatusCode < 500
 }
 
 // RetireRuntime uses the target's manifest even if runtime opt-in was removed.

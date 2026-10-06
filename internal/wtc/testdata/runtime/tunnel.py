@@ -8,6 +8,7 @@ exposes a public endpoint.
 import http.client
 import http.server
 import os
+import time
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -41,4 +42,6 @@ else:
     print(f'Connect via browser: {url}')
     print(f'Inspect network activity: {url}/inspect', flush=True)
 print('TUNNEL_READY', flush=True)
+# A real client announces its URL before certificates or routes are in place.
+time.sleep(float(os.environ.get('TUNNEL_WARMUP', '0')))
 server.serve_forever()
