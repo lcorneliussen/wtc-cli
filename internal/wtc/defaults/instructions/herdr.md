@@ -34,6 +34,9 @@ Layout is applied on create. Explicit `--narrow` / `--wide` **switches** an
 existing workspace (live panes are moved). A partial
 workspace — common when you start the agent first, then open — is built out
 toward the resolved layout. `auto` never flips a complete wide ↔ narrow.
+A narrow workspace whose tabs hold the right panes side by side is reported
+by `--list` as `unstacked`; `--narrow` or a plain open **restacks** it without
+restarting the panes.
 `--wide` / `--narrow` override `WTC_LAYOUT` (and auto).
 
 `browse` is the slot for something a human should look at. An agent that

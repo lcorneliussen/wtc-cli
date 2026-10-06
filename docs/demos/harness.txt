@@ -1,0 +1,18 @@
+WTC / a small, project-owned harness
+sources ❯ wtc harness init agent-harness \
+  --remote https://example.invalid/h.git \
+  --cli-version 0.1.39
+created harness ~/wtc-demo/sources/agent-harness: .harness-repos.yml, .wtc-cli-version, wtc.toml, .gitignore, AGENTS.md, README.md
+
+sources ❯ cd agent-harness
+
+agent-harness ❯ ls -A
+.gitignore		.wtc-cli-version	README.md
+.harness-repos.yml	AGENTS.md		wtc.toml
+
+agent-harness ❯ cat wtc.toml
+[compatibility]
+  requires = ">=0.1.39,<0.2"
+
+[harness]
+  name = "agent-harness"

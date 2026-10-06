@@ -142,7 +142,8 @@ prod_paths = ["api/.env.production"]
 ## Skills and instructions
 
 The CLI embeds generic `wtc-*` skills and instructions. `wtc skills render`
-materializes embedded skills and instruction defaults in the disposable collection, links skills into
+materializes embedded skills and instruction defaults in the disposable
+collection, links skills into
 `.claude/skills` and `.agents/skills`, and wires `AGENTS.md`, agent hooks,
 `.envrc`, and `.env.toolchain`. `--seed-scope` creates `WTC-SCOPE.md` from the
 harness template only when it is absent. `--dry-run` previews changes, and
@@ -185,9 +186,3 @@ diff reports `untracked`. `--json` provides the same findings for automation.
 embedded default into the harness for editing; eject refuses to overwrite an
 existing file. Keep repository-specific agent instructions in that
 repository's `AGENTS.md` and hooks in its `.harness/` directory.
-
-## Opt-in services and resources
-
-See [runtime.md](runtime.md) for the experimental dekit adapter, repo-owned
-service/tunnel groups, resource hooks, agent logs and verified retirement.
-Keep each repo's existing standalone launch command and toolchain unchanged.

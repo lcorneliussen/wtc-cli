@@ -5,7 +5,7 @@ configuration that makes its workspace different. Keeping copies of every
 standard skill in every harness makes upgrades harder and hides which files
 are deliberate policy overrides.
 
-## The proposed default
+## The default from v0.1.39
 
 A new harness starts with six files:
 
@@ -36,12 +36,12 @@ repo; it does not own your repository list or publish the repo for you.
 ## What happens to the boilerplate?
 
 Keep it as an optional reference during the transition. Make the CLI the
-canonical source for generic guidance, examples, and demos. Do not require a
-boilerplate fork for new projects once the minimal path is released and proven.
+canonical source for generic guidance, examples, and demos. New projects can use the
+minimal scaffold without a boilerplate fork.
 
 For an existing harness:
 
-1. Keep its current CLI pin and authored files while evaluating the candidate.
+1. Keep its current CLI pin and authored files while evaluating the CLI defaults.
 2. Compare standard files with the embedded defaults using `wtc skills diff`
    and the source documents. Review project policy and hooks separately.
 3. After installing a compatible release, remove only overrides that are truly
@@ -54,9 +54,14 @@ helps. Its existence need not be a dependency of WTC itself.
 
 ## Application compatibility
 
-Onboarding wraps the repository's ordinary foreground command. A Ruby process
-manager can remain the launcher; an `npx` build-and-run command or .NET host
-works the same way. WTC does not replace those commands or split build from run.
+Keep repository development commands usable outside WTC. Optional setup and
+teardown hooks prepare worktree-specific files without replacing normal local
+commands or toolchains.
+
+The runtime candidate wraps the repository's ordinary foreground command. A Ruby
+process manager can remain the launcher; an `npx` build-and-run command or .NET
+host works the same way. WTC does not replace those commands or split build from
+run.
 
 Optional `.harness/dekit.tasks.yaml` fragments and resource hooks affect WTC
 users only. Docker and cloud resources are managed by their native tools in
@@ -64,5 +69,5 @@ hooks. Hooks record exact ownership, preserve shared services, and tear down
 only resources allocated for that collection. A service and its tunnel share
 a group in status while remaining separate supervised processes.
 
-This design and the new scaffold are candidates. The released v0.1.38 bootstrap
-continues to use a populated harness.
+The small scaffold and complete embedded instruction fallback are available
+from v0.1.39. The earlier v0.1.38 bootstrap uses a populated harness.

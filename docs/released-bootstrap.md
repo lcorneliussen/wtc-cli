@@ -1,8 +1,8 @@
-# First workspace with a released CLI
+# First workspace with a populated harness
 
 This is the populated-harness path, including v0.1.38. The
-[minimal scaffold](getting-started.md#minimal-harness--candidate) is a separate
-candidate. Start with your own harness repository adapted from the optional
+[minimal scaffold](getting-started.md#minimal-harness) is available from
+v0.1.39. Start with your own harness repository adapted from the optional
 [reference harness](https://github.com/lcorneliussen/wtc-boilerplate).
 
 Git and WTC are required. Authenticate Git for your forge before cloning.

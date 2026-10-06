@@ -31,6 +31,9 @@ CI verifies the dekit archive checksum and uses a pinned Postgres image digest.
 Actual Azure provisioning and connectivity across machines remain onboarding
 checks for the project using them.
 
-[Public demos](demos/README.md) are recorded from real commands against synthetic
-local repositories. They do not require an agent, a forge account, or a desktop
-recording.
+[Release notes](release-notes.md) are committed and embedded separately from
+generated harness guidance. Before tagging, add the matching numbered note;
+the release workflow publishes that exact file as the GitHub release body.
+
+[Public demos](demos/README.md) record actual collection and bootstrap commands
+against synthetic local repositories. They need no forge account or agent.
