@@ -60,10 +60,12 @@ type openHerdrResponse struct {
 				Area struct {
 					Width int `json:"width"`
 				} `json:"area"`
+				TabID string `json:"tab_id"`
 				Panes []struct {
 					ID   string `json:"pane_id"`
 					Rect struct {
 						X int `json:"x"`
+						Y int `json:"y"`
 					} `json:"rect"`
 				} `json:"panes"`
 			} `json:"layouts"`
@@ -192,6 +194,30 @@ func openSameColumn(session, left, right string) bool {
 		}
 	}
 	return foundLeft && foundRight && xleft == xright
+}
+
+// openStacked reports whether lower sits below upper in the same tab and column.
+func openStacked(session, upper, lower string) bool {
+	result, err := openHerdr(session, "api", "snapshot")
+	if err != nil {
+		return false
+	}
+	for _, layout := range result.Result.Snapshot.Layouts {
+		var xupper, yupper, xlower, ylower int
+		foundUpper, foundLower := false, false
+		for _, pane := range layout.Panes {
+			if pane.ID == upper {
+				xupper, yupper, foundUpper = pane.Rect.X, pane.Rect.Y, true
+			}
+			if pane.ID == lower {
+				xlower, ylower, foundLower = pane.Rect.X, pane.Rect.Y, true
+			}
+		}
+		if foundUpper || foundLower {
+			return foundUpper && foundLower && xupper == xlower && yupper < ylower
+		}
+	}
+	return false
 }
 
 func openFirstPane(result openHerdrResponse) string {

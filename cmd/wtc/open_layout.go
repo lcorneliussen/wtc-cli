@@ -37,11 +37,16 @@ func openLayoutState(session, workspace string) (string, []openPaneInfo, error) 
 			complete = false
 		}
 	}
-	if openTabByLabel(tabs, "tools").ID != "" {
-		if complete {
+	if tools := openTabByLabel(tabs, "tools").ID; tools != "" {
+		agent, status := openPaneByLabel(panes, "agent"), openPaneByLabel(panes, "status")
+		browse, shell := openPaneByLabel(panes, "browse"), openPaneByLabel(panes, "shell")
+		if !complete || agent.TabID != status.TabID || browse.TabID != tools || shell.TabID != tools {
+			return "partial", panes, nil
+		}
+		if openStacked(session, agent.ID, status.ID) && openStacked(session, browse.ID, shell.ID) {
 			return "narrow", panes, nil
 		}
-		return "partial", panes, nil
+		return "unstacked", panes, nil
 	}
 	if complete && openSameColumn(session, openPaneByLabel(panes, "agent").ID, openPaneByLabel(panes, "shell").ID) {
 		return "wide", panes, nil
@@ -123,6 +128,39 @@ func openApplyNarrow(session, workspace, agent, cwd string) error {
 	return openRenamePane(session, shell, "shell")
 }
 
+// openMoveBelow puts pane under target in target's tab. herdr ignores a move
+// within one tab, so a pane already there leaves through a temporary tab,
+// which keeps its process alive and closes once the pane moves back.
+func openMoveBelow(session, workspace, pane, target, ratio string) error {
+	tab := openPaneTab(session, target)
+	if tab == "" {
+		return fmt.Errorf("cannot find the tab of pane %s", target)
+	}
+	if openPaneTab(session, pane) == tab {
+		if _, err := openHerdr(session, "pane", "move", pane, "--new-tab", "--workspace", workspace, "--label", "restack-tmp", "--no-focus"); err != nil {
+			return err
+		}
+	}
+	_, err := openHerdr(session, "pane", "move", pane, "--tab", tab, "--split", "down", "--target-pane", target, "--ratio", ratio, "--no-focus")
+	return err
+}
+
+// openRestackNarrow repairs a narrow workspace whose tabs hold the right panes
+// side by side instead of stacked.
+func openRestackNarrow(session, workspace string, panes []openPaneInfo) error {
+	agent, status := openPaneByLabel(panes, "agent").ID, openPaneByLabel(panes, "status").ID
+	if !openStacked(session, agent, status) {
+		if err := openMoveBelow(session, workspace, status, agent, "0.65"); err != nil {
+			return err
+		}
+	}
+	browse, shell := openPaneByLabel(panes, "browse").ID, openPaneByLabel(panes, "shell").ID
+	if !openStacked(session, browse, shell) {
+		return openMoveBelow(session, workspace, shell, browse, "0.80")
+	}
+	return nil
+}
+
 func openSwitchNarrow(session, workspace, agent, cwd string, panes []openPaneInfo) error {
 	if err := openRenamePane(session, agent, "agent"); err != nil {
 		return err
@@ -151,9 +189,8 @@ func openSwitchNarrow(session, workspace, agent, cwd string, panes []openPaneInf
 			return err
 		}
 	}
-	tools := openPaneTab(session, browse)
 	if shell != "" {
-		if _, err := openHerdr(session, "pane", "move", shell, "--tab", tools, "--split", "down", "--target-pane", browse, "--ratio", "0.80", "--no-focus"); err != nil {
+		if err := openMoveBelow(session, workspace, shell, browse, "0.80"); err != nil {
 			return err
 		}
 	} else {
@@ -167,11 +204,7 @@ func openSwitchNarrow(session, workspace, agent, cwd string, panes []openPaneInf
 		}
 	}
 	if status := openPaneByLabel(panes, "status").ID; status != "" {
-		main := openPaneTab(session, agent)
-		if _, err := openHerdr(session, "pane", "move", status, "--tab", main, "--split", "down", "--target-pane", agent, "--ratio", "0.65", "--no-focus"); err != nil {
-			return err
-		}
-		return nil
+		return openMoveBelow(session, workspace, status, agent, "0.65")
 	}
 	status, err := openSplit(session, agent, "down", "0.65", cwd)
 	if err != nil {
@@ -180,7 +213,7 @@ func openSwitchNarrow(session, workspace, agent, cwd string, panes []openPaneInf
 	return openRenamePane(session, status, "status")
 }
 
-func openSwitchWide(session, agent, cwd string, panes []openPaneInfo) error {
+func openSwitchWide(session, workspace, agent, cwd string, panes []openPaneInfo) error {
 	if err := openRenamePane(session, agent, "agent"); err != nil {
 		return err
 	}
@@ -219,10 +252,7 @@ func openSwitchWide(session, agent, cwd string, panes []openPaneInfo) error {
 		}
 	}
 	if status := openPaneByLabel(panes, "status").ID; status != "" {
-		if _, err := openHerdr(session, "pane", "move", status, "--tab", main, "--split", "down", "--target-pane", browse, "--ratio", "0.65", "--no-focus"); err != nil {
-			return err
-		}
-		return nil
+		return openMoveBelow(session, workspace, status, browse, "0.65")
 	}
 	status, err := openSplit(session, browse, "down", "0.65", cwd)
 	if err != nil {
@@ -251,10 +281,13 @@ func openEnsureLayout(session, workspace, cwd, desired string) (string, error) {
 		}
 		return "built", err
 	}
+	if current == "unstacked" && desired == "narrow" {
+		return "restacked", openRestackNarrow(session, workspace, panes)
+	}
 	if desired == "narrow" {
 		err = openSwitchNarrow(session, workspace, agent, cwd, panes)
 	} else {
-		err = openSwitchWide(session, agent, cwd, panes)
+		err = openSwitchWide(session, workspace, agent, cwd, panes)
 	}
 	return "switched", err
 }
