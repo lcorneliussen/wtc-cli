@@ -76,63 +76,74 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 	if err := c.RunHook("retire.pre", values); err != nil {
 		return result, err
 	}
-	postRan := false
-	for _, wt := range worktrees {
-		// A self-retire loses its harness hook source when that final worktree
-		// goes away. Run the post hook after product teardown, while it exists.
-		if opt.Self && wt.name == "harness" {
-			if err := c.RunHook("retire.post", values); err != nil {
-				return result, err
-			}
-			postRan = true
-		}
-		RunRepoTeardown(wt.path)
-		args := []string{"--git-dir=" + wt.owner, "worktree", "remove"}
-		if opt.Force {
-			args = append(args, "--force")
-		}
-		args = append(args, wt.path)
-		if _, err := gitOutput(args...); err != nil {
-			return result, fmt.Errorf("remove %s: %w", wt.name, err)
-		}
-		if _, err := gitOutput("--git-dir="+wt.owner, "worktree", "prune"); err != nil {
-			return result, fmt.Errorf("prune %s: %w", wt.name, err)
-		}
-		result.Removed = append(result.Removed, wt.name)
-	}
-	if opt.Self && !postRan {
-		if err := c.RunHook("retire.post", values); err != nil {
-			return result, err
-		}
-	}
-	if !result.WorkspaceClosed {
-		closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
-		result.WorkspaceClosed = closed
-		if warning != "" {
-			result.Warnings = append(result.Warnings, warning)
-		}
-	}
-	stopRetiredStatusWatchers(target)
-	if err := removeRetiredGeneratedFiles(target); err != nil {
+	// Runtime ownership belongs to the target, not to the caller's harness.
+	runtimeTarget, err := OpenCollection(target)
+	if err != nil {
 		return result, err
 	}
-	if err := os.Remove(target); err == nil {
-		result.FolderRemoved = true
-	} else {
-		entries, readErr := os.ReadDir(target)
-		if readErr != nil {
-			return result, fmt.Errorf("remove collection folder: %w", err)
+	err = runtimeTarget.withRuntimeLock(func() error {
+		if err := runtimeTarget.retireRuntime(); err != nil {
+			return fmt.Errorf("runtime cleanup: %w", err)
 		}
-		for _, entry := range entries {
-			result.Leftovers = append(result.Leftovers, entry.Name())
+		postRan := false
+		for _, wt := range worktrees {
+			// A self-retire loses its harness hook source when that final worktree
+			// goes away. Run the post hook after product teardown, while it exists.
+			if opt.Self && wt.name == "harness" {
+				if err := c.RunHook("retire.post", values); err != nil {
+					return err
+				}
+				postRan = true
+			}
+			RunRepoTeardown(wt.path)
+			args := []string{"--git-dir=" + wt.owner, "worktree", "remove"}
+			if opt.Force {
+				args = append(args, "--force")
+			}
+			args = append(args, wt.path)
+			if _, err := gitOutput(args...); err != nil {
+				return fmt.Errorf("remove %s: %w", wt.name, err)
+			}
+			if _, err := gitOutput("--git-dir="+wt.owner, "worktree", "prune"); err != nil {
+				return fmt.Errorf("prune %s: %w", wt.name, err)
+			}
+			result.Removed = append(result.Removed, wt.name)
 		}
-	}
-	if !opt.Self {
-		if err := c.RunHook("retire.post", values); err != nil {
-			return result, err
+		if opt.Self && !postRan {
+			if err := c.RunHook("retire.post", values); err != nil {
+				return err
+			}
 		}
-	}
-	return result, nil
+		if !result.WorkspaceClosed {
+			closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
+			result.WorkspaceClosed = closed
+			if warning != "" {
+				result.Warnings = append(result.Warnings, warning)
+			}
+		}
+		stopRetiredStatusWatchers(target)
+		if err := removeRetiredGeneratedFiles(target); err != nil {
+			return err
+		}
+		if err := os.Remove(target); err == nil {
+			result.FolderRemoved = true
+		} else {
+			entries, readErr := os.ReadDir(target)
+			if readErr != nil {
+				return fmt.Errorf("remove collection folder: %w", err)
+			}
+			for _, entry := range entries {
+				result.Leftovers = append(result.Leftovers, entry.Name())
+			}
+		}
+		if !opt.Self {
+			if err := c.RunHook("retire.post", values); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return result, err
 }
 
 // RetirePreflight checks the same deletion blockers as RetireCollection without
@@ -318,6 +329,7 @@ func removeRetiredGeneratedFiles(target string) error {
 	files := []string{
 		"HANDOFF.md", ".env.collection", ".env.collection.local", "mise.toml", ".DS_Store",
 		"WTC-SCOPE.md", ".env.toolchain",
+		".wtc-runtime.lock",
 		".wtc-prs", ".wtc-prs.lock", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
 	}
 	for _, name := range files {
@@ -333,6 +345,11 @@ func removeRetiredGeneratedFiles(target string) error {
 	}
 	wtcDir := filepath.Join(target, ".wtc")
 	if info, err := os.Lstat(wtcDir); err == nil && info.IsDir() {
+		if info, err := os.Lstat(filepath.Join(wtcDir, "runtime", "manifest.json")); err == nil && info.Mode().IsRegular() {
+			if err := os.RemoveAll(filepath.Join(wtcDir, "runtime")); err != nil {
+				return err
+			}
+		}
 		if err := os.RemoveAll(filepath.Join(wtcDir, "instructions")); err != nil {
 			return err
 		}

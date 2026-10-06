@@ -1,0 +1,15 @@
+WTC candidate | failed teardown blocks retirement | shared resources survive
+add-search $ printf '\nRUNTIME_TEARDOWN_FAIL=1\n' >> .env.collection.local
+main $ wtc retire add-search
+deliberate fixture teardown failure
+wtc: runtime cleanup: api runtime teardown failed: exit status 8
+main $ test -d ../add-search/api && echo "worktrees preserved for retry"
+worktrees preserved for retry
+add-search $ sed -i.bak '/RUNTIME_TEARDOWN_FAIL=/d' .env.collection.local
+main $ wtc retire add-search
+synthetic collection resource removed
+retired add-search
+workspace $ test ! -d add-search && echo "collection removed"
+collection removed
+workspace $ cat shared-resource.marker
+Synthetic shared resource

@@ -35,6 +35,35 @@ are required: the remote to record and the exact CLI version to pin.
 
 [Transcript](harness.txt) · [Asciicast](harness.cast)
 
+## Runtime candidate
+
+The next two recordings use the opt-in dekit runtime, which no released CLI
+contains yet. They are recorded by `record_runtime.py` (see below).
+
+### Services, grouped endpoints, and logs
+
+Start an existing build-and-run command and its loopback relay as one group.
+Read their status and logs, restart with the cached build, then stop processes.
+The synthetic owned data folder and append-only logs remain after `down`.
+
+![Service lifecycle](runtime.gif)
+
+[Transcript](runtime.txt) · [Asciicast](runtime.cast)
+
+The relay runs on the same machine. It demonstrates grouping and dependencies;
+it does not demonstrate cross-machine access or a cloud provider. Replace it
+with the project's existing foreground tunnel command for real onboarding.
+
+### Cleanup failure
+
+A deliberate resource teardown failure blocks retirement and preserves the
+worktrees. Correct the override and retry: owned resources and the collection
+are removed, while a synthetic shared resource marker remains.
+
+![Retirement failure and retry](cleanup.gif)
+
+[Transcript](cleanup.txt) · [Asciicast](cleanup.cast)
+
 ## Reproduce
 
 Build the CLI, then supply Python 3, Git, and `pyte` 0.8.2 for capturing
@@ -63,3 +92,16 @@ The v0.1.39 pin is fixture metadata only: every command uses the supplied
 source-built binary. No pin is installed or changed in your projects. Captures
 replace only their own temporary sandbox path with `~/wtc-demo`; transcripts
 also normalize terminal whitespace. Inspect all captures before publishing.
+
+### Runtime recordings
+
+The runtime and cleanup recordings need dekit 0.10.0 and use their own script:
+
+```sh
+python3 docs/demos/record_runtime.py \
+  --wtc ./wtc --dekit /path/to/dekit --agg /path/to/agg
+```
+
+It creates its own temporary repos and owners, launches only loopback services,
+and removes its fixture. The relay runs on the same machine; it shows grouping
+and dependencies, not cross-machine access or a cloud provider.

@@ -79,3 +79,8 @@ and project policy as needed. Use `wtc eject <path>` to take ownership of a
 specific default; existing files are never overwritten. Keep credentials out
 of Git. Collection-local overrides and logs are disposable; durable work
 belongs in repository commits and forge records.
+
+Optional services and resources use `wtc docs instructions/runtime.md`. Wrap
+ordinary foreground development commands so people outside WTC keep their
+existing local workflow. `wtc down` stops processes; retirement also runs strict
+resource teardown before deleting the collection.

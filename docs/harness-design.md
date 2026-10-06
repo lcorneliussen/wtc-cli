@@ -58,5 +58,16 @@ Keep repository development commands usable outside WTC. Optional setup and
 teardown hooks prepare worktree-specific files without replacing normal local
 commands or toolchains.
 
+The runtime candidate wraps the repository's ordinary foreground command. A Ruby
+process manager can remain the launcher; an `npx` build-and-run command or .NET
+host works the same way. WTC does not replace those commands or split build from
+run.
+
+Optional `.harness/dekit.tasks.yaml` fragments and resource hooks affect WTC
+users only. Docker and cloud resources are managed by their native tools in
+hooks. Hooks record exact ownership, preserve shared services, and tear down
+only resources allocated for that collection. A service and its tunnel share
+a group in status while remaining separate supervised processes.
+
 The small scaffold and complete embedded instruction fallback are available
 from v0.1.39. The earlier v0.1.38 bootstrap uses a populated harness.

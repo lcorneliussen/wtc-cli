@@ -318,14 +318,18 @@ func statusTUIPR(pr *wtc.StatusPRFacts) string {
 }
 
 type statusRepoLayout struct {
-	name, branch, pr, tree, ahead, behind, tip, prod int
-	showTree, showSync, showBuilds                   bool
+	name, branch, pr, tree, ahead, behind, tip, prod, runtime int
+	showTree, showSync, showBuilds, showRuntime               bool
 }
 
 func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayout {
 	l := statusRepoLayout{name: 16, branch: 30, pr: 15, tree: 4, ahead: 3, behind: 3, tip: 8, prod: 8,
 		showTree: true, showSync: true, showBuilds: true}
 	for _, row := range snapshot.Repos {
+		if row.Runtime != "" && width >= 90 {
+			l.showRuntime = true
+			l.runtime = 20
+		}
 		if row.Tree != "clean" {
 			l.tree = max(l.tree, runewidth.StringWidth(row.Tree))
 		}
@@ -351,6 +355,9 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 	}
 	other := func() int {
 		n := l.name + 1 + l.pr
+		if l.showRuntime {
+			n += 1 + l.runtime
+		}
 		if l.showTree {
 			n += 1 + l.tree
 		}
@@ -466,6 +473,9 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 	if l.showBuilds {
 		header += " " + statusTUIFit("TEST", l.tip) + " " + statusTUIFit("PROD", l.prod)
 	}
+	if l.showRuntime {
+		header += " " + statusTUIFit("RUNTIME", l.runtime)
+	}
 	if styled {
 		header = statusTUIStyle(header, statusToneHeading)
 	}
@@ -552,6 +562,9 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 			}
 			line += " " + tipCell + " " + prodCell
 		}
+		if l.showRuntime {
+			line += " " + statusTUIFit(statusTUISafe(row.Runtime), l.runtime)
+		}
 		lines = append(lines, line)
 	}
 	if len(snapshot.Repos) == 0 {
@@ -613,7 +626,7 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	if m.reposOnly || m.snapshot.ShowCollectionColumn {
 		return ""
 	}
-	visibleIndex := rowIndex - max(1, len(m.snapshot.Repos)) - 3
+	visibleIndex := rowIndex - max(1, len(m.snapshot.Repos)) - 3 - len(statusTUIRuntimeLines(m.snapshot, width, false))
 	if visibleIndex < 0 {
 		return ""
 	}
@@ -909,6 +922,7 @@ func (m statusTUIModel) contentLines() []string {
 		lines = append(lines, strings.Split(strings.TrimSuffix(wtc.StatusProcessesText(m.processes), "\n"), "\n")...)
 	} else {
 		lines = append(lines, statusTUIRepoLines(m.snapshot, width, true)...)
+		lines = append(lines, statusTUIRuntimeLines(m.snapshot, width, true)...)
 		if !m.reposOnly {
 			lines = append(lines, statusTUIPRLines(m.snapshot, width, m.showArchived, true)...)
 		}

@@ -57,3 +57,9 @@ are optional; introduce them only for collection-specific preparation.
 Keep `bin/dev`, mise tasks, npm scripts, and other local commands usable outside
 WTC. Make collection-specific setup optional so developers retain the same
 local workflow.
+
+For the runtime candidate, add a small task fragment that wraps the existing
+foreground launch command. Start with the [onboarding guide](../internal/wtc/defaults/instructions/runtime.md)
+and [synthetic example](../examples/runtime/README.md). Test standalone startup,
+parallel collections, logs after shutdown, and teardown failure before adopting
+it for real resources.
