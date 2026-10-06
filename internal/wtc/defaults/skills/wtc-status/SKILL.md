@@ -95,4 +95,4 @@ A status-only request does not authorize PR mutations. Merged or archived rows
 do not prove delivery is finished; follow main builds and required ports.
 
 ---
-Canon: `harness/instructions/herdr.md`.
+Canon: `.wtc/instructions/herdr.md`.

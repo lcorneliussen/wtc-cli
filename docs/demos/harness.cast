@@ -1,0 +1,10 @@
+{"version": 2, "width": 110, "height": 32, "title": "harness", "env": {"TERM": "xterm-256color"}}
+[0.0, "o", "\u001b[2J\u001b[H\u001b[1;36mWTC candidate | six-file harness scaffold | no Git, network, or hooks\u001b[0m\r\n\r\n"]
+[0.0, "o", "\u001b[1;32msources $ wtc harness init agent-harness --remote https://example.invalid/h.git --cli-version 0.1.38\u001b[0m\r\n"]
+[0.03, "o", "created harness ~/wtc-demo/sources/agent-harness: .harness-repos.yml, .wtc-cli-version, wtc.toml, .gitignore, AGENTS.md, README.md\r\n"]
+[2.032, "o", "\u001b[1;32msources $ ls -A agent-harness\u001b[0m\r\n"]
+[2.054, "o", ".gitignore\t\t.wtc-cli-version\tREADME.md\r\n.harness-repos.yml\tAGENTS.md\t\twtc.toml\r\n"]
+[4.064, "o", "\u001b[1;32msources $ cat agent-harness/wtc.toml\u001b[0m\r\n"]
+[4.077, "o", "[compatibility]\r\n  requires = \">=0.1.38,<0.2\"\r\n\r\n[harness]\r\n  name = \"agent-harness\"\r\n"]
+[6.078, "o", "\u001b[1;32msources $ test ! -d agent-harness/.git && echo \"Git setup stays yours\"\u001b[0m\r\n"]
+[6.098, "o", "Git setup stays yours\r\n"]

@@ -383,5 +383,5 @@ gh pr checks <n> | awk -F'\t' '$2 != "pass"'                              # what
   chose to leave is a decision worth naming, not an oversight to hide.
 
 ---
-Canon: `harness/instructions/development-workflows.md`,
+Canon: `.wtc/instructions/development-workflows.md`,
 `harness/.harness-repos.yml`.

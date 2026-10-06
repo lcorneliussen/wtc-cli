@@ -73,6 +73,6 @@ longer describes the collection is how one task quietly becomes two
 (`instructions/collection-context.md`).
 
 ---
-Canon: `harness/instructions/worktree-workspace.md`,
-`harness/instructions/hooks-and-env.md`,
-`harness/instructions/development-workflows.md`.
+Canon: `.wtc/instructions/worktree-workspace.md`,
+`.wtc/instructions/hooks-and-env.md`,
+`.wtc/instructions/development-workflows.md`.

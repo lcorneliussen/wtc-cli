@@ -333,6 +333,9 @@ func removeRetiredGeneratedFiles(target string) error {
 	}
 	wtcDir := filepath.Join(target, ".wtc")
 	if info, err := os.Lstat(wtcDir); err == nil && info.IsDir() {
+		if err := os.RemoveAll(filepath.Join(wtcDir, "instructions")); err != nil {
+			return err
+		}
 		if err := os.RemoveAll(filepath.Join(wtcDir, "skills")); err != nil {
 			return err
 		}

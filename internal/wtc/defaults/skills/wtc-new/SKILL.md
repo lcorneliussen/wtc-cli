@@ -104,5 +104,5 @@ herdr --session <project> agent prompt api-foh7-paging-clamp \
 ```
 
 ---
-Canon: `harness/instructions/worktree-workspace.md`,
-`harness/instructions/hooks-and-env.md`, `harness/AGENTS.md`.
+Canon: `.wtc/instructions/worktree-workspace.md`,
+`.wtc/instructions/hooks-and-env.md`, `harness/AGENTS.md`.
