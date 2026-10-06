@@ -11,7 +11,9 @@ Use this for a downstream harness that pins `wtc` or ports the shell-era referen
 
 Read the downstream's recorded upstream version or commit and the target release or upstream ref. Confirm the target exists. If no machine-readable pin exists in the shell era, use merge commits, port trailers, and the last upgrade PR to establish the base; record any uncertainty in the private upgrade PR. Do not guess from file timestamps.
 
-Check the target changelog and list the commands, skills, instructions, registry schema, and hook contracts that changed. Compare each local override with the corresponding new default. The upgrade is a single version transition, not a series of unrelated cherry-picks.
+Before changing the pin, download the published target binary and run that binary's `release-notes --since <old-pin>` command. The archive is offline and specific to that binary: running the old installed CLI cannot reveal future notes. `wtc release-notes <version>` reads one release; `wtc release-notes unreleased` explicitly reads upcoming changes, which are not evidence that a feature has shipped. If the target predates this command, read its published GitHub release notes instead.
+
+Use the full release range to list changed commands, skills, instructions, registry schema, and hook contracts, including later corrections to earlier notes. Identify harness adoption steps and compatibility requirements. Compare each local override with the corresponding new default and inspect `wtc skills diff`. The upgrade is a single version transition, not a series of unrelated cherry-picks.
 
 ## 2. Prepare the branch
 
