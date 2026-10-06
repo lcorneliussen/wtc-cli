@@ -52,7 +52,12 @@ func (c *Context) runtimeBinary() (string, error) {
 		name = "dekit"
 	}
 	if strings.ContainsRune(name, filepath.Separator) && !filepath.IsAbs(name) {
-		name = filepath.Join(c.Harness, name)
+		// Resolve the harness, not the tool: the path feeds the config digest.
+		harness := c.Harness
+		if resolved, err := filepath.EvalSymlinks(harness); err == nil {
+			harness = resolved
+		}
+		name = filepath.Join(harness, name)
 	}
 	path, err := exec.LookPath(name)
 	if err != nil {
@@ -205,7 +210,7 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 			}
 			task["cwd"] = resolved
 			if script, ok := task["script"].(string); ok && !filepath.IsAbs(script) {
-				task["script"] = filepath.Join(repo.path, script)
+				task["script"] = filepath.Join(base, script)
 			}
 			item.Log = filepath.Join(m.Root, "logs", filepath.FromSlash(full)+".log")
 			task["log"] = map[string]any{"enabled": true, "file": item.Log, "mode": "append"}

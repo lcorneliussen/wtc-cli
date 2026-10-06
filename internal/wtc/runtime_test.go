@@ -337,7 +337,13 @@ func TestRuntimeCommandTruncatesNoisyStderr(t *testing.T) {
 
 func TestRuntimeManifestSurvivesSymlinkedCollectionPath(t *testing.T) {
 	c := runtimeFixture(t)
-	if _, err := c.RenderRuntime(false); err != nil {
+	fixtureFile(t, filepath.Join(c.Harness, "bin/dekit"), "#!/bin/sh\nexec "+c.Config.Runtime.Binary+" \"$@\"\n", 0755)
+	c.Config.Runtime.Binary = "bin/dekit"
+	fragment := filepath.Join(c.Collection, "widget/.harness/dekit.tasks.yaml")
+	data, _ := os.ReadFile(fragment)
+	fixtureFile(t, fragment, string(data)+" web/job:\n  script: bin/job\n  type: job\n", 0644)
+	first, err := c.renderRuntime()
+	if err != nil {
 		t.Fatal(err)
 	}
 	alias := filepath.Join(t.TempDir(), "alias")
@@ -350,7 +356,13 @@ func TestRuntimeManifestSurvivesSymlinkedCollectionPath(t *testing.T) {
 	}
 	other.Config = c.Config
 	m, err := other.runtimeManifest()
-	if err != nil || m == nil || len(m.Tasks) != 2 {
+	if err != nil || m == nil || len(m.Tasks) != 3 {
 		t.Fatalf("second spelling refused the runtime: %+v %v", m, err)
+	}
+	if again, _, err := other.runtimePlan(first.Binary); err != nil || again.Digest != first.Digest {
+		t.Fatalf("second spelling changed the generated config: %v", err)
+	}
+	if binary, err := other.runtimeBinary(); err != nil || binary != first.Binary {
+		t.Fatalf("second spelling changed the binary: %s %v", binary, err)
 	}
 }
