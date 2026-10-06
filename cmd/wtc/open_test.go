@@ -142,7 +142,7 @@ elif args[:2] == ["api", "snapshot"]:
         sys.exit(2)
     emit({"snapshot":{"layouts":[{"area":{"width":180},"tab_id":tab["tab_id"],"panes":[
         {"pane_id":pane["pane_id"],"rect":{"x":pane.get("x", 0),"y":pane.get("y", 0)}}
-        for pane in state["panes"] if pane["tab_id"] == tab["tab_id"]]} for tab in state["tabs"]]}})
+        for pane in state["panes"] if pane["tab_id"] == tab["tab_id"]]} for tab in state["tabs"] if not os.environ.get("OPEN_TEST_EMPTY_SNAPSHOT")]}})
 else:
     print("unexpected command: " + " ".join(args), file=sys.stderr)
     sys.exit(2)
@@ -249,6 +249,13 @@ else:
 		t.Fatalf("unreadable geometry was treated as unstacked: %+v\n%s", blind, blindCalls)
 	}
 	t.Setenv("OPEN_TEST_FAIL_SNAPSHOT", "")
+	t.Setenv("OPEN_TEST_EMPTY_SNAPSHOT", "1")
+	blind = openCollection(c, "sample", opt, "narrow", true, true)
+	blindCalls, _ = os.ReadFile(log)
+	if !strings.Contains(blind.Error, "snapshot has no layout") || strings.Count(string(blindCalls), "pane move ") != strings.Count(string(restackCalls), "pane move ") {
+		t.Fatalf("missing geometry was treated as unstacked: %+v\n%s", blind, blindCalls)
+	}
+	t.Setenv("OPEN_TEST_EMPTY_SNAPSHOT", "")
 	shellBeside := strings.Replace(string(state), `"label": "shell", "x": 0, "y": 1`, `"label": "shell", "x": 80, "y": 0`, 1)
 	if shellBeside == string(state) {
 		t.Fatalf("fixture has no stacked shell to displace: %s", state)

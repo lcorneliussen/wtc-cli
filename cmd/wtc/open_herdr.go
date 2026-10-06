@@ -213,11 +213,14 @@ func openStacked(session, upper, lower string) (bool, error) {
 				xlower, ylower, foundLower = pane.Rect.X, pane.Rect.Y, true
 			}
 		}
+		if foundUpper && foundLower {
+			return xupper == xlower && yupper < ylower, nil
+		}
 		if foundUpper || foundLower {
-			return foundUpper && foundLower && xupper == xlower && yupper < ylower, nil
+			return false, nil
 		}
 	}
-	return false, nil
+	return false, fmt.Errorf("herdr snapshot has no layout for panes %s and %s", upper, lower)
 }
 
 func openFirstPane(result openHerdrResponse) string {
