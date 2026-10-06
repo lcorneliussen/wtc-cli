@@ -1,0 +1,33 @@
+WTC / inspect environment and secret links
+add-search ❯ wtc env list
+[Interactive screen before q]
+wtc env · add-search
+3 source files · 6 variable names · values hidden
+  FILE / KEY                                                 SCOPE     STATE
+  file  wtc.env                                              machine   absent
+  file  .env.collection                                      local     present
+  file  .env.collection.local                                local     present
+  API_PORT                                                   local
+  COLLECTION_PORT_BASE                                       local
+  WEB_PORT                                                   local
+  WTC_AGENT_NAME                                             local
+  WTC_COLLECTION                                             local
+› WTC_CONFIG_ROOT                                            local
+WTC_CONFIG_ROOT
+source: .env.collection
+scope: this collection (generated)
+9/9 · ↑↓ select · PgUp/PgDn page · q quit
+
+add-search ❯ wtc secrets list
+[Interactive screen before q]
+wtc secrets · add-search
+3 file paths · shared means available to collections with that repository
+  PATH                                                       SCOPE     STATE
+  .env.collection.local                                      local     present
+› api/.env                                                   shared    linked
+  web/.env                                                   shared    linked
+
+api/.env
+state: linked · scope: all collections with this repository
+target: api/.env · gitignored: yes
+2/3 · ↑↓ select · PgUp/PgDn page · q quit
