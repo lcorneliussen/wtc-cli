@@ -5,7 +5,7 @@ configuration that makes its workspace different. Keeping copies of every
 standard skill in every harness makes upgrades harder and hides which files
 are deliberate policy overrides.
 
-## The proposed default
+## The default from v0.1.39
 
 A new harness starts with six files:
 
@@ -36,12 +36,12 @@ repo; it does not own your repository list or publish the repo for you.
 ## What happens to the boilerplate?
 
 Keep it as an optional reference during the transition. Make the CLI the
-canonical source for generic guidance, examples, and demos. Do not require a
-boilerplate fork for new projects once the minimal path is released and proven.
+canonical source for generic guidance, examples, and demos. New projects can use the
+minimal scaffold without a boilerplate fork.
 
 For an existing harness:
 
-1. Keep its current CLI pin and authored files while evaluating the candidate.
+1. Keep its current CLI pin and authored files while evaluating the CLI defaults.
 2. Compare standard files with the embedded defaults using `wtc skills diff`
    and the source documents. Review project policy and hooks separately.
 3. After installing a compatible release, remove only overrides that are truly
@@ -58,5 +58,5 @@ Keep repository development commands usable outside WTC. Optional setup and
 teardown hooks prepare worktree-specific files without replacing normal local
 commands or toolchains.
 
-This design and the new scaffold are candidates. The released v0.1.38 bootstrap
-continues to use a populated harness.
+The small scaffold and complete embedded instruction fallback are available
+from v0.1.39. The earlier v0.1.38 bootstrap uses a populated harness.

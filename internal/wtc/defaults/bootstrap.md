@@ -3,16 +3,13 @@
 A workspace root is a plain folder. Shared bare Git owners live in `.bare/`;
 each task gets a collection of worktrees, including its harness.
 
-This guide describes the minimal-harness candidate. The released v0.1.38 path
-uses a populated harness; see the released bootstrap in the CLI repository:
+The minimal harness path requires **v0.1.39 or newer**. Earlier releases use a
+populated harness; see the compatible bootstrap in the CLI repository:
 https://github.com/lcorneliussen/wtc-cli/blob/main/docs/released-bootstrap.md .
-Do not pin v0.1.38 for a config-only harness: its embedded instruction fallback
-is incomplete. Use the candidate binary for evaluation, and a release that
-contains this path for adoption.
 
 ## 1. Create your harness repo
 
-Install WTC from a published release containing `harness init`. Git is required;
+Install WTC v0.1.39 or newer from a published release. Git is required;
 mise is useful for pins and environment. Herdr, Neovim, agents, and forge CLIs
 are optional interfaces. Your own Git remote must be available before the next
 step.
@@ -20,7 +17,7 @@ step.
 ```sh
 wtc harness init agent-harness \
   --remote git@github.com:example-org/agent-harness.git \
-  --cli-version <release-containing-the-minimal-harness>
+  --cli-version 0.1.39
 cd agent-harness
 ```
 
