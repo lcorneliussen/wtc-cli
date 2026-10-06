@@ -111,7 +111,7 @@ Do **not** diagnose `mise trust` / `mise exec` / `mise where ruby` as a first
 step. Agent shells get sibling toolchain bins on PATH from `.env.toolchain`
 (via a PreToolUse hook or `.envrc`; herdr passes the cached path). If `ruby -v` is macOS 2.6,
 `eval "$(wtc agent-env)"` once and continue — full rule in
-`harness/instructions/hooks-and-env.md` → Agent shells and PATH.
+`.wtc/instructions/hooks-and-env.md` → Agent shells and PATH.
 
 ## Resume delivery ownership
 
@@ -132,5 +132,5 @@ what landed since — run the `wtc-catch-up` skill first.
 
 ---
 Canon: `harness/AGENTS.md` (State lives in git),
-`harness/instructions/collection-context.md`,
-`harness/instructions/development-workflows.md`.
+`.wtc/instructions/collection-context.md`,
+`.wtc/instructions/development-workflows.md`.

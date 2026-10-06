@@ -77,14 +77,14 @@ Once detected:
   collections only contain the repos in scope. The full inventory is
   `../harness/.harness-repos.yml`.
 - **Harness instructions** (workspace pattern, workflows, catch-up):
-  `../harness/AGENTS.md` and `../harness/instructions/`.
+  `../harness/AGENTS.md` and `../.wtc/instructions/`.
 - **Collection env**: `../.env.collection` holds shared variables —
   `WTC_COLLECTION`, `WTC_AGENT_NAME`, `COLLECTION_PORT_BASE`, and
   `<REPO>_PORT` for serving repos (e.g. `API_PORT`). mise-activated shells
   inherit it automatically via the collection-root `mise.toml`; otherwise
   `set -a; . ../.env.collection; set +a`. Details and the init/teardown hook
   contract (`harness:init` mise task or `.harness/init.sh`):
-  `../harness/instructions/hooks-and-env.md`.
+  `../.wtc/instructions/hooks-and-env.md`.
 - Orchestrating from here into siblings is fine (edit, branch, PR per each
   repo's own conventions), but **respect each sibling's `AGENTS.md`** —
   branch policy, working branch, and any commit/push restrictions are per

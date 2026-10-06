@@ -1,0 +1,52 @@
+WTC candidate | detached services, grouped loopback relay, persistent logs
+add-search $ wtc up api/web
+synthetic collection resource provisioned
+Runtime (dekit; ready = startup probe passed)
+  add-search/api/resources
+    @resources   resources  provision-hook-completed · resource hook
+  add-search/api/web
+    server       service    ready · existing build-and-run command · http://127.0.0.1:52797
+    tunnel       endpoint   ready · local relay fixture (replace with real tunnel) · http://127.0.0.1:52798
+add-search $ wtc status --local --ansi --repos --silent
+wtc status · add-search · 2026-10-06T07:52:01Z                                                                
+
+REPO                 BRANCH                PR              ±    ↑   ↓   TEST     PROD     RUNTIME             
+harness              ⌂ main                ·               ·    ·   ·   ·        ·                            
+api                  ⌂ main                ·               ·    ·   ·   ·        ·        2 ready, 1 provisio…
+web                  ⌂ main                ·               ·    ·   ·   ·        ·                            
+
+Runtime (dekit; ready = startup probe passed)                                                                 
+  add-search/api/resources                                                                                    
+    @resources   resources  provision-hook-completed · resource hook                                          
+  add-search/api/web                                                                                          
+    server       service    ready · existing build-and-run command · http://127.0.0.1:52797                   
+    tunnel       endpoint   ready · local relay fixture (replace with real tunnel) · http://127.0.0.1:52798   
+add-search $ wtc logs api/web/server
+BUILD fresh
+WEB_READY port=52797
+add-search $ wtc restart api/web
+Runtime (dekit; ready = startup probe passed)
+  add-search/api/resources
+    @resources   resources  provision-hook-completed · resource hook
+  add-search/api/web
+    server       service    ready · existing build-and-run command · http://127.0.0.1:52797
+    tunnel       endpoint   ready · local relay fixture (replace with real tunnel) · http://127.0.0.1:52798
+add-search $ wtc logs api/web/server
+BUILD fresh
+WEB_READY port=52797
+BUILD cached
+WEB_READY port=52797
+add-search $ wtc down
+Runtime (dekit; ready = startup probe passed)
+  add-search/api/resources
+    @resources   resources  provision-hook-completed · resource hook
+  add-search/api/web
+    server       service    absent · existing build-and-run command · http://127.0.0.1:52797
+    tunnel       endpoint   absent · local relay fixture (replace with real tunnel) · http://127.0.0.1:52798
+add-search $ test -f api/.runtime-data/database && echo "down kept the owned resource"
+down kept the owned resource
+add-search $ wtc logs api/web/server
+BUILD fresh
+WEB_READY port=52797
+BUILD cached
+WEB_READY port=52797

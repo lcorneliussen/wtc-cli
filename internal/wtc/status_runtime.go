@@ -49,14 +49,35 @@ func (c *Context) statusRuntime(snapshot *StatusSnapshot, all bool) {
 		counts := map[string]int{}
 		for _, item := range snapshot.Runtime {
 			if item.Repo == row.Repo && item.Collection == row.Collection {
-				counts[item.State]++
+				state := item.State
+				if item.Kind == "resources" && state == "provision-hook-completed" {
+					state = "provisioned"
+				}
+				counts[state]++
 			}
 		}
 		states := []string{}
 		for state := range counts {
 			states = append(states, state)
 		}
-		sort.Strings(states)
+		// Keep service state visible in a narrow repo column. The detailed
+		// list retains the exact resource-hook fact rather than implying health.
+		sort.Slice(states, func(i, j int) bool {
+			rank := func(state string) int {
+				switch state {
+				case "ready":
+					return 1
+				case "provisioned":
+					return 2
+				default:
+					return 0
+				}
+			}
+			if rank(states[i]) != rank(states[j]) {
+				return rank(states[i]) < rank(states[j])
+			}
+			return states[i] < states[j]
+		})
 		parts := []string{}
 		for _, state := range states {
 			parts = append(parts, fmt.Sprintf("%d %s", counts[state], state))

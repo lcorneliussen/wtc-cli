@@ -37,4 +37,4 @@ in your own pane. Status-pane clicks talk to this nvim over its listen
 socket. gt / gT (or the tabline) switches siblings.
 
 ---
-Canon: `harness/instructions/herdr.md`.
+Canon: `.wtc/instructions/herdr.md`.

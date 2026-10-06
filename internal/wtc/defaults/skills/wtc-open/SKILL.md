@@ -5,7 +5,7 @@ description: Open or reshape a worktree collection in herdr — ensure the agent
 
 # Open a collection in herdr
 
-Mechanism: `wtc open`. Canon: `harness/instructions/herdr.md`.
+Mechanism: `wtc open`. Canon: `.wtc/instructions/herdr.md`.
 
 A workspace is ergonomics only — worktrees already exist. Opening is
 idempotent: reuse the workspace, keep a live agent, fill idle panes, and
@@ -64,4 +64,4 @@ is the read-only check.
 - Attach is the human's job: `herdr --session <project>`.
 
 ---
-Canon: `harness/instructions/herdr.md`.
+Canon: `.wtc/instructions/herdr.md`.

@@ -1,238 +1,89 @@
-# Bootstrap — install the harness in an empty folder
+# Bootstrap a workspace
 
-This is the empty-folder path: a new machine, or a new workspace root
-with nothing in it yet. The workspace root is **not** a git repo. Do not
-`git init` it. Do not `git clone` the harness into it as a normal
-checkout — that points `origin` at the wrong thing. Bare owners live
-under `.bare/`; collections are worktrees hanging off those bares.
+A workspace root is a plain folder. Shared bare Git owners live in `.bare/`;
+each task gets a collection of worktrees, including its harness.
 
-Day-to-day geometry after this: `instructions/worktree-workspace.md`.
+This guide describes the minimal-harness candidate. The released v0.1.38 path
+uses a populated harness; see the released bootstrap in the CLI repository:
+https://github.com/lcorneliussen/wtc-cli/blob/main/docs/released-bootstrap.md .
+Do not pin v0.1.38 for a config-only harness: its embedded instruction fallback
+is incomplete. Use the candidate binary for evaluation, and a release that
+contains this path for adoption.
 
-```text
-<workspace-root>/                 # plain folder, e.g. ~/Code/<org>/workspace
-  .bare/
-    agent-harness.git             # the only bare you must create by hand
-    …                             # others clone on demand
-  main/                           # first collection — day-to-day tip
-    AGENTS.md                     # entry point -> harness/collection-AGENTS.md
-    WTC-SCOPE.md                  # what this collection is for
-    harness/                      # agent-harness worktree
-    <repo>/                       # siblings, added when you need them
+## 1. Create your harness repo
+
+Install WTC from a published release containing `harness init`. Git is required;
+mise is useful for pins and environment. Herdr, Neovim, agents, and forge CLIs
+are optional interfaces. Your own Git remote must be available before the next
+step.
+
+```sh
+wtc harness init agent-harness \
+  --remote git@github.com:example-org/agent-harness.git \
+  --cli-version <release-containing-the-minimal-harness>
+cd agent-harness
 ```
 
----
+This creates six configuration and guidance files. It refuses to overwrite
+existing files and does not initialize Git, publish, install tools, or run hooks.
+Initialize, commit, and publish this as your own repository using your usual
+Git workflow. Configure project tool pins under `[mise.tools]` in `wtc.toml`.
 
-## Dependencies
+## 2. First bare owner and collection
 
-Install `wtc` from a [published CLI release](https://github.com/lcorneliussen/wtc-cli/releases)
-before creating the first collection. After `wtc env setup` generates
-`mise.toml`, `mise install` provides the checked-in pinned version.
+Clone the published harness from its forge remote, rather than another local
+worktree. The workspace root itself must not be initialized as a Git repo.
 
-### Required
-
-| Tool | Why |
-|---|---|
-| **git** | Bares, worktrees, everything |
-| **`wtc` CLI** | Collection creation, environment, skills, and status |
-| **Forge SSH** | Clone from `git@github.com:<org>/…` |
-| **`gh`** | Auth check, PR review wtcs (`--pr`), `wtc-status` PR cells, `wtc-pr` |
-
-```bash
-git --version
-wtc --version
-gh auth status --hostname github.com
+```sh
+mkdir -p ~/Code/example-workspace/.bare
+cd ~/Code/example-workspace
+git clone --bare git@github.com:example-org/agent-harness.git .bare/agent-harness.git
+git --git-dir=.bare/agent-harness.git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+git --git-dir=.bare/agent-harness.git fetch origin --prune
+git --git-dir=.bare/agent-harness.git worktree add --detach main/harness origin/main
+cd main
+wtc env setup
+wtc skills render --seed-scope
 ```
 
-You need write access to the org (or at least to the harness repo and
-whichever product repos you will add).
+With mise, run `mise install` in `main`. The generated tool entry comes from the
+harness's `.wtc-cli-version`; edits to the generated `mise.toml` are replaced at
+the next refresh. `AGENTS.md` and `.wtc/instructions/` now provide the pinned
+CLI's collection guidance, with project overrides where present.
 
-### Recommended
+## 3. Add application repos
 
-| Tool | Why | Without it |
-|---|---|---|
-| **herdr** | One session, one workspace per wtc; `wtc open`, status pane | Open collections as ordinary folders / terminals |
-| **neovim** + [LazyVim](https://www.lazyvim.org/) | `wtc browse` — file tree + multi-repo change index | VS Code / Cursor on the collection root, or a JetBrains IDE per sibling |
-| **mise** | Loads `.env.collection` (ports, `WTC_CONFIG_ROOT`) | Export those by hand |
-
-### Optional
-
-| Tool | Used by |
-|---|---|
-| **lazygit** | `wtc-status` TREE click when nvim is not up |
-| **gh-dash** (`gh extension install dlvhdr/gh-dash`) | `pr` herdr tab next to browse |
-| **octo.nvim** | Status PR-click opens the PR inside nvim |
-| **unified.nvim** | Inline (Zed-style) overlay when browse opens a real file |
-| **diffview.nvim** | Side-by-side from browse (`<leader>gD`) |
-| **Nerd Font** | Icons in the browse tree |
-| **`twg`** (Atlassian Teamwork Graph CLI) | Jira/Confluence from the CLI and from agents — `instructions/jira.md` |
-| **`jira` CLI** | Legacy Atlassian CLI — prefer `twg`; see `instructions/jira.md` |
-| A coding-agent CLI (Claude, Codex, Cursor, …) | The herdr `agent` pane |
-
-None of the optional tools are needed to create collections, commit, or
-open PRs.
-
-Secrets for product repos live in a **control root** inside the
-workspace (`<workspace-root>/.config` by default). You do not need it to stand the
-harness up; add files there when a sibling actually needs them. See
-`instructions/secrets.md`.
-
----
-
-## 1. Empty folder + first bare
-
-Pick a path. Example uses `~/Code/<org>/workspace`.
-
-```bash
-mkdir -p ~/Code/<org>/workspace/.bare
-cd ~/Code/<org>/workspace
-
-git clone --bare git@github.com:<org>/agent-harness.git \
-  .bare/agent-harness.git
-git --git-dir=.bare/agent-harness.git config remote.origin.fetch \
-  '+refs/heads/*:refs/remotes/origin/*'
-git --git-dir=.bare/agent-harness.git fetch --all --prune
-```
-
-Always clone bares from the forge. Never seed a bare from another local
-tree.
-
-## 2. First collection
-
-The first harness worktree is added by hand so `wtc` can read its registry. `main/` is the day-to-day tip collection.
-
-```bash
-git --git-dir=.bare/agent-harness.git worktree add --detach \
-  main/harness origin/main
-
-cd main/harness
-```
-
-Now author the **registry**, `.harness-repos.yml` — the tracked statement
-of which repos are yours. This repository ships none, because the list is
-yours; native commands require it. Start with the harness itself:
+The harness's `.harness-repos.yml` is the tracked registry. Keep its self entry
+and add each application repo, for example:
 
 ```yaml
-schema_version: 1
-
-repositories:
-  - name: agent-harness
-    remote: git@github.com:<org>/agent-harness.git
+  - name: api
+    remote: git@github.com:example-org/api.git
     default_ref: origin/main
-    role: Development harness — instructions, registry, collection tools.
+    port_offset: 1
 ```
 
-One block per repo as you adopt it: `default_ref:` wherever the tip is not
-`origin/main`, and `port_offset:` for anything that serves a port (the
-collection env turns those into `<REPO>_PORT`). The name has to match the
-bare in `.bare/`; if you renamed your fork, set `WTC_HARNESS_REPO` to it.
-Commit it — it is the one file in this fork that is genuinely yours. Then run
-`wtc registry refresh` to generate the local registry from the bare owners.
+Commit the registry, then bring the repo into the collection:
 
-Now finish wiring the collection:
-
-```bash
-wtc env setup                # .env.collection + mise.toml
-wtc skills render --seed-scope   # AGENTS.md entry point, skills, WTC-SCOPE.md
+```sh
+wtc add-repo api
+wtc status --local --no-watch
+wtc new fix-login api web --no-open  # after registering web too
 ```
 
-To use a released `wtc` CLI, commit its exact version (without the `v` tag
-prefix) in `harness/.wtc-cli-version`, then run `wtc env setup` and
-`mise install` from the collection root. The refresh generates the CLI tool
-entry in the collection-root `mise.toml`, inherited by every sibling. Upgrade
-the checked-in version file to change the pin; edits to generated `mise.toml`
-are replaced on the next refresh. Use the installed CLI directly for collection operations.
+Missing bare owners are cloned on demand. Worktrees begin detached; create a
+branch before the first commit. An agent or editor opens the collection root
+so it can see all sibling repos. Use `wtc open` if you want herdr panes.
 
-`wtc new` does both for every collection it creates; this first one is
-by hand because the tools only exist once their own worktree does. Without
-them the collection has no ports, no `WTC_CONFIG_ROOT`, and no `AGENTS.md`
-for an agent opened at the collection root to read.
+## 4. Customize only what the project owns
 
-Worktrees rest **detached at the tip**. A branch is created at the first
-commit (`git switch -c <issue-id>-<slug>`), not now.
+Read `wtc docs instructions/customize.md`. Add hooks, secret path declarations,
+and project policy as needed. Use `wtc eject <path>` to take ownership of a
+specific default; existing files are never overwritten. Keep credentials out
+of Git. Collection-local overrides and logs are disposable; durable work
+belongs in repository commits and forge records.
 
-## 3. Add siblings when you need them
-
-```bash
-# still from main/harness — collection name is the folder next to harness/
-wtc add-repo --collection main api
-wtc add-repo --collection main api console
-```
-
-Missing bares are cloned from the forge on demand. A repo added only for
-context never needs a branch.
-
-A *new* collection for a task, issue, or PR:
-
-```bash
-wtc new fix-login-flow api
-wtc new --issue api-foh7 paging-clamp
-wtc new --tracker PROJ-123 rate-limits api
-wtc new --pr api#41
-```
-
-## 4. Open it
-
-```bash
-wtc open            # this collection, in herdr (if installed)
-wtc browse          # LazyVim on the collection
-wtc status --no-watch          # branches, PRs, dirty trees
-```
-
-Or open the collection root (`main/`) in an editor. Agents should be
-started from the **collection root**, not only `harness/`.
-
-## 5. Ambient CLI credentials — decide once (optional)
-
-`gh`, `twg` and `jira` each resolve one credential store per machine, so
-by default **every project on this machine shares whichever account is
-logged in**. If this workspace is the only thing you use those CLIs for,
-that is fine and there is nothing to do here — skip to Check.
-
-It stops being fine when you keep a second, unrelated project in
-parallel: a collection here can then reach repositories and issues that
-belong to the other one, and vice versa. The harness can give this
-workspace its own store instead, keyed off the control root:
-
-```bash
-cd ..                                     # the collection root; mise loads .env.collection here
-                                          # (no mise? set -a; . ./.env.collection; set +a)
-mkdir -p "${WTC_CONFIG_ROOT:?load the collection environment first}"/gh
-wtc env setup              # emits GH_CONFIG_DIR now that it exists
-set -a; . ./.env.collection; set +a       # reload so GH_CONFIG_DIR reaches this shell
-gh auth login                             # writes into the scoped store
-gh auth status                            # confirm the identity is this workspace's
-```
-
-The mechanism, the per-tool levers, and what is *not* solved by it (a
-scoped `jira-cli` token is still plaintext on disk) are in
-`instructions/secrets.md` → "Tool identity". Two things worth knowing
-before you turn it on:
-
-- **It is opt-in by presence.** The generator emits `GH_CONFIG_DIR` only
-  once `$WTC_CONFIG_ROOT/gh` exists, so a workspace that never creates
-  the directory keeps the machine default. Nothing breaks by doing
-  nothing.
-- **Turning it on logs you out inside collections until you re-auth.**
-  The scoped store starts empty. That one-time `gh auth login` is the
-  whole cost; outside any collection the machine-global store is still
-  what answers.
-
-Agents running `wtc-catch-up` on a collection created before this
-existed will offer the same choice, since that is when a workspace
-usually discovers the option.
-
----
-
-## Check
-
-```text
-<workspace-root>/.bare/agent-harness.git   exists, origin is the forge
-<workspace-root>/main/harness/             detached at origin/main
-<workspace-root>/main/harness/.harness-repos  lists the bares you have
-<workspace-root>/main/AGENTS.md            -> harness/collection-AGENTS.md
-```
-
-`git -C main/harness status` is clean. `wtc status --no-watch` from
-`main/harness` prints the `main` collection.
-
-Then `instructions/worktree-workspace.md` is the rest of the map.
+Optional services and resources use `wtc docs instructions/runtime.md`. Wrap
+ordinary foreground development commands so people outside WTC keep their
+existing local workflow. `wtc down` stops processes; retirement also runs strict
+resource teardown before deleting the collection.
