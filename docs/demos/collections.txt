@@ -20,5 +20,5 @@ harness              ⌂ main                         ·               ·    · 
 api                  ⌂ main                         ·               ·    ·   ·   ·        ·
 web                  ⌂ main                         ·               ±1   ·   ·   ·        ·
 add-search $ git -C web diff --stat
- README.md | 2 [32m++[m
+ README.md | 2 ++
  1 file changed, 2 insertions(+)

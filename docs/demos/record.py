@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import shutil
 import struct
@@ -119,7 +120,7 @@ def main():
                       'title': self.name, 'env': {'TERM': 'xterm-256color'}}
             cast = OUT / (self.name + '.cast')
             cast.write_text('\n'.join(json.dumps(x) for x in [header, *self.events]) + '\n')
-            transcript = ''.join(self.transcript).replace('\r', '')
+            transcript = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', ''.join(self.transcript)).replace('\r', '')
             (OUT / (self.name + '.txt')).write_text('\n'.join(line.rstrip() for line in transcript.splitlines()) + '\n')
             if args.agg:
                 subprocess.run([str(args.agg.resolve()), '--theme', 'github-dark',
