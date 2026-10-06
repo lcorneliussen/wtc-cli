@@ -1,6 +1,6 @@
 # Release notes and harness upgrades
 
-**Preview:** `wtc release-notes` is on main and is not included in v0.1.38.
+`wtc release-notes` is available from v0.1.39.
 
 Release notes ship inside the CLI, so people and agents can read them offline
 from any directory. The archive includes published versions from 0.1.0 onward.
