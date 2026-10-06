@@ -197,10 +197,10 @@ func openSameColumn(session, left, right string) bool {
 }
 
 // openStacked reports whether lower sits below upper in the same tab and column.
-func openStacked(session, upper, lower string) bool {
+func openStacked(session, upper, lower string) (bool, error) {
 	result, err := openHerdr(session, "api", "snapshot")
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, layout := range result.Result.Snapshot.Layouts {
 		var xupper, yupper, xlower, ylower int
@@ -214,10 +214,10 @@ func openStacked(session, upper, lower string) bool {
 			}
 		}
 		if foundUpper || foundLower {
-			return foundUpper && foundLower && xupper == xlower && yupper < ylower
+			return foundUpper && foundLower && xupper == xlower && yupper < ylower, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func openFirstPane(result openHerdrResponse) string {

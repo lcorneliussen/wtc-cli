@@ -137,6 +137,9 @@ elif args[:2] == ["pane", "run"]:
     state.setdefault("running", {})[args[2]] = ["bash", args[3]]
     save(); emit({})
 elif args[:2] == ["api", "snapshot"]:
+    if os.environ.get("OPEN_TEST_FAIL_SNAPSHOT"):
+        print("synthetic snapshot failure", file=sys.stderr)
+        sys.exit(2)
     emit({"snapshot":{"layouts":[{"area":{"width":180},"tab_id":tab["tab_id"],"panes":[
         {"pane_id":pane["pane_id"],"rect":{"x":pane.get("x", 0),"y":pane.get("y", 0)}}
         for pane in state["panes"] if pane["tab_id"] == tab["tab_id"]]} for tab in state["tabs"]]}})
@@ -238,6 +241,44 @@ else:
 	}
 	if again := openCollection(c, "sample", narrowOpt, "narrow", true, true); again.Error != "" || strings.Contains(strings.Join(again.Actions, " "), "layout ") {
 		t.Fatalf("stacked narrow layout was changed again: %+v", again)
+	}
+	t.Setenv("OPEN_TEST_FAIL_SNAPSHOT", "1")
+	blind := openCollection(c, "sample", opt, "narrow", true, true)
+	blindCalls, _ := os.ReadFile(log)
+	if !strings.Contains(blind.Error, "synthetic snapshot failure") || strings.Count(string(blindCalls), "pane move ") != strings.Count(string(restackCalls), "pane move ") {
+		t.Fatalf("unreadable geometry was treated as unstacked: %+v\n%s", blind, blindCalls)
+	}
+	t.Setenv("OPEN_TEST_FAIL_SNAPSHOT", "")
+	shellBeside := strings.Replace(string(state), `"label": "shell", "x": 0, "y": 1`, `"label": "shell", "x": 80, "y": 0`, 1)
+	if shellBeside == string(state) {
+		t.Fatalf("fixture has no stacked shell to displace: %s", state)
+	}
+	if err := os.WriteFile(os.Getenv("OPEN_TEST_STATE"), []byte(shellBeside), 0644); err != nil {
+		t.Fatal(err)
+	}
+	auto := openCollection(c, "sample", opt, "wide", true, true)
+	state, err = os.ReadFile(os.Getenv("OPEN_TEST_STATE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auto.Error != "" || auto.Layout != "narrow" || !strings.Contains(strings.Join(auto.Actions, " "), "layout restacked (narrow)") || !strings.Contains(string(state), `"pane_id": "p3", "tab_id": "t2", "label": "shell", "x": 0, "y": 1`) || strings.Contains(string(state), "restack-tmp") {
+		t.Fatalf("automatic open did not restack the tools tab as narrow: %+v\n%s", auto, state)
+	}
+	if err := os.WriteFile(os.Getenv("OPEN_TEST_STATE"), []byte(sideBySide), 0644); err != nil {
+		t.Fatal(err)
+	}
+	wideOpt := opt
+	wideOpt.LayoutSet = true
+	widened := openCollection(c, "sample", wideOpt, "wide", true, true)
+	state, err = os.ReadFile(os.Getenv("OPEN_TEST_STATE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if widened.Error != "" || !strings.Contains(strings.Join(widened.Actions, " "), "layout switched (wide)") || !strings.Contains(string(state), `"pane_id": "p4", "tab_id": "t1", "label": "status", "x": 80, "y": 1`) || strings.Contains(string(state), `"label": "tools"`) {
+		t.Fatalf("unstacked workspace did not switch to wide: %+v\n%s", widened, state)
+	}
+	if listed := openCollection(c, "sample", openOptions{Session: "test", List: true}, "wide", true, true); listed.Layout != "wide" {
+		t.Fatalf("switched workspace is not reported as wide: %+v", listed)
 	}
 	if err := os.Remove(os.Getenv("OPEN_TEST_STATE")); err != nil {
 		t.Fatal(err)

@@ -43,10 +43,16 @@ func openLayoutState(session, workspace string) (string, []openPaneInfo, error) 
 		if !complete || agent.TabID != status.TabID || browse.TabID != tools || shell.TabID != tools {
 			return "partial", panes, nil
 		}
-		if openStacked(session, agent.ID, status.ID) && openStacked(session, browse.ID, shell.ID) {
-			return "narrow", panes, nil
+		for _, pair := range [][2]string{{agent.ID, status.ID}, {browse.ID, shell.ID}} {
+			stacked, err := openStacked(session, pair[0], pair[1])
+			if err != nil {
+				return "", nil, err
+			}
+			if !stacked {
+				return "unstacked", panes, nil
+			}
 		}
-		return "unstacked", panes, nil
+		return "narrow", panes, nil
 	}
 	if complete && openSameColumn(session, openPaneByLabel(panes, "agent").ID, openPaneByLabel(panes, "shell").ID) {
 		return "wide", panes, nil
@@ -148,15 +154,18 @@ func openMoveBelow(session, workspace, pane, target, ratio string) error {
 // openRestackNarrow repairs a narrow workspace whose tabs hold the right panes
 // side by side instead of stacked.
 func openRestackNarrow(session, workspace string, panes []openPaneInfo) error {
-	agent, status := openPaneByLabel(panes, "agent").ID, openPaneByLabel(panes, "status").ID
-	if !openStacked(session, agent, status) {
-		if err := openMoveBelow(session, workspace, status, agent, "0.65"); err != nil {
+	for _, stack := range [][3]string{{"agent", "status", "0.65"}, {"browse", "shell", "0.80"}} {
+		upper, lower := openPaneByLabel(panes, stack[0]).ID, openPaneByLabel(panes, stack[1]).ID
+		stacked, err := openStacked(session, upper, lower)
+		if err != nil {
 			return err
 		}
-	}
-	browse, shell := openPaneByLabel(panes, "browse").ID, openPaneByLabel(panes, "shell").ID
-	if !openStacked(session, browse, shell) {
-		return openMoveBelow(session, workspace, shell, browse, "0.80")
+		if stacked {
+			continue
+		}
+		if err := openMoveBelow(session, workspace, lower, upper, stack[2]); err != nil {
+			return err
+		}
 	}
 	return nil
 }
