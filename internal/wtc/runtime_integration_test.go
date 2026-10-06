@@ -380,7 +380,16 @@ func TestDekitTunnelURLDiscovery(t *testing.T) {
 			if second.URL == first.URL || second.State != "ready" || through(second.URL) != "tunnel-"+style {
 				t.Fatalf("restart kept %q, now %+v", first.URL, second)
 			}
-			t.Logf("%s: %s then %s", style, first.URL, second.URL)
+			// The tunnel depends on the service, so dekit restarts it with the
+			// service and a URL assigned at startup changes. Status must follow.
+			if _, err := c.RuntimeAction("restart", "widget/web/server", 5*time.Second); err != nil {
+				t.Fatal(err)
+			}
+			third := endpoint()
+			if third.State != "ready" || through(third.URL) != "tunnel-"+style {
+				t.Fatalf("after service restart: %+v", third)
+			}
+			t.Logf("%s: %s, tunnel restart %s, service restart %s", style, first.URL, second.URL, third.URL)
 		})
 	}
 }
