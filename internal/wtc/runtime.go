@@ -55,7 +55,15 @@ type RuntimeResult struct {
 	Items  []RuntimeItem `json:"items"`
 }
 
-func (c *Context) runtimeRoot() string { return filepath.Join(c.Collection, ".wtc", "runtime") }
+// The manifest records this root, so it is canonical: a collection reached
+// through a symlinked parent must name the same runtime.
+func (c *Context) runtimeRoot() string {
+	collection := c.Collection
+	if resolved, err := filepath.EvalSymlinks(collection); err == nil {
+		collection = resolved
+	}
+	return filepath.Join(collection, ".wtc", "runtime")
+}
 
 func runtimeRegular(path string) error {
 	info, err := os.Lstat(path)

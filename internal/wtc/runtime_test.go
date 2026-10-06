@@ -2,6 +2,7 @@ package wtc
 
 import (
 	"encoding/json"
+	"fmt"
 	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
@@ -319,5 +320,37 @@ func TestRuntimeReadinessProbeURLIsShownOnlyWhenPlain(t *testing.T) {
 		if m.Tasks[0].URL != want || !m.Tasks[0].Ready || !strings.Contains(string(data), probe) {
 			t.Fatalf("probe %s shown as %q", probe, m.Tasks[0].URL)
 		}
+	}
+}
+
+func TestRuntimeCommandTruncatesNoisyStderr(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "dekit")
+	fixtureFile(t, binary, "#!/bin/sh\nhead -c 20000 /dev/zero | tr '\\0' x >&2\n[ \"$4\" = fail ] && exit 3\necho '{}'\n", 0755)
+	m := &runtimeManifest{Root: t.TempDir(), Binary: binary}
+	if out, err := runtimeCommand(m, false, "ls"); err != nil || strings.TrimSpace(string(out)) != "{}" {
+		t.Fatalf("noisy success failed: %q %v", out, err)
+	}
+	if _, err := runtimeCommand(m, false, "fail"); err == nil || len(err.Error()) > 4300 || !strings.Contains(err.Error(), "xxxx") {
+		t.Fatalf("failure diagnostics not truncated: %d", len(fmt.Sprint(err)))
+	}
+}
+
+func TestRuntimeManifestSurvivesSymlinkedCollectionPath(t *testing.T) {
+	c := runtimeFixture(t)
+	if _, err := c.RenderRuntime(false); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(c.Workspace, alias); err != nil {
+		t.Fatal(err)
+	}
+	other, err := OpenCollection(filepath.Join(alias, filepath.Base(c.Collection)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Config = c.Config
+	m, err := other.runtimeManifest()
+	if err != nil || m == nil || len(m.Tasks) != 2 {
+		t.Fatalf("second spelling refused the runtime: %+v %v", m, err)
 	}
 }

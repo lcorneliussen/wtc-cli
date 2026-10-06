@@ -62,6 +62,22 @@ func (c *Context) withRuntimeLock(fn func() error) error {
 	return fn()
 }
 
+// runtimeDiagnostics keeps the start of stderr and discards the rest, so a
+// noisy but successful call is never reported as failed.
+type runtimeDiagnostics struct {
+	data  []byte
+	limit int
+}
+
+func (d *runtimeDiagnostics) Write(p []byte) (int, error) {
+	if room := d.limit - len(d.data); room > 0 {
+		d.data = append(d.data, p[:min(room, len(p))]...)
+	}
+	return len(p), nil
+}
+
+func (d *runtimeDiagnostics) String() string { return string(d.data) }
+
 func runtimeCommand(m *runtimeManifest, sourceEnv bool, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -74,9 +90,9 @@ func runtimeCommand(m *runtimeManifest, sourceEnv bool, args ...string) ([]byte,
 	}
 	cmd.Dir = m.Root
 	cmd.WaitDelay = 200 * time.Millisecond
-	var stdout, stderr statusLimitedBuffer
+	var stdout statusLimitedBuffer
 	stdout.limit = 1 << 20
-	stderr.limit = 4096
+	stderr := runtimeDiagnostics{limit: 4096}
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("dekit %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
