@@ -1,24 +1,37 @@
-WTC candidate | one task, two repositories | offline synthetic fixture
-main $ wtc new add-search api web --no-open
+WTC / one task, two repositories
+main ❯ wtc new add-search api web
 done: ~/wtc-demo/workspace/add-search
-add-search $ ls
-AGENTS.md	HANDOFF.md	mise.toml	WTC-SCOPE.md
-api		harness		web
-add-search $ wtc status --local --ansi --repos --silent
-wtc status · add-search · 2026-10-06T08:53:37Z
 
-REPO                 BRANCH                         PR              ±    ↑   ↓   TEST     PROD
-harness              ⌂ main                         ·               ·    ·   ·   ·        ·
-api                  ⌂ main                         ·               ·    ·   ·   ·        ·
-web                  ⌂ main                         ·               ·    ·   ·   ·        ·
-add-search $ printf '\nSearch work in progress\n' >> web/README.md
-add-search $ wtc status --local --ansi --repos --silent
-wtc status · add-search · 2026-10-06T08:53:41Z
+main ❯ cd ../add-search
 
-REPO                 BRANCH                         PR              ±    ↑   ↓   TEST     PROD
-harness              ⌂ main                         ·               ·    ·   ·   ·        ·
-api                  ⌂ main                         ·               ·    ·   ·   ·        ·
-web                  ⌂ main                         ·               ±1   ·   ·   ·        ·
-add-search $ git -C web diff --stat
- README.md | 2 ++
- 1 file changed, 2 insertions(+)
+add-search ❯ wtc status
+[Interactive screen before q]
+wtc status · add-search · 2s old
+
+REPO             BRANCH                   PR              ±    ↑   ↓   TEST     PROD
+harness          ⌂ main                   ·               ·    ·   ·   ·        ·
+api              ⌂ main                   ·               ·    ·   ·   ·        ·
+web              ⌂ main                   ·               ·    ·   ·   ·        ·
+
+PRs
+PR      REPO             STATE      C M R TITLE
+(none enlisted)
+
+r refresh · l log · a archived · ↗ link · ? help · q quit · next 27s
+
+add-search ❯ echo "Search in progress" >> web/README.md
+
+add-search ❯ wtc status
+[Interactive screen before q]
+wtc status · add-search · 1s old
+
+REPO             BRANCH                   PR              ±    ↑   ↓   TEST     PROD
+harness          ⌂ main                   ·               ·    ·   ·   ·        ·
+api              ⌂ main                   ·               ·    ·   ·   ·        ·
+web              ⌂ main                   ·               ±1   ·   ·   ·        ·
+
+PRs
+PR      REPO             STATE      C M R TITLE
+(none enlisted)
+
+r refresh · l log · a archived · ↗ link · ? help · q quit · next 28s

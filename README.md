@@ -36,12 +36,21 @@ Real commands, recorded with the candidate binary against synthetic local repos.
 
 ### One task, two repositories
 
-Create a collection with API and web worktrees. Inspect its status, make a
-frontend edit, and see the change appear in the repo row.
+Create a collection with API and web worktrees. Open the live TUI with
+`wtc status`, then make a frontend edit and refresh the view.
 
 [![Recording: create a collection and see a frontend change in status](docs/demos/collections.gif)](docs/demos/collections.gif)
 
 [Read the transcript](docs/demos/collections.txt) · [Asciicast](docs/demos/collections.cast)
+
+### Environment and secrets at a glance
+
+`wtc env list` and `wtc secrets list` open interactive inventories. Browse
+variable names, source scopes, and secret link states; values stay hidden.
+
+[![Recording: browse environment names and secret link states in the TUIs](docs/demos/inventories.gif)](docs/demos/inventories.gif)
+
+[Read the transcript](docs/demos/inventories.txt) · [Asciicast](docs/demos/inventories.cast)
 
 ### A six-file harness
 
@@ -54,7 +63,7 @@ the released setup path.
 
 [![Recording: create and inspect the six-file harness scaffold](docs/demos/harness.gif)](docs/demos/harness.gif)
 
-[Read the transcript](docs/demos/harness.txt) · [Asciicast](docs/demos/harness.cast) · [Reproduce both recordings](docs/demos/README.md)
+[Read the transcript](docs/demos/harness.txt) · [Asciicast](docs/demos/harness.cast) · [Reproduce the recordings](docs/demos/README.md)
 
 ## Get started
 
@@ -80,9 +89,9 @@ can continue to use their own mise files.
 From an existing collection:
 
 ```sh
-wtc new fix-login api web --no-open
+wtc new fix-login api web
 cd ../fix-login
-wtc status --no-watch
+wtc status
 wtc add-repo shared
 # Make changes, commit, and open PRs in each repository.
 wtc retire .
