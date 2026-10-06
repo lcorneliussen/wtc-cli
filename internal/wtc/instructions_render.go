@@ -32,10 +32,14 @@ func (c *Context) renderInstructions(dryRun bool, r *SkillRenderResult) error {
 			// A previously generated default becomes a link when a project takes ownership.
 			if info, err := os.Lstat(dest); err == nil && info.Mode().IsRegular() {
 				r.Actions = append(r.Actions, "replace default instruction: "+path)
-				if !dryRun {
-					if err := os.Remove(dest); err != nil {
-						return err
-					}
+				if dryRun {
+					// The default is still on disk, so the link step would misread it as an override.
+					r.Linked++
+					r.Actions = append(r.Actions, "would link: "+path+" -> "+link)
+					continue
+				}
+				if err := os.Remove(dest); err != nil {
+					return err
 				}
 			}
 			if err := renderSkillLink(c.Collection, dest, link, path, dryRun, r); err != nil {

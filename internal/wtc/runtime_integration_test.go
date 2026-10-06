@@ -55,12 +55,21 @@ func runtimePortClosed(t *testing.T, port int) {
 	}
 }
 
+// CI sets WTC_TEST_REQUIRE_RUNTIME so a missing tool fails instead of skipping.
+func runtimeToolsSkip(t *testing.T, reason string) {
+	t.Helper()
+	if os.Getenv("WTC_TEST_REQUIRE_RUNTIME") != "" {
+		t.Fatal(reason)
+	}
+	t.Skip(reason)
+}
+
 // Run explicitly against the pinned upstream release, without replacing a host
 // installation: WTC_TEST_DEKIT=/absolute/path/to/dekit go test ./internal/wtc -run TestDekitRuntimeIntegration -v
 func TestDekitRuntimeIntegration(t *testing.T) {
 	binary := os.Getenv("WTC_TEST_DEKIT")
 	if binary == "" {
-		t.Skip("set WTC_TEST_DEKIT to the pinned dekit 0.10.0 binary")
+		runtimeToolsSkip(t, "set WTC_TEST_DEKIT to the pinned dekit 0.10.0 binary")
 	}
 	binary, err := filepath.Abs(binary)
 	if err != nil {

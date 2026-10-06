@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -159,8 +160,9 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 			}
 			if ready, ok := task["ready"].(map[string]any); ok {
 				item.Ready = true
-				if item.URL == "" {
-					item.URL, _ = ready["http"].(string)
+				// A probe may carry credentials or a query; only a plain URL is shown.
+				if probe, _ := ready["http"].(string); item.URL == "" && runtimeURLSafe(probe) == nil {
+					item.URL = probe
 				}
 			}
 			item.Autostart, _ = task["autostart"].(bool)
@@ -266,7 +268,14 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 			return nil, err
 		}
 		if old.Digest == m.Digest {
-			return old, nil
+			// Endpoint metadata is outside the generated config and its digest.
+			if reflect.DeepEqual(old.Tasks, m.Tasks) {
+				return old, nil
+			}
+			if err := runtimeSaveManifest(m); err != nil {
+				return nil, err
+			}
+			return m, nil
 		}
 		state, err := runtimeRunnerState(old)
 		if err != nil {

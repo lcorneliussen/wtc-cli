@@ -276,3 +276,48 @@ func TestRuntimeWaitsForFiniteJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRuntimeEndpointMetadataRerendersWithoutConfigChange(t *testing.T) {
+	c := runtimeFixture(t)
+	fragment := filepath.Join(c.Collection, "widget/.harness/dekit.tasks.yaml")
+	base, _ := os.ReadFile(fragment)
+	withURL := func(url string) {
+		fixtureFile(t, fragment, string(base)+"  x-wtc: {url: '"+url+"'}\n", 0644)
+	}
+	withURL("https://one.example.invalid")
+	first, err := c.RenderRuntime(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := c.runtimeManifest()
+	withURL("https://two.example.invalid")
+	second, err := c.RenderRuntime(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _ := c.runtimeManifest()
+	if first.Items[1].URL != "https://one.example.invalid" || second.Items[1].URL != "https://two.example.invalid" || after.Tasks[1].URL != "https://two.example.invalid" {
+		t.Fatalf("stale endpoint: %+v %+v", second.Items, after.Tasks)
+	}
+	if before.Digest != after.Digest {
+		t.Fatal("metadata changed the generated config")
+	}
+}
+
+func TestRuntimeReadinessProbeURLIsShownOnlyWhenPlain(t *testing.T) {
+	for probe, want := range map[string]string{
+		"http://127.0.0.1:3000/health":                 "http://127.0.0.1:3000/health",
+		"http://user:password@127.0.0.1:3000/health":   "",
+		"http://127.0.0.1:3000/health?token=synthetic": "",
+	} {
+		c := runtimeFixture(t)
+		fixtureFile(t, filepath.Join(c.Collection, "widget/.harness/dekit.tasks.yaml"), "tasks: {web: {cmd: [true], ready: {http: '"+probe+"'}}}\n", 0644)
+		m, data, err := c.runtimePlan("dekit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.Tasks[0].URL != want || !m.Tasks[0].Ready || !strings.Contains(string(data), probe) {
+			t.Fatalf("probe %s shown as %q", probe, m.Tasks[0].URL)
+		}
+	}
+}

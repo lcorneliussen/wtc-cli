@@ -16,7 +16,7 @@ import (
 func TestDekitSharedDockerPostgres(t *testing.T) {
 	image, binary := os.Getenv("WTC_TEST_DOCKER_IMAGE"), os.Getenv("WTC_TEST_DEKIT")
 	if image == "" || binary == "" {
-		t.Skip("set WTC_TEST_DOCKER_IMAGE and WTC_TEST_DEKIT for the isolated Docker trial")
+		runtimeToolsSkip(t, "set WTC_TEST_DOCKER_IMAGE and WTC_TEST_DEKIT for the isolated Docker trial")
 	}
 	docker, err := exec.LookPath("docker")
 	if err != nil {
