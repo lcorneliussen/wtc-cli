@@ -142,11 +142,19 @@ prod_paths = ["api/.env.production"]
 ## Skills and instructions
 
 The CLI embeds generic `wtc-*` skills and instructions. `wtc skills render`
-materializes embedded skills in the disposable collection, links them into
+materializes embedded skills and instruction defaults in the disposable
+collection, links skills into
 `.claude/skills` and `.agents/skills`, and wires `AGENTS.md`, agent hooks,
 `.envrc`, and `.env.toolchain`. `--seed-scope` creates `WTC-SCOPE.md` from the
 harness template only when it is absent. `--dry-run` previews changes, and
 `--all` explicitly applies them to every collection in the workspace.
+
+Effective instruction files live under `.wtc/instructions/`. A matching file
+under `harness/instructions/` is linked there instead of the embedded default.
+Edit that tracked source, not the generated copy. The default collection entry
+point uses these effective paths; authored harness entry points stay unchanged.
+`wtc docs [path]` reads the installed binary's defaults from any directory,
+without applying project overrides.
 
 For a skill with local wording, check in `harness/skills/<name>/SKILL.md`;
 it replaces the embedded default. A file at

@@ -14,9 +14,9 @@ a branch.
   .bare/<repo>.git           shared owners — the worktrees hang off these
   <other-collection>/        a COLLECTION SIBLING: someone else's task
   <this-collection>/         the COLLECTION ROOT — you are here
-    AGENTS.md                this file (linked from harness/collection-AGENTS.md)
+    AGENTS.md                this file (rendered from the pinned CLI or harness override)
     WTC-SCOPE.md             what THIS collection is for — read it next
-    harness/                 tools, instructions, skills
+    harness/                 project configuration and policy
     <repo>/                  REPO SIBLINGS: worktrees in scope for this task
     HANDOFF.md               only on a fresh collection — /wtc-start, then gone
 ```
@@ -29,7 +29,7 @@ collections — other tasks, not your working set.
 ## Public and private audiences
 
 Before publishing any issue, PR, reply, commit or artifact, follow
-`harness/instructions/publication-privacy.md`. Keep private project identities,
+`.wtc/instructions/publication-privacy.md`. Keep private project identities,
 adoption relationships and delivery links out of public upstream records. This
 also applies to delegated agents and to explanations of a privacy cleanup.
 
@@ -41,7 +41,7 @@ also applies to delegated agents and to explanations of a privacy cleanup.
 2. **`harness/AGENTS.md`** if this harness has one — the domain rules for your
    project. Then each sibling's own `AGENTS.md`: branch policy and commit
    restrictions are per repo.
-3. **`harness/instructions/`** — geometry, branch policy, secrets, skills.
+3. **`.wtc/instructions/`** — geometry, branch policy, secrets, skills.
 
 ## Stay in this collection
 
@@ -56,7 +56,7 @@ Do not "also fix" a collection sibling for convenience. The `.bare/` owners and
 `$WTC_CONFIG_ROOT` are shared infrastructure, not another collection — reading
 and fetching there is normal. Tools that span collections (`--all` sweeps,
 `retire <other>`, a new branch-off) run only when the user asked for that
-explicitly. Full rule: `harness/instructions/collection-context.md`.
+explicitly. Full rule: `.wtc/instructions/collection-context.md`.
 
 ## Skills, config, secrets — the short version
 
@@ -85,7 +85,7 @@ explicitly. Full rule: `harness/instructions/collection-context.md`.
   **symlinked** into the worktrees by `wtc secrets link`, so a
   rotated credential is current everywhere at once.
 
-Details in `harness/instructions/` — secrets.md, hooks-and-env.md, skills.md.
+Details in `.wtc/instructions/` — secrets.md, hooks-and-env.md, skills.md.
 
 ## Follow the work this session owns
 
@@ -96,7 +96,7 @@ checkpoints before actions that still need authorization. Reuse fresh status
 snapshots instead of repeatedly querying every PR. `/wtc-catch-up` brings
 outside changes in; `/wtc-follow` carries this session's work to its outcome.
 A status-only request remains read-only. Procedure and resumption limits:
-`harness/skills/wtc-follow/SKILL.md`.
+`.agents/skills/wtc-follow/SKILL.md`.
 
 ## Review a draft before marking it ready
 
@@ -121,8 +121,7 @@ cost nothing. Durable state goes to **git and the forge**: commits and branches
 in the repo siblings, PRs, and the issue that the branch name points at.
 
 ---
-Source: `harness/collection-AGENTS.md` — edit it there, not through the link.
-(It is named for its destination rather than called `AGENTS.md` in the harness:
-a file by that name would be read as instructions for the folder it sits in,
-and "you are in a worktree collection" is the wrong thing to tell someone
-editing the harness.)
+This is the pinned CLI default, rendered into `.wtc/collection-AGENTS.md`.
+Use `wtc eject collection-AGENTS.md` to own an override in the harness.
+Project instructions override defaults in `.wtc/instructions/`; edit their
+source under `harness/instructions/`, never the generated copy.

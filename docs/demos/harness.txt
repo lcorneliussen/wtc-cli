@@ -1,0 +1,14 @@
+WTC candidate | six-file harness scaffold | no Git, network, or hooks
+sources $ wtc harness init agent-harness --remote https://example.invalid/h.git --cli-version 0.1.38
+created harness ~/wtc-demo/sources/agent-harness: .harness-repos.yml, .wtc-cli-version, wtc.toml, .gitignore, AGENTS.md, README.md
+sources $ ls -A agent-harness
+.gitignore		.wtc-cli-version	README.md
+.harness-repos.yml	AGENTS.md		wtc.toml
+sources $ cat agent-harness/wtc.toml
+[compatibility]
+  requires = ">=0.1.38,<0.2"
+
+[harness]
+  name = "agent-harness"
+sources $ test ! -d agent-harness/.git && echo "Git setup stays yours"
+Git setup stays yours

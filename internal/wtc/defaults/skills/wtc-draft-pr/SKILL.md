@@ -20,7 +20,7 @@ Resumable — run it whenever, it does the outstanding part.
 
 ## Procedure
 
-Follow **`harness/skills/wtc-pr/SKILL.md` §1 through §5.1**, unchanged:
+Follow **`.agents/skills/wtc-pr/SKILL.md` §1 through §5.1**, unchanged:
 
 1. §1 — read the branch, tree, and any existing PR; resolve the base from
    `default_ref` in `harness/.harness-repos.yml`.
@@ -79,5 +79,5 @@ Report the URL, what still has to happen before it can go to review, and
 whether CI is green on it.
 
 ---
-Canon: `harness/skills/wtc-pr/SKILL.md`,
-`harness/instructions/development-workflows.md`.
+Canon: `.agents/skills/wtc-pr/SKILL.md`,
+`.wtc/instructions/development-workflows.md`.

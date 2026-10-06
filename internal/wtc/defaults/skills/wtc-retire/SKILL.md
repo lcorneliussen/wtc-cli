@@ -97,5 +97,5 @@ anything you rescued out of the collection on the way (handoff content,
 backups) and where you put it.
 
 ---
-Canon: `harness/instructions/worktree-workspace.md`,
-`harness/instructions/herdr.md`, `harness/AGENTS.md` → State lives in git.
+Canon: `.wtc/instructions/worktree-workspace.md`,
+`.wtc/instructions/herdr.md`, `harness/AGENTS.md` → State lives in git.

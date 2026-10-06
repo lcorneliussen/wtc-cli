@@ -136,6 +136,9 @@ func (c *Context) RenderSkills(opt SkillRenderOptions) (SkillRenderResult, error
 		}
 		sources[name] = source{path: filepath.Join(c.Collection, ".wtc", "skills", name, "SKILL.md"), target: "../../.wtc/skills/" + name, data: base}
 	}
+	if err := c.renderInstructions(opt.DryRun, &r); err != nil {
+		return r, err
+	}
 	names := make([]string, 0, len(sources))
 	for name := range sources {
 		names = append(names, name)

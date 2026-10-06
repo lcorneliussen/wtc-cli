@@ -131,7 +131,7 @@ product repo, which is exactly the coupling this layout avoids.
    `wtc-draft-pr`).
 4. **No CLI-specific interpolation in the body.** `${CLAUDE_SKILL_DIR}` and
    friends are substituted by one CLI only. Reference paths from the
-   collection root (`harness/instructions/…`), which is
+   collection root (`.wtc/instructions/…`), which is
    stable and readable everywhere.
 5. **Open with orientation, not action.** A skill may be loaded by an agent
    that has no idea where it is; the first step is establishing that it is in

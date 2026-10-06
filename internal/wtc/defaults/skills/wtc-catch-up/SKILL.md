@@ -164,7 +164,7 @@ records that its PR is gone.
 ## 3. Move each worktree, by what it is
 
 The resting state of a worktree is **detached at the development tip**, not a
-branch (`harness/instructions/development-workflows.md`). Catch-up's job is to
+branch (`.wtc/instructions/development-workflows.md`). Catch-up's job is to
 move the tip forward under it, and to return worktrees to that state once
 their work has landed.
 
@@ -378,7 +378,7 @@ first, then re-run. Never link a secret into a path git would offer to commit.
 `gh` and `jira` each resolve one credential store per machine, so by default
 every project on the machine shares whichever account is logged in. The
 harness can give this workspace its own store instead, opt-in by presence
-(`harness/instructions/secrets.md` → Tool identity).
+(`.wtc/instructions/secrets.md` → Tool identity).
 
 Catch-up is when a workspace usually *discovers* this option, because §6 just
 regenerated `.env.collection` against whatever the generator currently knows.
@@ -446,5 +446,5 @@ asked about ambient credentials, report the question and the answer; if it did
 not ask, say nothing about it.
 
 ---
-Canon: `harness/instructions/development-workflows.md`,
-`harness/instructions/secrets.md`, `harness/instructions/skills.md`.
+Canon: `.wtc/instructions/development-workflows.md`,
+`.wtc/instructions/secrets.md`, `.wtc/instructions/skills.md`.

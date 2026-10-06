@@ -247,3 +247,41 @@ func TestRenderSkillsRejectsConflictingAndDuplicateSectionOverlays(t *testing.T)
 		t.Fatalf("full overlay conflict accepted: %v", err)
 	}
 }
+
+func TestInstructionDryRunMatchesReplacingDefaultWithOverride(t *testing.T) {
+	c := fixture(t)
+	if err := c.renderInstructions(false, &SkillRenderResult{}); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var path string
+	for _, candidate := range paths {
+		if strings.HasPrefix(candidate, "instructions/") {
+			path = candidate
+			break
+		}
+	}
+	override := filepath.Join(c.Harness, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(override), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(override, []byte("project policy\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var dry, real SkillRenderResult
+	if err := c.renderInstructions(true, &dry); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.renderInstructions(false, &real); err != nil {
+		t.Fatal(err)
+	}
+	if dry.Linked != 1 || dry.Skipped != 0 || real.Linked != dry.Linked || real.Skipped != dry.Skipped {
+		t.Fatalf("dry run %+v differs from render %+v", dry, real)
+	}
+	if target, err := os.Readlink(filepath.Join(c.Collection, ".wtc", filepath.FromSlash(path))); err != nil || !strings.HasSuffix(target, path) {
+		t.Fatalf("override not linked: %q %v", target, err)
+	}
+}
