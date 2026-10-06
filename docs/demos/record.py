@@ -122,7 +122,8 @@ def main():
                       'title': self.name, 'env': {'TERM': 'xterm-256color'}}
             cast = OUT / (self.name + '.cast')
             cast.write_text('\n'.join(json.dumps(x) for x in [header, *self.events]) + '\n')
-            (OUT / (self.name + '.txt')).write_text(''.join(self.transcript))
+            transcript = ''.join(self.transcript).replace('\r', '')
+            (OUT / (self.name + '.txt')).write_text('\n'.join(line.rstrip() for line in transcript.splitlines()) + '\n')
             if args.agg:
                 subprocess.run([str(args.agg.resolve()), '--theme', 'github-dark',
                                 '--font-size', '17', '--fps-cap', '12',
