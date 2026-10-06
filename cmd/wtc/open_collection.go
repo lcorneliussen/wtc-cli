@@ -89,7 +89,10 @@ func openCollection(source *wtc.Context, name string, opt openOptions, desired s
 			}
 			return item
 		}
-		if current == "partial" || opt.LayoutSet && current != desired {
+		if current == "unstacked" && !opt.LayoutSet {
+			desired, item.Layout = "narrow", "narrow" // Auto restacks; it does not flip to wide.
+		}
+		if current == "partial" || current == "unstacked" || opt.LayoutSet && current != desired {
 			if opt.DryRun {
 				item.Actions = append(item.Actions, "would layout "+current+" → "+desired)
 			} else {

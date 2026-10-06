@@ -57,6 +57,17 @@ except FileNotFoundError:
 def save():
     with open(state_path, "w") as f: json.dump(state, f)
 def emit(result): print(json.dumps({"result": result}))
+def new_tab(label):
+    state["next_tab"] = state.get("next_tab", len(state["tabs"])) + 1
+    tab_id = "t" + str(state["next_tab"])
+    state["tabs"].append({"tab_id":tab_id,"label":label})
+    return tab_id
+def beside(pane, target, direction):
+    pane["tab_id"] = target["tab_id"]
+    if direction == "right":
+        pane["x"], pane["y"] = target.get("x", 0) + 80, target.get("y", 0)
+    else:
+        pane["x"], pane["y"] = target.get("x", 0), target.get("y", 0) + 1
 if args == ["workspace", "list"]:
     emit({"workspaces": [{"label": "sample", "workspace_id": "ws1"}] if state["created"] else []})
 elif args[:2] == ["workspace", "create"]:
@@ -78,15 +89,16 @@ elif args[:2] == ["tab", "rename"]:
         if tab["tab_id"] == args[2]: tab["label"] = args[3]
     save(); emit({})
 elif args[:2] == ["tab", "create"]:
-    tab_id = "t" + str(len(state["tabs"])+1)
+    tab_id = new_tab(args[args.index("--label")+1])
     new_id = "p" + str(len(state["panes"])+1)
-    state["tabs"].append({"tab_id":tab_id,"label":args[args.index("--label")+1]})
     state["panes"].append({"pane_id":new_id,"tab_id":tab_id,"label":new_id})
     save(); emit({"pane_id":new_id})
 elif args[:2] == ["pane", "split"]:
     new_id = "p" + str(len(state["panes"])+1)
     parent = next(p for p in state["panes"] if p["pane_id"] == args[2])
-    state["panes"].append({"pane_id":new_id,"tab_id":parent["tab_id"],"label":new_id})
+    pane = {"pane_id":new_id,"tab_id":parent["tab_id"],"label":new_id}
+    beside(pane, parent, args[args.index("--direction")+1])
+    state["panes"].append(pane)
     save(); emit({"pane_id":new_id})
 elif args[:2] == ["pane", "get"]:
     emit({"pane":next(p for p in state["panes"] if p["pane_id"] == args[2])})
@@ -96,13 +108,16 @@ elif args[:2] == ["pane", "rename"]:
     save(); emit({})
 elif args[:2] == ["pane", "move"]:
     pane = next(p for p in state["panes"] if p["pane_id"] == args[2])
+    changed = True
     if "--new-tab" in args:
-        tab_id = "t" + str(len(state["tabs"])+1)
-        state["tabs"].append({"tab_id":tab_id,"label":args[args.index("--label")+1]})
-        pane["tab_id"] = tab_id
+        pane["tab_id"], pane["x"], pane["y"] = new_tab(args[args.index("--label")+1]), 0, 0
+    elif pane["tab_id"] == args[args.index("--tab")+1]:
+        changed = False # herdr ignores a move within one tab
     else:
-        pane["tab_id"] = args[args.index("--tab")+1]
-    save(); emit({})
+        target = next(p for p in state["panes"] if p["pane_id"] == args[args.index("--target-pane")+1])
+        beside(pane, target, args[args.index("--split")+1])
+    state["tabs"] = [t for t in state["tabs"] if any(p["tab_id"] == t["tab_id"] for p in state["panes"])]
+    save(); emit({"move_result":{"changed":changed}})
 elif args[:2] == ["pane", "close"]:
     state["panes"] = [p for p in state["panes"] if p["pane_id"] != args[2]]
     save(); emit({})
@@ -122,9 +137,12 @@ elif args[:2] == ["pane", "run"]:
     state.setdefault("running", {})[args[2]] = ["bash", args[3]]
     save(); emit({})
 elif args[:2] == ["api", "snapshot"]:
-    emit({"snapshot":{"layouts":[{"area":{"width":180},"panes":[
-        {"pane_id":pane["pane_id"],"rect":{"x":0 if pane["label"] in ("agent","shell") else 80}}
-        for pane in state["panes"]]}]}})
+    if os.environ.get("OPEN_TEST_FAIL_SNAPSHOT"):
+        print("synthetic snapshot failure", file=sys.stderr)
+        sys.exit(2)
+    emit({"snapshot":{"layouts":[{"area":{"width":180},"tab_id":tab["tab_id"],"panes":[
+        {"pane_id":pane["pane_id"],"rect":{"x":pane.get("x", 0),"y":pane.get("y", 0)}}
+        for pane in state["panes"] if pane["tab_id"] == tab["tab_id"]]} for tab in state["tabs"] if not os.environ.get("OPEN_TEST_EMPTY_SNAPSHOT")]}})
 else:
     print("unexpected command: " + " ".join(args), file=sys.stderr)
     sys.exit(2)
@@ -190,8 +208,84 @@ else:
 	if !strings.Contains(string(state), `"pane_id": "p1", "tab_id": "t1", "label": "agent"`) || !strings.Contains(string(state), `"pane_id": "p2", "tab_id": "t2", "label": "browse"`) {
 		t.Fatalf("switch did not preserve the agent and move browse: %s", state)
 	}
-	if !strings.Contains(string(state), `"pane_id": "p4", "tab_id": "t1", "label": "status"`) {
-		t.Fatalf("switch did not preserve the status pane: %s", state)
+	if !strings.Contains(string(state), `"pane_id": "p4", "tab_id": "t1", "label": "status", "x": 0, "y": 1`) || strings.Contains(string(state), "restack-tmp") {
+		t.Fatalf("switch did not stack the status pane under the agent: %s", state)
+	}
+	if listed := openCollection(c, "sample", openOptions{Session: "test", List: true}, "wide", true, true); listed.Layout != "narrow" {
+		t.Fatalf("stacked tabs are not reported as narrow: %+v", listed)
+	}
+	sideBySide := strings.Replace(string(state), `"label": "status", "x": 0, "y": 1`, `"label": "status", "x": 80, "y": 0`, 1)
+	if err := os.WriteFile(os.Getenv("OPEN_TEST_STATE"), []byte(sideBySide), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if listed := openCollection(c, "sample", openOptions{Session: "test", List: true}, "wide", true, true); listed.Layout != "unstacked" || !strings.Contains(strings.Join(listed.Actions, " "), "unstacked (4 panes)") {
+		t.Fatalf("side-by-side main tab is reported as narrow: %+v", listed)
+	}
+	if planned := openCollection(c, "sample", openOptions{Session: "test", DryRun: true}, "wide", true, true); !strings.Contains(strings.Join(planned.Actions, " "), "would layout unstacked → narrow") {
+		t.Fatalf("automatic layout would not restack: %+v", planned)
+	}
+	restacked := openCollection(c, "sample", narrowOpt, "narrow", true, true)
+	if restacked.Error != "" || !strings.Contains(strings.Join(restacked.Actions, " "), "layout restacked (narrow)") {
+		t.Fatalf("side-by-side main tab was not restacked: %+v", restacked)
+	}
+	state, err = os.ReadFile(os.Getenv("OPEN_TEST_STATE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(state), `"pane_id": "p4", "tab_id": "t1", "label": "status", "x": 0, "y": 1`) || strings.Contains(string(state), "restack-tmp") {
+		t.Fatalf("restack did not stack the status pane under the agent: %s", state)
+	}
+	restackCalls, _ := os.ReadFile(log)
+	if strings.Contains(string(restackCalls), "pane close ") || strings.Contains(string(restackCalls), "pane split p1 --direction down --ratio 0.65") {
+		t.Fatalf("restack replaced a pane instead of moving it:\n%s", restackCalls)
+	}
+	if again := openCollection(c, "sample", narrowOpt, "narrow", true, true); again.Error != "" || strings.Contains(strings.Join(again.Actions, " "), "layout ") {
+		t.Fatalf("stacked narrow layout was changed again: %+v", again)
+	}
+	t.Setenv("OPEN_TEST_FAIL_SNAPSHOT", "1")
+	blind := openCollection(c, "sample", opt, "narrow", true, true)
+	blindCalls, _ := os.ReadFile(log)
+	if !strings.Contains(blind.Error, "synthetic snapshot failure") || strings.Count(string(blindCalls), "pane move ") != strings.Count(string(restackCalls), "pane move ") {
+		t.Fatalf("unreadable geometry was treated as unstacked: %+v\n%s", blind, blindCalls)
+	}
+	t.Setenv("OPEN_TEST_FAIL_SNAPSHOT", "")
+	t.Setenv("OPEN_TEST_EMPTY_SNAPSHOT", "1")
+	blind = openCollection(c, "sample", opt, "narrow", true, true)
+	blindCalls, _ = os.ReadFile(log)
+	if !strings.Contains(blind.Error, "snapshot has no layout") || strings.Count(string(blindCalls), "pane move ") != strings.Count(string(restackCalls), "pane move ") {
+		t.Fatalf("missing geometry was treated as unstacked: %+v\n%s", blind, blindCalls)
+	}
+	t.Setenv("OPEN_TEST_EMPTY_SNAPSHOT", "")
+	shellBeside := strings.Replace(string(state), `"label": "shell", "x": 0, "y": 1`, `"label": "shell", "x": 80, "y": 0`, 1)
+	if shellBeside == string(state) {
+		t.Fatalf("fixture has no stacked shell to displace: %s", state)
+	}
+	if err := os.WriteFile(os.Getenv("OPEN_TEST_STATE"), []byte(shellBeside), 0644); err != nil {
+		t.Fatal(err)
+	}
+	auto := openCollection(c, "sample", opt, "wide", true, true)
+	state, err = os.ReadFile(os.Getenv("OPEN_TEST_STATE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auto.Error != "" || auto.Layout != "narrow" || !strings.Contains(strings.Join(auto.Actions, " "), "layout restacked (narrow)") || !strings.Contains(string(state), `"pane_id": "p3", "tab_id": "t2", "label": "shell", "x": 0, "y": 1`) || strings.Contains(string(state), "restack-tmp") {
+		t.Fatalf("automatic open did not restack the tools tab as narrow: %+v\n%s", auto, state)
+	}
+	if err := os.WriteFile(os.Getenv("OPEN_TEST_STATE"), []byte(sideBySide), 0644); err != nil {
+		t.Fatal(err)
+	}
+	wideOpt := opt
+	wideOpt.LayoutSet = true
+	widened := openCollection(c, "sample", wideOpt, "wide", true, true)
+	state, err = os.ReadFile(os.Getenv("OPEN_TEST_STATE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if widened.Error != "" || !strings.Contains(strings.Join(widened.Actions, " "), "layout switched (wide)") || !strings.Contains(string(state), `"pane_id": "p4", "tab_id": "t1", "label": "status", "x": 80, "y": 1`) || strings.Contains(string(state), `"label": "tools"`) {
+		t.Fatalf("unstacked workspace did not switch to wide: %+v\n%s", widened, state)
+	}
+	if listed := openCollection(c, "sample", openOptions{Session: "test", List: true}, "wide", true, true); listed.Layout != "wide" {
+		t.Fatalf("switched workspace is not reported as wide: %+v", listed)
 	}
 	if err := os.Remove(os.Getenv("OPEN_TEST_STATE")); err != nil {
 		t.Fatal(err)
@@ -230,7 +324,7 @@ else:
 	liveSwitch := openCollection(c, "sample", openOptions{Session: "test", LayoutSet: true}, "wide", true, true)
 	liveState, _ := os.ReadFile(os.Getenv("OPEN_TEST_STATE"))
 	liveCalls, _ := os.ReadFile(log)
-	if liveSwitch.Error != "" || !strings.Contains(string(liveState), `"pane_id": "p2", "tab_id": "t1", "label": "status"`) || strings.Contains(string(liveCalls), "pane close ") {
+	if liveSwitch.Error != "" || !strings.Contains(string(liveState), `"pane_id": "p2", "tab_id": "t1", "label": "status", "x": 80, "y": 1`) || strings.Contains(string(liveCalls), "pane close ") {
 		t.Fatalf("layout switch did not preserve live status pane: %+v\n%s\n%s", liveSwitch, liveState, liveCalls)
 	}
 	stale := strings.Replace(string(state), `"panes":`, `"running": {}, "panes":`, 1)
