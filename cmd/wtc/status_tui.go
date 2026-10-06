@@ -64,6 +64,7 @@ type statusTUIModel struct {
 	progressKey  string
 	startedAt    time.Time
 	errorText    string
+	hover        string
 }
 
 func statusTUITick() tea.Cmd {
@@ -200,6 +201,11 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge))
 		}
 		return m, statusTUITick()
+	case tea.MouseMotionMsg:
+		m.hover = ""
+		if item, ok := m.runtimeItemAt(msg.X, msg.Y); ok {
+			m.hover = statusRuntimeHover(item)
+		}
 	case tea.MouseClickMsg:
 		header := m.headerLine()
 		refreshIndex := strings.Index(header, "refreshing")
@@ -326,9 +332,9 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 	l := statusRepoLayout{name: 16, branch: 30, pr: 15, tree: 4, ahead: 3, behind: 3, tip: 8, prod: 8,
 		showTree: true, showSync: true, showBuilds: true}
 	for _, row := range snapshot.Repos {
-		if row.Runtime != "" && width >= 90 {
+		if marks := len(statusRuntimeItems(snapshot, row)); marks > 0 && width >= 60 {
 			l.showRuntime = true
-			l.runtime = 20
+			l.runtime = max(l.runtime, len("LOCAL"), marks)
 		}
 		if row.Tree != "clean" {
 			l.tree = max(l.tree, runewidth.StringWidth(row.Tree))
@@ -387,6 +393,19 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 }
 
 func (l statusRepoLayout) prStart() int { return l.name + 1 + l.branch + 1 }
+func (l statusRepoLayout) runtimeStart() int {
+	start := l.prStart() + l.pr
+	if l.showTree {
+		start += 1 + l.tree
+	}
+	if l.showSync {
+		start += 1 + l.ahead + 1 + l.behind
+	}
+	if l.showBuilds {
+		start += 1 + l.tip + 1 + l.prod
+	}
+	return start + 1
+}
 func (l statusRepoLayout) tipStart() int {
 	start := l.prStart() + l.pr + 1 + l.tree
 	if l.showSync {
@@ -474,7 +493,7 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 		header += " " + statusTUIFit("TEST", l.tip) + " " + statusTUIFit("PROD", l.prod)
 	}
 	if l.showRuntime {
-		header += " " + statusTUIFit("RUNTIME", l.runtime)
+		header += " " + statusTUIFit("LOCAL", l.runtime)
 	}
 	if styled {
 		header = statusTUIStyle(header, statusToneHeading)
@@ -563,7 +582,7 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 			line += " " + tipCell + " " + prodCell
 		}
 		if l.showRuntime {
-			line += " " + statusTUIFit(statusTUISafe(row.Runtime), l.runtime)
+			line += " " + statusRuntimeCell(statusRuntimeItems(snapshot, row), l.runtime, styled)
 		}
 		lines = append(lines, line)
 	}
@@ -571,6 +590,34 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 		lines = append(lines, "(no worktrees)")
 	}
 	return lines
+}
+
+// runtimeItemAt returns the service, tunnel or resource whose mark is at a cell.
+func (m statusTUIModel) runtimeItemAt(x, y int) (wtc.RuntimeItem, bool) {
+	width, height := m.width, m.height
+	if width <= 0 {
+		width = 80
+	}
+	if height <= 0 {
+		height = 24
+	}
+	if m.showLog || m.procs || x < 0 || x >= width || y < 0 || y >= max(1, height-2) {
+		return wtc.RuntimeItem{}, false
+	}
+	base := 3
+	if m.showHelp {
+		base += 4
+	}
+	rowIndex := y + m.effectiveScroll() - base
+	if rowIndex < 0 || rowIndex >= len(m.snapshot.Repos) {
+		return wtc.RuntimeItem{}, false
+	}
+	layout := statusTUIRepoLayout(m.snapshot, width)
+	items := statusRuntimeItems(m.snapshot, m.snapshot.Repos[rowIndex])
+	if index := x - layout.runtimeStart(); layout.showRuntime && index >= 0 && index < min(len(items), layout.runtime) {
+		return items[index], true
+	}
+	return wtc.RuntimeItem{}, false
 }
 
 func (m statusTUIModel) buildClickTarget(x, y int) string {
@@ -594,6 +641,9 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	rowIndex := y + m.effectiveScroll() - base
 	if rowIndex < 0 {
 		return ""
+	}
+	if item, ok := m.runtimeItemAt(x, y); ok {
+		return statusTUIURL(item.URL)
 	}
 	if rowIndex < len(m.snapshot.Repos) {
 		row := m.snapshot.Repos[rowIndex]
@@ -953,6 +1003,9 @@ func (m statusTUIModel) View() tea.View {
 	if !m.nextRefresh.IsZero() && !m.refreshing {
 		footer += fmt.Sprintf(" · next %ds", max(0, int(time.Until(m.nextRefresh).Seconds())))
 	}
+	if m.hover != "" {
+		footer = m.hover
+	}
 	bodyHeight := max(1, height-2)
 	scroll := m.effectiveScroll()
 	end := min(len(lines), scroll+bodyHeight)
@@ -975,6 +1028,10 @@ func (m statusTUIModel) View() tea.View {
 	view.ReportFocus = os.Getenv("TERM") != "dumb"
 	if os.Getenv("TERM") != "dumb" && (m.refreshing || visibleLink && !m.noClick) {
 		view.MouseMode = tea.MouseModeCellMotion
+	}
+	// Hover text for the LOCAL marks needs motion without a pressed button.
+	if os.Getenv("TERM") != "dumb" && !m.procs && statusTUIRepoLayout(m.snapshot, width).showRuntime {
+		view.MouseMode = tea.MouseModeAllMotion
 	}
 	return view
 }
