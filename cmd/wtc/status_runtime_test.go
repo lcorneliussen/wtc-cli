@@ -105,3 +105,46 @@ func TestStatusRuntimeURLLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusRuntimeSeparatesProtectedAndPublicTunnels(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	item := func(name, kind, url string, public bool) wtc.RuntimeItem {
+		return wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/" + name, Group: "widget/web", Kind: kind, State: "ready", URL: url, Public: public}
+	}
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Collection: "fixture", Repo: "widget", Dir: "widget", BranchDisplay: "feature", Tree: "clean"}},
+		Runtime: []wtc.RuntimeItem{item("server", "service", "http://127.0.0.1:3000", false),
+			item("tailnet", "endpoint", "https://workstation.example.ts.net:8443", false),
+			item("preview", "endpoint", "https://calm-river.trycloudflare.com", true)}}
+	model := statusTUIModel{width: 120, height: 40, snapshot: snapshot}
+	lines := model.contentLines()
+	header, row, y := "", "", -1
+	for i, line := range lines {
+		if plain := ansi.Strip(line); strings.HasPrefix(plain, "sTP widget") {
+			header, row, y = ansi.Strip(lines[i-1]), plain, i
+		}
+	}
+	if y < 0 {
+		t.Fatalf("service line missing: %q", lines)
+	}
+	column := func(name string) int { return len([]rune(header[:strings.Index(header, name)])) }
+	cell := func(name string) string { return strings.Fields(string([]rune(row)[column(name):]))[0] }
+	if cell("URL") != ":3000" || cell("TUNNEL") != "tailscale" || cell("PUBLIC") != "cloudflare" {
+		t.Fatalf("columns wrong: %q / %q", header, row)
+	}
+	for name, want := range map[string]string{"URL": "http://127.0.0.1:3000", "TUNNEL": "https://workstation.example.ts.net:8443", "PUBLIC": "https://calm-river.trycloudflare.com"} {
+		if got := model.buildClickTarget(column(name), y); got != want {
+			t.Errorf("%s opened %q", name, got)
+		}
+	}
+	if !strings.Contains(lines[y], "\x1b[33mcloudflare") {
+		t.Errorf("public link is not warning-toned: %q", lines[y])
+	}
+	if hover := statusRuntimeHover(snapshot.Runtime[2]); !strings.Contains(hover, "public endpoint") {
+		t.Errorf("hover does not say public: %q", hover)
+	}
+	// Without a public endpoint the column is absent.
+	snapshot.Runtime = snapshot.Runtime[:2]
+	if plain := ansi.Strip(strings.Join(statusTUIModel{width: 120, height: 40, snapshot: snapshot}.contentLines(), "\n")); strings.Contains(plain, "PUBLIC") {
+		t.Fatal("PUBLIC column shown without a public endpoint")
+	}
+}

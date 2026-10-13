@@ -21,11 +21,14 @@ type RuntimeItem struct {
 	Kind       string `json:"kind"`
 	Label      string `json:"label,omitempty"`
 	URL        string `json:"url,omitempty"`
-	State      string `json:"state"`
-	ExitCode   *int   `json:"exit_code,omitempty"`
-	Signal     *int   `json:"signal,omitempty"`
-	Reason     string `json:"reason,omitempty"`
-	Error      string `json:"error,omitempty"`
+	// Public marks an endpoint reachable from the internet, as opposed to a
+	// protected one such as a tailnet address.
+	Public   bool   `json:"public,omitempty"`
+	State    string `json:"state"`
+	ExitCode *int   `json:"exit_code,omitempty"`
+	Signal   *int   `json:"signal,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 type runtimeTask struct {

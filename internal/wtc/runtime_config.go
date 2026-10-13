@@ -130,11 +130,18 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 			item.Label, _ = task["label"].(string)
 			if metadata, ok := task["x-wtc"].(map[string]any); ok {
 				for key := range metadata {
-					if key != "url" && key != "url_env" && key != "url_log" {
+					if key != "url" && key != "url_env" && key != "url_log" && key != "public" {
 						return nil, nil, fmt.Errorf("%s: unsupported x-wtc field %s", full, key)
 					}
 				}
 				item.URL, _ = metadata["url"].(string)
+				if value, set := metadata["public"]; set {
+					public, ok := value.(bool)
+					if !ok {
+						return nil, nil, fmt.Errorf("%s: x-wtc public must be true or false", full)
+					}
+					item.Public = public
+				}
 				if name, _ := metadata["url_env"].(string); name != "" {
 					if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(name) {
 						return nil, nil, fmt.Errorf("%s: invalid URL variable", full)
@@ -174,6 +181,9 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 				if probe, _ := ready["http"].(string); item.URL == "" && runtimeURLSafe(probe) == nil {
 					item.URL = probe
 				}
+			}
+			if item.Public && item.Kind != "endpoint" {
+				return nil, nil, fmt.Errorf("%s: only an endpoint can be public", full)
 			}
 			item.Autostart, _ = task["autostart"].(bool)
 			if deps, ok := task["deps"].([]any); ok {

@@ -426,6 +426,14 @@ func TestRuntimeStatusShowsDiscoveredURLOnlyWhenReady(t *testing.T) {
 	if got := url(); got != "https://second.example.invalid" {
 		t.Fatalf("kept the old URL after a restart: %q", got)
 	}
+	fixtureFile(t, fragment, string(data)+"  x-wtc: {public: true}\n", 0644)
+	if m, _, err := c.runtimePlan("dekit"); err != nil || !m.Tasks[1].Public || m.Tasks[0].Public {
+		t.Fatalf("public endpoint not recorded: %v", err)
+	}
+	fixtureFile(t, fragment, strings.Replace(string(data), "  ready: {log: READY}\n", "  ready: {log: READY}\n  x-wtc: {public: true}\n", 1), 0644)
+	if _, _, err := c.runtimePlan("dekit"); err == nil {
+		t.Fatal("accepted a public service")
+	}
 	fixtureFile(t, fragment, string(data)+"  x-wtc: {url_log: '(a)(b)'}\n", 0644)
 	if _, _, err := c.runtimePlan("dekit"); err == nil {
 		t.Fatal("accepted an ambiguous url_log")
