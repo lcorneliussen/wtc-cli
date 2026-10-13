@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/url"
 	"strings"
 	"unicode"
 
@@ -45,6 +46,28 @@ func statusRuntimeGroups(snapshot wtc.StatusSnapshot) []statusRuntimeGroup {
 	return groups
 }
 
+// statusRuntimeURLLabel is the short clickable name of a URL: the port for a
+// loopback address, the provider for a known tunnel domain, else the host.
+func statusRuntimeURLLabel(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return raw
+	}
+	host := u.Hostname()
+	if host == "localhost" || strings.HasPrefix(host, "127.") || host == "::1" {
+		if u.Port() != "" {
+			return ":" + u.Port()
+		}
+		return host
+	}
+	for suffix, name := range map[string]string{".ts.net": "tailscale", ".trycloudflare.com": "cloudflare", ".ngrok-free.app": "ngrok", ".ngrok.app": "ngrok", ".ngrok.io": "ngrok", ".devtunnels.ms": "devtunnel"} {
+		if strings.HasSuffix(host, suffix) {
+			return name
+		}
+	}
+	return host
+}
+
 // state is the member state that most needs attention, with its tone.
 func (g statusRuntimeGroup) state() (string, string) {
 	rank := map[string]int{statusToneDim: 1, statusToneSuccess: 2, statusToneWarning: 3, statusToneFailure: 4}
@@ -64,7 +87,7 @@ func statusTUIRuntimeLayout(snapshot wtc.StatusSnapshot, width int) statusRuntim
 	for _, g := range statusRuntimeGroups(snapshot) {
 		l.marks = max(l.marks, len(g.members))
 		l.name = max(l.name, len([]rune(g.name)))
-		l.local = max(l.local, len([]rune(g.local)))
+		l.local = max(l.local, len([]rune(statusRuntimeURLLabel(g.local))))
 	}
 	l.name, l.local = min(l.name, max(7, width/6)), min(l.local, max(5, width/3))
 	l.tunnel = max(1, width-l.tunnelStart())
@@ -78,15 +101,16 @@ func (l statusRuntimeLayout) tunnelStart() int { return l.localStart() + l.local
 
 // urlAt is the URL drawn at a column of a group's line.
 func (l statusRuntimeLayout) urlAt(g statusRuntimeGroup, x int) string {
-	if x >= l.localStart() && x < l.localStart()+min(l.local, len([]rune(g.local))) {
+	if x >= l.localStart() && x < l.localStart()+min(l.local, len([]rune(statusRuntimeURLLabel(g.local)))) {
 		return g.local
 	}
 	start := l.tunnelStart()
 	for _, tunnel := range g.tunnels {
-		if x >= start && x < start+len([]rune(tunnel)) {
+		label := len([]rune(statusRuntimeURLLabel(tunnel)))
+		if x >= start && x < start+label {
 			return tunnel
 		}
-		start += len([]rune(tunnel)) + 2
+		start += label + 2
 	}
 	return ""
 }
@@ -101,7 +125,8 @@ func statusRuntimeState(item wtc.RuntimeItem) string {
 
 // statusTUIRuntimeLines draws one line per service in the style of the PR
 // list: the LOCAL marks of the service and its tunnels, repo, name, the state
-// that most needs attention, the local URL, then the tunnel URLs.
+// that most needs attention, then the local URL and the tunnel URLs as short
+// links; hover and click give the full address.
 func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) []string {
 	if len(snapshot.Runtime) == 0 {
 		return nil
@@ -120,7 +145,7 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 		state, tone := g.state()
 		repo, name := statusTUIFit(statusTUISafe(g.repo), l.repo), statusTUIFit(statusTUISafe(g.name), l.name)
 		stateCell := statusTUIFit(statusTUISafe(state), l.state)
-		local := statusTUIFit(statusTUISafe(g.local), l.local)
+		local := statusTUIFit(statusTUISafe(statusRuntimeURLLabel(g.local)), l.local)
 		if styled {
 			repo, name, stateCell = statusTUIStyle(repo, statusToneLabel), statusTUIStyle(name, statusToneLabel), statusTUIStyle(stateCell, tone)
 			if statusTUIURL(g.local) != "" {
@@ -130,7 +155,7 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 		var tunnel strings.Builder
 		used := 0
 		for i, raw := range g.tunnels {
-			text := statusTUISafe(raw)
+			text := statusTUISafe(statusRuntimeURLLabel(raw))
 			if i > 0 {
 				tunnel.WriteString("  ")
 				used += 2

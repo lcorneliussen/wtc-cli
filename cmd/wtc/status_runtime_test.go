@@ -72,6 +72,9 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 		if detail < 0 || !strings.Contains(lines[detail], "\x1b]8;;https://widget.example.test") {
 			t.Fatalf("%d: service line or its tunnel link missing: %q", width, lines)
 		}
+		if plain := ansi.Strip(lines[detail]); strings.Contains(plain, "https://") || !strings.Contains(plain, "widget.example.test") {
+			t.Fatalf("URL not shortened to its host: %q", plain)
+		}
 		layout := statusTUIRuntimeLayout(snapshot, width)
 		if got := model.buildClickTarget(layout.tunnelStart()+2, detail); got != "https://widget.example.test" {
 			t.Fatalf("tunnel URL opened %q", got)
@@ -83,6 +86,22 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 		model.hover = hover
 		if view := ansi.Strip(model.View().Content); !strings.Contains(view, "widget/web/tunnel · endpoint · ready · https://widget.example.test") {
 			t.Fatalf("hover text missing from footer: %q", hover)
+		}
+	}
+}
+
+func TestStatusRuntimeURLLabels(t *testing.T) {
+	for raw, want := range map[string]string{
+		"http://127.0.0.1:42431":                   ":42431",
+		"http://localhost:3000/":                   ":3000",
+		"https://workstation.example.ts.net:42433": "tailscale",
+		"https://calm-river.trycloudflare.com":     "cloudflare",
+		"https://1a2b.ngrok-free.app":              "ngrok",
+		"https://abc-3000.euw.devtunnels.ms":       "devtunnel",
+		"https://preview.example.test/path":        "preview.example.test",
+	} {
+		if got := statusRuntimeURLLabel(raw); got != want {
+			t.Errorf("%s: got %q, want %q", raw, got, want)
 		}
 	}
 }
