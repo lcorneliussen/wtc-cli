@@ -7,32 +7,88 @@ import (
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
 
-type statusRuntimeLayout struct{ repo, task, kind, state, detail int }
+// statusRuntimeGroup is one line of the detail table: a service with its
+// tunnels, or a repository's resource hooks.
+type statusRuntimeGroup struct {
+	repo, name string
+	members    []wtc.RuntimeItem
+	local      string
+	tunnels    []string
+	notes      []string
+}
+
+func statusRuntimeGroups(snapshot wtc.StatusSnapshot) []statusRuntimeGroup {
+	var groups []statusRuntimeGroup
+	index := map[string]int{}
+	for _, item := range snapshot.Runtime {
+		key := item.Collection + "\x00" + item.Group
+		at, ok := index[key]
+		if !ok {
+			at, index[key] = len(groups), len(groups)
+			groups = append(groups, statusRuntimeGroup{repo: item.Dir, name: strings.TrimPrefix(item.Group, item.Dir+"/")})
+		}
+		g := &groups[at]
+		g.members = append(g.members, item)
+		if item.URL != "" {
+			if item.Kind == "endpoint" {
+				g.tunnels = append(g.tunnels, item.URL)
+			} else if g.local == "" {
+				g.local = item.URL
+			}
+		}
+		for _, note := range []string{item.Reason, item.Error} {
+			if note != "" {
+				g.notes = append(g.notes, note)
+			}
+		}
+	}
+	return groups
+}
+
+// state is the member state that most needs attention, with its tone.
+func (g statusRuntimeGroup) state() (string, string) {
+	rank := map[string]int{statusToneDim: 1, statusToneSuccess: 2, statusToneWarning: 3, statusToneFailure: 4}
+	state, tone := "", ""
+	for _, item := range g.members {
+		if _, t := statusRuntimeMark(item); rank[t] > rank[tone] {
+			state, tone = statusRuntimeState(item), t
+		}
+	}
+	return state, tone
+}
+
+type statusRuntimeLayout struct{ marks, repo, name, state, local, tunnel int }
 
 func statusTUIRuntimeLayout(snapshot wtc.StatusSnapshot, width int) statusRuntimeLayout {
-	l := statusRuntimeLayout{repo: statusTUIPRLayout(width).repo, task: 10, kind: 9, state: 11}
-	for _, item := range snapshot.Runtime {
-		l.task = max(l.task, len([]rune(statusRuntimeTask(item))))
+	l := statusRuntimeLayout{marks: 1, repo: statusTUIPRLayout(width).repo, name: 7, state: 11, local: 5}
+	for _, g := range statusRuntimeGroups(snapshot) {
+		l.marks = max(l.marks, len(g.members))
+		l.name = max(l.name, len([]rune(g.name)))
+		l.local = max(l.local, len([]rune(g.local)))
 	}
-	l.task = min(l.task, max(10, width/4))
-	if width < 60 {
-		l.kind = 0
-	}
-	l.detail = max(1, width-l.detailStart())
+	l.name, l.local = min(l.name, max(7, width/6)), min(l.local, max(5, width/3))
+	l.tunnel = max(1, width-l.tunnelStart())
 	return l
 }
 
-func (l statusRuntimeLayout) detailStart() int {
-	start := 2 + l.repo + 1 + l.task + 1 + l.state + 1
-	if l.kind > 0 {
-		start += l.kind + 1
-	}
-	return start
+func (l statusRuntimeLayout) localStart() int {
+	return l.marks + 1 + l.repo + 1 + l.name + 1 + l.state + 1
 }
+func (l statusRuntimeLayout) tunnelStart() int { return l.localStart() + l.local + 1 }
 
-// statusRuntimeTask is a task's path inside its repository.
-func statusRuntimeTask(item wtc.RuntimeItem) string {
-	return strings.TrimPrefix(item.Path, item.Dir+"/")
+// urlAt is the URL drawn at a column of a group's line.
+func (l statusRuntimeLayout) urlAt(g statusRuntimeGroup, x int) string {
+	if x >= l.localStart() && x < l.localStart()+min(l.local, len([]rune(g.local))) {
+		return g.local
+	}
+	start := l.tunnelStart()
+	for _, tunnel := range g.tunnels {
+		if x >= start && x < start+len([]rune(tunnel)) {
+			return tunnel
+		}
+		start += len([]rune(tunnel)) + 2
+	}
+	return ""
 }
 
 // statusRuntimeState shortens the hook fact the way the repo summary does.
@@ -43,62 +99,66 @@ func statusRuntimeState(item wtc.RuntimeItem) string {
 	return item.State
 }
 
-// statusTUIRuntimeLines draws services, tunnels and resource hooks as a table
-// in the style of the PR list: the LOCAL mark, repo, task, kind, state, then the URL
-// or a note.
+// statusTUIRuntimeLines draws one line per service in the style of the PR
+// list: the LOCAL marks of the service and its tunnels, repo, name, the state
+// that most needs attention, the local URL, then the tunnel URLs.
 func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) []string {
 	if len(snapshot.Runtime) == 0 {
 		return nil
 	}
 	l := statusTUIRuntimeLayout(snapshot, width)
 	heading := "LOCAL"
-	header := "  " + statusTUIFit("REPO", l.repo) + " " + statusTUIFit("TASK", l.task) + " "
-	if l.kind > 0 {
-		header += statusTUIFit("KIND", l.kind) + " "
-	}
-	header += statusTUIFit("STATE", l.state) + " " + statusTUIFit("URL", l.detail)
+	header := strings.Repeat(" ", l.marks) + " " + statusTUIFit("REPO", l.repo) + " " + statusTUIFit("SERVICE", l.name) + " " +
+		statusTUIFit("STATE", l.state) + " " + statusTUIFit("URL", l.local) + " " + statusTUIFit("TUNNEL", l.tunnel)
+	header = statusTUIFit(header, width)
 	if styled {
 		heading, header = statusTUIStyle(heading, statusToneHeading), statusTUIStyle(header, statusToneDim)
 	}
 	lines := []string{"", heading, header}
-	for _, item := range snapshot.Runtime {
-		mark, tone := statusRuntimeMark(item)
-		repo := statusTUIFit(statusTUISafe(item.Dir), l.repo)
-		task := statusTUIFit(statusTUISafe(statusRuntimeTask(item)), l.task)
-		kind := statusTUIFit(statusTUISafe(item.Kind), l.kind)
-		state := statusTUIFit(statusTUISafe(statusRuntimeState(item)), l.state)
-		notes := []string{}
-		for _, note := range []string{item.Label, item.Reason, item.Error} {
-			if note != "" {
-				notes = append(notes, statusTUISafe(note))
-			}
-		}
-		note := strings.Join(notes, " · ")
-		detail := note
-		target := statusTUIURL(item.URL)
-		if item.URL != "" {
-			detail = statusTUISafe(item.URL)
-			if note != "" {
-				detail += "  " + note
-			}
-		}
-		detail = statusTUIFit(detail, l.detail)
+	for _, g := range statusRuntimeGroups(snapshot) {
+		marks := statusRuntimeCell(g.members, l.marks, styled)
+		state, tone := g.state()
+		repo, name := statusTUIFit(statusTUISafe(g.repo), l.repo), statusTUIFit(statusTUISafe(g.name), l.name)
+		stateCell := statusTUIFit(statusTUISafe(state), l.state)
+		local := statusTUIFit(statusTUISafe(g.local), l.local)
 		if styled {
-			mark, task, state = statusTUIStyle(mark, tone), statusTUIStyle(task, statusToneLabel), statusTUIStyle(state, tone)
-			repo = statusTUIStyle(repo, statusToneLabel)
-			kind = statusTUIStyle(kind, statusToneDim)
-			if shown := statusTUIFit(statusTUISafe(item.URL), l.detail); target != "" && strings.TrimSpace(shown) != "" {
-				rest := strings.TrimPrefix(detail, strings.TrimRight(shown, " "))
-				detail = statusTUILinkTone(strings.TrimRight(shown, " "), item.URL, statusToneLink) + statusTUIStyle(rest, statusToneDim)
-			} else {
-				detail = statusTUIStyle(detail, statusToneDim)
+			repo, name, stateCell = statusTUIStyle(repo, statusToneLabel), statusTUIStyle(name, statusToneLabel), statusTUIStyle(stateCell, tone)
+			if statusTUIURL(g.local) != "" {
+				local = statusTUIFitANSI(statusTUILinkTone(strings.TrimRight(local, " "), g.local, statusToneLink), l.local)
 			}
 		}
-		line := mark + " " + repo + " " + task + " "
-		if l.kind > 0 {
-			line += kind + " "
+		var tunnel strings.Builder
+		used := 0
+		for i, raw := range g.tunnels {
+			text := statusTUISafe(raw)
+			if i > 0 {
+				tunnel.WriteString("  ")
+				used += 2
+			}
+			text = strings.TrimRight(statusTUIFit(text, min(len([]rune(text)), max(0, l.tunnel-used))), " ")
+			used += len([]rune(text))
+			if styled && statusTUIURL(raw) != "" {
+				text = statusTUILinkTone(text, raw, statusToneLink)
+			}
+			tunnel.WriteString(text)
 		}
-		lines = append(lines, line+state+" "+detail)
+		if notes := statusTUISafe(strings.Join(g.notes, " · ")); notes != "" && used+2 < l.tunnel {
+			if used > 0 {
+				notes = "  " + notes
+			}
+			notes = strings.TrimRight(statusTUIFit(notes, min(len([]rune(notes)), l.tunnel-used)), " ")
+			if styled {
+				notes = statusTUIStyle(notes, statusToneDim)
+			}
+			tunnel.WriteString(notes)
+		}
+		line := marks + " " + repo + " " + name + " " + stateCell + " " + local + " " + tunnel.String()
+		if styled {
+			line = statusTUIFitANSI(line, width)
+		} else {
+			line = statusTUIFit(line, width)
+		}
+		lines = append(lines, line)
 	}
 	return lines
 }

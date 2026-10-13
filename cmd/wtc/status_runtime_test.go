@@ -59,22 +59,25 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 		if got := model.buildClickTarget(start, 3); got != "" {
 			t.Fatalf("service mark without a URL opened %q", got)
 		}
-		// The detail table below repeats each mark and opens a URL from its URL cell.
+		// The detail table has one line for the service and its tunnel.
 		detail := -1
 		for y, line := range lines {
-			if plain := ansi.Strip(line); strings.HasPrefix(plain, "T widget") && strings.Contains(plain, "web/tunnel") && strings.Contains(plain, "endpoint") && strings.Contains(plain, "ready") {
+			if plain := ansi.Strip(line); strings.HasPrefix(plain, "sT widget") && strings.Contains(plain, " web ") && strings.Contains(plain, "ready") {
 				detail = y
+			}
+			if plain := ansi.Strip(line); strings.Contains(plain, "web/tunnel") || strings.Contains(plain, "web/server") {
+				t.Fatalf("service and tunnel are on separate lines: %q", plain)
 			}
 		}
 		if detail < 0 || !strings.Contains(lines[detail], "\x1b]8;;https://widget.example.test") {
-			t.Fatalf("%d: tunnel row or its link missing: %q", width, lines)
+			t.Fatalf("%d: service line or its tunnel link missing: %q", width, lines)
 		}
-		urlStart := statusTUIRuntimeLayout(snapshot, width).detailStart()
-		if got := model.buildClickTarget(urlStart, detail); got != "https://widget.example.test" {
-			t.Fatalf("URL cell opened %q", got)
+		layout := statusTUIRuntimeLayout(snapshot, width)
+		if got := model.buildClickTarget(layout.tunnelStart()+2, detail); got != "https://widget.example.test" {
+			t.Fatalf("tunnel URL opened %q", got)
 		}
-		if got := model.buildClickTarget(urlStart, detail-1); got != "" {
-			t.Fatalf("service row without a URL opened %q", got)
+		if got := model.buildClickTarget(layout.localStart(), detail); got != "" {
+			t.Fatalf("empty local URL cell opened %q", got)
 		}
 		hover := statusRuntimeHover(snapshot.Runtime[1])
 		model.hover = hover

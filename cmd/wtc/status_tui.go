@@ -676,12 +676,11 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	if m.reposOnly || m.snapshot.ShowCollectionColumn {
 		return ""
 	}
-	// A runtime row opens its URL from the URL cell only.
-	if index := rowIndex - max(1, len(m.snapshot.Repos)) - 3; index >= 0 && index < len(m.snapshot.Runtime) {
-		if x >= statusTUIRuntimeLayout(m.snapshot, width).detailStart() {
-			return statusTUIURL(m.snapshot.Runtime[index].URL)
+	// A service line opens whichever of its URLs is under the pointer.
+	if groups := statusRuntimeGroups(m.snapshot); len(groups) > 0 {
+		if index := rowIndex - max(1, len(m.snapshot.Repos)) - 3; index >= 0 && index < len(groups) {
+			return statusTUIURL(statusTUIRuntimeLayout(m.snapshot, width).urlAt(groups[index], x))
 		}
-		return ""
 	}
 	visibleIndex := rowIndex - max(1, len(m.snapshot.Repos)) - 3 - len(statusTUIRuntimeLines(m.snapshot, width, false))
 	if visibleIndex < 0 {
