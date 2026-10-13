@@ -130,11 +130,18 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 			item.Label, _ = task["label"].(string)
 			if metadata, ok := task["x-wtc"].(map[string]any); ok {
 				for key := range metadata {
-					if key != "url" && key != "url_env" && key != "url_log" && key != "public" {
+					if key != "url" && key != "url_env" && key != "url_log" && key != "public" && key != "mark" {
 						return nil, nil, fmt.Errorf("%s: unsupported x-wtc field %s", full, key)
 					}
 				}
 				item.URL, _ = metadata["url"].(string)
+				if value, set := metadata["mark"]; set {
+					mark, _ := value.(string)
+					if !regexp.MustCompile(`^[A-Za-z0-9]$`).MatchString(mark) {
+						return nil, nil, fmt.Errorf("%s: x-wtc mark must be one letter or digit", full)
+					}
+					item.Mark = mark
+				}
 				if value, set := metadata["public"]; set {
 					public, ok := value.(bool)
 					if !ok {

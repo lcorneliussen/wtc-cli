@@ -23,7 +23,9 @@ type RuntimeItem struct {
 	URL        string `json:"url,omitempty"`
 	// Public marks an endpoint reachable from the internet, as opposed to a
 	// protected one such as a tailnet address.
-	Public   bool   `json:"public,omitempty"`
+	Public bool `json:"public,omitempty"`
+	// Mark is the one-character name status shows for the task.
+	Mark     string `json:"mark,omitempty"`
 	State    string `json:"state"`
 	ExitCode *int   `json:"exit_code,omitempty"`
 	Signal   *int   `json:"signal,omitempty"`

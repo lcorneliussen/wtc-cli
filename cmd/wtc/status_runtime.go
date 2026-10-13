@@ -229,19 +229,28 @@ func statusRuntimeItems(snapshot wtc.StatusSnapshot, row wtc.StatusRepo) []wtc.R
 	return items
 }
 
-// statusRuntimeMark is one letter for a task, toned by its state: the first
-// letter of its name, upper-case for an endpoint such as a tunnel.
+// statusRuntimeMark is one letter for a task, toned by its state. A configured
+// mark wins. Otherwise a service takes the first letter of its service name
+// (w for web), a tunnel the first letter of its own name (t for tunnel), in
+// upper case when it is public, and resource hooks are r.
 func statusRuntimeMark(item wtc.RuntimeItem) (string, string) {
-	name := strings.TrimPrefix(item.Path[strings.LastIndex(item.Path, "/")+1:], "@")
-	letter := '?'
-	for _, r := range name {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			letter = unicode.ToLower(r)
-			break
+	first := func(name string) rune {
+		for _, r := range strings.TrimPrefix(name[strings.LastIndex(name, "/")+1:], "@") {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				return unicode.ToLower(r)
+			}
+		}
+		return '?'
+	}
+	letter := first(item.Group)
+	if item.Kind == "endpoint" {
+		letter = first(item.Path)
+		if item.Public {
+			letter = unicode.ToUpper(letter)
 		}
 	}
-	if item.Kind == "endpoint" {
-		letter = unicode.ToUpper(letter)
+	if item.Mark != "" {
+		letter = []rune(item.Mark)[0]
 	}
 	tone := statusToneFailure
 	switch item.State {

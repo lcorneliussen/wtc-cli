@@ -38,13 +38,13 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 		if width < 60 {
 			continue
 		}
-		// One letter per task under LOCAL; the tunnel is upper-case and opens its URL.
+		// One letter per task under LOCAL: w for the web service, t for its tunnel.
 		header, row := ansi.Strip(lines[2]), ansi.Strip(lines[3])
 		start := len([]rune(header[:max(0, strings.Index(header, "LOCAL"))]))
-		if !strings.Contains(header, "LOCAL") || !strings.HasPrefix(string([]rune(row)[start:]), "sT") {
+		if !strings.Contains(header, "LOCAL") || !strings.HasPrefix(string([]rune(row)[start:]), "wt") {
 			t.Fatalf("%d: marks missing under LOCAL: %q / %q", width, header, row)
 		}
-		if !strings.Contains(lines[3], "\x1b[32ms") {
+		if !strings.Contains(lines[3], "\x1b[32mw") {
 			t.Fatalf("ready mark is not toned: %q", lines[3])
 		}
 		if item, ok := model.runtimeItemAt(start+1, 3); !ok || item.Path != "widget/web/tunnel" {
@@ -62,7 +62,7 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 		// The detail table has one line for the service and its tunnel.
 		detail := -1
 		for y, line := range lines {
-			if plain := ansi.Strip(line); strings.HasPrefix(plain, "sT widget") && strings.Contains(plain, " web ") && strings.Contains(plain, "ready") {
+			if plain := ansi.Strip(line); strings.HasPrefix(plain, "wt widget") && strings.Contains(plain, " web ") && strings.Contains(plain, "ready") {
 				detail = y
 			}
 			if plain := ansi.Strip(line); strings.Contains(plain, "web/tunnel") || strings.Contains(plain, "web/server") {
@@ -119,7 +119,7 @@ func TestStatusRuntimeSeparatesProtectedAndPublicTunnels(t *testing.T) {
 	lines := model.contentLines()
 	header, row, y := "", "", -1
 	for i, line := range lines {
-		if plain := ansi.Strip(line); strings.HasPrefix(plain, "sTP widget") {
+		if plain := ansi.Strip(line); strings.HasPrefix(plain, "wtP widget") {
 			header, row, y = ansi.Strip(lines[i-1]), plain, i
 		}
 	}
@@ -146,5 +146,20 @@ func TestStatusRuntimeSeparatesProtectedAndPublicTunnels(t *testing.T) {
 	snapshot.Runtime = snapshot.Runtime[:2]
 	if plain := ansi.Strip(strings.Join(statusTUIModel{width: 120, height: 40, snapshot: snapshot}.contentLines(), "\n")); strings.Contains(plain, "PUBLIC") {
 		t.Fatal("PUBLIC column shown without a public endpoint")
+	}
+}
+
+func TestStatusRuntimeMarkDefaultsAndOverride(t *testing.T) {
+	for want, item := range map[string]wtc.RuntimeItem{
+		"w": {Path: "app/web/server", Group: "app/web", Kind: "service"},
+		"d": {Path: "app/database", Group: "app/database", Kind: "service"},
+		"t": {Path: "app/web/tunnel", Group: "app/web", Kind: "endpoint"},
+		"T": {Path: "app/web/tunnel", Group: "app/web", Kind: "endpoint", Public: true},
+		"r": {Path: "app/@resources", Group: "app/resources", Kind: "resources"},
+		"x": {Path: "app/web/server", Group: "app/web", Kind: "service", Mark: "x"},
+	} {
+		if got, _ := statusRuntimeMark(item); got != want {
+			t.Errorf("%+v: got %q, want %q", item, got, want)
+		}
 	}
 }

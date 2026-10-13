@@ -426,6 +426,14 @@ func TestRuntimeStatusShowsDiscoveredURLOnlyWhenReady(t *testing.T) {
 	if got := url(); got != "https://second.example.invalid" {
 		t.Fatalf("kept the old URL after a restart: %q", got)
 	}
+	fixtureFile(t, fragment, string(data)+"  x-wtc: {mark: p}\n", 0644)
+	if m, _, err := c.runtimePlan("dekit"); err != nil || m.Tasks[1].Mark != "p" {
+		t.Fatalf("mark not recorded: %v", err)
+	}
+	fixtureFile(t, fragment, string(data)+"  x-wtc: {mark: web}\n", 0644)
+	if _, _, err := c.runtimePlan("dekit"); err == nil {
+		t.Fatal("accepted a long mark")
+	}
 	fixtureFile(t, fragment, string(data)+"  x-wtc: {public: true}\n", 0644)
 	if m, _, err := c.runtimePlan("dekit"); err != nil || !m.Tasks[1].Public || m.Tasks[0].Public {
 		t.Fatalf("public endpoint not recorded: %v", err)
