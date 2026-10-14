@@ -102,6 +102,12 @@ func statusTUIBuildLink(cell string, build *wtc.StatusBuild) string {
 	}
 	label := strings.TrimRight(cell, " ")
 	padding := strings.TrimPrefix(cell, label)
+	if build.HeadInBuild != nil && !*build.HeadInBuild && build.Error == "" {
+		if build.URL != nil && statusTUIURL(*build.URL) != "" {
+			return statusTUILinkTone(label, *build.URL, statusToneDim) + padding
+		}
+		return statusTUIStyle(label, statusToneDim) + padding
+	}
 	if build.URL != nil && statusTUIURL(*build.URL) != "" {
 		tone := statusToneLink
 		if build.Checks != nil {
