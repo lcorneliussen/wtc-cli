@@ -308,7 +308,17 @@ func (c *Context) RemoveService(service string, shared bool) (RuntimeResult, err
 		}
 	}
 	if others == 0 {
-		return RuntimeResult{Root: c.runtimeRoot(), Action: "rm", Items: []RuntimeItem{}}, nil
+		// No task is left to render. Keep the manifest for the resources it
+		// records, which retirement must still tear down, without the tasks.
+		err := c.withRuntimeLock(func() error {
+			m, err := c.runtimeManifest()
+			if err != nil || m == nil {
+				return err
+			}
+			m.Tasks = []runtimeTask{}
+			return runtimeSaveManifest(m)
+		})
+		return RuntimeResult{Root: c.runtimeRoot(), Action: "rm", Items: c.RuntimeStatus()}, err
 	}
 	if m, err := c.runtimeManifest(); err != nil || m == nil {
 		return RuntimeResult{Root: c.runtimeRoot(), Action: "rm", Items: []RuntimeItem{}}, err

@@ -199,3 +199,87 @@ func TestRuntimeDeclaredResourcesShowByName(t *testing.T) {
 		t.Fatal("accepted an invalid resource name")
 	}
 }
+
+func TestRuntimeResourceOnlyChangeReachesTheManifest(t *testing.T) {
+	c := runtimeFixture(t)
+	if _, err := c.RenderRuntime(false); err != nil {
+		t.Fatal(err)
+	}
+	fragment := filepath.Join(c.Collection, "widget/.harness/dekit.tasks.yaml")
+	data, _ := os.ReadFile(fragment)
+	fixtureFile(t, fragment, string(data)+"resources:\n  database: {type: postgres}\n", 0644)
+	if _, err := c.RenderRuntime(false); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := c.runtimeManifest(); len(m.Declared) != 1 || m.Declared[0].Type != "postgres" {
+		t.Fatalf("declared resources not saved: %+v", m.Declared)
+	}
+}
+
+func TestServiceTunnelTemplatesAndRemovingTheLastService(t *testing.T) {
+	c := runtimeFixture(t)
+	fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), "ECHO_PORT=43001\n", 0600)
+	if _, err := c.AddService(ServiceOptions{Service: "echo", PortEnv: "ECHO_PORT", Cmd: []string{"python3", "-m", "http.server"}, NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(c.runtimeRoot(), "fake-tasks.json"), `{"tasks":[]}`, 0600)
+	for _, tc := range []struct {
+		provider string
+		public   bool
+		cmd      string
+		exposure string
+	}{
+		{"tailscale", false, `exec tailscale serve --https="$ECHO_PORT" "http://127.0.0.1:$ECHO_PORT"`, ExposureTailnet},
+		{"devtunnel", false, `exec devtunnel host -p "$ECHO_PORT"`, ExposureAccount},
+		{"cloudflare", true, `exec cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$ECHO_PORT"`, ExposurePublic},
+	} {
+		if _, err := c.Tunnel(TunnelOptions{Service: "echo", Provider: tc.provider, Public: tc.public}); err != nil {
+			t.Fatalf("%s: %v", tc.provider, err)
+		}
+		m, _, err := c.runtimePlan("dekit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, task := range m.Tasks {
+			if task.Path == "widget/echo/"+tc.provider {
+				found = true
+				if task.Kind != "endpoint" || task.Provider != tc.provider || task.Exposure != tc.exposure || task.Autostart || task.Deps[0] != "widget/echo/main" {
+					t.Errorf("%s: %+v", tc.provider, task)
+				}
+			}
+		}
+		data, _ := os.ReadFile(c.runtimeLocalFragment("widget"))
+		if !found || !strings.Contains(string(data), tc.cmd) {
+			t.Fatalf("%s tunnel not written:\n%s", tc.provider, data)
+		}
+		calls, _ := os.ReadFile(filepath.Join(c.runtimeRoot(), "calls"))
+		if !strings.Contains(string(calls), "start widget/echo/"+tc.provider) {
+			t.Fatalf("%s tunnel not started:\n%s", tc.provider, calls)
+		}
+	}
+	// The committed web service goes with --shared; echo, the last one, after.
+	if _, err := c.RemoveService("widget/web", true); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(runtimeSharedFragment(filepath.Join(c.Collection, "widget"))); strings.Contains(string(data), "web/") {
+		t.Fatalf("web still in the committed file:\n%s", data)
+	}
+	m, _ := c.runtimeManifest()
+	m.Resources = []runtimeResource{{Dir: "widget", Repo: "widget", State: "provision-hook-completed"}}
+	if err := runtimeSaveManifest(m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RemoveService("echo", false); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = c.runtimeManifest()
+	if len(m.Tasks) != 0 || len(m.Resources) != 1 {
+		t.Fatalf("after removing the last service: tasks %d, resources %+v", len(m.Tasks), m.Resources)
+	}
+	for _, item := range c.RuntimeStatus() {
+		if item.Kind != "resources" {
+			t.Fatalf("removed service still listed: %+v", item)
+		}
+	}
+}

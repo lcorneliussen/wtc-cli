@@ -60,19 +60,20 @@ explicitly. Full rule: `.wtc/instructions/collection-context.md`.
 
 ## Launching anything: `wtc svc`
 
-To launch, run, serve, preview or share an app, server or worker, use
-`/wtc-svc` (`wtc svc up`, `wtc svc add`, `wtc svc tunnel`). Do not start
-long-running servers in your own shell: they die with your session, may take
-another collection's port, and do not show in `wtc status`.
+When the harness enables services (`[runtime] backend = "dekit"` in
+`harness/wtc.toml`), launch, run, serve, preview or share an app, server or
+worker through `/wtc-svc` (`wtc svc up`, `wtc svc add`, `wtc svc tunnel`)
+rather than in your own shell: such a server dies with your session, may take
+another collection's port, and does not show in `wtc status`.
 
 ## Skills, config, secrets — the short version
 
 - **Skills** are the procedures for recurring collection actions —
   `/wtc-status`, `/wtc-open`, `/wtc-catch-up`, `/wtc-pr`, `/wtc-add-repo`,
   `/wtc-retire`, `/wtc-svc` to launch, share or stop an app, and `/wtc-start`
-  on a fresh one. Generic procedures ship
-  with the CLI; harness overrides live in `harness/skills/`. `wtc skills render`
-  exposes them at this root. Prefer a skill when one exists.
+  on a fresh one. Generic procedures ship with the CLI; harness overrides
+  live in `harness/skills/`. `wtc skills render` exposes them at this root.
+  Prefer a skill when one exists.
 - **MCP servers** are declared once in `harness/.mcp-servers.yml` and
   rendered into `.mcp.json`, `.cursor/mcp.json` and `.codex/config.toml` at
   this root by `wtc mcp render`. The rendered files name credentials and never

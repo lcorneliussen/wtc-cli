@@ -394,8 +394,9 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 			return nil, err
 		}
 		if old.Digest == m.Digest {
-			// Endpoint metadata is outside the generated config and its digest.
-			if reflect.DeepEqual(old.Tasks, m.Tasks) {
+			// Endpoint metadata and declared resources are outside the
+			// generated config and its digest.
+			if reflect.DeepEqual(old.Tasks, m.Tasks) && reflect.DeepEqual(old.Declared, m.Declared) {
 				return old, nil
 			}
 			if err := runtimeSaveManifest(m); err != nil {
