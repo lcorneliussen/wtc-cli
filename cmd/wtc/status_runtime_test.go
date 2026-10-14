@@ -38,22 +38,24 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 		if width < 60 {
 			continue
 		}
-		// One letter per task under LOCAL: w for the web service, t for its tunnel.
+		// One letter per task under LOCAL: w for the web service, / then t for its tunnel.
 		header, row := ansi.Strip(lines[2]), ansi.Strip(lines[3])
 		start := len([]rune(header[:max(0, strings.Index(header, "LOCAL"))]))
-		if !strings.Contains(header, "LOCAL") || !strings.HasPrefix(string([]rune(row)[start:]), "wt") {
+		if !strings.Contains(header, "LOCAL") || !strings.HasPrefix(string([]rune(row)[start:]), "w/t") {
 			t.Fatalf("%d: marks missing under LOCAL: %q / %q", width, header, row)
 		}
 		if !strings.Contains(lines[3], "\x1b[32mw") {
 			t.Fatalf("ready mark is not toned: %q", lines[3])
 		}
-		if item, ok := model.runtimeItemAt(start+1, 3); !ok || item.Path != "widget/web/tunnel" {
+		if item, ok := model.runtimeItemAt(start+2, 3); !ok || item.Path != "widget/web/tunnel" {
 			t.Fatalf("wrong mark under pointer: %+v", item)
 		}
-		if _, ok := model.runtimeItemAt(start+2, 3); ok {
-			t.Fatal("empty cell resolved to a task")
+		for _, x := range []int{start + 1, start + 3} {
+			if _, ok := model.runtimeItemAt(x, 3); ok {
+				t.Fatalf("separator or empty cell at %d resolved to a task", x)
+			}
 		}
-		if got := model.buildClickTarget(start+1, 3); got != "https://widget.example.test" {
+		if got := model.buildClickTarget(start+2, 3); got != "https://widget.example.test" {
 			t.Fatalf("tunnel mark did not open its URL: %q", got)
 		}
 		if got := model.buildClickTarget(start, 3); got != "" {
@@ -62,7 +64,7 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 		// The detail table has one line for the service and its tunnel.
 		detail := -1
 		for y, line := range lines {
-			if plain := ansi.Strip(line); strings.HasPrefix(plain, "wt widget") && strings.Contains(plain, " web ") && strings.Contains(plain, "ready") {
+			if plain := ansi.Strip(line); strings.HasPrefix(plain, "w/t widget") && strings.Contains(plain, " web ") && strings.Contains(plain, "ready") {
 				detail = y
 			}
 			if plain := ansi.Strip(line); strings.Contains(plain, "web/tunnel") || strings.Contains(plain, "web/server") {
@@ -119,7 +121,7 @@ func TestStatusRuntimeSeparatesProtectedAndPublicTunnels(t *testing.T) {
 	lines := model.contentLines()
 	header, row, y := "", "", -1
 	for i, line := range lines {
-		if plain := ansi.Strip(line); strings.HasPrefix(plain, "wtP widget") {
+		if plain := ansi.Strip(line); strings.HasPrefix(plain, "w/t/P widget") {
 			header, row, y = ansi.Strip(lines[i-1]), plain, i
 		}
 	}
@@ -161,5 +163,16 @@ func TestStatusRuntimeMarkDefaultsAndOverride(t *testing.T) {
 		if got, _ := statusRuntimeMark(item); got != want {
 			t.Errorf("%+v: got %q, want %q", item, got, want)
 		}
+	}
+}
+
+func TestStatusRuntimeCellSeparatesServices(t *testing.T) {
+	items := []wtc.RuntimeItem{
+		{Collection: "c", Group: "widget/web", Path: "widget/web/server", Kind: "service", State: "ready"},
+		{Collection: "c", Group: "widget/resources", Path: "widget/resources", Kind: "resources", State: "provision-hook-completed"},
+		{Collection: "c", Group: "widget/web", Path: "widget/web/tunnel", Kind: "endpoint", State: "ready"},
+	}
+	if got := statusRuntimeCell(items, 6, false); got != "w/t r " {
+		t.Fatalf("cell = %q, want a service joined to its tunnel and apart from resources", got)
 	}
 }

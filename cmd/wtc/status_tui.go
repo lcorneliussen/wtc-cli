@@ -332,7 +332,7 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 	l := statusRepoLayout{name: 16, branch: 30, pr: 15, tree: 4, ahead: 3, behind: 3, tip: 8, prod: 8,
 		showTree: true, showSync: true, showBuilds: true}
 	for _, row := range snapshot.Repos {
-		if marks := len(statusRuntimeItems(snapshot, row)); marks > 0 && width >= 60 {
+		if marks := len(statusRuntimeSlots(statusRuntimeItems(snapshot, row))); marks > 0 && width >= 60 {
 			l.showRuntime = true
 			l.runtime = max(l.runtime, len("LOCAL"), marks)
 		}
@@ -614,8 +614,9 @@ func (m statusTUIModel) runtimeItemAt(x, y int) (wtc.RuntimeItem, bool) {
 	}
 	layout := statusTUIRepoLayout(m.snapshot, width)
 	items := statusRuntimeItems(m.snapshot, m.snapshot.Repos[rowIndex])
-	if index := x - layout.runtimeStart(); layout.showRuntime && index >= 0 && index < min(len(items), layout.runtime) {
-		return items[index], true
+	slots := statusRuntimeSlots(items)
+	if index := x - layout.runtimeStart(); layout.showRuntime && index >= 0 && index < min(len(slots), layout.runtime) && slots[index].item >= 0 {
+		return items[slots[index].item], true
 	}
 	return wtc.RuntimeItem{}, false
 }

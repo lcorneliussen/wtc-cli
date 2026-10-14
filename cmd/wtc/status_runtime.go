@@ -88,7 +88,7 @@ type statusRuntimeLayout struct{ marks, repo, name, state, local, tunnel, public
 func statusTUIRuntimeLayout(snapshot wtc.StatusSnapshot, width int) statusRuntimeLayout {
 	l := statusRuntimeLayout{marks: 1, repo: statusTUIPRLayout(width).repo, name: 7, state: 11, local: 5}
 	for _, g := range statusRuntimeGroups(snapshot) {
-		l.marks = max(l.marks, len(g.members))
+		l.marks = max(l.marks, len(statusRuntimeSlots(g.members)))
 		l.name = max(l.name, len([]rune(g.name)))
 		l.local = max(l.local, len([]rune(statusRuntimeURLLabel(g.local))))
 	}
@@ -264,19 +264,63 @@ func statusRuntimeMark(item wtc.RuntimeItem) (string, string) {
 	return string(letter), tone
 }
 
+// statusRuntimeSlot is one column of a LOCAL cell: the mark of items[item],
+// or a separator when item is -1.
+type statusRuntimeSlot struct {
+	sep  string
+	item int
+}
+
+// statusRuntimeSlots lays out marks per service: a service and its tunnels
+// joined by "/", services apart by a space, so "w/t r" reads as web with its
+// tunnel, then resources.
+func statusRuntimeSlots(items []wtc.RuntimeItem) []statusRuntimeSlot {
+	var keys []string
+	members := map[string][]int{}
+	for i, item := range items {
+		key := item.Collection + "\x00" + item.Group
+		if _, ok := members[key]; !ok {
+			keys = append(keys, key)
+		}
+		members[key] = append(members[key], i)
+	}
+	var slots []statusRuntimeSlot
+	for g, key := range keys {
+		if g > 0 {
+			slots = append(slots, statusRuntimeSlot{sep: " ", item: -1})
+		}
+		for m, i := range members[key] {
+			if m > 0 {
+				slots = append(slots, statusRuntimeSlot{sep: "/", item: -1})
+			}
+			slots = append(slots, statusRuntimeSlot{item: i})
+		}
+	}
+	return slots
+}
+
 func statusRuntimeCell(items []wtc.RuntimeItem, width int, styled bool) string {
 	var b strings.Builder
-	for i, item := range items {
+	slots := statusRuntimeSlots(items)
+	for i, slot := range slots {
 		if i >= width {
 			break
 		}
-		letter, tone := statusRuntimeMark(item)
+		if slot.item < 0 {
+			text := slot.sep
+			if styled && text != " " {
+				text = statusTUIStyle(text, statusToneDim)
+			}
+			b.WriteString(text)
+			continue
+		}
+		letter, tone := statusRuntimeMark(items[slot.item])
 		if styled {
 			letter = statusTUIStyle(letter, tone)
 		}
 		b.WriteString(letter)
 	}
-	return b.String() + strings.Repeat(" ", max(0, width-min(len(items), width)))
+	return b.String() + strings.Repeat(" ", max(0, width-min(len(slots), width)))
 }
 
 // statusRuntimeHover is the footer text for the mark under the pointer.
