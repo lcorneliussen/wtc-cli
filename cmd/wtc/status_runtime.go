@@ -345,7 +345,7 @@ func statusRuntimeMark(item wtc.RuntimeItem) (string, string) {
 		tone = statusToneSuccess
 	case "starting", "running", "provision-attempted":
 		tone = statusToneWarning
-	case "absent", "unconfigured", "stopped", "idle":
+	case "absent", "unconfigured", "stopped", "idle", "checking":
 		tone = statusToneDim
 	}
 	return string(letter), tone

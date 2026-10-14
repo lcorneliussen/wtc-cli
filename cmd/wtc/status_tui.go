@@ -132,7 +132,19 @@ func (m *statusTUIModel) focusLogTail() {
 }
 
 func (m statusTUIModel) Init() tea.Cmd {
-	return tea.Batch(statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge))
+	cmds := []tea.Cmd{statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge)}
+	if m.context != nil && !m.all && !m.procs {
+		cmds = append(cmds, statusTUIRuntimeRefresh(m.context))
+	}
+	return tea.Batch(cmds...)
+}
+
+// statusRuntimeMsg carries runtime states, which arrive long before a full
+// refresh with its fetches and forge calls.
+type statusRuntimeMsg struct{ items []wtc.RuntimeItem }
+
+func statusTUIRuntimeRefresh(c *wtc.Context) tea.Cmd {
+	return func() tea.Msg { return statusRuntimeMsg{items: c.RuntimeStatus()} }
 }
 
 func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -145,6 +157,8 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BlurMsg:
 		m.focused = false
 		m.nextRefresh = time.Now().Add(m.background)
+	case statusRuntimeMsg:
+		m.snapshot.Runtime = msg.items
 	case statusRefreshStartedMsg:
 		return m, statusTUIWait(msg.events)
 	case statusProgressMsg:
@@ -1058,6 +1072,9 @@ func runStatusTUI(c *wtc.Context, all, procs, reposOnly, noFetch, noClick bool, 
 				model.lastRefresh = time.Now().Add(-time.Duration(age) * time.Second)
 			}
 		}
+		// What is enlisted comes from the runtime manifest, not the shared
+		// cache another wtc may have written; states follow from Init.
+		model.snapshot.Runtime = c.RuntimeEnlisted()
 	}
 	_, err := tea.NewProgram(model).Run()
 	return err

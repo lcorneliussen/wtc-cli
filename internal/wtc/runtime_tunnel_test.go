@@ -106,3 +106,22 @@ func TestRuntimeTunnelExposurePrecedence(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeEnlistedComesFromTheManifestWithoutTheRunner(t *testing.T) {
+	c := runtimeFixture(t)
+	if got := c.RuntimeEnlisted(); got != nil {
+		t.Fatalf("listed tasks before wtc up: %+v", got)
+	}
+	if _, err := c.RuntimeAction("up", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	got := c.RuntimeEnlisted()
+	if len(got) != 2 || got[0].Path != "widget/web/server" || got[1].Path != "widget/web/tunnel" {
+		t.Fatalf("enlisted = %+v", got)
+	}
+	for _, item := range got {
+		if item.State != "checking" {
+			t.Fatalf("%s state = %q, want checking", item.Path, item.State)
+		}
+	}
+}

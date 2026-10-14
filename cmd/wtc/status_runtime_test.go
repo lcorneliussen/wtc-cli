@@ -219,3 +219,17 @@ func TestStatusRuntimeTreatsUnknownExposureAsPublic(t *testing.T) {
 		t.Fatalf("hover = %q", hover)
 	}
 }
+
+func TestStatusTUIRuntimeMessageReplacesEnlistedStates(t *testing.T) {
+	enlisted := wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/server", Group: "widget/web", Kind: "service", State: "checking"}
+	model := statusTUIModel{width: 100, height: 30, snapshot: wtc.StatusSnapshot{Collection: "fixture", Runtime: []wtc.RuntimeItem{enlisted}}}
+	if plain := ansi.Strip(strings.Join(model.contentLines(), "\n")); !strings.Contains(plain, "checking") {
+		t.Fatalf("enlisted service not shown before its state: %s", plain)
+	}
+	ready := enlisted
+	ready.State, ready.URL = "ready", "http://127.0.0.1:3000"
+	next, _ := model.Update(statusRuntimeMsg{items: []wtc.RuntimeItem{ready}})
+	if plain := ansi.Strip(strings.Join(next.(statusTUIModel).contentLines(), "\n")); !strings.Contains(plain, "ready") || !strings.Contains(plain, ":3000") {
+		t.Fatalf("runtime state not applied: %s", plain)
+	}
+}

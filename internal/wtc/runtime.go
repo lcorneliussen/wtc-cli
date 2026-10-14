@@ -200,6 +200,29 @@ func (c *Context) RuntimeStatus() []RuntimeItem {
 	return c.runtimeStatus(m)
 }
 
+// RuntimeEnlisted lists the services, tunnels and resource hooks recorded at
+// the last wtc up, in the state "checking", without asking the runner. Status
+// shows them at once and fills in states from RuntimeStatus.
+func (c *Context) RuntimeEnlisted() []RuntimeItem {
+	m, err := c.runtimeManifest()
+	if err != nil || m == nil {
+		return nil
+	}
+	var items []RuntimeItem
+	for _, task := range m.Tasks {
+		item := task.RuntimeItem
+		item.State, item.URL = "checking", ""
+		if task.URLLog == "" {
+			item.URL = task.URL
+		}
+		items = append(items, item)
+	}
+	for _, resource := range m.Resources {
+		items = append(items, RuntimeItem{Collection: filepath.Base(c.Collection), Repo: resource.Repo, Dir: resource.Dir, Path: resource.Dir + "/@resources", Group: resource.Dir + "/resources", Kind: "resources", State: "checking", Label: "resource hook"})
+	}
+	return items
+}
+
 func (c *Context) runtimeStatus(m *runtimeManifest) []RuntimeItem {
 	items := make([]RuntimeItem, len(m.Tasks))
 	for _, resource := range m.Resources {
