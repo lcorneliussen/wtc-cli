@@ -47,6 +47,9 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 		if !strings.Contains(lines[3], "\x1b[32mw") {
 			t.Fatalf("ready mark is not toned: %q", lines[3])
 		}
+		if !strings.Contains(lines[3], "\x1b]8;;https://widget.example.test\a\x1b[32mt") {
+			t.Fatalf("tunnel mark is not a link to its URL: %q", lines[3])
+		}
 		if item, ok := model.runtimeItemAt(start+2, 3); !ok || item.Path != "widget/web/tunnel" {
 			t.Fatalf("wrong mark under pointer: %+v", item)
 		}

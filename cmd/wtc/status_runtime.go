@@ -411,7 +411,12 @@ func statusRuntimeCell(items []wtc.RuntimeItem, width int, styled bool) string {
 		}
 		letter, tone := statusRuntimeMark(items[slot.item])
 		if styled {
-			letter = statusTUIStyle(letter, tone)
+			// A letter with an address is a terminal link to it, like a PR number.
+			if raw := statusTUIURL(items[slot.item].URL); raw != "" {
+				letter = statusTUILinkTone(letter, raw, tone)
+			} else {
+				letter = statusTUIStyle(letter, tone)
+			}
 		}
 		b.WriteString(letter)
 	}
