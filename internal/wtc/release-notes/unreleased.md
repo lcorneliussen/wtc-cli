@@ -11,7 +11,9 @@
   `$XDG_DATA_HOME/wtc/bare`, and added repositories are remembered by name for
   later ad-hoc collections.
 - `wtc retire .` retires an ad-hoc collection in place when Herdr is not in use.
-- `wtc new`, `--all` sweeps and `--collection` are refused in ad-hoc
-  collections for now.
+- In ad-hoc collections, `wtc new`, every `--all` sweep, `--collection`, and
+  `open`, `catch-up` or `retire` of another collection are refused for now.
 
-Harness-backed workspaces are unchanged; no harness upgrade is needed.
+Harness-backed workspaces are unchanged and need no harness upgrade, with one
+exception: `wtc retire` now also removes the generated `.wtc-catch-up.json`
+report and its `.md` companion, which used to stay behind as leftovers.

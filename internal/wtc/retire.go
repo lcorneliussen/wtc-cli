@@ -325,6 +325,7 @@ func removeRetiredGeneratedFiles(target string) error {
 		"HANDOFF.md", ".env.collection", ".env.collection.local", "mise.toml", ".DS_Store",
 		"WTC-SCOPE.md", ".env.toolchain",
 		".wtc-prs", ".wtc-prs.lock", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
+		".wtc-catch-up.json", ".wtc-catch-up.json.md",
 	}
 	// An ad-hoc registry is remembered per user. Hand-written local hooks
 	// and config stay behind as leftovers for inspection.

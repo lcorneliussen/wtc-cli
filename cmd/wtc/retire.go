@@ -31,6 +31,11 @@ func addRetireCommand(root *cobra.Command, asJSON *bool) {
 		if args[0] != "." {
 			name = args[0]
 		}
+		if name != filepath.Base(c.Collection) {
+			if err := c.RequireWorkspace("retire of another collection"); err != nil {
+				return err
+			}
+		}
 		if name == filepath.Base(c.Collection) && c.AdHoc && os.Getenv("HERDR_ENV") != "1" {
 			result, err := c.RetireCollection(wtc.RetireOptions{Name: name, Force: force, Self: true, InPlace: true})
 			if err != nil {

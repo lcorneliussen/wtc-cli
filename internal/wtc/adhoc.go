@@ -210,6 +210,7 @@ func (c *Context) RegisterAdHocRepo(opt AdHocRepoOptions) (Repo, error) {
 			for _, r := range user.Repos {
 				if r.Name == opt.Spec {
 					repo, known = r, true
+					repo.Owner = liveOwner(r.Owner)
 				}
 			}
 			if !known {
@@ -227,7 +228,7 @@ func (c *Context) RegisterAdHocRepo(opt AdHocRepoOptions) (Repo, error) {
 				return Repo{}, fmt.Errorf("the name %s already stands for %s; choose another with --name", r.Name, r.Remote)
 			}
 			if r.Name == repo.Name && repo.Owner == "" {
-				repo.Owner, repo.DefaultRef = r.Owner, r.DefaultRef
+				repo.Owner, repo.DefaultRef = liveOwner(r.Owner), r.DefaultRef
 				known = true
 			}
 		}
@@ -264,6 +265,14 @@ func (c *Context) RegisterAdHocRepo(opt AdHocRepoOptions) (Repo, error) {
 		}
 		repo.DefaultRef = "origin/" + target
 	}
+	if repo.Owner != "" {
+		// A single-branch or shallow checkout may lack the tip; fetch it
+		// before anything is recorded, so a failed add leaves no entry.
+		branch := strings.TrimPrefix(repo.DefaultRef, "origin/")
+		if _, err := gitOutput("--git-dir="+repo.Owner, "fetch", "origin", "+refs/heads/"+branch+":refs/remotes/"+repo.DefaultRef); err != nil {
+			return Repo{}, fmt.Errorf("fetch %s into %s: %w", repo.DefaultRef, repo.Owner, err)
+		}
+	}
 	if existing, err := c.Repository(repo.Name); err == nil {
 		if existing.Remote != repo.Remote {
 			return Repo{}, fmt.Errorf("the name %s already stands for %s in this collection; choose another with --name", existing.Name, existing.Remote)
@@ -283,6 +292,18 @@ func (c *Context) RegisterAdHocRepo(opt AdHocRepoOptions) (Repo, error) {
 		return Repo{}, err
 	}
 	return c.Repository(repo.Name)
+}
+
+// liveOwner drops a remembered checkout that no longer exists, so the
+// repository falls back to the shared owner cache.
+func liveOwner(owner string) string {
+	if owner == "" {
+		return ""
+	}
+	if info, err := os.Stat(owner); err != nil || !info.IsDir() {
+		return ""
+	}
+	return owner
 }
 
 // describeRemoteSpec reads a clone URL, or an existing checkout that will

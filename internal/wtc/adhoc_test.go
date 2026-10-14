@@ -285,8 +285,8 @@ func TestAdHocCatchUpStatusAndRenderedLinks(t *testing.T) {
 		if err != nil {
 			t.Fatalf("rendered link %s does not resolve: %v", path, err)
 		}
-		if path == ".wtc/instructions/secrets.md" && string(data) != "# Local secrets policy\n" {
-			t.Fatalf("instruction override not linked: %q", data)
+		if want := map[string]string{".claude/skills/local-skill/SKILL.md": "---\nname: local-skill\n---\n", ".wtc/instructions/secrets.md": "# Local secrets policy\n"}[path]; string(data) != want {
+			t.Fatalf("%s does not link to its override: %q", path, data)
 		}
 	}
 	if _, err := c.RegisterAdHocRepo(AdHocRepoOptions{Spec: "file://" + source, Target: "other"}); err == nil {
@@ -313,5 +313,32 @@ func TestAdHocCatchUpStatusAndRenderedLinks(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("status did not list the ad-hoc worktree: %+v", snapshot.Repos)
+	}
+}
+
+func TestAdHocCheckoutOwnerFetchesTargetAndForgetsDeletedCheckouts(t *testing.T) {
+	root := adHocFixture(t)
+	source := adHocSource(t, root, "service", "develop")
+	checkout := filepath.Join(root, "narrow")
+	fixtureGit(t, "clone", "-q", "--single-branch", "--branch", "main", "file://"+source, checkout)
+	c := initAdHoc(t, filepath.Join(root, "task"))
+	repo := addAdHoc(t, c, AdHocRepoOptions{Spec: checkout, Target: "develop"})
+	want := fixtureGit(t, "-C", source, "rev-parse", "develop")
+	if got := fixtureGit(t, "-C", filepath.Join(c.Collection, repo.Name), "rev-parse", "HEAD"); got != want {
+		t.Fatalf("single-branch owner did not get the target: %s, want %s", got, want)
+	}
+	if err := os.RemoveAll(filepath.Join(c.Collection, repo.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(checkout); err != nil {
+		t.Fatal(err)
+	}
+	second := initAdHoc(t, filepath.Join(root, "second"))
+	again := addAdHoc(t, second, AdHocRepoOptions{Spec: "service"})
+	if again.Owner != "" {
+		t.Fatalf("a deleted checkout is still the owner: %+v", again)
+	}
+	if owner, err := second.bareFor("service"); err != nil || !strings.Contains(owner, filepath.Join("data", "bare")) {
+		t.Fatalf("owner did not fall back to the cache: %s %v", owner, err)
 	}
 }

@@ -19,9 +19,8 @@
 
 A **worktree collection** puts the repositories needed for one task in a single
 folder: your API, frontend, shared library, and optionally a project-owned
-harness. Open
-an agent or editor there and work across them. Start another task alongside it
-with its own worktrees and ports.
+harness. Open an agent or editor there and work across them. Start another
+task alongside it with its own worktrees and ports.
 
 WTC manages the workspace around your projects: Git worktrees, environment,
 agent guidance, PR status, and cleanup. Projects keep their usual build and

@@ -38,6 +38,12 @@ func addAddRepoCommand(root *cobra.Command, asJSON *bool) {
 			return err
 		}
 		repos := args
+		if c.AdHoc && collection != "" {
+			// Refuse before anything is registered or prompted for.
+			if err := c.RequireWorkspace("add-repo --collection"); err != nil {
+				return err
+			}
+		}
 		if c.AdHoc {
 			if (name != "" || target != "") && len(args) != 1 {
 				return fmt.Errorf("--name and --target describe one repository")
