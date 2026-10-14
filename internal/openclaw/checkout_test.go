@@ -24,6 +24,12 @@ func TestDetectHost(t *testing.T) {
 // clone, on openclaw/<name>, with origin on originURL and a remote main.
 func managedWorktree(t *testing.T, originURL string) (*Checkout, func(args ...string) string) {
 	t.Helper()
+	// Every git command in the test, wtc's own included, commits as this
+	// identity: a CI machine has none configured.
+	for name, value := range map[string]string{"GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.com",
+		"GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.com", "GIT_CONFIG_GLOBAL": "/dev/null"} {
+		t.Setenv(name, value)
+	}
 	root := t.TempDir()
 	run := func(dir string, args ...string) string {
 		t.Helper()

@@ -293,9 +293,14 @@ func (c *Checkout) CatchUp() (CatchUp, error) {
 		result.Note = "already contains origin/" + c.Dest
 		return result, nil
 	}
-	if _, err := git(c.Dir, "merge", "--no-edit", "--quiet", dest); err != nil {
+	if _, mergeErr := git(c.Dir, "merge", "--no-edit", "--quiet", dest); mergeErr != nil {
 		conflicts, _ := git(c.Dir, "diff", "--name-only", "--diff-filter=U")
-		_, _ = git(c.Dir, "merge", "--abort")
+		if c.inProgress() != "" {
+			_, _ = git(c.Dir, "merge", "--abort")
+		}
+		if strings.TrimSpace(conflicts) == "" {
+			return result, fmt.Errorf("merging origin/%s into %s failed, and the checkout is as before: %w", c.Dest, c.Branch(), mergeErr)
+		}
 		return result, fmt.Errorf("merging origin/%s into %s conflicts in: %s. The merge was aborted and the checkout is as before. Merge by hand with `git merge origin/%s`, resolve, commit — do not rebase", c.Dest, c.Branch(), strings.Join(strings.Fields(conflicts), ", "), c.Dest)
 	}
 	result.Merged = true
