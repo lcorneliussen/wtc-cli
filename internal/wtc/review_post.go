@@ -27,10 +27,11 @@ type ReviewPostOptions struct {
 }
 
 type ReviewPostResult struct {
-	CommentID    string `json:"comment_id"`
-	URL          string `json:"url"`
-	InlinePosted int    `json:"inline_posted"`
-	InlineFailed int    `json:"inline_failed"`
+	CommentID     string `json:"comment_id"`
+	URL           string `json:"url"`
+	InlinePosted  int    `json:"inline_posted"`
+	InlineFailed  int    `json:"inline_failed"`
+	InlineSkipped int    `json:"inline_skipped"`
 }
 
 type ReviewInlineRecord struct {
@@ -43,6 +44,7 @@ type ReviewInlineRecord struct {
 	ID       string `json:"id"`
 	URL      string `json:"url"`
 	Error    string `json:"error"`
+	Skipped  string `json:"skipped,omitempty"`
 	Resolved bool   `json:"resolved"`
 }
 
@@ -71,7 +73,7 @@ func reviewForgeCommand(worktree, name string, args []string, input []byte) ([]b
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return out, nil
 }
@@ -206,7 +208,7 @@ func (c *Context) PostReviewBundle(bundle string, opt ReviewPostOptions) (Review
 		}
 	}
 	if mode == "summary" {
-		posted.InlinePosted, posted.InlineFailed = postReviewInline(manifest, bundle)
+		posted.InlinePosted, posted.InlineFailed, posted.InlineSkipped = postReviewInline(manifest, bundle)
 		if posted.InlineFailed != 0 {
 			return posted, fmt.Errorf("%d inline comments failed to post; review remains pending at %s", posted.InlineFailed, posted.URL)
 		}
@@ -376,6 +378,17 @@ func writeInlineRecords(bundle string, rows []ReviewInlineRecord) error {
 	return os.WriteFile(filepath.Join(bundle, "inline-comments.json"), append(data, '\n'), 0644)
 }
 
+func saveInlineRecord(bundle string, rows []ReviewInlineRecord, row ReviewInlineRecord) ([]ReviewInlineRecord, error) {
+	unique := make([]ReviewInlineRecord, 0, len(rows)+1)
+	for _, existing := range rows {
+		if existing.Key != row.Key {
+			unique = append(unique, existing)
+		}
+	}
+	unique = append(unique, row)
+	return unique, writeInlineRecords(bundle, unique)
+}
+
 var reviewInlineMarker = regexp.MustCompile(`wtc-review-inline v1 key=([0-9a-f]{10})`)
 
 func priorReviewInlineKeys(m ReviewManifest, bundle string) map[string]bool {
@@ -389,6 +402,7 @@ func priorReviewInlineKeys(m ReviewManifest, bundle string) map[string]bool {
 	if m.Forge == "github" {
 		out, err := reviewForgeCommand(m.RepoDir, "gh", []string{"api", fmt.Sprintf("repos/%s/pulls/%s/comments?per_page=100", m.Slug, m.PR), "--paginate", "--slurp"}, nil)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "wtc: read prior GitHub inline comments: %v: %s\n", err, strings.TrimSpace(string(out)))
 			return nil
 		}
 		for _, match := range reviewInlineMarker.FindAllStringSubmatch(string(out), -1) {
@@ -397,6 +411,7 @@ func priorReviewInlineKeys(m ReviewManifest, bundle string) map[string]bool {
 	} else {
 		out, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "list", m.PR, "--all", "--json"}, nil)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "wtc: read prior Bitbucket inline comments: %v\n", err)
 			return nil
 		}
 		for _, match := range reviewInlineMarker.FindAllStringSubmatch(string(out), -1) {
@@ -406,17 +421,24 @@ func priorReviewInlineKeys(m ReviewManifest, bundle string) map[string]bool {
 	return keys
 }
 
-func postReviewInline(m ReviewManifest, bundle string) (posted, failed int) {
+func postReviewInline(m ReviewManifest, bundle string) (posted, failed, skipped int) {
 	prior := priorReviewInlineKeys(m, bundle)
 	if prior == nil {
-		return 0, 1
+		fmt.Fprintln(os.Stderr, "wtc: could not read prior inline comments; review remains pending")
+		return 0, 1, 0
 	}
 	rows := readInlineRecords(bundle)
+	previouslySkipped := map[string]bool{}
 	for _, row := range rows {
 		if row.ID != "" {
 			prior[row.Key] = true
 		}
+		if row.Skipped != "" {
+			previouslySkipped[row.Key] = true
+		}
 	}
+	var diff reviewDiffLines
+	diffLoaded := false
 	paths, _ := filepath.Glob(filepath.Join(bundle, "findings", "*.json"))
 	sort.Strings(paths)
 	for _, path := range paths {
@@ -450,12 +472,39 @@ func postReviewInline(m ReviewManifest, bundle string) (posted, failed int) {
 				continue
 			}
 			prior[key] = true
+			if previouslySkipped[key] {
+				skipped++
+				continue
+			}
+			row := ReviewInlineRecord{Key: key, Concern: file.Concern, File: f.File, Line: f.Line, Severity: f.Severity, Title: f.Title}
+			if m.Forge == "github" {
+				if !diffLoaded {
+					data, err := os.ReadFile(filepath.Join(bundle, "diff.patch"))
+					if err == nil {
+						diff, err = parseReviewDiff(data)
+					}
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "wtc: cannot validate inline positions: %v\n", err)
+						return posted, failed + 1, skipped
+					}
+					diffLoaded = true
+				}
+				if !diff.contains(f.File, f.Line) {
+					row.Skipped = "not in diff"
+					rows, err = saveInlineRecord(bundle, rows, row)
+					if err != nil {
+						failed++
+					}
+					skipped++
+					fmt.Fprintf(os.Stderr, "wtc: inline %s:%d skipped: not in diff (finding remains in summary)\n", f.File, f.Line)
+					continue
+				}
+			}
 			body := fmt.Sprintf("**%s** · `%s` — %s\n\n%s\n", f.Severity, file.Concern, f.Title, f.Detail)
 			if f.Suggestion != "" {
 				body += "\nSuggestion: " + f.Suggestion + "\n"
 			}
 			body += fmt.Sprintf("\nRound %d.\n\n`wtc-review-inline v1 key=%s concern=%s file=%s line=%d`\n", m.Round, key, file.Concern, f.File, f.Line)
-			row := ReviewInlineRecord{Key: key, Concern: file.Concern, File: f.File, Line: f.Line, Severity: f.Severity, Title: f.Title}
 			if m.Forge == "github" {
 				payload, _ := json.Marshal(map[string]any{"body": body, "commit_id": m.HeadSHA, "path": f.File, "line": f.Line, "side": "RIGHT"})
 				out, err := reviewForgeCommand(m.RepoDir, "gh", []string{"api", "-X", "POST", fmt.Sprintf("repos/%s/pulls/%s/comments", m.Slug, m.PR), "--input", "-"}, payload)
@@ -469,13 +518,23 @@ func postReviewInline(m ReviewManifest, bundle string) (posted, failed int) {
 						row.URL = result.HTMLURL
 					}
 				}
-				if row.ID == "" {
-					row.Error = "post failed"
+				if reviewUnresolvablePosition(out, err) {
+					row.Skipped = "not in diff"
+				} else if row.ID == "" {
+					row.Error = "GitHub returned no inline comment id"
+					if err != nil {
+						row.Error = err.Error()
+						if len(bytes.TrimSpace(out)) != 0 {
+							row.Error += ": " + strings.TrimSpace(string(out))
+						}
+					}
 				}
 			} else {
 				if result, ok, err := bitbucketReviewCommentAPI(m, "", body, f.File, f.Line, ""); ok {
 					if err == nil {
 						row.ID, row.URL = result.CommentID, result.URL
+					} else {
+						row.Error = err.Error()
 					}
 				} else if len(body) <= 8192 && !strings.HasPrefix(body, "-") {
 					out, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "add", m.PR, body, "--file", f.File, "--line-to", strconv.Itoa(f.Line), "--json"}, nil)
@@ -486,22 +545,28 @@ func postReviewInline(m ReviewManifest, bundle string) (posted, failed int) {
 						if json.Unmarshal(out, &result) == nil && result.ID != 0 {
 							row.ID = strconv.FormatInt(result.ID, 10)
 						}
+					} else {
+						row.Error = err.Error()
 					}
 				}
-				if row.ID == "" {
+				if row.ID == "" && row.Error == "" {
 					row.Error = "post failed"
 				}
 			}
-			if row.ID == "" {
+			if row.Skipped != "" {
+				skipped++
+				fmt.Fprintf(os.Stderr, "wtc: inline %s:%d skipped: not in diff (GitHub could not resolve position)\n", f.File, f.Line)
+			} else if row.ID == "" {
 				failed++
+				fmt.Fprintf(os.Stderr, "wtc: inline %s:%d: %s\n", f.File, f.Line, row.Error)
 			} else {
 				posted++
 			}
-			rows = append(rows, row)
-			if err := writeInlineRecords(bundle, rows); err != nil {
+			rows, err = saveInlineRecord(bundle, rows, row)
+			if err != nil {
 				failed++
 			}
 		}
 	}
-	return posted, failed
+	return posted, failed, skipped
 }
