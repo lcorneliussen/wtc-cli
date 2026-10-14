@@ -334,7 +334,8 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 	for _, row := range snapshot.Repos {
 		if marks := len(statusRuntimeSlots(statusRuntimeItems(snapshot, row))); marks > 0 && width >= 60 {
 			l.showRuntime = true
-			l.runtime = max(l.runtime, len("LOCAL"), marks)
+			// One column of air after the marks so they do not run into PR.
+			l.runtime = max(l.runtime, len("LOCAL")+1, marks+1)
 		}
 		if row.Tree != "clean" {
 			l.tree = max(l.tree, runewidth.StringWidth(row.Tree))
