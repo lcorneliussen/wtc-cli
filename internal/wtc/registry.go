@@ -19,6 +19,9 @@ type RegistryRefresh struct {
 // RefreshRegistry writes the local bare-owner map used by legacy commands.
 // The tracked registry remains the source of remote and branch metadata.
 func (c *Context) RefreshRegistry() (RegistryRefresh, error) {
+	if c.AdHoc {
+		return RegistryRefresh{}, fmt.Errorf("an ad-hoc collection has no bare-owner map; its registry names owners directly")
+	}
 	bareDir := filepath.Join(c.Workspace, ".bare")
 	entries, err := os.ReadDir(bareDir)
 	if err != nil {

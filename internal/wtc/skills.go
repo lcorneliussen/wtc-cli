@@ -28,7 +28,7 @@ type SkillRenderResult struct {
 // clients, while preserving hand-authored files at every destination.
 func (c *Context) RenderSkills(opt SkillRenderOptions) (SkillRenderResult, error) {
 	r := SkillRenderResult{Collection: c.Collection, DryRun: opt.DryRun, Actions: []string{}}
-	harnessName := filepath.Base(c.Harness)
+	harnessName := c.harnessRel()
 	type source struct {
 		path, target string
 		data         []byte

@@ -89,6 +89,11 @@ func (c *Context) StatusLiveSnapshot(all, noFetch bool) (StatusSnapshot, StatusF
 
 func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.Duration) (StatusSnapshot, StatusFetchReport, error) {
 	var report StatusFetchReport
+	if all {
+		if err := c.RequireWorkspace("status --all"); err != nil {
+			return StatusSnapshot{}, report, err
+		}
+	}
 	if !noFetch {
 		var err error
 		report, err = c.StatusRefreshRefsWithAge(all, maxAge)

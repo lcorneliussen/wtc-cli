@@ -21,7 +21,7 @@ func (c *Context) renderInstructions(dryRun bool, r *SkillRenderResult) error {
 		}
 		dest := filepath.Join(c.Collection, ".wtc", filepath.FromSlash(path))
 		override := filepath.Join(c.Harness, filepath.FromSlash(path))
-		link := "../../" + filepath.Base(c.Harness) + "/" + path
+		link := "../../" + c.harnessRel() + "/" + path
 		if err := safeGeneratedParent(c.Collection, filepath.Dir(dest)); err != nil {
 			return err
 		}
