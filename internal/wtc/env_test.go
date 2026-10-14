@@ -37,7 +37,7 @@ func TestRenderEnvPreservesPortBase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"COLLECTION_PORT_BASE=43100", "WIDGET_PORT=43102", "WTC_COLLECTION='demo'"} {
+	for _, want := range []string{"COLLECTION_PORT_BASE=43100", "WIDGET_PORT=43102", "WTC_COLLECTION='demo'", "WTC_LOCAL_REVIEW=auto"} {
 		if !strings.Contains(string(got), want) {
 			t.Errorf("missing %s in %s", want, got)
 		}
@@ -279,5 +279,18 @@ func TestRegistryRejectsPortNameCollision(t *testing.T) {
 	}
 	if _, err := OpenCollection(c.Collection); err == nil {
 		t.Fatal("accepted duplicate port variable")
+	}
+}
+
+func TestLocalReviewCanBeTurnedOff(t *testing.T) {
+	c := fixture(t)
+	off := false
+	c.Config.Review.AutoLocal = &off
+	got, err := c.RenderEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "WTC_LOCAL_REVIEW=off\n") {
+		t.Fatalf("auto_local = false was not rendered: %s", got)
 	}
 }

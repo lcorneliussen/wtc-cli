@@ -101,6 +101,10 @@ A status-only request remains read-only. Procedure and resumption limits:
 ## Review a draft before marking it ready
 
 Use `/wtc-local-review` to bundle the diff and run a separate headless review.
+Once a PR's own scope is complete — implemented, tests and CI green, no
+placeholders — run it **without being asked** and follow its findings through,
+unless `WTC_LOCAL_REVIEW=off` (`[review] auto_local = false` in `wtc.toml`) or
+your instructions say otherwise. A WIP push or a parked draft is not mature.
 For a public PR, inspect the bundle and outgoing summary before posting them.
 `wtc review ready` requires a passing review posted on the current head with a
 local receipt. The rendered procedure is at

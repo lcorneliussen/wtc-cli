@@ -78,6 +78,10 @@ draft — a draft PR is not a meaningful transition; "shipped" is.
 Report the URL, what still has to happen before it can go to review, and
 whether CI is green on it.
 
+If the draft already covers its whole scope and CI is green, it is mature: go
+straight on to `/wtc-local-review` instead of offering it, unless
+`WTC_LOCAL_REVIEW=off` or your instructions say otherwise.
+
 ---
 Canon: `.agents/skills/wtc-pr/SKILL.md`,
 `.wtc/instructions/development-workflows.md`.

@@ -147,6 +147,15 @@ func machineTWGSite(root string) (string, error) {
 	}
 	return value, nil
 }
+
+// LocalReviewMode is "auto" unless the harness sets [review] auto_local = false.
+func (c *Context) LocalReviewMode() string {
+	if c.Config.Review.AutoLocal != nil && !*c.Config.Review.AutoLocal {
+		return "off"
+	}
+	return "auto"
+}
+
 func (c *Context) RenderEnv() ([]byte, error) {
 	base, err := c.portBase()
 	if err != nil {
@@ -164,6 +173,7 @@ func (c *Context) RenderEnv() ([]byte, error) {
 		}
 		fmt.Fprintf(&b, "%s=%s\n", entry.key, q)
 	}
+	fmt.Fprintf(&b, "WTC_LOCAL_REVIEW=%s\n", c.LocalReviewMode())
 	fmt.Fprintf(&b, "COLLECTION_PORT_BASE=%d\n", base)
 	for _, r := range c.Registry.Repos {
 		if r.PortOffset == nil {

@@ -10,6 +10,10 @@ after a separate reviewer process posts a passing summary for its current head.
 The review is independent of the authoring agent; do not write its findings,
 summary, or verdict yourself.
 
+Run it unasked once a PR's own scope is complete and CI is green, unless
+`WTC_LOCAL_REVIEW=off` (`[review] auto_local = false` in `wtc.toml`) or
+instructions say otherwise.
+
 1. Build a bundle with `wtc review bundle <repo> <pr>`. For a public or
    unknown-audience PR, add `--public` to exclude other repositories and local
    concern overlays. A known PR checks out its branch and catches up the

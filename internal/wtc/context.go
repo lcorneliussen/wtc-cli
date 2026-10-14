@@ -41,6 +41,11 @@ type Config struct {
 	Herdr struct {
 		Session string `toml:"session"`
 	} `toml:"herdr"`
+	Review struct {
+		// AutoLocal unset means on: agents run the local review once a PR
+		// is mature without being asked.
+		AutoLocal *bool `toml:"auto_local"`
+	} `toml:"review"`
 	Compatibility struct {
 		Requires string `toml:"requires"`
 	} `toml:"compatibility"`

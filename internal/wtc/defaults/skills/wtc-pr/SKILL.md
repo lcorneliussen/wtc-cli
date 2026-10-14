@@ -165,6 +165,8 @@ wtc review ready <n> --repo <repo>     # after /wtc-local-review on this head
 gh pr edit <n> --add-reviewer <who>   # only if the repo doesn't auto-assign
 ```
 
+Run `/wtc-local-review` yourself once the PR's scope is complete, unless
+`WTC_LOCAL_REVIEW=off` — do not stop at the draft to offer it.
 Marking ready is what summons reviewers and the review bots. Do it only when
 the change is genuinely reviewable and the local review gate passes — otherwise
 this is a `wtc-draft-pr` job.
