@@ -14,11 +14,14 @@ package openclaw
 //
 //	WTC_TS_AUTHKEY=<reusable, ephemeral, untagged auth key of a tailnet whose
 //	  user signed in with GitHub> \
-//	WTC_OPENCLAW_GITHUB_REPO=<owner>/<throwaway-repo> GH_TOKEN=<publisher> \
+//	WTC_OPENCLAW_GITHUB_REPO=<owner>/<throwaway-repo> GH_TOKEN=… \
+//	[WTC_PUBLISH_GH_TOKEN=<the gateway's publishing account>] \
 //	  go test -tags openclaw_integration ./internal/openclaw/ -run CoAuthor -v
 //
-// OpenClaw never credits the account it publishes as, so the tailnet's user
-// and the owner of GH_TOKEN must be different GitHub accounts.
+// OpenClaw never credits the account it publishes as, by account ID: the
+// tailnet's user and the publishing account must be different GitHub
+// accounts. The gateway publishes as WTC_PUBLISH_GH_TOKEN's account when it
+// is set, otherwise as GH_TOKEN's.
 
 import (
 	"encoding/json"
@@ -55,7 +58,11 @@ func TestCoAuthorCredit(t *testing.T) {
 	if key == "" {
 		t.Skip("needs WTC_TS_AUTHKEY for a test tailnet whose user signed in with GitHub")
 	}
-	g := startGateway(t, gatewayOptions{repos: hub.clone(), secrets: []string{"GH_TOKEN=" + hub.token}, stubModel: true, tailnetKey: key})
+	publishing := hub
+	if token := os.Getenv("WTC_PUBLISH_GH_TOKEN"); token != "" {
+		publishing.token = token
+	}
+	g := startGateway(t, gatewayOptions{repos: hub.clone(), secrets: []string{"GH_TOKEN=" + publishing.token}, stubModel: true, tailnetKey: key})
 
 	out, err := exec.Command("docker", append(append([]string{"run", "-d"}, tailnetArgs...),
 		"--tmpfs", "/home/node:size=1g,uid=1000,gid=1000,exec", "--tmpfs", "/tmp:size=1g,exec",
@@ -77,7 +84,7 @@ func TestCoAuthorCredit(t *testing.T) {
 	var publisher struct {
 		Login string `json:"login"`
 	}
-	if code := hub.user(&publisher); code != 200 || publisher.Login == "" || strings.EqualFold(publisher.Login, githubLogin) {
+	if code := publishing.user(&publisher); code != 200 || publisher.Login == "" || strings.EqualFold(publisher.Login, githubLogin) {
 		t.Skipf("the gateway publishes as %q and OpenClaw does not credit its own account: sign in to the tailnet with another GitHub account", publisher.Login)
 	}
 
