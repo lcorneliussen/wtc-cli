@@ -239,6 +239,9 @@ func TestAdHocRefusesWorkspaceOperationsAndRetiresInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Generated catch-up reports must not keep the folder alive.
+	fixtureFile(t, filepath.Join(c.Collection, ".wtc-catch-up.json"), "{}\n", 0644)
+	fixtureFile(t, filepath.Join(c.Collection, ".wtc-catch-up.json.md"), "# report\n", 0644)
 	result, err := c.RetireCollection(RetireOptions{Name: "task", Self: true, InPlace: true})
 	if err != nil {
 		t.Fatal(err)
@@ -326,6 +329,19 @@ func TestAdHocCheckoutOwnerFetchesTargetAndForgetsDeletedCheckouts(t *testing.T)
 	want := fixtureGit(t, "-C", source, "rev-parse", "develop")
 	if got := fixtureGit(t, "-C", filepath.Join(c.Collection, repo.Name), "rev-parse", "HEAD"); got != want {
 		t.Fatalf("single-branch owner did not get the target: %s, want %s", got, want)
+	}
+	// Later plain fetches must keep the tip moving.
+	fixtureGit(t, "-C", source, "switch", "-q", "develop")
+	fixtureFile(t, filepath.Join(source, "later.txt"), "later\n", 0644)
+	fixtureGit(t, "-C", source, "add", "-A")
+	fixtureGit(t, "-C", source, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "later")
+	fixtureGit(t, "-C", source, "switch", "-q", "main")
+	if report, err := c.CatchUp(CatchUpOptions{}); err != nil {
+		t.Fatalf("catch-up failed: %v\n%s", err, report.Markdown())
+	}
+	want = fixtureGit(t, "-C", source, "rev-parse", "develop")
+	if got := fixtureGit(t, "-C", filepath.Join(c.Collection, repo.Name), "rev-parse", "HEAD"); got != want {
+		t.Fatalf("single-branch owner froze its tip: %s, want %s", got, want)
 	}
 	if err := os.RemoveAll(filepath.Join(c.Collection, repo.Name)); err != nil {
 		t.Fatal(err)

@@ -33,7 +33,9 @@ and tracked nowhere. The first time a repository is added, `wtc add-repo`
 asks for the branch worktrees rest on and pull requests target, suggesting the
 remote's default; `--target <branch>` answers non-interactively. Worktrees
 always start detached at that branch, never at whatever an existing checkout
-has checked out.
+has checked out. For an existing checkout, wtc adds that branch to the
+checkout's `remote.origin.fetch` if its refspec does not already cover it, so
+a single-branch clone keeps the tip current.
 
 Clones are shared per user under `$XDG_DATA_HOME/wtc/bare` (default
 `~/.local/share/wtc`, or `$WTC_DATA_HOME`), and every repository added once is

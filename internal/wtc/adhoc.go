@@ -266,11 +266,8 @@ func (c *Context) RegisterAdHocRepo(opt AdHocRepoOptions) (Repo, error) {
 		repo.DefaultRef = "origin/" + target
 	}
 	if repo.Owner != "" {
-		// A single-branch or shallow checkout may lack the tip; fetch it
-		// before anything is recorded, so a failed add leaves no entry.
-		branch := strings.TrimPrefix(repo.DefaultRef, "origin/")
-		if _, err := gitOutput("--git-dir="+repo.Owner, "fetch", "origin", "+refs/heads/"+branch+":refs/remotes/"+repo.DefaultRef); err != nil {
-			return Repo{}, fmt.Errorf("fetch %s into %s: %w", repo.DefaultRef, repo.Owner, err)
+		if err := trackOwnerTip(repo.Owner, repo.DefaultRef); err != nil {
+			return Repo{}, err
 		}
 	}
 	if existing, err := c.Repository(repo.Name); err == nil {
@@ -292,6 +289,30 @@ func (c *Context) RegisterAdHocRepo(opt AdHocRepoOptions) (Repo, error) {
 		return Repo{}, err
 	}
 	return c.Repository(repo.Name)
+}
+
+// trackOwnerTip makes a checkout owner fetch the development tip on every
+// later plain fetch, then fetches it now. A single-branch clone would
+// otherwise keep a frozen tip. It runs before anything is recorded, so a
+// failed add leaves no registry entry.
+func trackOwnerTip(owner, ref string) error {
+	branch := strings.TrimPrefix(ref, "origin/")
+	refspec := "+refs/heads/" + branch + ":refs/remotes/" + ref
+	configured, _ := gitOutput("--git-dir="+owner, "config", "--get-all", "remote.origin.fetch")
+	covered := false
+	for _, line := range strings.Split(configured, "\n") {
+		line = strings.TrimSpace(line)
+		covered = covered || line == refspec || line == "+refs/heads/*:refs/remotes/origin/*" || line == "refs/heads/*:refs/remotes/origin/*"
+	}
+	if !covered {
+		if _, err := gitOutput("--git-dir="+owner, "config", "--add", "remote.origin.fetch", refspec); err != nil {
+			return err
+		}
+	}
+	if _, err := gitOutput("--git-dir="+owner, "fetch", "origin", refspec); err != nil {
+		return fmt.Errorf("fetch %s into %s: %w", ref, owner, err)
+	}
+	return nil
 }
 
 // liveOwner drops a remembered checkout that no longer exists, so the

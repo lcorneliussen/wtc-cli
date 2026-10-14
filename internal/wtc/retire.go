@@ -119,7 +119,11 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 		}
 	}
 	stopRetiredStatusWatchers(target)
-	if err := removeRetiredGeneratedFiles(target); err != nil {
+	adHoc := false
+	if retired, err := OpenCollection(target); err == nil {
+		adHoc = retired.AdHoc
+	}
+	if err := removeRetiredGeneratedFiles(target, adHoc); err != nil {
 		return result, err
 	}
 	if err := os.Remove(target); err == nil {
@@ -320,16 +324,18 @@ func stopRetiredStatusWatchers(target string) {
 	}
 }
 
-func removeRetiredGeneratedFiles(target string) error {
+func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 	files := []string{
 		"HANDOFF.md", ".env.collection", ".env.collection.local", "mise.toml", ".DS_Store",
 		"WTC-SCOPE.md", ".env.toolchain",
 		".wtc-prs", ".wtc-prs.lock", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
 		".wtc-catch-up.json", ".wtc-catch-up.json.md",
 	}
-	// An ad-hoc registry is remembered per user. Hand-written local hooks
-	// and config stay behind as leftovers for inspection.
-	files = append(files, filepath.Join(AdHocConfigDir, adHocRegistryFile))
+	if adHoc {
+		// An ad-hoc registry is remembered per user. Hand-written local
+		// hooks and config stay behind as leftovers for inspection.
+		files = append(files, filepath.Join(AdHocConfigDir, adHocRegistryFile))
+	}
 	for _, name := range files {
 		if err := os.Remove(filepath.Join(target, name)); err != nil && !os.IsNotExist(err) {
 			return err
