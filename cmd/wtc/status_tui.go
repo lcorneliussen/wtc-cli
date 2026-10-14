@@ -284,6 +284,24 @@ func statusTUIFit(value string, width int) string {
 	return b.String() + strings.Repeat(" ", width-1-used) + "…"
 }
 
+func statusTUIPRConflict(pr *wtc.StatusPRFacts) bool {
+	return pr != nil && (pr.Merge == "CONFLICTING" || pr.Merge == "DIRTY")
+}
+
+func statusTUIBehind(row wtc.StatusRepo) string {
+	count := ""
+	if row.Behind > 0 {
+		count = fmt.Sprint(row.Behind)
+	}
+	if row.Conflict || statusTUIPRConflict(row.PR) {
+		return "✗" + count
+	}
+	if count == "" {
+		return "·"
+	}
+	return count
+}
+
 func statusTUIPR(pr *wtc.StatusPRFacts) string {
 	if pr == nil || pr.Number == "" {
 		return "·"
@@ -292,7 +310,12 @@ func statusTUIPR(pr *wtc.StatusPRFacts) string {
 	if pr.Draft {
 		parts = append(parts, "◇")
 	}
-	for _, token := range []string{pr.Checks, pr.Merge, pr.Review} {
+	tokens := []string{pr.Checks, pr.Merge, pr.Review}
+	if statusTUIPRConflict(pr) {
+		parts = append(parts, "✗ conflict")
+		tokens = []string{pr.Checks, pr.Review}
+	}
+	for _, token := range tokens {
 		switch token {
 		case "SUCCESS", "approved":
 			parts = append(parts, "✓")
@@ -333,7 +356,14 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 			l.tree = max(l.tree, runewidth.StringWidth(row.Tree))
 		}
 		l.ahead = max(l.ahead, len(fmt.Sprint(row.Ahead)))
-		l.behind = max(l.behind, len(fmt.Sprint(row.Behind)))
+		l.behind = max(l.behind, runewidth.StringWidth(statusTUIBehind(row)))
+		if statusTUIPRConflict(row.PR) {
+			prWidth := runewidth.StringWidth(statusTUIPR(row.PR))
+			if statusTUIURL(row.PR.URL) != "" {
+				prWidth += 2 // Linked number includes the arrow.
+			}
+			l.pr = max(l.pr, prWidth)
+		}
 	}
 	// Build columns exist only for the tiers a provider reported on.
 	l.showBuilds = l.hasTip || l.hasProd
@@ -468,6 +498,16 @@ func statusTUIBuildCell(prefix string, build *wtc.StatusBuild) string {
 
 func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, width int, styled bool) string {
 	plain := statusTUIPR(pr)
+	if statusTUIPRConflict(pr) && runewidth.StringWidth(plain) > width {
+		// Keep the warning visible even when the number and signals do not fit.
+		marker, label := "✗ ", "#"+pr.Number
+		if styled {
+			marker = statusTUIStyle(marker, statusToneFailure)
+			label = statusTUILinkCell(label, pr.URL, statusToneLabel)
+			return statusTUIFitANSI(marker+label, width)
+		}
+		return statusTUIFit(marker+label, width)
+	}
 	if !styled || pr == nil || pr.Number == "" {
 		return statusTUIFit(plain, width)
 	}
@@ -554,14 +594,9 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 			line += " " + treeCell
 		}
 		if l.showSync {
-			ahead, behind := "·", "·"
+			ahead, behind := "·", statusTUIBehind(row)
 			if row.Ahead > 0 {
 				ahead = fmt.Sprint(row.Ahead)
-			}
-			if row.Behind > 0 {
-				behind = fmt.Sprint(row.Behind)
-			} else if row.Conflict || row.PR != nil && (row.PR.Merge == "CONFLICTING" || row.PR.Merge == "DIRTY") {
-				behind = "✗"
 			}
 			aheadCell, behindCell := statusTUIFit(ahead, l.ahead), statusTUIFit(behind, l.behind)
 			if styled {
@@ -570,7 +605,7 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 				} else {
 					aheadCell = statusTUIStyle(aheadCell, statusToneDim)
 				}
-				if row.Conflict || row.PR != nil && (row.PR.Merge == "CONFLICTING" || row.PR.Merge == "DIRTY") {
+				if row.Conflict || statusTUIPRConflict(row.PR) {
 					behindCell = statusTUIStyle(behindCell, statusToneFailure)
 				} else if row.Behind > 0 {
 					behindCell = statusTUIStyle(behindCell, statusToneWarning)

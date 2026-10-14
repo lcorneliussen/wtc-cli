@@ -2,6 +2,12 @@
 
 Use `wtc <command> --help` for flags, or `wtc commands --json` for the machine-readable surface. `harness init`, `docs`, and `release-notes` require v0.1.39 or newer.
 
+Status marks PR merge conflicts against the target branch with `✗ conflict` in
+the repository's PR cell and the PR list. The `↓` cell keeps its count with a
+conflict marker, such as `✗3`; compact views retain the warning when counts do
+not fit. Passing checks or a clean local checkout do not clear a PR conflict.
+Local unmerged files are shown separately in the working-tree (`±`) cell.
+
 - `wtc env list` shows variable names, source files, and whether a collection-local entry overrides an earlier one. It opens a scrollable, width-aware view in an interactive terminal; `--no-tui` prints a compact table and `--json` emits structured data. It never prints values. Bare `wtc env` shows help.
 - `wtc env setup [--collection DIR] [--dry-run]` regenerates `.env.collection`, preserving its port base. It leaves `.env.collection.local` intact, writes the collection's mise environment file, and trusts the generated mise config when mise is installed. Existing flagged `wtc env` invocations remain supported.
 - `wtc doctor` checks the collection registry and local tool availability.
