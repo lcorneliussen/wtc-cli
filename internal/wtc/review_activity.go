@@ -157,10 +157,10 @@ func parseReviewActivity(meta, reviews, threads []byte) (ReviewActivity, error) 
 		if provider == "" {
 			continue
 		}
-		if check.Status != "COMPLETED" && check.Status != "" || check.State == "PENDING" {
+		if check.Status != "COMPLETED" && check.Status != "" || check.State == "PENDING" || check.State == "EXPECTED" {
 			activeChecks[provider] = true
 		}
-		if check.Conclusion == "FAILURE" || check.Conclusion == "TIMED_OUT" || check.Conclusion == "CANCELLED" || check.Conclusion == "ACTION_REQUIRED" || check.State == "ERROR" || check.State == "FAILURE" {
+		if check.Conclusion == "FAILURE" || check.Conclusion == "TIMED_OUT" || check.Conclusion == "CANCELLED" || check.Conclusion == "ACTION_REQUIRED" || check.Conclusion == "STARTUP_FAILURE" || check.Conclusion == "STALE" || check.State == "ERROR" || check.State == "FAILURE" {
 			latest[provider] = HostedReviewReport{Provider: provider, State: "unavailable", Head: pr.Head, Body: "Hosted review check did not complete successfully: " + check.Name}
 		}
 	}

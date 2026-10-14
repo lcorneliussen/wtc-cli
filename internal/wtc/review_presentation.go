@@ -92,9 +92,11 @@ func presentReviewSummary(body string, m ReviewManifest, files map[string]bool) 
 func reviewSourceFiles(m ReviewManifest) map[string]bool {
 	files := map[string]bool{}
 	if m.Forge == "github" {
-		if raw, err := gitOutput("-C", m.RepoDir, "ls-tree", "-r", "-z", "--name-only", m.HeadSHA); err == nil {
-			for _, path := range strings.Split(raw, "\x00") {
-				files[path] = true
+		if raw, err := reviewGit(m.RepoDir, "ls-tree", "-r", "-z", "--name-only", m.HeadSHA); err == nil {
+			for _, path := range strings.Split(string(raw), "\x00") {
+				if path != "" {
+					files[path] = true
+				}
 			}
 		}
 	}
