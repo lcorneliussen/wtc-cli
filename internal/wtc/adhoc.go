@@ -372,8 +372,8 @@ func remoteDefaultBranch(remote string) (string, error) {
 	return "", fmt.Errorf("cannot tell the default branch of %s; pass --target", remote)
 }
 
-// registryEntry writes a Repo without empty keys, keeping hand-added fields
-// such as port_offset when an entry is copied to another registry.
+// registryEntry writes a Repo, leaving out empty optional fields and keeping
+// hand-added ones such as port_offset when an entry is copied elsewhere.
 type registryEntry struct {
 	Name          string         `yaml:"name"`
 	Remote        string         `yaml:"remote"`
