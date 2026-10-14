@@ -1,9 +1,8 @@
 # Opt-in service runtime with dekit
 
-This integration is experimental and requires the CLI implementation tracked in
-[wtc-cli #65](https://github.com/lcorneliussen/wtc-cli/issues/65). Existing stable
-CLI pins do not provide these commands yet. Test a locally built candidate in a
-disposable collection before updating a downstream harness's release pin.
+This integration is available from WTC **v0.1.40** and remains experimental.
+Test it in a disposable collection before updating a harness's release pin.
+Read `wtc release-notes --since <old-pin>` using the target binary first.
 
 WTC owns collection identity, repository association, generated configuration,
 logs and retirement. [dekit 0.10](https://dekit.run/docs/start/runners) owns an
@@ -24,7 +23,7 @@ backend = "dekit"
 ```
 
 Merge these tables with existing ones; TOML cannot repeat a table. Regenerate the
-collection environment using the candidate CLI's `wtc env setup`, then install
+collection environment using `wtc env setup`, then install
 the pinned tool with mise. The adapter accepts dekit 0.10.x; test a newer release
 before changing that constraint. A legacy mprocs binary named `dekit` is rejected.
 An optional `[runtime] binary = "/absolute/path/to/dekit"` selects an isolated
@@ -36,9 +35,9 @@ resolve from `.wtc/config`. Services, tunnels, status and logs then work as in a
 harness collection, and `wtc retire .` stops the runner and removes the
 collection's task files with it.
 
-For an unreleased trial, build the CLI checkout with `go build -o /tmp/wtc-runtime
-./cmd/wtc` and use that executable explicitly for every runtime command. Keep the
-harness's stable `.wtc-cli-version` until a tested release includes the adapter.
+Use the v0.1.40 or newer target binary explicitly during the trial, before
+changing the harness's `.wtc-cli-version`. Keep the pin and compatibility range
+in sync when adopting it.
 Enabling the backend alone starts nothing. Neither `wtc new`, env generation,
 `wtc status` nor repository initialization starts this runtime.
 

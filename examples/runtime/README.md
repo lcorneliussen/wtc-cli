@@ -6,7 +6,7 @@ Copy this directory into a disposable application repository. Its ordinary
 that standalone path. The command caches its synthetic build and hosts a child
 web process, so shutdown exercises a nested launcher.
 
-For the WTC trial, enable the candidate CLI and dekit as described in
+For the WTC trial, use WTC v0.1.40 or newer and enable dekit as described in
 [the onboarding guide](../../internal/wtc/defaults/instructions/runtime.md). Use a worktree of this
 fixture repo in a disposable collection. Before `wtc up`, set unused ports in
 that collection's `.env.collection.local`, for example:
