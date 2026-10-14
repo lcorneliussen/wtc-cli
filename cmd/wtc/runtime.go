@@ -130,46 +130,44 @@ var runtimeActionShort = map[string]string{
 }
 
 func runtimeActionCommand(action string, asJSON *bool) *cobra.Command {
-	{
-		var wait time.Duration
-		cmd := &cobra.Command{Use: action + " [service]", Short: runtimeActionShort[action], Args: cobra.MaximumNArgs(1)}
-		if action != "down" {
-			cmd.Flags().DurationVar(&wait, "wait", 30*time.Second, "Wait for selected startup readiness (0 returns immediately)")
-		}
-		cmd.RunE = func(cmd *cobra.Command, args []string) error {
-			if wait < 0 {
-				return fmt.Errorf("--wait must be nonnegative")
-			}
-			c, err := runtimeContext()
-			if err != nil {
-				return err
-			}
-			target := ""
-			if len(args) != 0 {
-				target = args[0]
-			}
-			result, err := c.RuntimeAction(action, target, wait)
-			if err != nil && !*asJSON {
-				// The task's own output is usually the actual error.
-				for _, tail := range result.Logs {
-					fmt.Fprintf(os.Stderr, "--- %s (last lines of %s)\n%s\n", tail.Path, tail.File, tail.Tail)
-				}
-			}
-			if *asJSON {
-				if emitErr := emit(envelope{OK: err == nil, Data: result, Summary: action + " runtime"}, true); emitErr != nil {
-					return emitErr
-				}
-			}
-			if err != nil {
-				return err
-			}
-			if !*asJSON {
-				fmt.Print(wtc.RuntimeText(result.Items))
-			}
-			return nil
-		}
-		return cmd
+	var wait time.Duration
+	cmd := &cobra.Command{Use: action + " [service]", Short: runtimeActionShort[action], Args: cobra.MaximumNArgs(1)}
+	if action != "down" {
+		cmd.Flags().DurationVar(&wait, "wait", 30*time.Second, "Wait for selected startup readiness (0 returns immediately)")
 	}
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if wait < 0 {
+			return fmt.Errorf("--wait must be nonnegative")
+		}
+		c, err := runtimeContext()
+		if err != nil {
+			return err
+		}
+		target := ""
+		if len(args) != 0 {
+			target = args[0]
+		}
+		result, err := c.RuntimeAction(action, target, wait)
+		if err != nil && !*asJSON {
+			// The task's own output is usually the actual error.
+			for _, tail := range result.Logs {
+				fmt.Fprintf(os.Stderr, "--- %s (last lines of %s)\n%s\n", tail.Path, tail.File, tail.Tail)
+			}
+		}
+		if *asJSON {
+			if emitErr := emit(envelope{OK: err == nil, Data: result, Summary: action + " runtime"}, true); emitErr != nil {
+				return emitErr
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if !*asJSON {
+			fmt.Print(wtc.RuntimeText(result.Items))
+		}
+		return nil
+	}
+	return cmd
 }
 
 func runtimeLogsCommand(asJSON *bool) *cobra.Command {

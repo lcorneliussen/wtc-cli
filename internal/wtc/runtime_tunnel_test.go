@@ -232,6 +232,7 @@ func TestServiceTunnelTemplatesAndRemovingTheLastService(t *testing.T) {
 		{"tailscale", false, `exec tailscale serve --https="$ECHO_PORT" "http://127.0.0.1:$ECHO_PORT"`, ExposureTailnet},
 		{"devtunnel", false, `exec devtunnel host -p "$ECHO_PORT"`, ExposureAccount},
 		{"cloudflare", true, `exec cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$ECHO_PORT"`, ExposurePublic},
+		{"ngrok", true, `exec ngrok http "$ECHO_PORT" --log stdout`, ExposurePublic},
 	} {
 		if _, err := c.Tunnel(TunnelOptions{Service: "echo", Provider: tc.provider, Public: tc.public}); err != nil {
 			t.Fatalf("%s: %v", tc.provider, err)
@@ -281,5 +282,15 @@ func TestServiceTunnelTemplatesAndRemovingTheLastService(t *testing.T) {
 		if item.Kind != "resources" {
 			t.Fatalf("removed service still listed: %+v", item)
 		}
+	}
+}
+
+func TestRemovingTheOnlyServiceBeforeAnyUp(t *testing.T) {
+	c := runtimeFixture(t)
+	if _, err := c.RemoveService("widget/web", true); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := c.runtimeManifest(); m != nil {
+		t.Fatal("removing a service created a runtime")
 	}
 }

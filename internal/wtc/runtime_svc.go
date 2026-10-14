@@ -284,9 +284,13 @@ func (c *Context) RemoveService(service string, shared bool) (RuntimeResult, err
 		return RuntimeResult{}, fmt.Errorf("unknown service %s/%s; wtc svc lists them", repo.dir, name)
 	}
 	if others == 0 {
-		// Nothing would be left to run; stop everything first.
-		if _, err := c.RuntimeAction("down", "", 0); err != nil {
+		// Nothing would be left to run; stop everything first, if it ever ran.
+		if m, err := c.runtimeManifest(); err != nil {
 			return RuntimeResult{}, err
+		} else if m != nil {
+			if _, err := c.RuntimeAction("down", "", 0); err != nil {
+				return RuntimeResult{}, err
+			}
 		}
 	}
 	for path, names := range files {

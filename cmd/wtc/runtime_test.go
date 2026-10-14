@@ -98,3 +98,27 @@ func TestRuntimeCommandsAreReadOnlyUntilAsked(t *testing.T) {
 		t.Fatal("read-only and rejected commands created a runtime")
 	}
 }
+
+func TestSvcCommandArguments(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := runtimeCLI(t, dir, "svc", "add", "web", "npm", "run", "dev"); err == nil || !strings.Contains(err.Error(), "--") {
+		t.Fatalf("add without -- before the command: %v", err)
+	}
+	if _, err := runtimeCLI(t, dir, "svc", "add", "web"); err == nil {
+		t.Fatal("add without a command")
+	}
+	if _, err := runtimeCLI(t, dir, "svc", "tunnel"); err == nil {
+		t.Fatal("tunnel without a service")
+	}
+	if _, err := runtimeCLI(t, dir, "svc", "tunnel", "web", "tailscale", "extra"); err == nil {
+		t.Fatal("tunnel with too many arguments")
+	}
+	if _, err := runtimeCLI(t, dir, "services", "dekit", "--", "--help"); err != nil {
+		t.Fatalf("dekit help through the alias: %v", err)
+	}
+	for _, name := range []string{"up", "down", "restart", "logs", "add", "rm", "tunnel", "dekit", "status"} {
+		if _, err := runtimeCLI(t, dir, "svc", name, "--help"); err != nil {
+			t.Errorf("svc %s --help: %v", name, err)
+		}
+	}
+}
