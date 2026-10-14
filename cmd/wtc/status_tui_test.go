@@ -349,6 +349,15 @@ func TestStatusLongConflictingPRFitsAndKeepsClickTarget(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")
 	prURL := "https://github.com/example/widget/pull/1234567"
+	pr := &wtc.StatusPRFacts{Number: "1234567", URL: prURL, Merge: "CONFLICTING", Checks: "SUCCESS"}
+	plain := statusTUIPR(pr)
+	plainWidth := runewidth.StringWidth(plain)
+	if got := statusTUIRepoPRCell(pr, plainWidth, false); got != plain {
+		t.Fatalf("plain conflict cell should fit exactly: %q", got)
+	}
+	if got := ansi.Strip(statusTUIRepoPRCell(pr, plainWidth, true)); !strings.HasPrefix(got, "✗ ") {
+		t.Fatalf("hyperlink arrow should trigger compact conflict cell: %q", got)
+	}
 	for _, number := range []string{"1234567", "123456789012345"} {
 		snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{
 			Dir: "widget", BranchDisplay: "topic", Tree: "±1234", Ahead: 1234, Behind: 1234,
