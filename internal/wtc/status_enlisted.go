@@ -127,7 +127,7 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	var err error
 	switch forge {
 	case "github.com":
-		raw, err = statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,reviewRequests,latestReviews,mergedAt,baseRefName")
+		raw, err = statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,mergeable,reviewRequests,latestReviews,mergedAt,baseRefName,mergeCommit")
 	case "bitbucket.org":
 		parts := strings.SplitN(slug, "/", 2)
 		raw, err = statusJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
@@ -165,7 +165,7 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 			checks = "NONE"
 		}
 		details[i] = statusPRDetail{Number: record.Number, State: "MERGED", Checks: checks,
-			Merge: "MERGED", Review: "merged", Title: record.Title, MergedOn: record.MergedOn}
+			Merge: "MERGED", Review: "merged", Title: record.Title, MergedOn: record.MergedOn, MergeCommit: record.MergeCommit, Base: record.MergeBase}
 		recorded++
 	}
 	if recorded != 0 {
@@ -291,7 +291,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		row := StatusPRRow{Repo: record.Repo, Number: detail.Number, State: detail.State, Checks: statusString(detail.Checks),
 			Merge: statusString(detail.Merge), Review: statusString(detail.Review), Title: detail.Title,
 			DisplayTitle: detail.Title, Slug: slug, URL: statusString(url), MergedOn: statusString(detail.MergedOn),
-			Draft: detail.State == "DRAFT", OnBranch: detail.State == "MERGED" && branchRow >= 0,
+			Draft: detail.State == "DRAFT", OnBranch: detail.State == "MERGED" && branchRow >= 0, MergeCommit: detail.MergeCommit, Base: detail.Base,
 			Archived: detail.State == "MERGED" && branchRow < 0 && statusArchived(detail.MergedOn, time.Now()),
 		}
 		if row.OnBranch {

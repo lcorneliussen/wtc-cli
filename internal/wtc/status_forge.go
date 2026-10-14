@@ -18,6 +18,7 @@ type statusPRDetail struct {
 	Title           string
 	MergedOn        string
 	Base            string
+	MergeCommit     string
 	ChecksUnsettled bool
 }
 
@@ -62,14 +63,18 @@ func statusCheckResult(rollup []struct {
 
 func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	var p struct {
-		Number            int               `json:"number"`
-		State             string            `json:"state"`
-		Title             string            `json:"title"`
-		IsDraft           bool              `json:"isDraft"`
-		ReviewDecision    string            `json:"reviewDecision"`
-		MergeStateStatus  string            `json:"mergeStateStatus"`
-		MergedAt          string            `json:"mergedAt"`
-		BaseRefName       string            `json:"baseRefName"`
+		Number           int    `json:"number"`
+		State            string `json:"state"`
+		Title            string `json:"title"`
+		IsDraft          bool   `json:"isDraft"`
+		ReviewDecision   string `json:"reviewDecision"`
+		MergeStateStatus string `json:"mergeStateStatus"`
+		Mergeable        string `json:"mergeable"`
+		MergedAt         string `json:"mergedAt"`
+		BaseRefName      string `json:"baseRefName"`
+		MergeCommit      *struct {
+			OID string `json:"oid"`
+		} `json:"mergeCommit"`
 		ReviewRequests    []json.RawMessage `json:"reviewRequests"`
 		LatestReviews     []json.RawMessage `json:"latestReviews"`
 		StatusCheckRollup []struct {
@@ -88,8 +93,14 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	d := statusPRDetail{Number: fmt.Sprint(p.Number), State: strings.ToUpper(p.State),
 		Checks: checks, ChecksUnsettled: unsettled, Merge: p.MergeStateStatus,
 		Title: cleanPRField(p.Title), MergedOn: p.MergedAt, Base: p.BaseRefName}
+	if strings.EqualFold(p.Mergeable, "CONFLICTING") {
+		d.Merge = "CONFLICTING"
+	}
 	if d.Title == "" {
 		d.Title = fallback.Title
+	}
+	if p.MergeCommit != nil {
+		d.MergeCommit = p.MergeCommit.OID
 	}
 	if d.State == "OPEN" && p.IsDraft {
 		d.State = "DRAFT"
@@ -131,6 +142,9 @@ func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 		Draft       bool   `json:"draft"`
 		Title       string `json:"title"`
 		MergedOn    string `json:"merged_on"`
+		MergeCommit *struct {
+			Hash string `json:"hash"`
+		} `json:"merge_commit"`
 		Destination struct {
 			Branch struct {
 				Name string `json:"name"`
@@ -169,6 +183,9 @@ func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 		d.Merge = "MERGED"
 		d.Review = "merged"
 		d.MergedOn = p.MergedOn
+		if p.MergeCommit != nil {
+			d.MergeCommit = p.MergeCommit.Hash
+		}
 	}
 	return d, nil
 }

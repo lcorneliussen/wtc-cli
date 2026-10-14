@@ -18,9 +18,9 @@
 </div>
 
 A **worktree collection** puts the repositories needed for one task in a single
-folder: your API, frontend, shared library, and a project-owned harness. Open
-an agent or editor there and work across them. Start another task alongside it
-with its own worktrees and ports.
+folder: your API, frontend, shared library, and optionally a project-owned
+harness. Open an agent or editor there and work across them. Start another
+task alongside it with its own worktrees and ports.
 
 WTC manages the workspace around your projects: Git worktrees, environment,
 agent guidance, PR status, and cleanup. Projects keep their usual build and
@@ -73,8 +73,22 @@ for macOS or Linux. With mise:
 mise use -g github:lcorneliussen/wtc-cli@0.1.39
 ```
 
-Then follow [getting started](docs/getting-started.md) to set up your first
-workspace with a harness. The
+For a quick task, no harness is needed. Run `wtc init` in an empty folder and
+add repositories by clone URL or existing checkout:
+
+```sh
+mkdir fix-login && cd fix-login
+wtc init
+wtc add-repo git@github.com:example-org/api.git
+wtc add-repo ~/code/web
+```
+
+This **ad-hoc collection** keeps its repo registry locally, shares clones per
+user, and remembers each repository by name for the next one
+([details](docs/getting-started.md#ad-hoc-collection-no-harness)).
+
+For a team workspace, follow [getting started](docs/getting-started.md) to set
+up your first workspace with a harness. The
 [reference harness](https://github.com/lcorneliussen/wtc-boilerplate) is an
 optional starter you can adapt.
 
@@ -85,7 +99,7 @@ can continue to use their own mise files.
 
 ## Work in a collection
 
-From an existing collection:
+From an existing harness-backed collection:
 
 ```sh
 wtc new fix-login api web

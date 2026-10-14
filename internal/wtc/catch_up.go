@@ -175,6 +175,11 @@ func (c *Context) CatchUpInventory(opt CatchUpOptions) (CatchUpReport, []catchUp
 		selectors[name] = false
 	}
 	collections := append([]string(nil), opt.Collections...)
+	if opt.All || len(collections) > 1 || len(collections) == 1 && collections[0] != filepath.Base(c.Collection) {
+		if err := c.RequireWorkspace("catch-up of other collections"); err != nil {
+			return report, nil, err
+		}
+	}
 	if opt.All {
 		dirs, err := WorkspaceCollections(c.Workspace)
 		if err != nil {
@@ -280,6 +285,9 @@ func (c *Context) CatchUpInventory(opt CatchUpOptions) (CatchUpReport, []catchUp
 // The initiating shell's WTC_HARNESS_REPO may name a different collection.
 // Resolve identity from each target's own Git owner or origin first.
 func (c *Context) catchUpHarnessRepo() (string, error) {
+	if c.AdHoc {
+		return "", nil
+	}
 	owner, err := gitOutput("-C", c.Harness, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err == nil {
 		name := strings.TrimSuffix(filepath.Base(owner), ".git")

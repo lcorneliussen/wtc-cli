@@ -353,6 +353,24 @@ func statusTUIFit(value string, width int) string {
 	return b.String() + strings.Repeat(" ", width-1-used) + "…"
 }
 
+func statusTUIPRConflict(pr *wtc.StatusPRFacts) bool {
+	return pr != nil && (pr.Merge == "CONFLICTING" || pr.Merge == "DIRTY")
+}
+
+func statusTUIBehind(row wtc.StatusRepo) string {
+	count := ""
+	if row.Behind > 0 {
+		count = fmt.Sprint(row.Behind)
+	}
+	if row.Conflict || statusTUIPRConflict(row.PR) {
+		return "✗" + count
+	}
+	if count == "" {
+		return "·"
+	}
+	return count
+}
+
 func statusTUIPR(pr *wtc.StatusPRFacts) string {
 	if pr == nil || pr.Number == "" {
 		return "·"
@@ -361,7 +379,12 @@ func statusTUIPR(pr *wtc.StatusPRFacts) string {
 	if pr.Draft {
 		parts = append(parts, "◇")
 	}
-	for _, token := range []string{pr.Checks, pr.Merge, pr.Review} {
+	tokens := []string{pr.Checks, pr.Merge, pr.Review}
+	if statusTUIPRConflict(pr) {
+		parts = append(parts, "✗ conflict")
+		tokens = []string{pr.Checks, pr.Review}
+	}
+	for _, token := range tokens {
 		switch token {
 		case "SUCCESS", "approved":
 			parts = append(parts, "✓")
@@ -389,22 +412,40 @@ func statusTUIPR(pr *wtc.StatusPRFacts) string {
 type statusRepoLayout struct {
 	name, branch, pr, tree, ahead, behind, tip, prod, runtime int
 	showTree, showSync, showBuilds, showRuntime               bool
+	hasTip, hasProd                                           bool
 }
 
 func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayout {
 	l := statusRepoLayout{name: 16, branch: 30, pr: 15, tree: 4, ahead: 3, behind: 3, tip: 8, prod: 8,
-		showTree: true, showSync: true, showBuilds: true}
+		showTree: true, showSync: true}
 	for _, row := range snapshot.Repos {
 		if marks := len(statusRuntimeSlots(statusRuntimeItems(snapshot, row))); marks > 0 && width >= 60 {
 			l.showRuntime = true
 			// One column of air after the marks so they do not run into PR.
 			l.runtime = max(l.runtime, len("LOCAL")+1, marks+1)
 		}
+		l.hasTip = l.hasTip || row.Tip != nil
+		l.hasProd = l.hasProd || row.Prod != nil
 		if row.Tree != "clean" {
 			l.tree = max(l.tree, runewidth.StringWidth(row.Tree))
 		}
 		l.ahead = max(l.ahead, len(fmt.Sprint(row.Ahead)))
-		l.behind = max(l.behind, len(fmt.Sprint(row.Behind)))
+		l.behind = max(l.behind, runewidth.StringWidth(statusTUIBehind(row)))
+		if statusTUIPRConflict(row.PR) {
+			prWidth := runewidth.StringWidth(statusTUIPR(row.PR))
+			if statusTUIURL(row.PR.URL) != "" {
+				prWidth += 2 // Linked number includes the arrow.
+			}
+			l.pr = max(l.pr, prWidth)
+		}
+	}
+	// Build columns exist only for the tiers a provider reported on.
+	l.showBuilds = l.hasTip || l.hasProd
+	if !l.hasTip {
+		l.tip = 0
+	}
+	if !l.hasProd {
+		l.prod = 0
 	}
 	if width >= 100 {
 		l.name = 20
@@ -435,7 +476,7 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 			n += 1 + l.ahead + 1 + l.behind
 		}
 		if l.showBuilds {
-			n += 1 + l.tip + 1 + l.prod
+			n += l.buildsWidth()
 		}
 		return n
 	}
@@ -464,6 +505,25 @@ func (l statusRepoLayout) prStart() int {
 		return l.runtimeStart() + l.runtime + 1
 	}
 	return l.runtimeStart()
+}
+
+// buildsWidth is the width of the build columns, each with its leading space.
+func (l statusRepoLayout) buildsWidth() int {
+	n := 0
+	if l.hasTip {
+		n += 1 + l.tip
+	}
+	if l.hasProd {
+		n += 1 + l.prod
+	}
+	return n
+}
+
+func (l statusRepoLayout) prodStart() int {
+	if l.hasTip {
+		return l.tipStart() + l.tip + 1
+	}
+	return l.tipStart()
 }
 func (l statusRepoLayout) tipStart() int {
 	start := l.prStart() + l.pr + 1 + l.tree
@@ -510,6 +570,10 @@ func statusTUIBuildCell(prefix string, build *wtc.StatusBuild) string {
 			glyph = "●"
 		}
 	}
+	if build.Error == "" && build.HeadInBuild != nil && !*build.HeadInBuild {
+		// The build is real but does not contain this row's HEAD.
+		glyph = "○"
+	}
 	cell := prefix + glyph
 	if build.Build != nil && *build.Build != "" {
 		cell += "#" + *build.Build
@@ -519,6 +583,16 @@ func statusTUIBuildCell(prefix string, build *wtc.StatusBuild) string {
 
 func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, width int, styled bool) string {
 	plain := statusTUIPR(pr)
+	if statusTUIPRConflict(pr) && runewidth.StringWidth(plain) > width {
+		// Keep the warning visible even when the number and signals do not fit.
+		marker, label := "✗ ", "#"+pr.Number
+		if styled {
+			marker = statusTUIStyle(marker, statusToneFailure)
+			label = statusTUILinkCell(label, pr.URL, statusToneLabel)
+			return statusTUIFitANSI(marker+label, width)
+		}
+		return statusTUIFit(marker+label, width)
+	}
 	if !styled || pr == nil || pr.Number == "" {
 		return statusTUIFit(plain, width)
 	}
@@ -552,8 +626,11 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 	if l.showSync {
 		header += " " + statusTUIFit("↑", l.ahead) + " " + statusTUIFit("↓", l.behind)
 	}
-	if l.showBuilds {
-		header += " " + statusTUIFit("TEST", l.tip) + " " + statusTUIFit("PROD", l.prod)
+	if l.showBuilds && l.hasTip {
+		header += " " + statusTUIFit("TEST", l.tip)
+	}
+	if l.showBuilds && l.hasProd {
+		header += " " + statusTUIFit("PROD", l.prod)
 	}
 	if styled {
 		header = statusTUIStyle(header, statusToneHeading)
@@ -610,14 +687,9 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 			line += " " + treeCell
 		}
 		if l.showSync {
-			ahead, behind := "·", "·"
+			ahead, behind := "·", statusTUIBehind(row)
 			if row.Ahead > 0 {
 				ahead = fmt.Sprint(row.Ahead)
-			}
-			if row.Behind > 0 {
-				behind = fmt.Sprint(row.Behind)
-			} else if row.Conflict || row.PR != nil && (row.PR.Merge == "CONFLICTING" || row.PR.Merge == "DIRTY") {
-				behind = "✗"
 			}
 			aheadCell, behindCell := statusTUIFit(ahead, l.ahead), statusTUIFit(behind, l.behind)
 			if styled {
@@ -626,7 +698,7 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 				} else {
 					aheadCell = statusTUIStyle(aheadCell, statusToneDim)
 				}
-				if row.Conflict || row.PR != nil && (row.PR.Merge == "CONFLICTING" || row.PR.Merge == "DIRTY") {
+				if row.Conflict || statusTUIPRConflict(row.PR) {
 					behindCell = statusTUIStyle(behindCell, statusToneFailure)
 				} else if row.Behind > 0 {
 					behindCell = statusTUIStyle(behindCell, statusToneWarning)
@@ -643,7 +715,12 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 				tipCell = statusTUIBuildLink(tipCell, row.Tip)
 				prodCell = statusTUIBuildLink(prodCell, row.Prod)
 			}
-			line += " " + tipCell + " " + prodCell
+			if l.hasTip {
+				line += " " + tipCell
+			}
+			if l.hasProd {
+				line += " " + prodCell
+			}
 		}
 		lines = append(lines, line)
 	}
@@ -728,9 +805,10 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 		}
 		tipStart := layout.tipStart()
 		var build *wtc.StatusBuild
-		if x >= tipStart && x < tipStart+layout.tip {
+		prodStart := layout.prodStart()
+		if layout.hasTip && x >= tipStart && x < tipStart+layout.tip {
 			build = row.Tip
-		} else if x >= tipStart+layout.tip+1 && x < tipStart+layout.tip+1+layout.prod {
+		} else if layout.hasProd && x >= prodStart && x < prodStart+layout.prod {
 			build = row.Prod
 		}
 		if build != nil && build.URL != nil {
@@ -807,6 +885,32 @@ func statusTUIPRGlyph(value *string) string {
 		return "∅"
 	}
 	return "·"
+}
+
+// statusTUIFollowState names the tier a merged PR is waiting on and how that
+// tier's build stands, with the tone to show it in.
+func statusTUIFollowState(follow *wtc.StatusFollow) (string, string) {
+	if follow == nil {
+		return "merged", statusToneDim
+	}
+	if follow.Stage == "done" {
+		return "✓ built", statusToneSuccess
+	}
+	stage := "test"
+	if follow.Stage == "prod" {
+		stage = "prod"
+	}
+	switch follow.Checks {
+	case "WAITING":
+		return "→ " + stage, statusToneWarning
+	case "PENDING", "EXPECTED":
+		return "● " + stage, statusToneWarning
+	case "FAILURE", "ERROR":
+		return "✗ " + stage, statusToneFailure
+	case "UNKNOWN":
+		return "? " + stage, statusToneDim
+	}
+	return "merged", statusToneDim
 }
 
 func statusTUIMergedPR(row wtc.StatusPRRow) bool {
@@ -897,7 +1001,7 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 		} else if row.Draft {
 			state = "◇ draft"
 		} else if merged {
-			state = "merged"
+			state, _ = statusTUIFollowState(row.Follow)
 		} else if row.State == "UNKNOWN" {
 			state = "unknown"
 		}
@@ -927,6 +1031,9 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 				stateCell = statusTUIStyle(stateCell, statusToneFailure)
 			} else if row.OnBranch {
 				stateCell = statusTUIStyle(stateCell, statusToneWarning)
+			} else if merged {
+				_, tone := statusTUIFollowState(row.Follow)
+				stateCell = statusTUIStyle(stateCell, tone)
 			} else {
 				stateCell = statusTUIStyle(stateCell, statusToneDim)
 			}

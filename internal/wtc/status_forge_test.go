@@ -386,6 +386,31 @@ func TestStatusGHDetailSeparatesChecksReviewAndMerge(t *testing.T) {
 	}
 }
 
+func TestStatusGHConflictIndependentOfChecksDraftAndLocalState(t *testing.T) {
+	for _, tc := range []struct {
+		name, state, mergeable, mergeState, want string
+		draft                                    bool
+	}{
+		{"green checks", "OPEN", "CONFLICTING", "DIRTY", "CONFLICTING", false},
+		{"draft label", "OPEN", "CONFLICTING", "DRAFT", "CONFLICTING", true},
+		{"still computing", "OPEN", "UNKNOWN", "UNKNOWN", "UNKNOWN", false},
+		{"blocked by policy", "OPEN", "MERGEABLE", "BLOCKED", "BLOCKED", false},
+		{"legacy cached detail", "OPEN", "", "DIRTY", "DIRTY", false},
+		{"merged overrides stale conflict", "MERGED", "CONFLICTING", "DIRTY", "MERGED", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(fmt.Sprintf(`{"number":7,"state":%q,"isDraft":%t,"mergeable":%q,"mergeStateStatus":%q,"statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}`, tc.state, tc.draft, tc.mergeable, tc.mergeState))
+			detail, err := statusGHDetail(raw, PRRecord{})
+			if err != nil || detail.Merge != tc.want || detail.Checks != "SUCCESS" {
+				t.Fatalf("merge conflict lost or check status changed: %+v %v", detail, err)
+			}
+			if tc.draft && detail.State != "DRAFT" {
+				t.Fatalf("draft fact lost: %+v", detail)
+			}
+		})
+	}
+}
+
 func TestStatusDraftMergedAndUnknownFacts(t *testing.T) {
 	draft, err := statusGHDetail([]byte(`{"number":8,"state":"OPEN","isDraft":true}`), PRRecord{})
 	if err != nil || draft.State != "DRAFT" || draft.Checks != "draft" || draft.Review != "none" {
