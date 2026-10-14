@@ -126,7 +126,7 @@ func statusRuntimeTunnelShown(item wtc.RuntimeItem) bool {
 }
 
 func statusTUIRuntimeLayout(snapshot wtc.StatusSnapshot, width int) statusRuntimeLayout {
-	l := statusRuntimeLayout{marks: 1, repo: statusTUIPRLayout(width).repo, name: 7, state: 11, local: 5}
+	l := statusRuntimeLayout{marks: len("KEY"), repo: statusTUIPRLayout(width).repo, name: 7, state: 11, local: 5}
 	index := map[string]int{}
 	for _, g := range statusRuntimeGroups(snapshot) {
 		l.marks = max(l.marks, len(statusRuntimeSlots(g.members)))
@@ -238,7 +238,7 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 	}
 	l := statusTUIRuntimeLayout(snapshot, width)
 	heading := "SERVICES"
-	header := strings.Repeat(" ", l.marks) + " " + statusTUIFit("REPO", l.repo) + " " + statusTUIFit("NAME", l.name) + " " +
+	header := statusTUIFit("KEY", l.marks) + " " + statusTUIFit("REPO", l.repo) + " " + statusTUIFit("NAME", l.name) + " " +
 		statusTUIFit("STATE", l.state) + " " + statusTUIFit("URL", l.local)
 	for _, c := range l.tunnels {
 		header += " " + statusTUIFit(c.header(), c.width)
