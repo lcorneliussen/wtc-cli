@@ -32,6 +32,7 @@ func emit(v envelope, asJSON bool) error {
 	return nil
 }
 func main() {
+	handOverToDevBuild()
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "wtc:", err)
 		os.Exit(1)
@@ -42,7 +43,7 @@ func run() error {
 	root := &cobra.Command{Use: "wtc", Short: "Worktree collection tools", SilenceUsage: true, SilenceErrors: true}
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "Emit a JSON result")
-	root.Version = version
+	root.Version = versionLabel()
 	cwd := func() (*wtc.Context, error) {
 		dir, err := os.Getwd()
 		if err != nil {
@@ -277,6 +278,7 @@ func run() error {
 	addBrowseCommand(root, &asJSON)
 	addHarnessCommands(root, &asJSON)
 	addReleaseNotesCommand(root, &asJSON)
+	addDevCommands(root, &asJSON)
 	args, err := normalizeStatusWatchArgs(os.Args[1:])
 	if err != nil {
 		return err
@@ -290,6 +292,9 @@ func compatible(requirement, actual string) bool {
 	if err != nil {
 		return false
 	}
+	// Dev builds past a release are prereleases of the next patch
+	// (0.1.40-dev.3); they sit inside the same ranges as the releases around them.
+	constraint.IncludePrerelease = true
 	v, err := semver.NewVersion(actual)
 	if err != nil {
 		return false

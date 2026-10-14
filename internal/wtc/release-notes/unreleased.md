@@ -2,6 +2,7 @@
 
 ## Added
 
+- `wtc dev install` builds the wtc-cli checkout in a collection into `.wtc/dev/wtc`. From this release on, any `wtc` started inside that collection hands over to the dev build while it is the same version or newer, so panes, agents and hooks run the code under development without PATH changes. `wtc dev status` shows which build is in effect, and `wtc dev uninstall` removes it ([#79](https://github.com/lcorneliussen/wtc-cli/issues/79)).
 - `wtc status` follows builds without a harness hook. The test tier is each repository's `default_ref` branch, and the prod tier is `production_ref` (or `release_ref`). GitHub builds come from the branch head's check rollup, and Bitbucket builds from the newest branch pipeline, using the `bb` login or `BB_USERNAME`/`BB_API_TOKEN`.
 - Merged PRs are followed again: the PR table shows the tier still waiting for a passing build that contains the merge (`→ test`, `● prod`, `✗ test`, `✓ built`). The follow starts at the tier that builds the PR's base branch; PRs merged into other branches are not followed. The merge commit and base are recorded in `.wtc-prs` as a separate `# merged-commit` row.
 - Repository rows show a build as `○` when their HEAD is not in it.
