@@ -286,6 +286,9 @@ func compatible(requirement, actual string) bool {
 	if err != nil {
 		return false
 	}
+	// Dev builds past a release are prereleases of the next patch
+	// (0.1.40-dev.3); they sit inside the same ranges as the releases around them.
+	constraint.IncludePrerelease = true
 	v, err := semver.NewVersion(actual)
 	if err != nil {
 		return false
