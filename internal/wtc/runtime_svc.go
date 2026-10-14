@@ -187,7 +187,13 @@ func (c *Context) runtimeChange(path string, edit func(tasks *yaml.Node) error) 
 	if err := runtimeEditFragment(path, edit); err != nil {
 		return err
 	}
-	if _, _, err := c.runtimePlan("dekit"); err != nil {
+	// The real binary also resolves url_env and port_env, so that a
+	// variable that does not resolve is refused now, not on every later up.
+	binary, err := c.runtimeBinary()
+	if err != nil {
+		binary = "dekit"
+	}
+	if _, _, err := c.runtimePlan(binary); err != nil {
 		if readErr == nil {
 			_ = os.WriteFile(path, before, 0644)
 		} else {
@@ -245,6 +251,8 @@ func (c *Context) AddService(opt ServiceOptions) (RuntimeResult, error) {
 	// resolved per collection when the services render.
 	if opt.ReadyLog != "" {
 		task["ready"] = map[string]any{"log": opt.ReadyLog, "timeout": runtimeDekitDuration(timeout)}
+	} else if opt.PortEnv != "" && timeout != 60*time.Second {
+		task["ready"] = map[string]any{"timeout": runtimeDekitDuration(timeout)}
 	}
 	path := runtimeFragmentFor(c, repo, opt.Shared)
 	if err := c.runtimeChange(path, func(tasks *yaml.Node) error { return runtimeAddTask(tasks, name+"/main", task) }); err != nil {

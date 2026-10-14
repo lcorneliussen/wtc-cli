@@ -8,6 +8,9 @@ import (
 )
 
 func (c *Context) statusRuntime(snapshot *StatusSnapshot, all bool) {
+	if c.statusSweep {
+		return
+	}
 	if !all {
 		snapshot.Runtime = c.RuntimeStatus()
 	} else {
@@ -38,6 +41,8 @@ func (c *Context) statusRuntime(snapshot *StatusSnapshot, all bool) {
 					item.Error = binaryErr.Error()
 					snapshot.Runtime = append(snapshot.Runtime, item)
 				}
+				// Resource hook facts come from the manifest, not the runner.
+				snapshot.Runtime = append(snapshot.Runtime, target.runtimeResourceItems(m, false)...)
 				continue
 			}
 			m.Binary = binary
@@ -100,19 +105,19 @@ func RuntimeText(items []RuntimeItem) string {
 	for _, item := range items {
 		key := item.Collection + "/" + item.Group
 		if key != group {
-			fmt.Fprintf(&b, "  %s\n", key)
+			fmt.Fprintf(&b, "  %s\n", runtimeTextSafe(key))
 			group = key
 		}
 		name := strings.TrimPrefix(item.Path, item.Group+"/")
 		if name == item.Path {
 			name = filepath.Base(item.Path)
 		}
-		fmt.Fprintf(&b, "    %-12s %-10s %s", name, item.Kind, item.State)
+		fmt.Fprintf(&b, "    %-12s %-10s %s", runtimeTextSafe(name), runtimeTextSafe(item.Kind), runtimeTextSafe(item.State))
 		if item.Label != "" {
-			fmt.Fprintf(&b, " · %s", item.Label)
+			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.Label))
 		}
 		if item.URL != "" {
-			fmt.Fprintf(&b, " · %s", item.URL)
+			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.URL))
 		}
 		if item.ExitCode != nil {
 			fmt.Fprintf(&b, " · exit %d", *item.ExitCode)
@@ -121,12 +126,23 @@ func RuntimeText(items []RuntimeItem) string {
 			fmt.Fprintf(&b, " · signal %d", *item.Signal)
 		}
 		if item.Reason != "" {
-			fmt.Fprintf(&b, " · %s", item.Reason)
+			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.Reason))
 		}
 		if item.Error != "" {
-			fmt.Fprintf(&b, " · %s", item.Error)
+			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.Error))
 		}
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// runtimeTextSafe keeps a repo's labels and dekit's messages from writing
+// escape sequences or control characters to the terminal.
+func runtimeTextSafe(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r < ' ' || r == 0x7f || r >= 0x80 && r <= 0x9f {
+			return ' '
+		}
+		return r
+	}, value)
 }

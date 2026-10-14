@@ -150,6 +150,10 @@ func (c *Context) runtimeHooks(m *runtimeManifest, tasks []runtimeTask, hook str
 				break
 			}
 		}
+		if hook == "teardown" && resourceIndex < 0 {
+			// Nothing provisioned here, so nothing of this collection's to destroy.
+			continue
+		}
 		if hook == "provision" {
 			teardown := filepath.Join(worktree, ".harness", "runtime-teardown.sh")
 			if err := runtimeRegular(teardown); err != nil {
@@ -229,6 +233,32 @@ func (c *Context) runtimeHooks(m *runtimeManifest, tasks []runtimeTask, hook str
 	return nil
 }
 
+// runtimeGroupTasks picks what starting or restarting a service group runs:
+// its own processes, not its tunnels. A tunnel that is not running opens only
+// through wtc svc tunnel, which checks how far it reaches; a running tunnel
+// restarts with the service it depends on. Starting also brings up a tunnel
+// that autostarts and stays private.
+func runtimeGroupTasks(selector string, tasks []runtimeTask, starting bool) ([]runtimeTask, error) {
+	var picked []runtimeTask
+	for _, task := range tasks {
+		if task.Kind != "endpoint" {
+			picked = append(picked, task)
+			continue
+		}
+		switch task.Exposure {
+		case ExposureTailnet, ExposureAccount, ExposureProtected:
+			if starting && task.Autostart {
+				picked = append(picked, task)
+			}
+		}
+	}
+	if len(picked) == 0 {
+		group := strings.TrimSuffix(selector, "/**")
+		return nil, fmt.Errorf("%s has only tunnels; open one with wtc svc tunnel", group)
+	}
+	return picked, nil
+}
+
 func (c *Context) RuntimeAction(action, target string, wait time.Duration) (RuntimeResult, error) {
 	defer c.signalServicesChanged()
 	result := RuntimeResult{Root: c.runtimeRoot(), Action: action, Items: []RuntimeItem{}}
@@ -255,6 +285,7 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 		if err != nil {
 			return err
 		}
+		grouped := strings.HasSuffix(selector, "/**")
 		live := map[string]bool{}
 		switch action {
 		case "up", "provision":
@@ -263,6 +294,17 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 			}
 			if action == "provision" {
 				return nil
+			}
+			if grouped {
+				if tasks, err = runtimeGroupTasks(selector, tasks, true); err != nil {
+					return err
+				}
+				for _, task := range tasks {
+					if _, err := runtimeCommand(m, true, "start", task.Path); err != nil {
+						return err
+					}
+				}
+				break
 			}
 			args := []string{"up"}
 			if selector != "" {
@@ -301,6 +343,17 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 				if item.State == "ready" || item.State == "running" || item.State == "starting" {
 					live[item.Path] = true
 				}
+			}
+			if grouped {
+				if tasks, err = runtimeGroupTasks(selector, tasks, false); err != nil {
+					return err
+				}
+				for _, task := range tasks {
+					if _, err := runtimeCommand(m, false, "restart", task.Path); err != nil {
+						return err
+					}
+				}
+				break
 			}
 			if _, err := runtimeCommand(m, false, "restart", selector); err != nil {
 				return err

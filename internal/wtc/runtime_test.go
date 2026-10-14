@@ -248,6 +248,12 @@ func TestRetireRuntimeFailurePreservesWorktrees(t *testing.T) {
 	if _, err := target.RenderRuntime(false); err != nil {
 		t.Fatal(err)
 	}
+	// Teardown runs only for what this collection provisioned.
+	m, _ := target.runtimeManifest()
+	m.Resources = []runtimeResource{{Dir: "widget", Repo: "widget", State: "provision-hook-completed"}}
+	if err := runtimeSaveManifest(m); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := c.RetireCollection(RetireOptions{Name: "runtime-failure", Force: true}); err == nil || !strings.Contains(err.Error(), "runtime cleanup") {
 		t.Fatal("ignored cleanup failure", err)
 	}
@@ -462,5 +468,20 @@ func TestRuntimeStatusShowsDiscoveredURLOnlyWhenReady(t *testing.T) {
 	fixtureFile(t, fragment, string(data)+"  x-wtc: {url_log: '(a)(b)'}\n", 0644)
 	if _, _, err := c.runtimePlan("dekit"); err == nil {
 		t.Fatal("accepted an ambiguous url_log")
+	}
+}
+
+func TestRuntimeTeardownSkipsReposItNeverProvisioned(t *testing.T) {
+	c := runtimeFixture(t)
+	marker := filepath.Join(c.Collection, "torn-down")
+	fixtureFile(t, filepath.Join(c.Collection, "widget/.harness/runtime-teardown.sh"), "#!/bin/sh\ntouch '"+marker+"'\n", 0755)
+	if _, err := c.RenderRuntime(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RetireRuntime(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("teardown ran for a repo with nothing provisioned: %v", err)
 	}
 }

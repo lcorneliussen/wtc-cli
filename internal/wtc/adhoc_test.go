@@ -386,3 +386,28 @@ func TestAdHocCheckoutOwnerFetchesTargetAndForgetsDeletedCheckouts(t *testing.T)
 		t.Fatalf("owner did not fall back to the cache: %s %v", owner, err)
 	}
 }
+
+func TestAdHocServicesEnlistRunAndRetireWithTheCollection(t *testing.T) {
+	root := adHocFixture(t)
+	c := initAdHoc(t, filepath.Join(root, "task"))
+	addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + adHocSource(t, root, "widget")})
+	c.Config.Runtime = runtimeFixture(t).Config.Runtime
+	fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), "WIDGET_WEB_PORT=43011\n", 0600)
+	if _, err := c.AddService(ServiceOptions{Service: "web", PortEnv: "WIDGET_WEB_PORT", Cmd: []string{"python3", "-m", "http.server"}, NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	items := c.RuntimeEnlisted()
+	if len(items) != 1 || items[0].Path != "widget/web/main" || items[0].URL != "http://127.0.0.1:43011" {
+		t.Fatalf("ad-hoc service not enlisted: %+v", items)
+	}
+	if _, err := os.Stat(c.runtimeLocalFragment("widget")); err != nil {
+		t.Fatalf("no collection-local task file: %v", err)
+	}
+	result, err := c.RetireCollection(RetireOptions{Name: "task", Self: true, InPlace: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.FolderRemoved {
+		t.Fatalf("services kept the collection folder: %+v", result)
+	}
+}

@@ -30,6 +30,12 @@ before changing that constraint. A legacy mprocs binary named `dekit` is rejecte
 An optional `[runtime] binary = "/absolute/path/to/dekit"` selects an isolated
 trial binary. Relative binary paths resolve from the harness directory.
 
+An ad-hoc collection (`wtc init`) has no harness repository: put the same
+`[runtime]` table in its `.wtc/config/wtc.toml`, where relative binary paths
+resolve from `.wtc/config`. Services, tunnels, status and logs then work as in a
+harness collection, and `wtc retire .` stops the runner and removes the
+collection's task files with it.
+
 For an unreleased trial, build the CLI checkout with `go build -o /tmp/wtc-runtime
 ./cmd/wtc` and use that executable explicitly for every runtime command. Keep the
 harness's stable `.wtc-cli-version` until a tested release includes the adapter.

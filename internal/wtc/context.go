@@ -73,6 +73,9 @@ type Context struct {
 	// callers that only need the snapshot.
 	StatusProgress  func(string) `json:"-"`
 	previewPortBase *int
+	// statusSweep marks a collection read by another collection's status
+	// sweep, which reads its services itself with its own trusted binary.
+	statusSweep bool
 }
 
 var validRepoName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)

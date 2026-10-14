@@ -362,6 +362,12 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 				return err
 			}
 		}
+		// Services enlisted with wtc svc belong to this collection alone.
+		if info, err := os.Lstat(filepath.Join(wtcDir, "svc")); err == nil && info.IsDir() {
+			if err := os.RemoveAll(filepath.Join(wtcDir, "svc")); err != nil {
+				return err
+			}
+		}
 		if err := os.RemoveAll(filepath.Join(wtcDir, "instructions")); err != nil {
 			return err
 		}

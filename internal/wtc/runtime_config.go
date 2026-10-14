@@ -199,11 +199,18 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 							// Ready once the port accepts connections. The port is
 							// resolved here: a runner started before the variable
 							// existed would not see it.
-							if _, set := task["ready"]; !set {
+							if ready, set := task["ready"].(map[string]any); !set {
 								task["ready"] = map[string]any{"tcp": "127.0.0.1:" + port, "timeout": "60s"}
+							} else if len(ready) == 1 && ready["timeout"] != nil {
+								// wtc svc add --ready-timeout without --ready-log.
+								ready["tcp"] = "127.0.0.1:" + port
 							}
 							ports[dir+"/"+strings.Split(local, "/")[0]] = [2]string{name, port}
 						}
+					}
+					if ready, _ := task["ready"].(map[string]any); len(ready) == 1 && ready["timeout"] != nil {
+						// No port to probe: a timeout alone is no readiness check.
+						delete(task, "ready")
 					}
 				}
 				if item.URLLog, _ = metadata["url_log"].(string); item.URLLog != "" {

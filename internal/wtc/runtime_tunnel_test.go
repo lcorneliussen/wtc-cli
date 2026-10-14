@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestRuntimeTunnelRecognisesProvidersFromTheCommand(t *testing.T) {
@@ -305,5 +308,76 @@ func TestRemovingTheOnlyServiceBeforeAnyUp(t *testing.T) {
 	}
 	if m, _ := c.runtimeManifest(); m != nil {
 		t.Fatal("removing a service created a runtime")
+	}
+}
+
+func TestServiceUpAndRestartLeaveAStoppedPublicTunnelClosed(t *testing.T) {
+	c := runtimeFixture(t)
+	fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), "ECHO_PORT=43001\n", 0600)
+	if _, err := c.AddService(ServiceOptions{Service: "echo", PortEnv: "ECHO_PORT", Cmd: []string{"python3", "-m", "http.server"}, NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(c.runtimeRoot(), "fake-tasks.json"), `{"tasks":[]}`, 0600)
+	if _, err := c.Tunnel(TunnelOptions{Service: "echo", Provider: "cloudflare", Public: true}); err != nil {
+		t.Fatal(err)
+	}
+	// The fake runner lists no task as running: the tunnel is closed.
+	for _, action := range []string{"up", "restart"} {
+		os.Remove(filepath.Join(c.runtimeRoot(), "calls"))
+		if _, err := c.RuntimeAction(action, "echo", 0); err != nil {
+			t.Fatalf("%s: %v", action, err)
+		}
+		calls, _ := os.ReadFile(filepath.Join(c.runtimeRoot(), "calls"))
+		verb := map[string]string{"up": "start", "restart": "restart"}[action]
+		if !strings.Contains(string(calls), verb+" widget/echo/main\n") || strings.Contains(string(calls), "cloudflare") || strings.Contains(string(calls), "/**") {
+			t.Fatalf("%s echo reached its public tunnel:\n%s", action, calls)
+		}
+	}
+	// The committed web service starts its private autostart tunnel with it.
+	data, _ := os.ReadFile(runtimeSharedFragment(filepath.Join(c.Collection, "widget")))
+	fixtureFile(t, runtimeSharedFragment(filepath.Join(c.Collection, "widget")), strings.Replace(string(data), "  tags: [endpoint]\n", "  tags: [endpoint]\n  autostart: true\n  x-wtc: {public: false}\n", 1), 0644)
+	os.Remove(filepath.Join(c.runtimeRoot(), "calls"))
+	if _, err := c.RuntimeAction("up", "web", 0); err != nil {
+		t.Fatal(err)
+	}
+	if calls, _ := os.ReadFile(filepath.Join(c.runtimeRoot(), "calls")); !strings.Contains(string(calls), "start widget/web/tunnel\n") {
+		t.Fatalf("private autostart tunnel not started with its service:\n%s", calls)
+	}
+}
+
+func TestServiceAddReadyTimeoutAndUnresolvedVariables(t *testing.T) {
+	c := runtimeFixture(t)
+	fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), "ECHO_PORT=43001\n", 0600)
+	if _, err := c.AddService(ServiceOptions{Service: "echo", PortEnv: "ECHO_PORT", ReadyTimeout: 5 * time.Minute, Cmd: []string{"python3", "-m", "http.server"}, NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	binary, _ := c.runtimeBinary()
+	_, data, err := c.runtimePlan(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var native struct {
+		Tasks map[string]map[string]any `yaml:"tasks"`
+	}
+	if err := yaml.Unmarshal(data, &native); err != nil {
+		t.Fatal(err)
+	}
+	if ready, _ := native.Tasks["widget/echo/main"]["ready"].(map[string]any); ready["tcp"] != "127.0.0.1:43001" || ready["timeout"] != "300s" {
+		t.Fatalf("port probe lost the timeout: %v", native.Tasks["widget/echo/main"])
+	}
+	before, _ := os.ReadFile(c.runtimeLocalFragment("widget"))
+	if _, err := c.AddService(ServiceOptions{Service: "api", URLEnv: "API_URL_MISSING", Cmd: []string{"true"}, NoStart: true}); err == nil {
+		t.Fatal("enlisted a service whose URL variable does not resolve")
+	}
+	if after, _ := os.ReadFile(c.runtimeLocalFragment("widget")); string(after) != string(before) {
+		t.Fatalf("refused service left in the task file:\n%s", after)
+	}
+}
+
+func TestRuntimeTextFiltersControlCharacters(t *testing.T) {
+	text := RuntimeText([]RuntimeItem{{Collection: "c", Group: "widget/web", Path: "widget/web/main", Kind: "service", State: "failed",
+		Label: "web\x1b]8;;https://evil.invalid\x07", Reason: "bad\x1b[2J", Error: "line\rover"}})
+	if strings.ContainsAny(text, "\x1b\x07\r") {
+		t.Fatalf("control characters reached the terminal: %q", text)
 	}
 }
