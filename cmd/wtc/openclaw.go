@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/spf13/cobra"
@@ -167,4 +170,81 @@ func catchUpCheckout(dest string, asJSON bool) error {
 		summary = fmt.Sprintf("merged origin/%s into %s; publish to send the merge (wtc publish)", result.Dest, result.Branch)
 	}
 	return emit(envelope{OK: true, Data: result, Summary: summary}, asJSON)
+}
+
+// gatewayStatus is status under OpenClaw. A collection there is no folder:
+// it is the managed worktrees of one name, one per repository, each owned by
+// a session of its own. Without a name it shows every collection.
+func gatewayStatus(names []string, asJSON bool) error {
+	stateDir := os.Getenv("OPENCLAW_STATE_DIR")
+	if stateDir == "" {
+		home, _ := os.UserHomeDir()
+		stateDir = filepath.Join(home, ".openclaw")
+	}
+	all, err := openclaw.ManagedCollections(stateDir)
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		for name := range all {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+	}
+	result := map[string]openclaw.Collection{}
+	for _, name := range names {
+		result[name] = openclaw.CheckoutsStatus(all[name], true)
+	}
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+	if len(names) == 0 {
+		fmt.Println("No collections: the gateway has no managed worktrees yet. wtc add-repo <repo> --worktree <name> starts one.")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	for i, name := range names {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "%s\n", name)
+		repos := result[name].Repos
+		if len(repos) == 0 {
+			fmt.Fprintln(w, "  (no repositories)")
+			continue
+		}
+		fmt.Fprintln(w, "  REPO\tBRANCH\tAGAINST BASE\tTO PUBLISH\tPR")
+		for _, r := range repos {
+			if r.Error != "" {
+				fmt.Fprintf(w, "  %s\t%s\t\t%s\t\n", filepath.Base(filepath.Dir(r.Path)), r.Branch, r.Error)
+				continue
+			}
+			base := fmt.Sprintf("%d ahead, %d behind", r.Ahead, r.Behind)
+			pending := "nothing"
+			if n := r.Dirty + r.Untracked; n > 0 || r.Unpublished > 0 {
+				pending = fmt.Sprintf("%d files, %d commits", n, r.Unpublished)
+			}
+			pr := "—"
+			if p := r.PullRequest; p != nil {
+				pr = fmt.Sprintf("#%d %s", p.Number, p.State)
+				if p.Draft && p.State == "open" {
+					pr = fmt.Sprintf("#%d draft", p.Number)
+				}
+			}
+			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n", r.Repo, r.Branch, base, pending, pr)
+		}
+	}
+	return w.Flush()
+}
+
+// refuseUnderGateway stops commands that make folder collections: under
+// OpenClaw the gateway owns the worktrees, and a folder collection beside it
+// is one it can neither see nor publish.
+func refuseUnderGateway(command string) error {
+	if currentHost() != openclaw.HostOpenClaw {
+		return nil
+	}
+	return fmt.Errorf("wtc %s makes a folder collection, which the OpenClaw gateway cannot see or publish. Here a collection is managed worktrees of one name: wtc add-repo <owner/name> --worktree <name> starts one, and wtc status lists them (wtc docs instructions/openclaw.md)", command)
 }

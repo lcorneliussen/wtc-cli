@@ -43,11 +43,7 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().Lookup("watch").NoOptDefVal = "30"
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if currentHost() == openclaw.HostOpenClaw {
-			// The gateway's collection is sessions, not a directory: status
-			// here would report an empty collection.
-			plan := openclaw.NewPlan(openclaw.Status())
-			plan.Warnings = append(plan.Warnings, "The collection's repositories are the sessions whose parentSessionKey is the collection's session. In a repository's session, wtc checkouts . prints its branch, pending changes and pull request.")
-			return printPlan(plan)
+			return gatewayStatus(args, *asJSON)
 		}
 		terminal := term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd())
 		implicitTUI := terminal && !cmd.Flags().Changed("tui") && !cmd.Flags().Changed("watch") &&

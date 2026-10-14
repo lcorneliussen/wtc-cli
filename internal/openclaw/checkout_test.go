@@ -9,14 +9,40 @@ import (
 )
 
 func TestDetectHost(t *testing.T) {
-	for want, env := range map[HostKind]map[string]string{
-		HostOpenClaw: {"OPENCLAW_SHELL": "exec", "HERDR_SESSION": "s"},
-		HostHerdr:    {"HERDR_WORKSPACE_ID": "w"},
-		HostTerminal: {"OPENCLAW_SHELL": "", "OPENCLAW_HOME": "/home/node"},
+	for _, tc := range []struct {
+		want HostKind
+		env  map[string]string
+	}{
+		{HostOpenClaw, map[string]string{"OPENCLAW_SHELL": "exec", "HERDR_SESSION": "s"}},
+		// Codex's bash tool and the Control UI terminal: the gateway's env only.
+		{HostOpenClaw, map[string]string{"OPENCLAW_STATE_DIR": "/home/node/.openclaw", "CODEX_HOME": "/x"}},
+		{HostHerdr, map[string]string{"HERDR_WORKSPACE_ID": "w"}},
+		{HostTerminal, map[string]string{"OPENCLAW_SHELL": "", "OPENCLAW_HOME": "/home/node"}},
 	} {
-		if got := DetectHost(func(k string) string { return env[k] }); got != want {
-			t.Errorf("%v: got %s, want %s", env, got, want)
+		if got := DetectHost(func(k string) string { return tc.env[k] }); got != tc.want {
+			t.Errorf("%v: got %s, want %s", tc.env, got, tc.want)
 		}
+	}
+}
+
+func TestManagedCollections(t *testing.T) {
+	state := t.TempDir()
+	for _, dir := range []string{"p1/wtc-smoke", "p2/wtc-smoke", "p1/other"} {
+		if err := os.MkdirAll(filepath.Join(state, "worktrees", dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(state, "worktrees", dir, ".git"), []byte("gitdir: x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Not a worktree: no .git.
+	_ = os.MkdirAll(filepath.Join(state, "worktrees", "p3", "stray"), 0o755)
+	got, err := ManagedCollections(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || len(got["wtc-smoke"]) != 2 || len(got["other"]) != 1 {
+		t.Fatalf("collections %v", got)
 	}
 }
 

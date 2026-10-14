@@ -3,7 +3,9 @@ package openclaw
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +55,27 @@ type PullRequest struct {
 // CheckoutsStatus describes the checkouts at paths. With pullRequests it also asks
 // GitHub, through gh and whatever login gh has, for each GitHub checkout's
 // pull request; a checkout it cannot ask about just has none.
+// ManagedCollections finds the gateway's collections: the managed worktrees
+// under stateDir, grouped by worktree name, which is the collection's name.
+// Each repository's worktree is in a directory of its own project.
+func ManagedCollections(stateDir string) (map[string][]string, error) {
+	dirs, err := filepath.Glob(filepath.Join(stateDir, "worktrees", "*", "*"))
+	if err != nil {
+		return nil, err
+	}
+	collections := map[string][]string{}
+	for _, dir := range dirs {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+			continue
+		}
+		name := filepath.Base(dir)
+		if ValidWorktreeName(name) {
+			collections[name] = append(collections[name], dir)
+		}
+	}
+	return collections, nil
+}
+
 func CheckoutsStatus(paths []string, pullRequests bool) Collection {
 	c := Collection{Schema: CollectionSchema, Repos: []CheckoutStatus{}}
 	for _, p := range paths {

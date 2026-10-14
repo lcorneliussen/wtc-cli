@@ -1,7 +1,7 @@
 # Under OpenClaw
 
-`wtc host` prints `openclaw` when a command runs in an OpenClaw agent's shell
-(the gateway sets `OPENCLAW_SHELL=exec`). There the rules for creating
+`wtc host` prints `openclaw` when a command runs under an OpenClaw gateway: in
+an agent's shell, whatever tool runs it, or in the Control UI's terminal. There the rules for creating
 worktrees and publishing change, because the gateway owns both:
 
 - a command in the agent's shell holds no git credential and cannot reach the
@@ -18,6 +18,12 @@ repository, as `owner/name` or its URL: the gateway clones that itself, with
 its own GitHub login. A repository on another forge has to be registered as a
 project by a gateway admin first.
 
+A collection is not a folder here: it is the gateway's managed worktrees of
+one name, one per repository. Never `wtc init` or `wtc new` a folder
+collection under OpenClaw (wtc refuses): the gateway can neither see nor
+publish it. `wtc status` lists the collections with each repository's branch,
+pending changes and pull request.
+
 So `wtc` does not act there. It checks, then prints a **plan**: JSON on
 stdout with the `intents` for you to carry out, and one line per intent on
 stderr saying how. An intent with a `tool` means: call that tool with the
@@ -29,7 +35,7 @@ args, and do not do the work some other way.
 | add a repository | `wtc add-repo <repo> --worktree <name>` in the parent | call `sessions_spawn` once per intent |
 | publish work | `wtc publish --title "<what changed>"` in the repository's child | call `github_publish`; off GitHub, hand the plan to the forge's skill |
 | take in upstream changes | `wtc catch-up` in the child | publish again to send the merge |
-| see the collection | `wtc status` (prints a `sessions_list` intent); `wtc checkouts .` in a child | call `sessions_list` |
+| see the collection | `wtc status [<name>]`, anywhere | — |
 
 ## Publishing safely
 

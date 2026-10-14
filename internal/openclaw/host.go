@@ -10,10 +10,12 @@ const (
 )
 
 // DetectHost reads the host from the environment. OpenClaw sets
-// OPENCLAW_SHELL=exec for every command an agent runs, and it wins: a gateway
+// OPENCLAW_SHELL=exec for the commands of its exec tool. Agents on other
+// runtimes (Codex's bash tool) and the Control UI's terminal do not get it,
+// but they inherit the gateway's OPENCLAW_STATE_DIR. Either wins: a gateway
 // started from a herdr pane still runs its agents' commands under OpenClaw.
 func DetectHost(getenv func(string) string) HostKind {
-	if getenv("OPENCLAW_SHELL") == "exec" {
+	if getenv("OPENCLAW_SHELL") == "exec" || getenv("OPENCLAW_STATE_DIR") != "" {
 		return HostOpenClaw
 	}
 	for _, name := range []string{"HERDR_SESSION", "HERDR_WORKSPACE_ID", "HARNESS_HERDR_SESSION"} {

@@ -7,7 +7,9 @@ gateway owns both. So under OpenClaw `wtc` checks and plans, and the agent
 carries the plan out with the gateway's tools.
 
 `wtc host` prints `openclaw` when `OPENCLAW_SHELL=exec` is set, which the
-gateway does for every command an agent runs.
+gateway's exec tool does, or when `OPENCLAW_STATE_DIR` is: agents on another
+runtime (Codex's bash tool) and the Control UI's terminal only inherit the
+gateway's environment.
 
 ## A collection is a session and its children
 
@@ -29,7 +31,7 @@ digits and hyphens, at most 64 characters.
 | add a repository | `wtc add-repo <repo> --worktree <name>` in the parent | calls `sessions_spawn` with each intent's `args` |
 | publish | `wtc publish --title "…"` in the repository's child | calls `github_publish` with the intent's `args` |
 | catch up | `wtc catch-up` in the child | publishes again to send the merge |
-| see the collection | `wtc status` | calls `sessions_list`; the children are the repositories |
+| see the collection | `wtc status [<name>]` | reads it: every managed worktree of that name is one repository |
 
 `<repo>` names a project registered on the gateway, or a GitHub repository as
 `owner/name` or URL. For a GitHub repository the intent carries
