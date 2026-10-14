@@ -69,6 +69,7 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 		IsDraft          bool   `json:"isDraft"`
 		ReviewDecision   string `json:"reviewDecision"`
 		MergeStateStatus string `json:"mergeStateStatus"`
+		Mergeable        string `json:"mergeable"`
 		MergedAt         string `json:"mergedAt"`
 		BaseRefName      string `json:"baseRefName"`
 		MergeCommit      *struct {
@@ -92,6 +93,9 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	d := statusPRDetail{Number: fmt.Sprint(p.Number), State: strings.ToUpper(p.State),
 		Checks: checks, ChecksUnsettled: unsettled, Merge: p.MergeStateStatus,
 		Title: cleanPRField(p.Title), MergedOn: p.MergedAt, Base: p.BaseRefName}
+	if strings.EqualFold(p.Mergeable, "CONFLICTING") {
+		d.Merge = "CONFLICTING"
+	}
 	if d.Title == "" {
 		d.Title = fallback.Title
 	}
