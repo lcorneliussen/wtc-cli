@@ -28,6 +28,9 @@ func TestHostedReviewActivityDistinguishesWaitingReportsAndUnavailable(t *testin
 		{"failed-check-requested", `"reviewRequests":[{"login":"copilot-pull-request-reviewer"}],"statusCheckRollup":[{"name":"Copilot code review","status":"COMPLETED","conclusion":"FAILURE"}]`, `[[]]`, "unavailable", false},
 		{"failed-check-with-retry", `"reviewRequests":[{"login":"copilot-pull-request-reviewer"}],"statusCheckRollup":[{"name":"Copilot code review","status":"IN_PROGRESS"},{"name":"Copilot code review","status":"COMPLETED","conclusion":"FAILURE"}]`, `[[]]`, "waiting", true},
 		{"failed-context", `"reviewRequests":[{"login":"copilot-pull-request-reviewer"}],"statusCheckRollup":[{"name":"Copilot code review","state":"ERROR"}]`, `[[]]`, "unavailable", false},
+		{"expected-context", `"reviewRequests":[],"statusCheckRollup":[{"name":"Copilot code review","state":"EXPECTED"}]`, `[[]]`, "waiting", true},
+		{"startup-failure", `"reviewRequests":[{"login":"copilot-pull-request-reviewer"}],"statusCheckRollup":[{"name":"Copilot code review","status":"COMPLETED","conclusion":"STARTUP_FAILURE"}]`, `[[]]`, "unavailable", false},
+		{"stale-check", `"reviewRequests":[{"login":"copilot-pull-request-reviewer"}],"statusCheckRollup":[{"name":"Copilot code review","status":"COMPLETED","conclusion":"STALE"}]`, `[[]]`, "unavailable", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := parseReviewActivity([]byte(`{"headRefOid":"`+head+`",`+tc.meta+`}`), []byte(tc.reviews), activityRaw([]any{activityThreadPage(head, false)}))

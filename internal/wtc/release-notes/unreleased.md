@@ -13,6 +13,7 @@
 
 ## Fixed
 
+- Hosted-review coordination recognizes `EXPECTED` checks as pending and `STARTUP_FAILURE`/`STALE` checks as unavailable. Exact-head summary links preserve filenames beginning with whitespace.
 - Git-generated diff headers for filenames containing spaces keep their correct path, and review bundles force canonical `a/` and `b/` prefixes regardless of local diff settings. These follow-up regressions were found by the independent review of #84.
 - Failed or missing local review concerns now yield `error` instead of a gate-opening `pass-with-notes`. Structured quota errors also try configured fallback agents when a CLI exits successfully, and retry attempts discard incomplete output from the limited agent.
 

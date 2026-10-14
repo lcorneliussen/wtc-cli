@@ -1,6 +1,7 @@
 package wtc
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -21,6 +22,33 @@ func TestReviewPresentationKeepsGateAndImportantFindingsVisible(t *testing.T) {
 	}
 	if got := presentReviewSummary(body, ReviewManifest{Forge: "bitbucket"}, nil); got != body {
 		t.Fatal("Bitbucket received GitHub HTML")
+	}
+}
+
+func TestReviewSourceLinksPreserveWhitespaceInGitFilenames(t *testing.T) {
+	repo := t.TempDir()
+	fixtureGit(t, "-C", repo, "init", "-b", "main")
+	fixtureGit(t, "-C", repo, "config", "user.email", "example@example.invalid")
+	fixtureGit(t, "-C", repo, "config", "user.name", "Example")
+	for _, name := range []string{"\tfirst.go", " leading.go", "trailing.go "} {
+		fixtureFile(t, filepath.Join(repo, name), "package example\n", 0644)
+	}
+	fixtureGit(t, "-C", repo, "add", ".")
+	fixtureGit(t, "-C", repo, "commit", "-m", "fixture")
+	m := ReviewManifest{Forge: "github", RepoDir: repo, Slug: "example/app", HeadSHA: fixtureGit(t, "-C", repo, "rev-parse", "HEAD")}
+	files := reviewSourceFiles(m)
+	for _, name := range []string{"\tfirst.go", " leading.go", "trailing.go "} {
+		if !files[name] {
+			t.Fatalf("Git filename changed: %q in %+v", name, files)
+		}
+	}
+	if files[""] {
+		t.Fatal("empty NUL field became a source file")
+	}
+	body := "**Local review: pass**\n\n`\tfirst.go:1` and ` leading.go:1`\n"
+	got := presentReviewSummary(body, m, files)
+	if !strings.Contains(got, "/%09first.go#L1") || !strings.Contains(got, "/%20leading.go#L1") {
+		t.Fatalf("whitespace file source links missing: %s", got)
 	}
 }
 
