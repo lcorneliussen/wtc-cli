@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -18,9 +22,14 @@ type statusBuildRequest struct {
 	Repo       string `json:"repo"`
 	Worktree   string `json:"worktree"`
 	Slug       string `json:"slug"`
+	Forge      string `json:"forge,omitempty"`
 	Branch     string `json:"branch"`
 	Tier       string `json:"tier"`
 }
+
+// errStatusBuildDefault is how a hook hands one request back to the built-in
+// provider, so a harness can customize some repositories and keep the rest.
+var errStatusBuildDefault = fmt.Errorf("use the default build provider")
 
 type statusLimitedBuffer struct {
 	bytes.Buffer
@@ -79,10 +88,17 @@ func (c *Context) statusBuildFromHook(path string, request statusBuildRequest) (
 	if strings.TrimSpace(stdout.String()) == "" || strings.TrimSpace(stdout.String()) == "null" {
 		return nil, nil
 	}
-	var build StatusBuild
+	var build struct {
+		StatusBuild
+		UseDefault bool `json:"use_default"`
+	}
 	if err := json.Unmarshal(stdout.Bytes(), &build); err != nil {
 		return nil, fmt.Errorf("status build hook JSON: %w", err)
 	}
+	if build.UseDefault {
+		return nil, errStatusBuildDefault
+	}
+	build.HeadInBuild, build.Error = nil, ""
 	if build.Branch == "" {
 		build.Branch = request.Branch
 	}
@@ -102,45 +118,240 @@ func (c *Context) statusBuildFromHook(path string, request statusBuildRequest) (
 			return nil, fmt.Errorf("status build hook returned an invalid build URL")
 		}
 	}
+	if build.SHA != nil && !statusCommitHash.MatchString(*build.SHA) {
+		return nil, fmt.Errorf("status build hook returned an invalid commit")
+	}
 	if build.Checks == nil && build.Build == nil {
 		return nil, nil
 	}
-	return &build, nil
+	return &build.StatusBuild, nil
+}
+
+var statusCommitHash = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
+
+type statusBuildTier struct {
+	Tier, Branch string
+}
+
+// statusBuildTiers maps the registry onto build tiers. The development tip is
+// the test tier; production_ref (or release_ref) is production. When
+// production deploys from the development tip itself, that one branch is
+// reported as production only.
+func statusBuildTiers(repo Repo) []statusBuildTier {
+	tip := strings.TrimPrefix(repo.DefaultRef, "origin/")
+	if tip == "" {
+		tip = "main"
+	}
+	prod := strings.TrimPrefix(repo.ProductionRef, "origin/")
+	if prod == "" {
+		prod = strings.TrimPrefix(repo.ReleaseRef, "origin/")
+	}
+	switch prod {
+	case "":
+		return []statusBuildTier{{"tip", tip}}
+	case tip:
+		return []statusBuildTier{{"prod", tip}}
+	}
+	return []statusBuildTier{{"tip", tip}, {"prod", prod}}
+}
+
+func (c *Context) statusBuild(hook string, request statusBuildRequest) *StatusBuild {
+	build, err := (*StatusBuild)(nil), errStatusBuildDefault
+	if hook != "" {
+		build, err = c.statusBuildFromHook(hook, request)
+	}
+	if err == errStatusBuildDefault {
+		build, err = statusForgeBuild(request.Forge, request.Slug, request.Branch)
+	}
+	if err != nil {
+		// One unreachable provider must not cost the rest of the refresh.
+		message := strings.TrimSpace(err.Error())
+		if len(message) > 300 {
+			message = message[:300] + "…"
+		}
+		return &StatusBuild{Branch: request.Branch, Checks: statusString("ERROR"), Error: message}
+	}
+	return build
+}
+
+// statusHeadInBuild answers whether head is contained in the build commit.
+// A build commit the local repository has not fetched yet is unknown, not
+// "outside the build".
+func statusHeadInBuild(worktree, head, sha string) *bool {
+	if worktree == "" || head == "" || sha == "" {
+		return nil
+	}
+	if _, err := statusGit(worktree, "cat-file", "-e", sha+"^{commit}"); err != nil {
+		return nil
+	}
+	_, err := statusGit(worktree, "merge-base", "--is-ancestor", head, sha)
+	if err == nil {
+		yes := true
+		return &yes
+	}
+	if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.ExitCode() == 1 {
+		no := false
+		return &no
+	}
+	return nil
 }
 
 func (c *Context) statusBuildFacts(snapshot *StatusSnapshot) error {
-	path, err := c.statusBuildHookPath()
-	if err != nil || path == "" {
+	hook, err := c.statusBuildHookPath()
+	if err != nil {
 		return err
 	}
-	for i := range snapshot.Repos {
-		row := &snapshot.Repos[i]
+	type job struct {
+		repo string
+		tier statusBuildTier
+		req  statusBuildRequest
+	}
+	jobs := []job{}
+	worktrees := map[string]string{}
+	harnessName, _ := c.HarnessRepoName()
+	for _, row := range snapshot.Repos {
 		repo, err := c.Repository(row.Repo)
 		if err != nil {
 			// Auxiliary worktrees can be checked out without a registry entry.
 			// The build provider only has a branch contract for registered repos.
 			continue
 		}
-		c.statusProgress(fmt.Sprintf("Checking builds %d/%d", i+1, len(snapshot.Repos)))
-		tip := strings.TrimPrefix(repo.DefaultRef, "origin/")
-		if tip == "" {
-			tip = "main"
+		if _, seen := worktrees[repo.Name]; seen {
+			continue
 		}
-		slug, _ := c.statusRecordForge(PRRecord{Repo: row.Repo}, snapshot.Repos)
-		request := statusBuildRequest{Collection: filepath.Base(c.Collection), Repo: row.Repo,
-			Worktree: row.Worktree, Slug: slug, Branch: tip, Tier: "tip"}
-		row.Tip, err = c.statusBuildFromHook(path, request)
-		if err != nil {
-			return fmt.Errorf("%s tip: %w", row.Repo, err)
+		worktrees[repo.Name] = row.Worktree
+		slug, forge := c.statusRecordForge(PRRecord{Repo: row.Repo}, snapshot.Repos)
+		if hook == "" && forge == "" {
+			continue
 		}
-		prod := strings.TrimPrefix(repo.ProductionRef, "origin/")
-		if prod != "" && prod != tip {
-			request.Branch, request.Tier = prod, "prod"
-			row.Prod, err = c.statusBuildFromHook(path, request)
-			if err != nil {
-				return fmt.Errorf("%s prod: %w", row.Repo, err)
-			}
+		for _, tier := range statusBuildTiers(repo) {
+			jobs = append(jobs, job{repo.Name, tier, statusBuildRequest{Collection: filepath.Base(c.Collection),
+				Repo: row.Repo, Worktree: row.Worktree, Slug: slug, Forge: forge, Branch: tier.Branch, Tier: tier.Tier}})
 		}
 	}
+	if len(jobs) == 0 {
+		return nil
+	}
+	results := make([]*StatusBuild, len(jobs))
+	limit := make(chan struct{}, 4)
+	var workers sync.WaitGroup
+	var done atomic.Int32
+	for i, j := range jobs {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			limit <- struct{}{}
+			defer func() { <-limit }()
+			results[i] = c.statusBuild(hook, j.req)
+			c.statusProgress(fmt.Sprintf("Checking builds %d/%d", done.Add(1), len(jobs)))
+		}()
+	}
+	workers.Wait()
+	builds := map[string]map[string]*StatusBuild{}
+	for i, j := range jobs {
+		if results[i] == nil {
+			continue
+		}
+		if results[i].Error != "" {
+			c.statusProgress(fmt.Sprintf("%s %s build: %s", j.repo, j.tier.Tier, results[i].Error))
+		}
+		if builds[j.repo] == nil {
+			builds[j.repo] = map[string]*StatusBuild{}
+		}
+		builds[j.repo][j.tier.Tier] = results[i]
+	}
+	for i := range snapshot.Repos {
+		row := &snapshot.Repos[i]
+		repo, err := c.Repository(row.Repo)
+		if err != nil {
+			continue
+		}
+		head, _ := statusGit(row.Worktree, "rev-parse", "HEAD")
+		attribute := func(build *StatusBuild) *StatusBuild {
+			if build == nil {
+				return nil
+			}
+			own := *build
+			if own.SHA != nil {
+				own.HeadInBuild = statusHeadInBuild(row.Worktree, head, *own.SHA)
+			}
+			return &own
+		}
+		row.Tip = attribute(builds[repo.Name]["tip"])
+		row.Prod = attribute(builds[repo.Name]["prod"])
+	}
+	for i := range snapshot.PRs {
+		pr := &snapshot.PRs[i]
+		name := pr.Repo
+		if name == "harness" && harnessName != "" {
+			name = harnessName
+		}
+		if repo, err := c.Repository(name); err == nil {
+			name = repo.Name
+		}
+		statusFollowPR(pr, worktrees[name], builds[name]["tip"], builds[name]["prod"])
+	}
 	return nil
+}
+
+func statusFollowLabel(build *StatusBuild, contained *bool) string {
+	if build == nil {
+		return ""
+	}
+	label := ""
+	if build.Build != nil && *build.Build != "" {
+		label = " #" + *build.Build
+	}
+	switch {
+	case build.Error != "":
+		return "error"
+	case contained != nil && !*contained:
+		return "waiting" + label
+	case build.Checks != nil:
+		return statusGlyph(*build.Checks) + label
+	}
+	return strings.TrimSpace(label)
+}
+
+// statusFollowPR carries a merged PR through the test and production builds:
+// it is followed until each tier has a passing build that contains the merge.
+func statusFollowPR(pr *StatusPRRow, worktree string, tip, prod *StatusBuild) {
+	if pr.State != "MERGED" || pr.Archived || pr.OnBranch {
+		return
+	}
+	for _, tier := range []struct {
+		stage string
+		build *StatusBuild
+		label **string
+	}{{"tip", tip, &pr.FollowTipBuild}, {"prod", prod, &pr.FollowProdBuild}} {
+		if tier.build == nil {
+			continue
+		}
+		var contained *bool
+		if tier.build.SHA != nil {
+			contained = statusHeadInBuild(worktree, pr.MergeCommit, *tier.build.SHA)
+		}
+		*tier.label = statusString(statusFollowLabel(tier.build, contained))
+		if pr.Follow != nil {
+			continue
+		}
+		checks := "PENDING"
+		switch {
+		case tier.build.Error != "":
+			checks = "ERROR"
+		case contained == nil:
+			// Without both commits the build cannot be attributed to the merge.
+			checks = "UNKNOWN"
+		case !*contained:
+			checks = "WAITING"
+		case tier.build.Checks != nil:
+			checks = *tier.build.Checks
+		}
+		if checks != "SUCCESS" {
+			pr.Follow = &StatusFollow{Stage: tier.stage, Checks: checks, Build: tier.build.Build, URL: tier.build.URL}
+		}
+	}
+	if pr.Follow == nil && (tip != nil || prod != nil) {
+		pr.Follow = &StatusFollow{Stage: "done", Checks: "SUCCESS"}
+	}
 }

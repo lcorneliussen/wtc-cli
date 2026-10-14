@@ -79,6 +79,9 @@ func statusBuildLabel(build *StatusBuild) string {
 	if build == nil {
 		return ""
 	}
+	if build.Error != "" {
+		return "error: " + build.Error
+	}
 	glyph := ""
 	if build.Checks != nil {
 		glyph = statusGlyph(*build.Checks)
@@ -88,7 +91,10 @@ func statusBuildLabel(build *StatusBuild) string {
 	}
 	label := statusMarkdownLink(build.URL, "#"+*build.Build)
 	if glyph != "" {
-		return glyph + " " + label
+		label = glyph + " " + label
+	}
+	if build.HeadInBuild != nil && !*build.HeadInBuild {
+		label += " (HEAD not in build)"
 	}
 	return label
 }
