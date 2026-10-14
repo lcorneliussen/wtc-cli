@@ -18,13 +18,14 @@ import (
 )
 
 type ReviewRunOptions struct {
-	Strong   string
-	Standard string
-	Fast     string
-	Lead     string
-	Parallel int
-	Timeout  time.Duration
-	Only     []string
+	Strong      string
+	Standard    string
+	Fast        string
+	Lead        string
+	Parallel    int
+	Timeout     time.Duration
+	Only        []string
+	HostedFirst bool
 }
 
 type ReviewRunResult struct {
@@ -91,6 +92,11 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	if manifest.RepoDir != worktree || manifest.Slug != slug || manifest.Forge != forge {
 		return ReviewRunResult{}, fmt.Errorf("bundle repository does not match this collection")
 	}
+	if opt.HostedFirst {
+		if err := c.PrepareHostedReviewBundle(bundle); err != nil {
+			return ReviewRunResult{}, err
+		}
+	}
 	if opt.Strong == "" {
 		opt.Strong = reviewEnv("HARNESS_REVIEW_STRONG", "claude:opus")
 	}
@@ -154,6 +160,18 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	for _, id := range opt.Only {
 		selected[id] = true
 	}
+	available := map[string]bool{}
+	for _, path := range concernFiles {
+		available[strings.TrimSuffix(filepath.Base(path), ".md")] = true
+	}
+	for id := range selected {
+		if !available[id] {
+			return ReviewRunResult{}, fmt.Errorf("unknown review concern %q", id)
+		}
+	}
+	if len(concernFiles) == 0 {
+		return ReviewRunResult{}, fmt.Errorf("review bundle has no concerns")
+	}
 	sem := make(chan struct{}, opt.Parallel)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -178,6 +196,12 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 		}(id, path)
 	}
 	wg.Wait()
+	for _, path := range concernFiles {
+		id := strings.TrimSuffix(filepath.Base(path), ".md")
+		if err := validateReviewFindings(filepath.Join(bundle, "findings", id+".json"), id); err != nil {
+			log.WriteString(reviewConcernError(bundle, id, err.Error()))
+		}
+	}
 	if err := os.WriteFile(filepath.Join(bundle, "run.log"), log.Bytes(), 0644); err != nil {
 		return ReviewRunResult{}, err
 	}
@@ -215,17 +239,17 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 		return ReviewRunResult{}, fmt.Errorf("lead wrote no verdict")
 	}
 	verdict := strings.TrimSpace(string(verdictData))
-	if verdict != "pass" && verdict != "pass-with-notes" && verdict != "changes-requested" {
+	if verdict != "pass" && verdict != "pass-with-notes" && verdict != "changes-requested" && verdict != "error" {
 		return ReviewRunResult{}, fmt.Errorf("invalid lead verdict %q", verdict)
 	}
 	blockers, errors, err := countReviewFindings(filepath.Join(bundle, "findings"))
 	if err != nil {
 		return ReviewRunResult{}, err
 	}
-	if blockers > 0 {
+	if errors > 0 {
+		verdict = "error"
+	} else if blockers > 0 {
 		verdict = "changes-requested"
-	} else if errors > 0 && verdict == "pass" {
-		verdict = "pass-with-notes"
 	}
 	if err := os.WriteFile(filepath.Join(bundle, "verdict"), []byte(verdict+"\n"), 0644); err != nil {
 		return ReviewRunResult{}, err
@@ -249,7 +273,7 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	return ReviewRunResult{Bundle: bundle, Verdict: verdict, Blockers: blockers, Round: manifest.Round, Concerns: count}, nil
 }
 
-var reviewHeading = regexp.MustCompile(`(?m)^(?:🟢 |🟡 |🔴 )?\*\*Local review: (pass|pass-with-notes|changes-requested)\*\*[^\n]*`)
+var reviewHeading = regexp.MustCompile(`(?m)^(?:🟢 |🟡 |🔴 )?\*\*Local review: (pass|pass-with-notes|changes-requested|error)\*\*[^\n]*`)
 
 func alignReviewHeading(summary, verdict string) string {
 	match := reviewHeading.FindStringSubmatchIndex(summary)
@@ -288,6 +312,7 @@ func (c *Context) runReviewConcern(bundle string, manifest ReviewManifest, id, p
 	prompt := filepath.Join(bundle, ".prompts", id+".md")
 	findings := filepath.Join(bundle, "findings", id+".json")
 	_ = os.Remove(findings)
+	_ = os.Remove(filepath.Join(bundle, "findings", id+".raw"))
 	if err := renderReviewPrompt(prompt, template, map[string]string{
 		"BUNDLE": bundle, "REPO_DIR": manifest.RepoDir, "CONCERN_FILE": path, "CONCERN_ID": id,
 		"FINDINGS_FILE": findings, "MANIFEST": filepath.Join(bundle, "manifest.env"),
@@ -421,6 +446,18 @@ func runReviewChain(bundle, repoDir, prompt, specs string, timeout time.Duration
 	}
 	var total reviewRunStats
 	for i, spec := range list {
+		if i > 0 {
+			id := strings.TrimSuffix(filepath.Base(prompt), ".md")
+			outputs := []string{filepath.Join(bundle, "findings", id+".json")}
+			if id == "lead" {
+				outputs = []string{filepath.Join(bundle, "summary.md"), filepath.Join(bundle, "verdict")}
+			}
+			for _, path := range outputs {
+				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+					return "", "", nil, total, err
+				}
+			}
+		}
 		parts := strings.SplitN(spec, ":", 2)
 		agent, model := parts[0], ""
 		if len(parts) == 2 {
@@ -428,14 +465,39 @@ func runReviewChain(bundle, repoDir, prompt, specs string, timeout time.Duration
 		}
 		_ = os.Remove(statsPath)
 		output, elapsed, err := launchReviewAgent(bundle, repoDir, prompt, agent, model, timeout, statsPath)
+		limited := reviewAgentLimited(output, err)
+		if limited && err == nil {
+			err = fmt.Errorf("%s reported a review usage limit", agent)
+		}
 		attempt := collectReviewStats(statsPath, agent, model, elapsed, "", output)
 		addReviewUsage(&total, attempt, i > 0)
 		total.Agent, total.Model = agent, attempt.Model
-		if err == nil || i == len(list)-1 || !reviewLimitMessage.Match(output) {
+		if err == nil || i == len(list)-1 || !limited {
 			return agent, model, output, total, err
 		}
 	}
 	return "", "", nil, total, fmt.Errorf("review agent chain exhausted")
+}
+
+func reviewAgentLimited(output []byte, err error) bool {
+	if err != nil {
+		return reviewLimitMessage.Match(output)
+	}
+	for _, line := range bytes.Split(output, []byte("\n")) {
+		var event struct {
+			Type    string          `json:"type"`
+			IsError bool            `json:"is_error"`
+			Error   json.RawMessage `json:"error"`
+		}
+		if json.Unmarshal(line, &event) == nil {
+			if (event.Type == "error" || event.IsError || len(event.Error) > 0 && string(event.Error) != "null") && reviewLimitMessage.Match(line) {
+				return true
+			}
+		} else if len(bytes.TrimSpace(output)) < 1024 && reviewLimitMessage.Match(line) {
+			return true
+		}
+	}
+	return false
 }
 
 func launchReviewAgent(bundle, repoDir, prompt, agent, model string, timeout time.Duration, statsPath string) ([]byte, time.Duration, error) {

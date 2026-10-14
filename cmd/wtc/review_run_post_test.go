@@ -25,7 +25,15 @@ func TestReviewRunPostUpdatesOneCommentOnSuccessAndFailure(t *testing.T) {
 	forgeLog := filepath.Join(bin, "forge.log")
 	gh := `#!/bin/sh
 case "$*" in
+  *'pr view 7'*'--json headRefOid,reviewRequests,statusCheckRollup'*)
+    if [ "${FAKE_HOSTED_WAITING:-}" = 1 ]; then
+      echo '{"headRefOid":"1234567890abcdef1234567890abcdef12345678","reviewRequests":[{"login":"copilot-pull-request-reviewer"}],"statusCheckRollup":[]}'
+    else
+      echo '{"headRefOid":"1234567890abcdef1234567890abcdef12345678","reviewRequests":[],"statusCheckRollup":[]}'
+    fi ;;
   *'pr view 7'*'--json headRefOid'*) echo '{"headRefOid":"1234567890abcdef1234567890abcdef12345678"}' ;;
+  *'pulls/7/reviews?per_page=100'*) echo '[[]]' ;;
+  *'api graphql'*) echo '[{"data":{"repository":{"pullRequest":{"headRefOid":"1234567890abcdef1234567890abcdef12345678","reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}]' ;;
   *'pulls/7/comments?per_page=100'*) echo '[[]]' ;;
   *'issues/7/comments'*)
     body=$(cat)
@@ -109,5 +117,18 @@ esac
 				t.Fatalf("expected updates on one comment: %s", log)
 			}
 		})
+	}
+	t.Setenv("FAKE_HOSTED_WAITING", "1")
+	t.Setenv("FAKE_REVIEW_FAIL", "")
+	if err := os.WriteFile(forgeLog, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	os.Args = []string{"wtc", "review", "run", filepath.Join(collection, "success"), "--collection", collection, "--post", "--fast", "test:", "--lead", "test:"}
+	if err := run(); err == nil || !strings.Contains(err.Error(), "hosted review is waiting") {
+		t.Fatalf("active hosted review wasn't deferred: %v", err)
+	}
+	log, _ := os.ReadFile(forgeLog)
+	if len(log) != 0 {
+		t.Fatalf("deferred run posted progress/failure: %s", log)
 	}
 }

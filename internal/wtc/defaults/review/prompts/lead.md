@@ -30,7 +30,8 @@ PR comment and a verdict. You did not write the change.
    - open `major`, no blocker → `pass-with-notes`, or `changes-requested` if
      you judge a major merge-stopping (say why)
    - otherwise `pass`
-   - any concern with `status: error` (or missing) → at best `pass-with-notes`
+   - any concern with `status: error` (or missing) → `error`; incomplete
+     coverage never opens the gate, even after a clean hosted review
    Findings with `prior: "addressed"` are not open.
 4. **Inline comments** are posted from each concern finding's `file` and
    `line` (new-file line), not from this summary. When you restate a finding,
@@ -55,11 +56,14 @@ and collapses secondary sections. Keep those as `###` headings — do not add
 5. On re-reviews: `### Addressed since previous round` — one line per closed
    finding (fixed, or answered by the author with a reason you accept).
 6. Dropped or downgraded findings, if any, in one short list with reasons.
+7. If the comments concern has actionable notes, `### Comment cleanup plan`
+   with a short Delete / Refactor first / Keep plan. Preserve its useful
+   rationale and avoid repeating the same inline findings.
 
 Do **not** write a status line starting with `wtc-review v1` — the posting
 tool appends it.
 
 ## Write `{{VERDICT_FILE}}`
 
-One word, no newline decoration: `pass`, `pass-with-notes` or
-`changes-requested`. Nothing else is needed on stdout.
+One word, no newline decoration: `pass`, `pass-with-notes`,
+`changes-requested` or `error`. Nothing else is needed on stdout.
