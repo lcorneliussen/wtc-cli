@@ -10,6 +10,8 @@ private downstream projects or link to their delivery records. Keep that trackin
 private, and pass the same restriction to every delegated follower.
 # Open or advance a review-ready PR
 
+**Under OpenClaw** (`wtc host` prints `openclaw`) do not push or run `gh pr create`: run `wtc publish` in the repository's session and carry out its plan — see [openclaw.md](../../instructions/openclaw.md). The gateway opens a draft pull request; marking it ready and following its checks continue as below.
+
 This skill opens and advances review-ready PRs. Opening or advancing one starts
 [wtc-follow](../wtc-follow/SKILL.md) ownership for this session: resume on its
 status/check/review updates and carry it through main builds and the task's

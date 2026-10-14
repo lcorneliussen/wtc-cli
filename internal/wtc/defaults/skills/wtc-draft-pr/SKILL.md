@@ -10,6 +10,8 @@ private downstream projects or link to their delivery records. Keep that trackin
 private, and pass the same restriction to every delegated follower.
 # Open or advance a draft PR
 
+**Under OpenClaw** (`wtc host` prints `openclaw`) do not push or run `gh pr create`: run `wtc publish` in the repository's session and carry out its plan — see [openclaw.md](../../instructions/openclaw.md). The gateway's pull requests are drafts already.
+
 Same machinery as `wtc-pr`, one difference that matters: **a draft does not
 summon anyone.** Reviewers aren't notified, review bots stay quiet, and the
 PR is not a claim that the change is finished. Use it to make work visible, to

@@ -5,6 +5,8 @@ description: Catch up selected repositories in one or explicitly requested multi
 
 # Catch a wtc up
 
+**Under OpenClaw** (`wtc host` prints `openclaw`) `wtc catch-up` works on the current session's worktree only: it merges the destination branch, never rebases and never pushes — see [openclaw.md](../../instructions/openclaw.md).
+
 Catch-up integrates work from outside this session. For the session's owned
 PRs, [wtc-follow](../wtc-follow/SKILL.md) carries review, main builds and delivery
 to completion. After catch-up pushes a live branch merge or returns a merged
