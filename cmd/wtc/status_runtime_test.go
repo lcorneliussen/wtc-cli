@@ -5,6 +5,7 @@ import (
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
@@ -255,5 +256,25 @@ func TestStatusRuntimePortColourFollowsState(t *testing.T) {
 	}
 	if _, tone := statusRuntimeMark(wtc.RuntimeItem{Kind: "resources", Group: "w/database", State: "provision-hook-completed"}); tone == statusToneSuccess {
 		t.Error("a provisioned resource looks like a running one")
+	}
+}
+
+func TestStatusTUIServiceStatesRefreshOnTheirOwnCycle(t *testing.T) {
+	running := wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/server", Group: "widget/web", Kind: "service", State: "ready"}
+	stopped := running
+	stopped.State = "absent"
+	model := statusTUIModel{width: 100, height: 30, context: &wtc.Context{}, focused: true, snapshot: wtc.StatusSnapshot{Collection: "fixture"}}
+	next, cmd := model.Update(statusRuntimeMsg{items: []wtc.RuntimeItem{running}})
+	if cmd == nil {
+		t.Fatal("no next service refresh scheduled")
+	}
+	if _, ok := cmd().(statusRuntimeTickMsg); !ok {
+		t.Fatal("the next service refresh is not a tick")
+	}
+	// A full refresh that read the states earlier does not undo newer ones.
+	next, _ = next.(statusTUIModel).Update(statusRuntimeMsg{items: []wtc.RuntimeItem{stopped}})
+	next, _ = next.(statusTUIModel).Update(statusLoadedMsg{snapshot: wtc.StatusSnapshot{Collection: "fixture", Runtime: []wtc.RuntimeItem{running}}, at: time.Now()})
+	if got := next.(statusTUIModel).snapshot.Runtime[0].State; got != "absent" {
+		t.Fatalf("full refresh replaced a newer service state with %q", got)
 	}
 }

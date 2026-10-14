@@ -139,12 +139,23 @@ func (m statusTUIModel) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// statusRuntimeMsg carries runtime states, which arrive long before a full
-// refresh with its fetches and forge calls.
+// statusRuntimeMsg carries service states. They are read on their own short
+// cycle: a full refresh, with its fetches and forge calls, would show a
+// stopped or crashed service only minutes later.
 type statusRuntimeMsg struct{ items []wtc.RuntimeItem }
+
+type statusRuntimeTickMsg struct{}
 
 func statusTUIRuntimeRefresh(c *wtc.Context) tea.Cmd {
 	return func() tea.Msg { return statusRuntimeMsg{items: c.RuntimeStatus()} }
+}
+
+func statusTUIRuntimeTick(focused bool) tea.Cmd {
+	every := 3 * time.Second
+	if !focused {
+		every = 15 * time.Second
+	}
+	return tea.Tick(every, func(time.Time) tea.Msg { return statusRuntimeTickMsg{} })
 }
 
 func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -159,6 +170,9 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.nextRefresh = time.Now().Add(m.background)
 	case statusRuntimeMsg:
 		m.snapshot.Runtime = msg.items
+		return m, statusTUIRuntimeTick(m.focused)
+	case statusRuntimeTickMsg:
+		return m, statusTUIRuntimeRefresh(m.context)
 	case statusRefreshStartedMsg:
 		return m, statusTUIWait(msg.events)
 	case statusProgressMsg:
@@ -202,7 +216,13 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.errorText = msg.err.Error()
 		} else {
+			// Service states from the short cycle are newer than the ones a
+			// full refresh read when it started.
+			live := m.snapshot.Runtime
 			m.snapshot = msg.snapshot
+			if live != nil && m.context != nil && !m.all && !m.procs {
+				m.snapshot.Runtime = live
+			}
 			m.processes = msg.processes
 			m.errorText = ""
 			if msg.fetched.Failed != 0 {
