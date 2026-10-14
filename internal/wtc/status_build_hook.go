@@ -212,6 +212,7 @@ func (c *Context) statusBuildFacts(snapshot *StatusSnapshot) error {
 	}
 	jobs := []job{}
 	worktrees := map[string]string{}
+	tiers := map[string][]statusBuildTier{}
 	harnessName, _ := c.HarnessRepoName()
 	for _, row := range snapshot.Repos {
 		repo, err := c.Repository(row.Repo)
@@ -228,7 +229,8 @@ func (c *Context) statusBuildFacts(snapshot *StatusSnapshot) error {
 		if hook == "" && forge == "" {
 			continue
 		}
-		for _, tier := range statusBuildTiers(repo) {
+		tiers[repo.Name] = statusBuildTiers(repo)
+		for _, tier := range tiers[repo.Name] {
 			jobs = append(jobs, job{repo.Name, tier, statusBuildRequest{Collection: filepath.Base(c.Collection),
 				Repo: row.Repo, Worktree: row.Worktree, Slug: slug, Forge: forge, Branch: tier.Branch, Tier: tier.Tier}})
 		}
@@ -293,7 +295,7 @@ func (c *Context) statusBuildFacts(snapshot *StatusSnapshot) error {
 		if repo, err := c.Repository(name); err == nil {
 			name = repo.Name
 		}
-		statusFollowPR(pr, worktrees[name], builds[name]["tip"], builds[name]["prod"])
+		statusFollowPR(pr, worktrees[name], tiers[name], builds[name])
 	}
 	return nil
 }
@@ -319,20 +321,38 @@ func statusFollowLabel(build *StatusBuild, contained *bool) string {
 
 // statusFollowPR carries a merged PR through the test and production builds:
 // it is followed until each tier has a passing build that contains the merge.
-func statusFollowPR(pr *StatusPRRow, worktree string, tip, prod *StatusBuild) {
+// The follow starts at the tier that builds the PR's base branch; a PR merged
+// into a branch no tier builds (a stacked or release branch) is not followed.
+func statusFollowPR(pr *StatusPRRow, worktree string, tiers []statusBuildTier, builds map[string]*StatusBuild) {
 	if pr.State != "MERGED" || pr.Archived || pr.OnBranch || pr.MergeCommit == "" {
 		// A merge recorded before merge commits were kept has nothing to
 		// attribute; it shows as plainly merged rather than as unknown.
 		return
 	}
-	for _, tier := range []struct {
-		stage string
-		build *StatusBuild
-		label **string
-	}{{"tip", tip, &pr.FollowTipBuild}, {"prod", prod, &pr.FollowProdBuild}} {
+	start := -1
+	for i, tier := range tiers {
+		if pr.Base == tier.Branch || (pr.Base == "" && i == 0) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return
+	}
+	followed := false
+	for _, t := range tiers[start:] {
+		tier := struct {
+			stage string
+			build *StatusBuild
+			label **string
+		}{t.Tier, builds[t.Tier], &pr.FollowTipBuild}
+		if t.Tier == "prod" {
+			tier.label = &pr.FollowProdBuild
+		}
 		if tier.build == nil {
 			continue
 		}
+		followed = true
 		var contained *bool
 		if tier.build.SHA != nil {
 			contained = statusHeadInBuild(worktree, pr.MergeCommit, *tier.build.SHA)
@@ -357,7 +377,7 @@ func statusFollowPR(pr *StatusPRRow, worktree string, tip, prod *StatusBuild) {
 			pr.Follow = &StatusFollow{Stage: tier.stage, Checks: checks, Build: tier.build.Build, URL: tier.build.URL}
 		}
 	}
-	if pr.Follow == nil && (tip != nil || prod != nil) {
+	if pr.Follow == nil && followed {
 		pr.Follow = &StatusFollow{Stage: "done", Checks: "SUCCESS"}
 	}
 }

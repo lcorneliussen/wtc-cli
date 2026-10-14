@@ -3,7 +3,7 @@
 ## Added
 
 - `wtc status` follows builds without a harness hook. The test tier is each repository's `default_ref` branch, and the prod tier is `production_ref` (or `release_ref`). GitHub builds come from the branch head's check rollup, and Bitbucket builds from the newest branch pipeline, using the `bb` login or `BB_USERNAME`/`BB_API_TOKEN`.
-- Merged PRs are followed again: the PR table shows the tier still waiting for a passing build that contains the merge (`→ test`, `● prod`, `✗ test`, `✓ built`). The merge commit is recorded in `.wtc-prs` as a separate `# merged-commit` row.
+- Merged PRs are followed again: the PR table shows the tier still waiting for a passing build that contains the merge (`→ test`, `● prod`, `✗ test`, `✓ built`). The follow starts at the tier that builds the PR's base branch; PRs merged into other branches are not followed. The merge commit and base are recorded in `.wtc-prs` as a separate `# merged-commit` row.
 - Repository rows show a build as `○` when their HEAD is not in it.
 - `status.build.sh` may return `sha`, the commit a build ran on, and `{"use_default":true}` to hand one request to the built-in provider. Requests now include `forge`.
 

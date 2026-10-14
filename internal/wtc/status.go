@@ -91,6 +91,7 @@ type StatusPRRow struct {
 	FollowProdBuild *string       `json:"follow_prod_build"`
 	Follow          *StatusFollow `json:"follow,omitempty"`
 	MergeCommit     string        `json:"merge_commit,omitempty"`
+	Base            string        `json:"base,omitempty"`
 	Archived        bool          `json:"archived"`
 	MergedOn        *string       `json:"merged_on"`
 	Draft           bool          `json:"draft"`

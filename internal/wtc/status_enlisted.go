@@ -165,7 +165,7 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 			checks = "NONE"
 		}
 		details[i] = statusPRDetail{Number: record.Number, State: "MERGED", Checks: checks,
-			Merge: "MERGED", Review: "merged", Title: record.Title, MergedOn: record.MergedOn, MergeCommit: record.MergeCommit}
+			Merge: "MERGED", Review: "merged", Title: record.Title, MergedOn: record.MergedOn, MergeCommit: record.MergeCommit, Base: record.MergeBase}
 		recorded++
 	}
 	if recorded != 0 {
@@ -291,7 +291,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		row := StatusPRRow{Repo: record.Repo, Number: detail.Number, State: detail.State, Checks: statusString(detail.Checks),
 			Merge: statusString(detail.Merge), Review: statusString(detail.Review), Title: detail.Title,
 			DisplayTitle: detail.Title, Slug: slug, URL: statusString(url), MergedOn: statusString(detail.MergedOn),
-			Draft: detail.State == "DRAFT", OnBranch: detail.State == "MERGED" && branchRow >= 0, MergeCommit: detail.MergeCommit,
+			Draft: detail.State == "DRAFT", OnBranch: detail.State == "MERGED" && branchRow >= 0, MergeCommit: detail.MergeCommit, Base: detail.Base,
 			Archived: detail.State == "MERGED" && branchRow < 0 && statusArchived(detail.MergedOn, time.Now()),
 		}
 		if row.OnBranch {

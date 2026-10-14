@@ -88,7 +88,10 @@ Every build carries the commit it ran on. Status uses that commit twice:
 - A repository row shows a build's cell as `○` (dimmed) when the row's HEAD
   is not contained in that build, for example on a feature branch.
 - A merged PR is **followed** until each tier has a passing build that
-  contains its merge commit. The PR table's state column shows the tier it
+  contains its merge commit. The follow starts at the tier that builds the
+  PR's base branch, so a hotfix merged into the production branch waits on
+  prod only, and a PR merged into any other branch (a stacked PR, a release
+  branch no tier builds) is not followed. The PR table's state column shows the tier it
   waits on: `→ test` (no build with the merge yet), `● test` (running),
   `✗ prod` (failed), `? test` (the build cannot be attributed), then
   `✓ built`. Merge commits are recorded in `.wtc-prs` with the final merge

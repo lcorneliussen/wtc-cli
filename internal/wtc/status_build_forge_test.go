@@ -206,34 +206,48 @@ func TestStatusFollowPRThroughTiers(t *testing.T) {
 	running := &StatusBuild{Branch: "main", Checks: &pending, Build: &n13, SHA: &merge}
 	passed := &StatusBuild{Branch: "main", Checks: &ok, Build: &n13, SHA: &merge}
 
+	tiers := []statusBuildTier{{"tip", "main"}, {"prod", "prod"}}
+	follow := func(pr *StatusPRRow, tip, prod *StatusBuild) {
+		statusFollowPR(pr, c.Harness, tiers, map[string]*StatusBuild{"tip": tip, "prod": prod})
+	}
 	pr := StatusPRRow{State: "MERGED", MergeCommit: merge}
-	statusFollowPR(&pr, c.Harness, old, nil)
+	follow(&pr, old, nil)
 	if pr.Follow == nil || pr.Follow.Stage != "tip" || pr.Follow.Checks != "WAITING" || *pr.FollowTipBuild != "waiting #12" {
 		t.Fatalf("a build older than the merge leaves the PR waiting: %+v", pr.Follow)
 	}
 	pr = StatusPRRow{State: "MERGED", MergeCommit: merge}
-	statusFollowPR(&pr, c.Harness, passed, running)
+	follow(&pr, passed, running)
 	if pr.Follow == nil || pr.Follow.Stage != "prod" || pr.Follow.Checks != "PENDING" {
 		t.Fatalf("a passed test build moves the follow to production: %+v", pr.Follow)
 	}
 	pr = StatusPRRow{State: "MERGED", MergeCommit: merge}
-	statusFollowPR(&pr, c.Harness, passed, passed)
+	follow(&pr, passed, passed)
 	if pr.Follow == nil || pr.Follow.Stage != "done" {
 		t.Fatalf("both tiers passed with the merge in them: %+v", pr.Follow)
 	}
 	pr = StatusPRRow{State: "MERGED"}
-	statusFollowPR(&pr, c.Harness, passed, nil)
+	follow(&pr, passed, nil)
 	if pr.Follow != nil {
 		t.Fatalf("a merge recorded without its commit is shown as plainly merged: %+v", pr.Follow)
 	}
 	pr = StatusPRRow{State: "MERGED", MergeCommit: merge}
 	unattributed := &StatusBuild{Branch: "main", Checks: &ok, Build: &n13}
-	statusFollowPR(&pr, c.Harness, unattributed, nil)
+	follow(&pr, unattributed, nil)
 	if pr.Follow == nil || pr.Follow.Checks != "UNKNOWN" {
 		t.Fatalf("a build without a commit cannot be attributed: %+v", pr.Follow)
 	}
+	pr = StatusPRRow{State: "MERGED", MergeCommit: merge, Base: "prod"}
+	follow(&pr, old, running)
+	if pr.Follow == nil || pr.Follow.Stage != "prod" || pr.FollowTipBuild != nil {
+		t.Fatalf("a hotfix merged into the production branch is followed from prod only: %+v", pr.Follow)
+	}
+	pr = StatusPRRow{State: "MERGED", MergeCommit: merge, Base: "feature/parent"}
+	follow(&pr, passed, passed)
+	if pr.Follow != nil || pr.FollowTipBuild != nil {
+		t.Fatalf("a PR merged into a branch no tier builds is not followed: %+v", pr.Follow)
+	}
 	pr = StatusPRRow{State: "OPEN", MergeCommit: merge}
-	statusFollowPR(&pr, c.Harness, passed, nil)
+	follow(&pr, passed, nil)
 	if pr.Follow != nil {
 		t.Fatalf("open PRs are not followed: %+v", pr.Follow)
 	}
@@ -249,16 +263,39 @@ func TestMergedPRRecordsMergeCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	sha := "0123456789abcdef0123456789abcdef01234567"
-	detail := statusPRDetail{Number: "7", State: "MERGED", MergedOn: "2026-09-30T12:00:00Z", Checks: "SUCCESS", MergeCommit: sha}
+	detail := statusPRDetail{Number: "7", State: "MERGED", MergedOn: "2026-09-30T12:00:00Z", Checks: "SUCCESS", MergeCommit: sha, Base: "main"}
 	if count, err := c.recordMergedPRs(records, []statusPRDetail{detail}); err != nil || count != 1 {
 		t.Fatalf("record: %d %v", count, err)
 	}
 	data, _ := os.ReadFile(c.PRFile())
-	if !strings.Contains(string(data), "# merged-pr widget 7 2026-09-30T12:00:00Z SUCCESS\n# merged-commit widget 7 "+sha+"\n") {
+	if !strings.Contains(string(data), "# merged-pr widget 7 2026-09-30T12:00:00Z SUCCESS\n# merged-commit widget 7 "+sha+" main\n") {
 		t.Fatalf("merge commit row missing: %s", data)
 	}
 	records, err = c.ListPRs()
-	if err != nil || len(records) != 1 || records[0].MergeCommit != sha {
+	if err != nil || len(records) != 1 || records[0].MergeCommit != sha || records[0].MergeBase != "main" {
 		t.Fatalf("merge commit not read back: %+v %v", records, err)
+	}
+}
+
+func TestStatusGHBuildPassesNumericNamesAsStrings(t *testing.T) {
+	bin := t.TempDir()
+	argsFile := filepath.Join(bin, "args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\nprintf '{\"data\":{\"repository\":{\"ref\":null}}}'\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := statusGHBuild("2048/4096", "main"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := string(raw)
+	for _, want := range []string{"-f\nowner=2048\n", "-f\nname=4096\n", "-f\nref=refs/heads/main\n"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("gh variables must be raw strings (-f), missing %q in:\n%s", want, args)
+		}
 	}
 }

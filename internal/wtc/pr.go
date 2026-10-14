@@ -25,9 +25,10 @@ type PRRecord struct {
 	MergedOn    string `json:"merged_on,omitempty"`
 	FinalChecks string `json:"final_checks,omitempty"`
 	MergeCommit string `json:"merge_commit,omitempty"`
+	MergeBase   string `json:"merge_base,omitempty"`
 }
 
-const prHeader = "# Local PR enlistment for this collection (not committed; dies with retire).\n# Format: repo  number  [branch]  [url]  [title…]\n# Final merges: # merged-pr repo number merged-at checks\n# Merge commits: # merged-commit repo number sha\n# Manage: wtc pr enlist|unlist|list\n"
+const prHeader = "# Local PR enlistment for this collection (not committed; dies with retire).\n# Format: repo  number  [branch]  [url]  [title…]\n# Final merges: # merged-pr repo number merged-at checks\n# Merge commits: # merged-commit repo number sha [base]\n# Manage: wtc pr enlist|unlist|list\n"
 
 var prNumber = regexp.MustCompile(`^[0-9]+$`)
 var prRepoName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -108,12 +109,15 @@ func parseMergedPR(line string) (repo, number, mergedOn, checks string, ok bool)
 
 // parseMergeCommit reads the commit a merge landed as. It is a separate row so
 // that older readers, which require exactly six merged-pr fields, keep working.
-func parseMergeCommit(line string) (repo, number, sha string, ok bool) {
+func parseMergeCommit(line string) (repo, number, sha, base string, ok bool) {
 	fields := strings.Fields(line)
-	if len(fields) != 5 || fields[0] != "#" || fields[1] != "merged-commit" || ValidatePRIdentity(fields[2], fields[3]) != nil || !statusCommitHash.MatchString(fields[4]) {
-		return "", "", "", false
+	if (len(fields) != 5 && len(fields) != 6) || fields[0] != "#" || fields[1] != "merged-commit" || ValidatePRIdentity(fields[2], fields[3]) != nil || !statusCommitHash.MatchString(fields[4]) {
+		return "", "", "", "", false
 	}
-	return fields[2], fields[3], fields[4], true
+	if len(fields) == 6 {
+		base = fields[5]
+	}
+	return fields[2], fields[3], fields[4], base, true
 }
 
 func (c *Context) ListPRs() ([]PRRecord, error) {
@@ -127,15 +131,15 @@ func (c *Context) ListPRs() ([]PRRecord, error) {
 	defer f.Close()
 	var records []PRRecord
 	merged := map[string]PRRecord{}
-	commits := map[string]string{}
+	commits := map[string][2]string{}
 	s := bufio.NewScanner(f)
 	for s.Scan() {
 		if record, ok := parsePR(s.Text()); ok {
 			records = append(records, record)
 		} else if repo, number, when, checks, ok := parseMergedPR(s.Text()); ok {
 			merged[prRecordKey(repo, number)] = PRRecord{MergedOn: when, FinalChecks: checks}
-		} else if repo, number, sha, ok := parseMergeCommit(s.Text()); ok {
-			commits[prRecordKey(repo, number)] = sha
+		} else if repo, number, sha, base, ok := parseMergeCommit(s.Text()); ok {
+			commits[prRecordKey(repo, number)] = [2]string{sha, base}
 		}
 	}
 	if err := s.Err(); err != nil {
@@ -144,7 +148,8 @@ func (c *Context) ListPRs() ([]PRRecord, error) {
 	for i := range records {
 		if final, ok := merged[prRecordKey(records[i].Repo, records[i].Number)]; ok {
 			records[i].MergedOn, records[i].FinalChecks = final.MergedOn, final.FinalChecks
-			records[i].MergeCommit = commits[prRecordKey(records[i].Repo, records[i].Number)]
+			commit := commits[prRecordKey(records[i].Repo, records[i].Number)]
+			records[i].MergeCommit, records[i].MergeBase = commit[0], commit[1]
 		}
 	}
 	return records, nil
@@ -325,7 +330,7 @@ func (c *Context) recordMergedPRsLocked(records []PRRecord, updates map[string]s
 		if repo, number, _, _, ok := parseMergedPR(line); ok && updates[prRecordKey(repo, number)].State == "MERGED" {
 			continue
 		}
-		if repo, number, _, ok := parseMergeCommit(line); ok && updates[prRecordKey(repo, number)].State == "MERGED" {
+		if repo, number, _, _, ok := parseMergeCommit(line); ok && updates[prRecordKey(repo, number)].State == "MERGED" {
 			continue
 		}
 		fmt.Fprintln(&out, line)
@@ -336,7 +341,11 @@ func (c *Context) recordMergedPRsLocked(records []PRRecord, updates map[string]s
 		if detail, ok := updates[key]; ok && seen[key] {
 			fmt.Fprintf(&out, "# merged-pr %s %s %s %s\n", record.Repo, record.Number, detail.MergedOn, detail.Checks)
 			if statusCommitHash.MatchString(detail.MergeCommit) {
-				fmt.Fprintf(&out, "# merged-commit %s %s %s\n", record.Repo, record.Number, detail.MergeCommit)
+				line := fmt.Sprintf("# merged-commit %s %s %s", record.Repo, record.Number, detail.MergeCommit)
+				if detail.Base != "" && !strings.ContainsAny(detail.Base, " \t\r\n") {
+					line += " " + detail.Base
+				}
+				fmt.Fprintln(&out, line)
 			}
 			count++
 		}
