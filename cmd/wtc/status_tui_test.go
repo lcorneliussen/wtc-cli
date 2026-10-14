@@ -293,13 +293,55 @@ func TestStatusTUIConflictsUseThemeColorsWithoutExtraColumn(t *testing.T) {
 		PR: &wtc.StatusPRFacts{Number: "7", Merge: conflicting},
 	}}, PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", Merge: &conflicting}}}
 	lines := statusTUIRepoLines(snapshot, 60, true)
-	if !strings.Contains(ansi.Strip(lines[1]), "#7 ✗") || !strings.Contains(ansi.Strip(lines[1]), "✗") ||
+	if !strings.Contains(ansi.Strip(lines[1]), "#7 ✗ conflict") || !strings.Contains(ansi.Strip(lines[1]), "✗3") ||
 		strings.Count(lines[1], "\x1b[31m") < 2 || strings.Contains(lines[1], "38;5;") {
 		t.Fatalf("repo conflict missing or color not themeable: %q", lines)
 	}
 	prs := statusTUIPRLines(snapshot, 60, false, true)
 	if !strings.Contains(ansi.Strip(prs[3]), "✗ conflict") || !strings.Contains(prs[3], "\x1b[31m") {
 		t.Fatalf("PR conflict missing: %q", prs)
+	}
+}
+
+func TestStatusPRConflictVisibleWithGreenChecksAndCleanCheckout(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	conflicting, passed := "CONFLICTING", "SUCCESS"
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{
+		Dir: "widget", BranchDisplay: "topic", Tree: "clean", Behind: 1234,
+		PR: &wtc.StatusPRFacts{Number: "7", URL: "https://github.com/example/widget/pull/7", Checks: passed, Merge: conflicting},
+	}}, PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "7", Checks: &passed, Merge: &conflicting}}}
+	for _, styled := range []bool{false, true} {
+		for _, width := range []int{32, 60, 100} {
+			lines := statusTUIRepoLines(snapshot, width, styled)
+			row := ansi.Strip(lines[1])
+			if !strings.Contains(row, "✗") || !strings.Contains(row, "#7") {
+				t.Fatalf("PR conflict hidden at width %d, styled %t: %q", width, styled, row)
+			}
+			if width >= 60 && (!strings.Contains(row, "✗ conflict ✓") || !strings.Contains(row, "✗1234")) {
+				t.Fatalf("conflict or count hidden: %q", row)
+			}
+			if ansi.StringWidth(lines[1]) > width {
+				t.Fatalf("row exceeds width %d: %q", width, row)
+			}
+			if strings.Contains(row, "✗") && strings.Contains(row, "±") {
+				t.Fatalf("PR conflict fabricated a dirty tree: %q", row)
+			}
+		}
+	}
+	prs := strings.Join(statusTUIPRLines(snapshot, 80, false, false), "\n")
+	if !strings.Contains(prs, "✗ conflict") || !strings.Contains(prs, "✓ ✗") {
+		t.Fatalf("passing checks hidden in PR list: %q", prs)
+	}
+	for _, styled := range []bool{false, true} {
+		cell := statusTUIRepoPRCell(&wtc.StatusPRFacts{Number: "1234567", URL: snapshot.Repos[0].PR.URL, Merge: conflicting}, 8, styled)
+		if !strings.HasPrefix(ansi.Strip(cell), "✗ ") || ansi.StringWidth(cell) > 8 {
+			t.Fatalf("compact cell hides conflict: %q", cell)
+		}
+	}
+	snapshot.Repos[0].Behind = 0
+	if got := statusTUIBehind(snapshot.Repos[0]); got != "✗" {
+		t.Fatalf("zero-behind PR conflict hidden: %q", got)
 	}
 }
 

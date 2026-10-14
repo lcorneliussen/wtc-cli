@@ -9,6 +9,7 @@
 
 ## Fixed
 
+- PR merge conflicts are explicit in `wtc status`: repository rows show `✗ conflict` in the PR cell and retain the upstream count with a conflict marker (for example, `✗3`). Compact views keep the warning visible even when sync columns are hidden. GitHub's `mergeable` field detects conflicts even when its merge-state label says draft; passing checks and a clean local checkout do not hide the conflict.
 - The TUI and terminal tables show TEST and PROD columns only for tiers with build facts, as documented ([#58](https://github.com/lcorneliussen/wtc-cli/issues/58)).
 - A failing or invalid build provider marks only its cell as an error; it no longer fails the whole status refresh.
 - The provider is called once per repository and tier, at most four at a time, instead of once per worktree row in sequence.
