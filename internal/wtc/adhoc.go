@@ -371,15 +371,27 @@ func remoteDefaultBranch(remote string) (string, error) {
 	return "", fmt.Errorf("cannot tell the default branch of %s; pass --target", remote)
 }
 
+// registryEntry writes a Repo without empty keys, keeping hand-added fields
+// such as port_offset when an entry is copied to another registry.
 type registryEntry struct {
-	Name       string `yaml:"name"`
-	Remote     string `yaml:"remote"`
-	DefaultRef string `yaml:"default_ref"`
-	Owner      string `yaml:"owner,omitempty"`
+	Name          string         `yaml:"name"`
+	Remote        string         `yaml:"remote"`
+	DefaultRef    string         `yaml:"default_ref"`
+	Owner         string         `yaml:"owner,omitempty"`
+	PortOffset    *int           `yaml:"port_offset,omitempty"`
+	Role          string         `yaml:"role,omitempty"`
+	ProductionRef string         `yaml:"production_ref,omitempty"`
+	ReleaseRef    string         `yaml:"release_ref,omitempty"`
+	ProdPaths     []string       `yaml:"prod_paths,omitempty"`
+	IDE           string         `yaml:"ide,omitempty"`
+	MergeStrategy string         `yaml:"merge_strategy,omitempty"`
+	Extra         map[string]any `yaml:",inline"`
 }
 
 func entryOf(r Repo) registryEntry {
-	return registryEntry{Name: r.Name, Remote: r.Remote, DefaultRef: r.DefaultRef, Owner: r.Owner}
+	return registryEntry{Name: r.Name, Remote: r.Remote, DefaultRef: r.DefaultRef, Owner: r.Owner,
+		PortOffset: r.PortOffset, Role: r.Role, ProductionRef: r.ProductionRef, ReleaseRef: r.ReleaseRef,
+		ProdPaths: r.ProdPaths, IDE: r.IDE, MergeStrategy: r.MergeStrategy, Extra: r.Extra}
 }
 
 // appendRegistryEntry adds text instead of re-encoding the file, so comments
@@ -498,4 +510,92 @@ func (c *Context) harnessRel() string {
 		return filepath.ToSlash(rel)
 	}
 	return filepath.Base(c.Harness)
+}
+
+// newAdHoc creates a sibling ad-hoc collection next to this one. Repositories
+// keep this collection's registration (owner, tip, ports); other names and
+// URLs resolve through the per-user registry as in add-repo.
+func (c *Context) newAdHoc(opt NewOptions) (NewResult, error) {
+	result := NewResult{}
+	if opt.PR != "" || opt.Issue != "" {
+		return result, errors.New("--pr and --issue need a harness registry; use a slug, optionally with --tracker")
+	}
+	if !collectionNamePattern.MatchString(opt.Slug) {
+		return result, fmt.Errorf("invalid collection slug %q", opt.Slug)
+	}
+	name := opt.Slug
+	result.Source = ""
+	if opt.Tracker != "" {
+		if !collectionNamePattern.MatchString(opt.Tracker) {
+			return result, fmt.Errorf("invalid tracker key %q", opt.Tracker)
+		}
+		name = strings.ToLower(opt.Tracker) + "-" + opt.Slug
+		result.Source = fmt.Sprintf("Tracker wtc for %s — create the linking issue (frontmatter `tracker: %s`) when consuming this note.", opt.Tracker, opt.Tracker)
+	}
+	result.IntendedBranch = name
+	if opt.Branch != "" {
+		if _, err := gitOutput("check-ref-format", "--branch", opt.Branch); err != nil {
+			return result, fmt.Errorf("invalid explicit branch: %w", err)
+		}
+		result.IntendedBranch = opt.Branch
+	}
+	result.Collection = filepath.Join(c.Workspace, name)
+	if _, err := os.Lstat(result.Collection); err == nil {
+		return result, fmt.Errorf("collection already exists: %s", result.Collection)
+	} else if !os.IsNotExist(err) {
+		return result, err
+	}
+	seen := map[string]bool{}
+	for _, spec := range opt.Repos {
+		if seen[spec] {
+			return result, fmt.Errorf("repository %q was requested more than once", spec)
+		}
+		seen[spec] = true
+	}
+	values := map[string]string{"collection": result.Collection, "source": result.Source, "branch": result.IntendedBranch}
+	if err := c.RunHook("new.pre", values); err != nil {
+		return result, err
+	}
+	if _, err := InitAdHoc(result.Collection); err != nil {
+		return result, err
+	}
+	target, err := OpenCollection(result.Collection)
+	if err != nil {
+		return result, err
+	}
+	result.Repositories = []string{}
+	for _, spec := range opt.Repos {
+		if repo, err := c.Repository(spec); err == nil {
+			if err := appendRegistryEntry(target.registryPath(), repo); err != nil {
+				return result, err
+			}
+			if err := target.load(); err != nil {
+				return result, err
+			}
+			result.Repositories = append(result.Repositories, repo.Name)
+			continue
+		}
+		repo, err := target.RegisterAdHocRepo(AdHocRepoOptions{Spec: spec})
+		if err != nil {
+			return result, fmt.Errorf("%w (partial collection at %s)", err, result.Collection)
+		}
+		result.Repositories = append(result.Repositories, repo.Name)
+	}
+	if len(result.Repositories) > 0 {
+		if _, err := target.AddRepositories(AddRepoOptions{Repos: result.Repositories, Branch: opt.Branch}); err != nil {
+			return result, fmt.Errorf("%w (partial collection at %s)", err, result.Collection)
+		}
+	}
+	branchNote := fmt.Sprintf("Worktrees start **detached at the development tip** — no branch exists yet.\nCreate one at your first commit:\n\n    git switch -c %s\n", result.IntendedBranch)
+	if opt.Branch != "" {
+		branchNote = "All siblings are already on the explicitly requested branch. Commit on that branch; do not create it again.\n"
+	}
+	handoff := fmt.Sprintf("# wtc: %s — launch note (EPHEMERAL)\n\n**Goal:** %s\n\nAn ad-hoc collection: no harness, registry in `.wtc/config/repos.yml`.\nFirst agent on this wtc: read this, turn anything durable into issues /\ncommits / PRs, then **delete this file as your very first action**.\n\n%s\nAdd repositories with `wtc add-repo <name|clone-url|path>`. Retire with `wtc retire .` from inside it.\n", name, defaultSource(result.Source), branchNote)
+	if err := os.WriteFile(filepath.Join(result.Collection, "HANDOFF.md"), []byte(handoff), 0644); err != nil {
+		return result, err
+	}
+	if err := c.RunHook("new.post", values); err != nil {
+		return result, err
+	}
+	return result, nil
 }
