@@ -78,7 +78,7 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 			t.Fatalf("URL not shortened to its host: %q", plain)
 		}
 		layout := statusTUIRuntimeLayout(snapshot, width)
-		if got := model.buildClickTarget(layout.tunnelStart()+2, detail); got != "https://widget.example.test" {
+		if got := model.buildClickTarget(layout.tunnelStart("")+2, detail); got != "https://widget.example.test" {
 			t.Fatalf("tunnel URL opened %q", got)
 		}
 		if got := model.buildClickTarget(layout.localStart(), detail); got != "" {
@@ -108,15 +108,15 @@ func TestStatusRuntimeURLLabels(t *testing.T) {
 	}
 }
 
-func TestStatusRuntimeSeparatesProtectedAndPublicTunnels(t *testing.T) {
+func TestStatusRuntimeHasAColumnPerTunnelProvider(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
-	item := func(name, kind, url string, public bool) wtc.RuntimeItem {
-		return wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/" + name, Group: "widget/web", Kind: kind, State: "ready", URL: url, Exposure: map[bool]string{true: wtc.ExposurePublic, false: wtc.ExposureTailnet}[public]}
+	item := func(name, kind, provider, url string, public bool) wtc.RuntimeItem {
+		return wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/" + name, Group: "widget/web", Kind: kind, State: "ready", URL: url, Provider: provider, Exposure: map[bool]string{true: wtc.ExposurePublic, false: wtc.ExposureTailnet}[public]}
 	}
 	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Collection: "fixture", Repo: "widget", Dir: "widget", BranchDisplay: "feature", Tree: "clean"}},
-		Runtime: []wtc.RuntimeItem{item("server", "service", "http://127.0.0.1:3000", false),
-			item("tailnet", "endpoint", "https://workstation.example.ts.net:8443", false),
-			item("preview", "endpoint", "https://calm-river.trycloudflare.com", true)}}
+		Runtime: []wtc.RuntimeItem{item("server", "service", "", "http://127.0.0.1:3000", false),
+			item("tailnet", "endpoint", "tailscale", "https://workstation.example.ts.net:8443", false),
+			item("preview", "endpoint", "cloudflare", "https://calm-river.trycloudflare.com", true)}}
 	model := statusTUIModel{width: 120, height: 40, snapshot: snapshot}
 	lines := model.contentLines()
 	header, row, y := "", "", -1
@@ -130,16 +130,16 @@ func TestStatusRuntimeSeparatesProtectedAndPublicTunnels(t *testing.T) {
 	}
 	column := func(name string) int { return len([]rune(header[:strings.Index(header, name)])) }
 	cell := func(name string) string { return strings.Fields(string([]rune(row)[column(name):]))[0] }
-	if cell("URL") != ":3000" || cell("TUNNEL") != "tailscale" || cell("PUBLIC") != "cloudflare" {
+	if cell("URL") != ":3000" || cell("TAILSCALE") != ":8443" || cell("CLOUDFLARE") != "calm-river" {
 		t.Fatalf("columns wrong: %q / %q", header, row)
 	}
-	for name, want := range map[string]string{"URL": "http://127.0.0.1:3000", "TUNNEL": "https://workstation.example.ts.net:8443", "PUBLIC": "https://calm-river.trycloudflare.com"} {
+	for name, want := range map[string]string{"URL": "http://127.0.0.1:3000", "TAILSCALE": "https://workstation.example.ts.net:8443", "CLOUDFLARE": "https://calm-river.trycloudflare.com"} {
 		if got := model.buildClickTarget(column(name), y); got != want {
 			t.Errorf("%s opened %q", name, got)
 		}
 	}
-	if !strings.Contains(lines[y], "\x1b[33mcloudflare") {
-		t.Errorf("public link is not warning-toned: %q", lines[y])
+	if !strings.Contains(lines[y], "\x1b[33mcalm-river") || !strings.Contains(lines[y], "\x1b[36m:8443") {
+		t.Errorf("public tunnel not warning-toned or tailnet tunnel not link-toned: %q", lines[y])
 	}
 	if hover := statusRuntimeHover(snapshot.Runtime[2]); !strings.Contains(hover, "public, reachable from the internet") {
 		t.Errorf("hover does not say public: %q", hover)
@@ -147,15 +147,33 @@ func TestStatusRuntimeSeparatesProtectedAndPublicTunnels(t *testing.T) {
 	if hover := statusRuntimeHover(snapshot.Runtime[1]); !strings.Contains(hover, "tailnet only") {
 		t.Errorf("hover does not say protected: %q", hover)
 	}
-	// With only a protected tunnel, the empty PUBLIC column still shows that
-	// nothing is exposed; without any tunnel neither column is drawn.
-	snapshot.Runtime = snapshot.Runtime[:2]
-	if plain := ansi.Strip(strings.Join(statusTUIModel{width: 120, height: 40, snapshot: snapshot}.contentLines(), "\n")); !strings.Contains(plain, "TUNNEL    PUBLIC") {
-		t.Fatalf("PUBLIC column missing beside a protected tunnel: %s", plain)
+	// A configured tunnel nobody started has no column; one that starts by
+	// default shows its state until it has an address.
+	snapshot.Runtime[2].State, snapshot.Runtime[2].URL = "idle", ""
+	render := func() string {
+		return ansi.Strip(strings.Join(statusTUIModel{width: 120, height: 40, snapshot: snapshot}.contentLines(), "\n"))
 	}
-	snapshot.Runtime = snapshot.Runtime[:1]
-	if plain := ansi.Strip(strings.Join(statusTUIModel{width: 120, height: 40, snapshot: snapshot}.contentLines(), "\n")); strings.Contains(plain, "PUBLIC") {
-		t.Fatal("PUBLIC column shown without any endpoint")
+	if plain := render(); strings.Contains(plain, "CLOUDFLARE") || !strings.Contains(plain, "TAILSCALE") {
+		t.Fatalf("idle tunnel shown or running one missing: %s", plain)
+	}
+	snapshot.Runtime[2].Autostart = true
+	if plain := render(); !strings.Contains(plain, "CLOUDFLARE") || !strings.Contains(plain, ":8443     idle") {
+		t.Fatalf("default tunnel not shown with its state: %s", plain)
+	}
+}
+
+func TestStatusRuntimeSlugs(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://workstation.example.ts.net:42433": ":42433",
+		"https://workstation.example.ts.net":       "workstation",
+		"https://calm-river.trycloudflare.com":     "calm-river",
+		"https://1a2b.ngrok-free.app":              "1a2b",
+		"https://abc-3000.euw.devtunnels.ms":       "abc-3000",
+		"https://preview.example.test/path":        "preview.example.test",
+	} {
+		if got := statusRuntimeSlug(raw); got != want {
+			t.Errorf("%s: got %q, want %q", raw, got, want)
+		}
 	}
 }
 
@@ -187,9 +205,8 @@ func TestStatusRuntimeCellSeparatesServices(t *testing.T) {
 
 func TestStatusRuntimeTreatsUnknownExposureAsPublic(t *testing.T) {
 	item := wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/tunnel", Group: "widget/web", Kind: "endpoint", State: "ready", URL: "https://preview.example.test"}
-	snapshot := wtc.StatusSnapshot{Collection: "fixture", Runtime: []wtc.RuntimeItem{item}}
-	if g := statusRuntimeGroups(snapshot); len(g) != 1 || len(g[0].public) != 1 || len(g[0].tunnels) != 0 {
-		t.Fatalf("undeclared tunnel not under PUBLIC: %+v", g)
+	if !statusRuntimeExposed(item) {
+		t.Fatal("undeclared tunnel not treated as public")
 	}
 	if letter, _ := statusRuntimeMark(item); letter != "T" {
 		t.Fatalf("mark = %q, want upper case for an unknown exposure", letter)

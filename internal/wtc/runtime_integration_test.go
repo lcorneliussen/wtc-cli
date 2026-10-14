@@ -355,7 +355,7 @@ func TestDekitTunnelURLDiscovery(t *testing.T) {
 				return RuntimeItem{}
 			}
 			through := func(url string) string {
-				response, err := (&http.Client{Timeout: time.Second}).Get(url + "/")
+				response, err := (&http.Client{Timeout: 5 * time.Second}).Get(url + "/")
 				if err != nil {
 					t.Fatal(err)
 				}

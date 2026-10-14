@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -14,8 +15,7 @@ type statusRuntimeGroup struct {
 	repo, name string
 	members    []wtc.RuntimeItem
 	local      string
-	tunnels    []string // protected, such as a tailnet address
-	public     []string // reachable from the internet
+	tunnels    []wtc.RuntimeItem // shown endpoints, in task order
 	notes      []string
 }
 
@@ -31,14 +31,12 @@ func statusRuntimeGroups(snapshot wtc.StatusSnapshot) []statusRuntimeGroup {
 		}
 		g := &groups[at]
 		g.members = append(g.members, item)
-		if item.URL != "" {
-			if statusRuntimeExposed(item) {
-				g.public = append(g.public, item.URL)
-			} else if item.Kind == "endpoint" {
-				g.tunnels = append(g.tunnels, item.URL)
-			} else if g.local == "" {
-				g.local = item.URL
+		if item.Kind == "endpoint" {
+			if statusRuntimeTunnelShown(item) {
+				g.tunnels = append(g.tunnels, item)
 			}
+		} else if item.URL != "" && g.local == "" {
+			g.local = item.URL
 		}
 		for _, note := range []string{item.Reason, item.Error} {
 			if note != "" {
@@ -47,6 +45,24 @@ func statusRuntimeGroups(snapshot wtc.StatusSnapshot) []statusRuntimeGroup {
 		}
 	}
 	return groups
+}
+
+// statusRuntimeSlug names a tunnel address within its provider's column: the
+// port of a tailnet address (the host is this machine), otherwise the first
+// label of the host, such as calm-river of calm-river.trycloudflare.com.
+func statusRuntimeSlug(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return raw
+	}
+	host := u.Hostname()
+	if wtc.RuntimeTunnelProvider(raw) == "tailscale" && u.Port() != "" && u.Port() != "443" {
+		return ":" + u.Port()
+	}
+	if wtc.RuntimeTunnelProvider(raw) != "" {
+		return strings.SplitN(host, ".", 2)[0]
+	}
+	return host
 }
 
 // statusRuntimeURLLabel is the short clickable name of a URL: the port for a
@@ -81,44 +97,107 @@ func (g statusRuntimeGroup) state() (string, string) {
 	return state, tone
 }
 
-type statusRuntimeLayout struct{ marks, repo, name, state, local, tunnel, public int }
+type statusRuntimeLayout struct {
+	marks, repo, name, state, local int
+	tunnels                         []statusRuntimeColumn
+}
+
+// statusRuntimeColumn is one tunnel provider's column, such as TAILSCALE.
+type statusRuntimeColumn struct {
+	provider string
+	width    int
+}
+
+func (c statusRuntimeColumn) header() string {
+	if c.provider == "" {
+		return "TUNNEL"
+	}
+	return strings.ToUpper(c.provider)
+}
+
+// statusRuntimeTunnelShown is true for a tunnel that is in use or starts by
+// default; a configured tunnel nobody started stays out of the table.
+func statusRuntimeTunnelShown(item wtc.RuntimeItem) bool {
+	switch item.State {
+	case "starting", "running", "ready", "failed", "exited":
+		return true
+	}
+	return item.URL != "" || item.Autostart
+}
 
 func statusTUIRuntimeLayout(snapshot wtc.StatusSnapshot, width int) statusRuntimeLayout {
 	l := statusRuntimeLayout{marks: 1, repo: statusTUIPRLayout(width).repo, name: 7, state: 11, local: 5}
+	index := map[string]int{}
 	for _, g := range statusRuntimeGroups(snapshot) {
 		l.marks = max(l.marks, len(statusRuntimeSlots(g.members)))
 		l.name = max(l.name, len([]rune(g.name)))
 		l.local = max(l.local, len([]rune(statusRuntimeURLLabel(g.local))))
-	}
-	l.name, l.local = min(l.name, max(7, width/6)), min(l.local, max(5, width/3))
-	// TUNNEL holds protected endpoints and PUBLIC the ones reachable from the
-	// internet. Both appear once any endpoint exists, so an empty PUBLIC
-	// column says plainly that nothing is exposed.
-	l.tunnel = len("TUNNEL")
-	for _, g := range statusRuntimeGroups(snapshot) {
-		l.tunnel = max(l.tunnel, statusRuntimeLinksWidth(g.tunnels))
-		for _, item := range g.members {
-			if item.Kind == "endpoint" {
-				l.public = max(l.public, len("PUBLIC"), statusRuntimeLinksWidth(g.public))
+		for _, provider := range statusRuntimeProviders(g.tunnels) {
+			at, ok := index[provider]
+			if !ok {
+				at, index[provider] = len(l.tunnels), len(l.tunnels)
+				l.tunnels = append(l.tunnels, statusRuntimeColumn{provider: provider})
+				l.tunnels[at].width = len(l.tunnels[at].header())
 			}
+			l.tunnels[at].width = max(l.tunnels[at].width, statusRuntimeLinksWidth(statusRuntimeOf(g.tunnels, provider)))
 		}
 	}
+	l.name, l.local = min(l.name, max(7, width/6)), min(l.local, max(5, width/3))
 	return l
+}
+
+func statusRuntimeProviders(tunnels []wtc.RuntimeItem) []string {
+	var providers []string
+	for _, item := range tunnels {
+		if !slices.Contains(providers, item.Provider) {
+			providers = append(providers, item.Provider)
+		}
+	}
+	return providers
+}
+
+func statusRuntimeOf(tunnels []wtc.RuntimeItem, provider string) []wtc.RuntimeItem {
+	var of []wtc.RuntimeItem
+	for _, item := range tunnels {
+		if item.Provider == provider {
+			of = append(of, item)
+		}
+	}
+	return of
 }
 
 func (l statusRuntimeLayout) localStart() int {
 	return l.marks + 1 + l.repo + 1 + l.name + 1 + l.state + 1
 }
-func (l statusRuntimeLayout) tunnelStart() int { return l.localStart() + l.local + 1 }
-func (l statusRuntimeLayout) publicStart() int { return l.tunnelStart() + l.tunnel + 1 }
 
-func statusRuntimeLinksWidth(urls []string) int {
+// tunnelStart is where the column of a provider begins, or -1.
+func (l statusRuntimeLayout) tunnelStart(provider string) int {
+	start := l.localStart() + l.local + 1
+	for _, c := range l.tunnels {
+		if c.provider == provider {
+			return start
+		}
+		start += c.width + 1
+	}
+	return -1
+}
+
+// statusRuntimeTunnelLabel is what a tunnel cell shows: its slug once the
+// address is known, else its state.
+func statusRuntimeTunnelLabel(item wtc.RuntimeItem) string {
+	if item.URL == "" {
+		return statusRuntimeState(item)
+	}
+	return statusRuntimeSlug(item.URL)
+}
+
+func statusRuntimeLinksWidth(tunnels []wtc.RuntimeItem) int {
 	width := 0
-	for i, raw := range urls {
+	for i, item := range tunnels {
 		if i > 0 {
 			width += 2
 		}
-		width += len([]rune(statusRuntimeURLLabel(raw)))
+		width += len([]rune(statusRuntimeTunnelLabel(item)))
 	}
 	return width
 }
@@ -128,15 +207,12 @@ func (l statusRuntimeLayout) urlAt(g statusRuntimeGroup, x int) string {
 	if x >= l.localStart() && x < l.localStart()+min(l.local, len([]rune(statusRuntimeURLLabel(g.local)))) {
 		return g.local
 	}
-	for _, cell := range []struct {
-		start int
-		urls  []string
-	}{{l.tunnelStart(), g.tunnels}, {l.publicStart(), g.public}} {
-		start := cell.start
-		for _, raw := range cell.urls {
-			label := len([]rune(statusRuntimeURLLabel(raw)))
+	for _, c := range l.tunnels {
+		start := l.tunnelStart(c.provider)
+		for _, item := range statusRuntimeOf(g.tunnels, c.provider) {
+			label := len([]rune(statusRuntimeTunnelLabel(item)))
 			if x >= start && x < start+label {
-				return raw
+				return item.URL
 			}
 			start += label + 2
 		}
@@ -154,8 +230,8 @@ func statusRuntimeState(item wtc.RuntimeItem) string {
 
 // statusTUIRuntimeLines draws one line per service in the style of the PR
 // list: the LOCAL marks of the service and its tunnels, repo, name, the state
-// that most needs attention, then the local URL, protected tunnels and public
-// tunnels as short links; hover and click give the full address.
+// that most needs attention, the local URL, then one column per tunnel
+// provider holding the tunnel's slug; hover and click give the full address.
 func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) []string {
 	if len(snapshot.Runtime) == 0 {
 		return nil
@@ -163,9 +239,9 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 	l := statusTUIRuntimeLayout(snapshot, width)
 	heading := "LOCAL"
 	header := strings.Repeat(" ", l.marks) + " " + statusTUIFit("REPO", l.repo) + " " + statusTUIFit("SERVICE", l.name) + " " +
-		statusTUIFit("STATE", l.state) + " " + statusTUIFit("URL", l.local) + " " + statusTUIFit("TUNNEL", l.tunnel)
-	if l.public > 0 {
-		header += " " + statusTUIFit("PUBLIC", l.public)
+		statusTUIFit("STATE", l.state) + " " + statusTUIFit("URL", l.local)
+	for _, c := range l.tunnels {
+		header += " " + statusTUIFit(c.header(), c.width)
 	}
 	header = statusTUIFit(header, width)
 	if styled {
@@ -184,24 +260,30 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 				local = statusTUIFitANSI(statusTUILinkTone(strings.TrimRight(local, " "), g.local, statusToneLink), l.local)
 			}
 		}
-		// Public links are warning-toned: they are reachable from the internet.
-		links := func(urls []string, width int, tone string) string {
-			var b strings.Builder
-			for i, raw := range urls {
-				if i > 0 {
-					b.WriteString("  ")
-				}
-				text := statusTUISafe(statusRuntimeURLLabel(raw))
-				if styled && statusTUIURL(raw) != "" {
-					text = statusTUILinkTone(text, raw, tone)
-				}
-				b.WriteString(text)
+		// A tunnel that may be reachable from the internet is warning-toned.
+		var tail string
+		for n, c := range l.tunnels {
+			if n > 0 {
+				tail += " "
 			}
-			return b.String() + strings.Repeat(" ", max(0, width-statusRuntimeLinksWidth(urls)))
-		}
-		tail := links(g.tunnels, l.tunnel, statusToneLink)
-		if l.public > 0 {
-			tail += " " + links(g.public, l.public, statusToneWarning)
+			of := statusRuntimeOf(g.tunnels, c.provider)
+			for i, item := range of {
+				if i > 0 {
+					tail += "  "
+				}
+				text := statusTUISafe(statusRuntimeTunnelLabel(item))
+				tone := statusToneLink
+				if statusRuntimeExposed(item) {
+					tone = statusToneWarning
+				}
+				if styled && statusTUIURL(item.URL) != "" {
+					text = statusTUILinkTone(text, item.URL, tone)
+				} else if styled {
+					text = statusTUIStyle(text, statusToneDim)
+				}
+				tail += text
+			}
+			tail += strings.Repeat(" ", max(0, c.width-statusRuntimeLinksWidth(of)))
 		}
 		if notes := statusTUISafe(strings.Join(g.notes, " · ")); notes != "" {
 			if styled {
@@ -209,7 +291,10 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 			}
 			tail += " " + notes
 		}
-		line := marks + " " + repo + " " + name + " " + stateCell + " " + local + " " + tail
+		line := marks + " " + repo + " " + name + " " + stateCell + " " + local
+		if tail != "" {
+			line += " " + tail
+		}
 		if styled {
 			line = statusTUIFitANSI(line, width)
 		} else {

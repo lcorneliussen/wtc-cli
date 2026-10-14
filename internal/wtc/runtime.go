@@ -27,6 +27,8 @@ type RuntimeItem struct {
 	// ExposureBasis how wtc knows it.
 	Exposure      string `json:"exposure,omitempty"`
 	ExposureBasis string `json:"exposure_basis,omitempty"`
+	// Autostart tasks start with wtc up; status shows such a tunnel before it runs.
+	Autostart bool `json:"autostart,omitempty"`
 	// Mark is the one-character name status shows for the task.
 	Mark     string `json:"mark,omitempty"`
 	State    string `json:"state"`
@@ -38,10 +40,9 @@ type RuntimeItem struct {
 
 type runtimeTask struct {
 	RuntimeItem
-	Log       string   `json:"log"`
-	Ready     bool     `json:"ready"`
-	Autostart bool     `json:"autostart"`
-	Deps      []string `json:"deps,omitempty"`
+	Log   string   `json:"log"`
+	Ready bool     `json:"ready"`
+	Deps  []string `json:"deps,omitempty"`
 	// URLLog finds an endpoint URL that is only known after startup.
 	URLLog string `json:"url_log,omitempty"`
 }
