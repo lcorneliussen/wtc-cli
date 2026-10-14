@@ -86,14 +86,11 @@ func statusBuildLabel(build *StatusBuild) string {
 	if build.Checks != nil {
 		glyph = statusGlyph(*build.Checks)
 	}
-	if build.Build == nil || *build.Build == "" {
-		return glyph
+	label := glyph
+	if build.Build != nil && *build.Build != "" {
+		label = strings.TrimSpace(glyph + " " + statusMarkdownLink(build.URL, "#"+*build.Build))
 	}
-	label := statusMarkdownLink(build.URL, "#"+*build.Build)
-	if glyph != "" {
-		label = glyph + " " + label
-	}
-	if build.HeadInBuild != nil && !*build.HeadInBuild {
+	if label != "" && build.HeadInBuild != nil && !*build.HeadInBuild {
 		label += " (HEAD not in build)"
 	}
 	return label

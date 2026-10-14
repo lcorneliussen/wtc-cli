@@ -25,7 +25,7 @@ func statusGHBuild(slug, branch string) (*StatusBuild, error) {
 		return nil, fmt.Errorf("invalid GitHub repository slug")
 	}
 	raw, err := statusJSON("gh", "api", "graphql", "-f", "query="+statusGHBuildQuery,
-		"-F", "owner="+parts[0], "-F", "name="+parts[1], "-F", "ref=refs/heads/"+branch)
+		"-f", "owner="+parts[0], "-f", "name="+parts[1], "-f", "ref=refs/heads/"+branch)
 	if err != nil {
 		return nil, err
 	}

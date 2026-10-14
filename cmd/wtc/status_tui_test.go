@@ -654,3 +654,28 @@ func TestStatusOneShotTableCanHidePRSection(t *testing.T) {
 		t.Fatalf("repository-only table wrong: full=%s repos=%s", full, repos)
 	}
 }
+
+func TestStatusTUIFollowStateNamesWaitingTier(t *testing.T) {
+	for _, tc := range []struct {
+		follow      *wtc.StatusFollow
+		state, tone string
+	}{
+		{nil, "merged", statusToneDim},
+		{&wtc.StatusFollow{Stage: "tip", Checks: "WAITING"}, "→ test", statusToneWarning},
+		{&wtc.StatusFollow{Stage: "prod", Checks: "PENDING"}, "● prod", statusToneWarning},
+		{&wtc.StatusFollow{Stage: "tip", Checks: "FAILURE"}, "✗ test", statusToneFailure},
+		{&wtc.StatusFollow{Stage: "prod", Checks: "ERROR"}, "✗ prod", statusToneFailure},
+		{&wtc.StatusFollow{Stage: "tip", Checks: "UNKNOWN"}, "? test", statusToneDim},
+		{&wtc.StatusFollow{Stage: "done", Checks: "SUCCESS"}, "✓ built", statusToneSuccess},
+	} {
+		if state, tone := statusTUIFollowState(tc.follow); state != tc.state || tone != tc.tone {
+			t.Fatalf("%+v: got %q/%q, want %q/%q", tc.follow, state, tone, tc.state, tc.tone)
+		}
+	}
+	merged := "MERGED"
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "8",
+		State: "MERGED", Merge: &merged, Title: "Shipped", Follow: &wtc.StatusFollow{Stage: "prod", Checks: "WAITING"}}}}
+	if prs := statusTUIPRLines(snapshot, 100, false, false); !strings.Contains(prs[3], "→ prod") {
+		t.Fatalf("PR table should show the tier the merge waits on: %q", prs)
+	}
+}

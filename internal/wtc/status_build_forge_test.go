@@ -61,6 +61,47 @@ func TestStatusBBBuildReadsNewestBranchPipeline(t *testing.T) {
 	}
 }
 
+func TestBitbucketCredentialsFallBackToBBLogin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, name := range []string{"BB_API_USER", "BB_USERNAME", "ATLASSIAN_ACCOUNT_EMAIL"} {
+		t.Setenv(name, "")
+	}
+	config := filepath.Join(home, ".config", "bb", "config.json")
+	if err := os.MkdirAll(filepath.Dir(config), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, []byte(`{"username":"someone@example.invalid","apiToken":"secret","authMethod":"api-token"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if user, pass := bitbucketCredentials(); user != "someone@example.invalid" || pass != "secret" {
+		t.Fatalf("bb login not used: %q %q", user, pass)
+	}
+	t.Setenv("BB_USERNAME", "env-user")
+	t.Setenv("BB_API_TOKEN", "env-token")
+	if user, pass := bitbucketCredentials(); user != "env-user" || pass != "env-token" {
+		t.Fatalf("environment should win over the bb login: %q %q", user, pass)
+	}
+}
+
+func TestStatusBuildHookNormalizesCommitAndMarksBuildWithoutNumber(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	built := fixtureGit(t, "-C", c.Harness, "rev-parse", "HEAD")
+	fixtureGit(t, "-C", c.Harness, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "ahead")
+	statusWriteBuildHook(t, c, "printf '{\"checks\":\"SUCCESS\",\"sha\":\""+strings.ToUpper(built)+"\"}\\n'\n")
+	snapshot, err := c.StatusForgePreview()
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := statusHarnessRow(t, snapshot)
+	if row.Tip == nil || row.Tip.Error != "" || row.Tip.SHA == nil || *row.Tip.SHA != built {
+		t.Fatalf("an uppercase commit should be accepted and normalized: %+v", row.Tip)
+	}
+	if label := statusBuildLabel(row.Tip); label != "✓ (HEAD not in build)" {
+		t.Fatalf("a build without a number still says HEAD is outside it: %q", label)
+	}
+}
+
 func TestStatusBBBuildReportsMissingCredentials(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, name := range []string{"BB_API_USER", "BB_USERNAME", "ATLASSIAN_ACCOUNT_EMAIL"} {
@@ -182,8 +223,14 @@ func TestStatusFollowPRThroughTiers(t *testing.T) {
 	}
 	pr = StatusPRRow{State: "MERGED"}
 	statusFollowPR(&pr, c.Harness, passed, nil)
+	if pr.Follow != nil {
+		t.Fatalf("a merge recorded without its commit is shown as plainly merged: %+v", pr.Follow)
+	}
+	pr = StatusPRRow{State: "MERGED", MergeCommit: merge}
+	unattributed := &StatusBuild{Branch: "main", Checks: &ok, Build: &n13}
+	statusFollowPR(&pr, c.Harness, unattributed, nil)
 	if pr.Follow == nil || pr.Follow.Checks != "UNKNOWN" {
-		t.Fatalf("an unknown merge commit cannot be attributed: %+v", pr.Follow)
+		t.Fatalf("a build without a commit cannot be attributed: %+v", pr.Follow)
 	}
 	pr = StatusPRRow{State: "OPEN", MergeCommit: merge}
 	statusFollowPR(&pr, c.Harness, passed, nil)

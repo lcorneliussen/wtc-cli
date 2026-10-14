@@ -118,6 +118,10 @@ func (c *Context) statusBuildFromHook(path string, request statusBuildRequest) (
 			return nil, fmt.Errorf("status build hook returned an invalid build URL")
 		}
 	}
+	if build.SHA != nil {
+		lower := strings.ToLower(*build.SHA)
+		build.SHA = &lower
+	}
 	if build.SHA != nil && !statusCommitHash.MatchString(*build.SHA) {
 		return nil, fmt.Errorf("status build hook returned an invalid commit")
 	}
@@ -316,7 +320,9 @@ func statusFollowLabel(build *StatusBuild, contained *bool) string {
 // statusFollowPR carries a merged PR through the test and production builds:
 // it is followed until each tier has a passing build that contains the merge.
 func statusFollowPR(pr *StatusPRRow, worktree string, tip, prod *StatusBuild) {
-	if pr.State != "MERGED" || pr.Archived || pr.OnBranch {
+	if pr.State != "MERGED" || pr.Archived || pr.OnBranch || pr.MergeCommit == "" {
+		// A merge recorded before merge commits were kept has nothing to
+		// attribute; it shows as plainly merged rather than as unknown.
 		return
 	}
 	for _, tier := range []struct {

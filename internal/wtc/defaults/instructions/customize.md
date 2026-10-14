@@ -92,7 +92,8 @@ Every build carries the commit it ran on. Status uses that commit twice:
   waits on: `→ test` (no build with the merge yet), `● test` (running),
   `✗ prod` (failed), `? test` (the build cannot be attributed), then
   `✓ built`. Merge commits are recorded in `.wtc-prs` with the final merge
-  facts. Archived PRs are not followed.
+  facts; a merge recorded by an older wtc without its commit shows as plainly
+  `merged`. Archived PRs are not followed.
 
 A provider failure marks only its own cell as an error (`✗`, with the message
 in JSON, Markdown and the refresh log); the rest of the refresh is kept. The
