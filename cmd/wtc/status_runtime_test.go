@@ -11,7 +11,7 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	url := "https://github.com/example/widget/pull/7"
 	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Collection: "fixture", Repo: "widget", Dir: "widget", Runtime: "2 ready", BranchDisplay: "feature", Tree: "clean"}},
-		Runtime: []wtc.RuntimeItem{{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/server", Group: "widget/web", Kind: "service", State: "ready"}, {Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/tunnel", Group: "widget/web", Kind: "endpoint", State: "ready", URL: "https://widget.example.test"}},
+		Runtime: []wtc.RuntimeItem{{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/server", Group: "widget/web", Kind: "service", State: "ready"}, {Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/tunnel", Group: "widget/web", Kind: "endpoint", State: "ready", URL: "https://widget.example.test", Exposure: wtc.ExposureProtected, ExposureBasis: wtc.ExposureDeclared}},
 		PRs:     []wtc.StatusPRRow{{Repo: "widget", Number: "7", Title: "Change widget", URL: &url}}}
 	for _, width := range []int{40, 80, 120} {
 		model := statusTUIModel{width: width, height: 60, snapshot: snapshot}
@@ -86,7 +86,7 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 		}
 		hover := statusRuntimeHover(snapshot.Runtime[1])
 		model.hover = hover
-		if view := ansi.Strip(model.View().Content); !strings.Contains(view, "widget/web/tunnel · protected endpoint · ready · https://widget.example.test") {
+		if view := ansi.Strip(model.View().Content); !strings.Contains(view, "widget/web/tunnel · tunnel, protected (declared)") {
 			t.Fatalf("hover text missing from footer: %q", hover)
 		}
 	}
@@ -111,7 +111,7 @@ func TestStatusRuntimeURLLabels(t *testing.T) {
 func TestStatusRuntimeSeparatesProtectedAndPublicTunnels(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	item := func(name, kind, url string, public bool) wtc.RuntimeItem {
-		return wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/" + name, Group: "widget/web", Kind: kind, State: "ready", URL: url, Public: public}
+		return wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/" + name, Group: "widget/web", Kind: kind, State: "ready", URL: url, Exposure: map[bool]string{true: wtc.ExposurePublic, false: wtc.ExposureTailnet}[public]}
 	}
 	snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{Collection: "fixture", Repo: "widget", Dir: "widget", BranchDisplay: "feature", Tree: "clean"}},
 		Runtime: []wtc.RuntimeItem{item("server", "service", "http://127.0.0.1:3000", false),
@@ -141,10 +141,10 @@ func TestStatusRuntimeSeparatesProtectedAndPublicTunnels(t *testing.T) {
 	if !strings.Contains(lines[y], "\x1b[33mcloudflare") {
 		t.Errorf("public link is not warning-toned: %q", lines[y])
 	}
-	if hover := statusRuntimeHover(snapshot.Runtime[2]); !strings.Contains(hover, "public endpoint") {
+	if hover := statusRuntimeHover(snapshot.Runtime[2]); !strings.Contains(hover, "public, reachable from the internet") {
 		t.Errorf("hover does not say public: %q", hover)
 	}
-	if hover := statusRuntimeHover(snapshot.Runtime[1]); !strings.Contains(hover, "protected endpoint") {
+	if hover := statusRuntimeHover(snapshot.Runtime[1]); !strings.Contains(hover, "tailnet only") {
 		t.Errorf("hover does not say protected: %q", hover)
 	}
 	// With only a protected tunnel, the empty PUBLIC column still shows that
@@ -163,8 +163,8 @@ func TestStatusRuntimeMarkDefaultsAndOverride(t *testing.T) {
 	for want, item := range map[string]wtc.RuntimeItem{
 		"w": {Path: "app/web/server", Group: "app/web", Kind: "service"},
 		"d": {Path: "app/database", Group: "app/database", Kind: "service"},
-		"t": {Path: "app/web/tunnel", Group: "app/web", Kind: "endpoint"},
-		"T": {Path: "app/web/tunnel", Group: "app/web", Kind: "endpoint", Public: true},
+		"t": {Path: "app/web/tunnel", Group: "app/web", Kind: "endpoint", Exposure: wtc.ExposureTailnet},
+		"T": {Path: "app/web/tunnel", Group: "app/web", Kind: "endpoint", Exposure: wtc.ExposurePublic},
 		"r": {Path: "app/@resources", Group: "app/resources", Kind: "resources"},
 		"x": {Path: "app/web/server", Group: "app/web", Kind: "service", Mark: "x"},
 	} {
@@ -178,9 +178,27 @@ func TestStatusRuntimeCellSeparatesServices(t *testing.T) {
 	items := []wtc.RuntimeItem{
 		{Collection: "c", Group: "widget/web", Path: "widget/web/server", Kind: "service", State: "ready"},
 		{Collection: "c", Group: "widget/resources", Path: "widget/resources", Kind: "resources", State: "provision-hook-completed"},
-		{Collection: "c", Group: "widget/web", Path: "widget/web/tunnel", Kind: "endpoint", State: "ready"},
+		{Collection: "c", Group: "widget/web", Path: "widget/web/tunnel", Kind: "endpoint", State: "ready", Exposure: wtc.ExposureTailnet},
 	}
 	if got := statusRuntimeCell(items, 6, false); got != "w/t r " {
 		t.Fatalf("cell = %q, want a service joined to its tunnel and apart from resources", got)
+	}
+}
+
+func TestStatusRuntimeTreatsUnknownExposureAsPublic(t *testing.T) {
+	item := wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/tunnel", Group: "widget/web", Kind: "endpoint", State: "ready", URL: "https://preview.example.test"}
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", Runtime: []wtc.RuntimeItem{item}}
+	if g := statusRuntimeGroups(snapshot); len(g) != 1 || len(g[0].public) != 1 || len(g[0].tunnels) != 0 {
+		t.Fatalf("undeclared tunnel not under PUBLIC: %+v", g)
+	}
+	if letter, _ := statusRuntimeMark(item); letter != "T" {
+		t.Fatalf("mark = %q, want upper case for an unknown exposure", letter)
+	}
+	if hover := statusRuntimeHover(item); !strings.Contains(hover, "exposure unknown") {
+		t.Fatalf("hover does not say unknown: %q", hover)
+	}
+	item.Provider, item.Exposure, item.ExposureBasis = "tailscale", wtc.ExposureTailnet, wtc.ExposureVerified
+	if hover := statusRuntimeHover(item); !strings.Contains(hover, "tailscale tunnel, tailnet only (checked with the provider)") {
+		t.Fatalf("hover = %q", hover)
 	}
 }

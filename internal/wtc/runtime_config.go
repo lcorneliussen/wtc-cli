@@ -130,7 +130,7 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 			item.Label, _ = task["label"].(string)
 			if metadata, ok := task["x-wtc"].(map[string]any); ok {
 				for key := range metadata {
-					if key != "url" && key != "url_env" && key != "url_log" && key != "public" && key != "mark" {
+					if key != "url" && key != "url_env" && key != "url_log" && key != "public" && key != "mark" && key != "tunnel" {
 						return nil, nil, fmt.Errorf("%s: unsupported x-wtc field %s", full, key)
 					}
 				}
@@ -147,7 +147,17 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 					if !ok {
 						return nil, nil, fmt.Errorf("%s: x-wtc public must be true or false", full)
 					}
-					item.Public = public
+					item.Exposure, item.ExposureBasis = ExposureProtected, ExposureDeclared
+					if public {
+						item.Exposure = ExposurePublic
+					}
+				}
+				if value, set := metadata["tunnel"]; set {
+					name, _ := value.(string)
+					if !runtimeTunnelNames.MatchString(name) {
+						return nil, nil, fmt.Errorf("%s: x-wtc tunnel must be one of %s", full, strings.Trim(strings.ReplaceAll(runtimeTunnelNames.String(), "|", ", "), "^()$"))
+					}
+					item.Provider = name
 				}
 				if name, _ := metadata["url_env"].(string); name != "" {
 					if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(name) {
@@ -189,8 +199,38 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 					item.URL = probe
 				}
 			}
-			if item.Public && item.Kind != "endpoint" {
-				return nil, nil, fmt.Errorf("%s: only an endpoint can be public", full)
+			if (item.Exposure != "" || item.Provider != "") && item.Kind != "endpoint" {
+				return nil, nil, fmt.Errorf("%s: only an endpoint can be a tunnel or public", full)
+			}
+			if item.Kind == "endpoint" {
+				// A known tunnel client needs no URL pattern and may say how
+				// far it reaches.
+				var cmd string
+				switch value := task["cmd"].(type) {
+				case string:
+					cmd = value
+				case []any:
+					for _, part := range value {
+						if text, ok := part.(string); ok {
+							cmd += text + " "
+						}
+					}
+				}
+				provider, known := runtimeTunnelProviderNamed(item.Provider)
+				if !known {
+					provider, known = runtimeTunnelProviderOfCommand(cmd)
+				}
+				if known {
+					item.Provider = provider.name
+					if item.URLLog == "" && item.URL == "" {
+						item.URLLog = provider.urlLog
+					}
+					if item.Exposure == "" && runtimeWord(cmd, provider.program) {
+						if exposure := provider.command(cmd); exposure != "" {
+							item.Exposure, item.ExposureBasis = exposure, ExposureCommand
+						}
+					}
+				}
 			}
 			item.Autostart, _ = task["autostart"].(bool)
 			if deps, ok := task["deps"].([]any); ok {

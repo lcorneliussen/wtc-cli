@@ -21,9 +21,12 @@ type RuntimeItem struct {
 	Kind       string `json:"kind"`
 	Label      string `json:"label,omitempty"`
 	URL        string `json:"url,omitempty"`
-	// Public marks an endpoint reachable from the internet, as opposed to a
-	// protected one such as a tailnet address.
-	Public bool `json:"public,omitempty"`
+	// Provider is the tunnel client of an endpoint, such as tailscale.
+	Provider string `json:"provider,omitempty"`
+	// Exposure is how far an endpoint reaches (Exposure* constants), and
+	// ExposureBasis how wtc knows it.
+	Exposure      string `json:"exposure,omitempty"`
+	ExposureBasis string `json:"exposure_basis,omitempty"`
 	// Mark is the one-character name status shows for the task.
 	Mark     string `json:"mark,omitempty"`
 	State    string `json:"state"`
@@ -213,6 +216,12 @@ func (c *Context) runtimeStatus(m *runtimeManifest) []RuntimeItem {
 	if err != nil || state != "running" {
 		return items
 	}
+	tailscale := runtimeTailscaleCheck()
+	defer func() {
+		for i := range m.Tasks {
+			runtimeTunnelExposure(&items[i], tailscale)
+		}
+	}()
 	data, err := runtimeCommand(m, false, "ls")
 	var response struct {
 		Tasks []RuntimeItem `json:"tasks"`

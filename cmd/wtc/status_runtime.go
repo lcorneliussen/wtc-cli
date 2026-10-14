@@ -32,7 +32,7 @@ func statusRuntimeGroups(snapshot wtc.StatusSnapshot) []statusRuntimeGroup {
 		g := &groups[at]
 		g.members = append(g.members, item)
 		if item.URL != "" {
-			if item.Kind == "endpoint" && item.Public {
+			if statusRuntimeExposed(item) {
 				g.public = append(g.public, item.URL)
 			} else if item.Kind == "endpoint" {
 				g.tunnels = append(g.tunnels, item.URL)
@@ -63,10 +63,8 @@ func statusRuntimeURLLabel(raw string) string {
 		}
 		return host
 	}
-	for suffix, name := range map[string]string{".ts.net": "tailscale", ".trycloudflare.com": "cloudflare", ".ngrok-free.app": "ngrok", ".ngrok.app": "ngrok", ".ngrok.io": "ngrok", ".devtunnels.ms": "devtunnel"} {
-		if strings.HasSuffix(host, suffix) {
-			return name
-		}
+	if provider := wtc.RuntimeTunnelProvider(raw); provider != "" {
+		return provider
 	}
 	return host
 }
@@ -249,7 +247,7 @@ func statusRuntimeMark(item wtc.RuntimeItem) (string, string) {
 	letter := first(item.Group)
 	if item.Kind == "endpoint" {
 		letter = first(item.Path)
-		if item.Public {
+		if statusRuntimeExposed(item) {
 			letter = unicode.ToUpper(letter)
 		}
 	}
@@ -330,10 +328,8 @@ func statusRuntimeCell(items []wtc.RuntimeItem, width int, styled bool) string {
 // statusRuntimeHover is the footer text for the mark under the pointer.
 func statusRuntimeHover(item wtc.RuntimeItem) string {
 	parts := []string{item.Path, item.Kind, item.State}
-	if item.Kind == "endpoint" && item.Public {
-		parts[1] = "public endpoint, reachable from the internet"
-	} else if item.Kind == "endpoint" {
-		parts[1] = "protected endpoint"
+	if item.Kind == "endpoint" {
+		parts[1] = statusRuntimeExposure(item)
 	}
 	for _, extra := range []string{item.Label, item.URL, item.Reason, item.Error} {
 		if extra != "" {
@@ -341,4 +337,44 @@ func statusRuntimeHover(item wtc.RuntimeItem) string {
 		}
 	}
 	return statusTUISafe(strings.Join(parts, " · "))
+}
+
+// statusRuntimeExposed is true for an endpoint that may be reachable from the
+// internet: public, or not known to be protected.
+func statusRuntimeExposed(item wtc.RuntimeItem) bool {
+	if item.Kind != "endpoint" {
+		return false
+	}
+	switch item.Exposure {
+	case wtc.ExposureTailnet, wtc.ExposureAccount, wtc.ExposureProtected:
+		return false
+	}
+	return true
+}
+
+// statusRuntimeExposure says who can reach an endpoint and how wtc knows.
+func statusRuntimeExposure(item wtc.RuntimeItem) string {
+	what := "tunnel"
+	if item.Provider != "" {
+		what = item.Provider + " tunnel"
+	}
+	reach := map[string]string{
+		wtc.ExposureTailnet:   "tailnet only",
+		wtc.ExposureAccount:   "allowed accounts only",
+		wtc.ExposureProtected: "protected",
+		wtc.ExposurePublic:    "public, reachable from the internet",
+	}[item.Exposure]
+	if reach == "" {
+		return what + ", exposure unknown (treated as public; set x-wtc public: false if it is protected)"
+	}
+	how := map[string]string{
+		wtc.ExposureVerified: "checked with the provider",
+		wtc.ExposureDeclared: "declared",
+		wtc.ExposureCommand:  "from its command",
+		wtc.ExposureDefault:  "provider default",
+	}[item.ExposureBasis]
+	if how != "" {
+		reach += " (" + how + ")"
+	}
+	return what + ", " + reach
 }

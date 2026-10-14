@@ -435,7 +435,7 @@ func TestRuntimeStatusShowsDiscoveredURLOnlyWhenReady(t *testing.T) {
 		t.Fatal("accepted a long mark")
 	}
 	fixtureFile(t, fragment, string(data)+"  x-wtc: {public: true}\n", 0644)
-	if m, _, err := c.runtimePlan("dekit"); err != nil || !m.Tasks[1].Public || m.Tasks[0].Public {
+	if m, _, err := c.runtimePlan("dekit"); err != nil || m.Tasks[1].Exposure != ExposurePublic || m.Tasks[0].Exposure != "" {
 		t.Fatalf("public endpoint not recorded: %v", err)
 	}
 	fixtureFile(t, fragment, strings.Replace(string(data), "  ready: {log: READY}\n", "  ready: {log: READY}\n  x-wtc: {public: true}\n", 1), 0644)
