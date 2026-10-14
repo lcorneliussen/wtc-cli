@@ -56,8 +56,9 @@ const stubModel = `,
 
 // gatewayStart writes the gateway's configuration and starts it. sandbox is
 // the agents' sandbox configuration, or empty to run their commands on the
-// gateway.
-func gatewayStart(stub bool, sandbox string) string {
+// gateway. tailnet serves the gateway on the container's tailnet and lets
+// people sign in as their Tailscale identity.
+func gatewayStart(stub bool, sandbox string, tailnet bool) string {
 	model, defaults, start := "", []string{}, ""
 	if stub {
 		model, defaults = stubModel, append(defaults, `"model": { "primary": "stub/stub-model" }`)
@@ -65,6 +66,10 @@ func gatewayStart(stub bool, sandbox string) string {
 	}
 	if sandbox != "" {
 		defaults = append(defaults, `"sandbox": `+sandbox)
+	}
+	auth := `"auth": { "mode": "token", "token": "t" }`
+	if tailnet {
+		auth = `"auth": { "mode": "token", "token": "t", "allowTailscale": true }, "tailscale": { "mode": "serve" }`
 	}
 	agents := ""
 	if len(defaults) > 0 {
@@ -74,7 +79,7 @@ func gatewayStart(stub bool, sandbox string) string {
 cd /app
 cat > "$OPENCLAW_CONFIG_PATH" <<JSON
 { "gateway": { "mode": "local", "bind": "loopback", "port": 18789,
-               "auth": { "mode": "token", "token": "t" },
+               ` + auth + `,
                "tools": { "allow": ["sessions_spawn", "github_publish"] } },
   "agents": { ` + agents + `"entries": { "dev": { "workspace": "$OPENCLAW_STATE_DIR/workspaces/dev" } } }` + model + ` }
 JSON
@@ -177,6 +182,62 @@ func sandboxImage(t *testing.T) string {
 	return sandboxTag
 }
 
+var (
+	tailscaleOnce sync.Once
+	tailscaleTag  string
+	tailscaleErr  string
+)
+
+// tailscaleImage is the gateway image plus Tailscale.
+func tailscaleImage(t *testing.T) string {
+	t.Helper()
+	gatewayImage := testImage(t)
+	tailscaleOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "wtc-openclaw-tailscale")
+		if err != nil {
+			tailscaleErr = "temp dir: " + err.Error()
+			return
+		}
+		defer os.RemoveAll(dir)
+		tag := strings.Replace(gatewayImage, "wtc-openclaw-test:", "wtc-openclaw-tailscale:", 1)
+		dockerfile := filepath.Join("testdata", "tailscale.Dockerfile")
+		if out, err := exec.Command("docker", "build", "-q", "--build-arg", "BASE_IMAGE="+gatewayImage, "-f", dockerfile, "-t", tag, dir).CombinedOutput(); err != nil {
+			tailscaleErr = "docker build: " + err.Error() + "\n" + string(out)
+			return
+		}
+		tailscaleTag = tag
+	})
+	if tailscaleErr != "" {
+		t.Fatal(tailscaleErr)
+	}
+	return tailscaleTag
+}
+
+// tailnetArgs let a container run its own tailscaled with a TUN device: its
+// tailnet traffic stays inside the container's network namespace.
+var tailnetArgs = []string{"--cap-add", "NET_ADMIN", "--device", "/dev/net/tun"}
+
+// joinTailnet starts tailscaled in a container and brings it up on the
+// tailnet the auth key in $WTC_TS_AUTHKEY (passed by name) belongs to. The
+// node is ephemeral: it leaves the tailnet when the container goes. It
+// returns the node's MagicDNS name.
+func joinTailnet(t *testing.T, container, hostname string, env []string) string {
+	t.Helper()
+	cmd := exec.Command("docker", "exec", "-i", "-u", "0", "-e", "WTC_TS_AUTHKEY", container, "sh", "-c", `set -e
+mkdir -p /var/lib/tailscale /var/run/tailscale
+nohup tailscaled --state=mem: --socket=/var/run/tailscale/tailscaled.sock > /tmp/tailscaled.log 2>&1 &
+for _ in $(seq 1 30); do tailscale status >/dev/null 2>&1 && break; [ -S /var/run/tailscale/tailscaled.sock ] && break; sleep 1; done
+tailscale up --authkey="$WTC_TS_AUTHKEY" --hostname=`+hostname+` --operator=node --accept-dns=true --timeout=60s
+tailscale status --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).Self.DNSName.replace(/\.$/,"")))'`)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("joining the tailnet as %s: %v\n%s", hostname, err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	return lines[len(lines)-1]
+}
+
 // sandboxRoot is the directory on the Docker host that holds the state of
 // sandboxed gateways, one directory per test.
 const sandboxRoot = "/var/lib/wtc-openclaw-e2e"
@@ -198,6 +259,8 @@ type gateway struct {
 	secrets []string
 	// hidden are further values that must not show up in failure output.
 	hidden []string
+	// tailnetName is the gateway's MagicDNS name on the test tailnet.
+	tailnetName string
 	// sandboxPrefix names the sandbox containers of a sandboxed gateway.
 	sandboxPrefix string
 }
@@ -224,6 +287,9 @@ type gatewayOptions struct {
 	// host instead of memory; that also leaves room for OpenClaw's worktree
 	// reserve.
 	sandbox bool
+	// tailnetKey joins the gateway to the tailnet this auth key belongs to
+	// and serves it there, so people can sign in as their Tailscale identity.
+	tailnetKey string
 }
 
 func startGateway(t *testing.T, opt gatewayOptions) *gateway {
@@ -262,7 +328,13 @@ func startGateway(t *testing.T, opt gatewayOptions) *gateway {
 		sandbox = `{ "mode": "all", "backend": "docker", "scope": "session",
                 "docker": { "image": "` + image + `", "containerPrefix": "` + g.sandboxPrefix + `" } }`
 	}
-	args := append(append([]string{"run", "-d"}, home...), "--tmpfs", "/tmp:size=6g,exec", "--entrypoint", "sleep", testImage(t), "infinity")
+	image := testImage(t)
+	if opt.tailnetKey != "" {
+		image = tailscaleImage(t)
+		home = append(home, tailnetArgs...)
+		g.hidden = append(g.hidden, opt.tailnetKey)
+	}
+	args := append(append([]string{"run", "-d"}, home...), "--tmpfs", "/tmp:size=6g,exec", "--entrypoint", "sleep", image, "infinity")
 	out, err := exec.Command("docker", args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("docker run: %v\n%s", err, out)
@@ -293,7 +365,10 @@ func startGateway(t *testing.T, opt gatewayOptions) *gateway {
 		}
 		g.put("/tmp/stub-model.mjs", stub)
 	}
-	if out, err := g.bash(gatewayPrepare + opt.repos + gatewayStart(opt.stubModel, sandbox)); err != nil {
+	if opt.tailnetKey != "" {
+		g.tailnetName = joinTailnet(t, g.container, "wtc-gw-"+g.container[:8], []string{"WTC_TS_AUTHKEY=" + opt.tailnetKey})
+	}
+	if out, err := g.bash(gatewayPrepare + opt.repos + gatewayStart(opt.stubModel, sandbox, opt.tailnetKey != "")); err != nil {
 		t.Fatalf("gateway setup: %v\n%s", err, g.redact(out))
 	}
 	if opt.plugin {
