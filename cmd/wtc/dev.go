@@ -4,19 +4,34 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/charmbracelet/x/term"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
 
+// delegatedFrom is the version that handed over to this binary, if any. The
+// handover marker is read once and removed from the environment, so hooks,
+// agents and panes started from here hand over again on their own.
+var delegatedFrom string
+
+func takeDelegatedFrom() {
+	delegatedFrom = os.Getenv(wtc.DevBuildDelegatedEnv)
+	os.Unsetenv(wtc.DevBuildDelegatedEnv)
+}
+
 // handOverToDevBuild replaces this process with the collection's dev build
 // when that build is the same version as this one or newer. It returns only
 // when this binary should keep running.
 func handOverToDevBuild() {
-	if os.Getenv(wtc.DevBuildDelegatedEnv) != "" || os.Getenv(wtc.DevBuildDisableEnv) == "off" {
+	takeDelegatedFrom()
+	if delegatedFrom != "" || os.Getenv(wtc.DevBuildDisableEnv) == "off" {
+		return
+	}
+	if _, err := semver.NewVersion(version); err != nil {
+		// An unversioned build ("dev") is already somebody's build.
 		return
 	}
 	dir, err := os.Getwd()
@@ -24,13 +39,8 @@ func handOverToDevBuild() {
 		return
 	}
 	build := wtc.ReadDevBuild(wtc.FindCollectionRoot(dir))
-	if build == nil {
+	if build == nil || isDevBuildBinary(build) {
 		return
-	}
-	if self, err := os.Executable(); err == nil {
-		if resolved, err := filepath.EvalSymlinks(self); err == nil && resolved == build.Binary {
-			return
-		}
 	}
 	if !wtc.DevBuildTakesOver(version, build) {
 		if term.IsTerminal(os.Stderr.Fd()) {
@@ -38,24 +48,30 @@ func handOverToDevBuild() {
 		}
 		return
 	}
-	env := []string{}
-	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, wtc.DevBuildDelegatedEnv+"=") {
-			env = append(env, entry)
-		}
-	}
-	env = append(env, wtc.DevBuildDelegatedEnv+"="+version)
+	env := append(os.Environ(), wtc.DevBuildDelegatedEnv+"="+version)
 	// On success Exec does not return; on failure keep running this binary.
 	if err := syscall.Exec(build.Binary, append([]string{build.Binary}, os.Args[1:]...), env); err != nil {
 		fmt.Fprintf(os.Stderr, "wtc: cannot run dev build %s: %v\n", build.Binary, err)
 	}
 }
 
+// isDevBuildBinary says whether this process is the dev build itself, by file
+// identity, so symlinked collection paths compare correctly.
+func isDevBuildBinary(build *wtc.DevBuild) bool {
+	self, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	a, errA := os.Stat(self)
+	b, errB := os.Stat(build.Binary)
+	return errA == nil && errB == nil && os.SameFile(a, b)
+}
+
 // versionLabel is what --version prints: a dev build standing in for another
 // version says so.
 func versionLabel() string {
-	if from := os.Getenv(wtc.DevBuildDelegatedEnv); from != "" {
-		return version + " (dev build, in place of " + from + ")"
+	if delegatedFrom != "" {
+		return version + " (dev build, in place of " + delegatedFrom + ")"
 	}
 	return version
 }
@@ -106,7 +122,7 @@ func addDevCommands(root *cobra.Command, asJSON *bool) {
 				return err
 			}
 			build := wtc.ReadDevBuild(root)
-			data := map[string]any{"running": version, "delegated_from": os.Getenv(wtc.DevBuildDelegatedEnv), "dev_build": build}
+			data := map[string]any{"running": version, "delegated_from": delegatedFrom, "dev_build": build}
 			summary := "no dev build in " + root
 			if build != nil {
 				summary = fmt.Sprintf("dev build %s from %s\n%s", build.Version, build.Source, devBuildEffect(build))
@@ -134,8 +150,8 @@ func addDevCommands(root *cobra.Command, asJSON *bool) {
 }
 
 func devBuildEffect(build *wtc.DevBuild) string {
-	if from := os.Getenv(wtc.DevBuildDelegatedEnv); from != "" {
-		return "in effect: running it in place of " + from
+	if delegatedFrom != "" {
+		return "in effect: running it in place of " + delegatedFrom
 	}
 	if version == build.Version {
 		return "in effect: this is the dev build"

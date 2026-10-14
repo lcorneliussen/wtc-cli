@@ -3,6 +3,7 @@ package wtc
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -104,5 +105,40 @@ func TestDevBuildSourceFindsWtcCheckout(t *testing.T) {
 	}
 	if _, err := DevBuildSource(collection); err == nil {
 		t.Fatal("a collection without wtc-cli has no source")
+	}
+}
+
+// Builds this repository into a scratch collection, as `wtc dev install` does.
+func TestInstallAndUninstallDevBuild(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the CLI")
+	}
+	source, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitOutput("-C", source, "describe", "--tags", "--match", "v[0-9]*"); err != nil {
+		t.Skip("checkout has no release tag (shallow clone)")
+	}
+	collection := t.TempDir()
+	build, err := InstallDevBuild(collection, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := ReadDevBuild(collection)
+	if read == nil || read.Version != build.Version || read.Source != source || !strings.Contains(build.Version, "dev") {
+		t.Fatalf("installed build not readable: %+v / %+v", build, read)
+	}
+	if _, err := os.Stat(filepath.Join(collection, ".wtc", "dev", ".wtc.tmp")); !os.IsNotExist(err) {
+		t.Fatal("temporary binary left behind")
+	}
+	if _, err := InstallDevBuild(collection, t.TempDir()); err == nil {
+		t.Fatal("a directory that is not wtc-cli must be refused")
+	}
+	if removed, err := UninstallDevBuild(collection); err != nil || !removed || ReadDevBuild(collection) != nil {
+		t.Fatalf("uninstall: %v %v", removed, err)
+	}
+	if removed, err := UninstallDevBuild(collection); err != nil || removed {
+		t.Fatalf("second uninstall: %v %v", removed, err)
 	}
 }

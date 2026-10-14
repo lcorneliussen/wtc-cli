@@ -59,9 +59,39 @@ func TestPinnedBinaryHandsOverToDevBuild(t *testing.T) {
 	if got := run("WTC_DEV_DELEGATED_FROM=", "WTC_DEV_BUILD=off"); !strings.Contains(got, "version 0.1.39") {
 		t.Fatalf("WTC_DEV_BUILD=off must keep the pinned binary: %q", got)
 	}
+	// The dev build run directly, through a symlinked collection path, is
+	// itself and must not hand over to itself.
+	link := filepath.Join(t.TempDir(), "collection")
+	if err := os.Symlink(collection, link); err != nil {
+		t.Fatal(err)
+	}
+	self := exec.Command(filepath.Join(link, ".wtc", "dev", "wtc"), "--version")
+	self.Dir = filepath.Join(link, "harness")
+	self.Env = append(os.Environ(), "WTC_DEV_DELEGATED_FROM=", "WTC_DEV_BUILD=")
+	if raw, err := self.CombinedOutput(); err != nil || strings.TrimSpace(string(raw)) != "wtc version "+devVersion {
+		t.Fatalf("the dev build re-executed itself: %q %v", raw, err)
+	}
 	// The pinned release moved past the build: it keeps running itself.
 	writeVersion("0.1.38-dev.1+dev.gabc1234")
 	if got := run("WTC_DEV_DELEGATED_FROM=", "WTC_DEV_BUILD="); !strings.Contains(got, "version 0.1.39") || strings.Contains(got, "dev build,") {
 		t.Fatalf("an older dev build must not take over: %q", got)
+	}
+}
+
+// The handover marker belongs to one process: children such as hooks, agents
+// and herdr panes must not inherit it, or they would never hand over.
+func TestDelegatedMarkerIsNotInherited(t *testing.T) {
+	t.Setenv("WTC_DEV_DELEGATED_FROM", "0.1.39")
+	takeDelegatedFrom()
+	defer func() { delegatedFrom = "" }()
+	if delegatedFrom != "0.1.39" || !strings.Contains(versionLabel(), "in place of 0.1.39") {
+		t.Fatalf("marker not taken: %q", delegatedFrom)
+	}
+	if _, set := os.LookupEnv("WTC_DEV_DELEGATED_FROM"); set {
+		t.Fatal("the marker is still in the environment for child processes")
+	}
+	child, err := exec.Command("/usr/bin/env").Output()
+	if err != nil || strings.Contains(string(child), "WTC_DEV_DELEGATED_FROM") {
+		t.Fatalf("a child process inherited the marker: %v", err)
 	}
 }
