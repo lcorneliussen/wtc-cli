@@ -142,3 +142,27 @@ func TestInstallAndUninstallDevBuild(t *testing.T) {
 		t.Fatalf("second uninstall: %v %v", removed, err)
 	}
 }
+
+func TestFindCollectionRootRecognizesHarnessAndAdHocCollections(t *testing.T) {
+	for _, marker := range []string{filepath.Join("harness", ".harness-repos.yml"), filepath.Join(AdHocConfigDir, adHocRegistryFile)} {
+		collection := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(collection, filepath.Dir(marker)), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(collection, marker), []byte("schema_version: 1\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		nested := filepath.Join(collection, "repo", "sub")
+		if err := os.MkdirAll(nested, 0755); err != nil {
+			t.Fatal(err)
+		}
+		want, _ := filepath.EvalSymlinks(collection)
+		got, _ := filepath.EvalSymlinks(FindCollectionRoot(nested))
+		if got != want {
+			t.Fatalf("%s: root = %q, want %q", marker, got, want)
+		}
+	}
+	if FindCollectionRoot(t.TempDir()) != "" {
+		t.Fatal("a plain directory is not a collection")
+	}
+}

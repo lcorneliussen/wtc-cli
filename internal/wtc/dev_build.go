@@ -40,16 +40,19 @@ func devBuildDir(collection string) string {
 	return filepath.Join(collection, ".wtc", "dev")
 }
 
-// FindCollectionRoot walks up from start to the directory that holds
-// harness/.harness-repos.yml, without loading the collection.
+// FindCollectionRoot walks up from start to the collection root, recognized
+// by the same markers as Discover (a harness registry or an ad-hoc one),
+// without loading the collection.
 func FindCollectionRoot(start string) string {
 	dir, err := filepath.Abs(start)
 	if err != nil {
 		return ""
 	}
 	for {
-		if info, err := os.Stat(filepath.Join(dir, "harness", ".harness-repos.yml")); err == nil && !info.IsDir() {
-			return dir
+		for _, marker := range []string{filepath.Join("harness", ".harness-repos.yml"), filepath.Join(AdHocConfigDir, adHocRegistryFile)} {
+			if info, err := os.Stat(filepath.Join(dir, marker)); err == nil && !info.IsDir() {
+				return dir
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
