@@ -416,6 +416,7 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 	if other()+minBranch+1 > width {
 		l.showTree = false
 	}
+	l.pr = min(l.pr, max(1, width-(other()-l.pr)-minBranch-1))
 	l.branch = max(minBranch, min(l.branch, width-other()-1))
 	return l
 }
@@ -498,7 +499,11 @@ func statusTUIBuildCell(prefix string, build *wtc.StatusBuild) string {
 
 func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, width int, styled bool) string {
 	plain := statusTUIPR(pr)
-	if statusTUIPRConflict(pr) && runewidth.StringWidth(plain) > width {
+	needed := runewidth.StringWidth(plain)
+	if styled && pr != nil && statusTUIURL(pr.URL) != "" {
+		needed += 2
+	}
+	if statusTUIPRConflict(pr) && needed > width {
 		// Keep the warning visible even when the number and signals do not fit.
 		marker, label := "✗ ", "#"+pr.Number
 		if styled {

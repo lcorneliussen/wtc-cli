@@ -345,6 +345,36 @@ func TestStatusPRConflictVisibleWithGreenChecksAndCleanCheckout(t *testing.T) {
 	}
 }
 
+func TestStatusLongConflictingPRFitsAndKeepsClickTarget(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	prURL := "https://github.com/example/widget/pull/1234567"
+	for _, number := range []string{"1234567", "123456789012345"} {
+		snapshot := wtc.StatusSnapshot{Collection: "fixture", Repos: []wtc.StatusRepo{{
+			Dir: "widget", BranchDisplay: "topic", Tree: "±1234", Ahead: 1234, Behind: 1234,
+			PR: &wtc.StatusPRFacts{Number: number, URL: prURL, Merge: "CONFLICTING", Checks: "SUCCESS"},
+		}}}
+		for width := 20; width <= 120; width++ {
+			layout := statusTUIRepoLayout(snapshot, width)
+			for _, styled := range []bool{false, true} {
+				lines := statusTUIRepoLines(snapshot, width, styled)
+				for _, line := range lines {
+					if ansi.StringWidth(line) > width {
+						t.Fatalf("PR %s overflows width %d (styled %t): %q", number, width, styled, line)
+					}
+				}
+				if !strings.Contains(ansi.Strip(lines[1]), "✗") {
+					t.Fatalf("conflict hidden at width %d: %q", width, lines[1])
+				}
+			}
+			model := statusTUIModel{snapshot: snapshot, width: width, height: 20}
+			if got := model.buildClickTarget(layout.prStart(), 3); got != prURL {
+				t.Fatalf("PR click at width %d: %q", width, got)
+			}
+		}
+	}
+}
+
 func TestStatusTUIHidesBuildColumnsWithoutFactsAndMutesMergedPRs(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")

@@ -9,6 +9,7 @@
 
 ## Fixed
 
+- Long conflicting PR numbers fit narrow TUI rows while retaining the conflict marker and aligned click target, including linked numbers at the 40-column boundary.
 - Review posting skips GitHub inline findings outside the PR diff and position-related HTTP 422 rejections, recording `skipped: not in diff` while keeping the finding in the summary ([#82](https://github.com/lcorneliussen/wtc-cli/issues/82)). Authentication, network and other validation failures still leave the review pending, with forge diagnostics retained for retry.
 - PR merge conflicts are explicit in `wtc status`: repository rows show `✗ conflict` in the PR cell and retain the upstream count with a conflict marker (for example, `✗3`). Compact views keep the warning visible even when sync columns are hidden. GitHub's `mergeable` field detects conflicts even when its merge-state label says draft; passing checks and a clean local checkout do not hide the conflict.
 - The TUI and terminal tables show TEST and PROD columns only for tiers with build facts, as documented ([#58](https://github.com/lcorneliussen/wtc-cli/issues/58)).
