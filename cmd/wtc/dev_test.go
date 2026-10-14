@@ -59,6 +59,27 @@ func TestPinnedBinaryHandsOverToDevBuild(t *testing.T) {
 	if got := run("WTC_DEV_DELEGATED_FROM=", "WTC_DEV_BUILD=off"); !strings.Contains(got, "version 0.1.39") {
 		t.Fatalf("WTC_DEV_BUILD=off must keep the pinned binary: %q", got)
 	}
+	// An ad-hoc collection (no harness repository) hands over the same way.
+	adHoc := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(adHoc, ".wtc", "config"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(adHoc, ".wtc", "config", "repos.yml"), []byte("schema_version: 1\nrepositories: []\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(adHoc, ".wtc", "dev"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	buildVersioned(t, filepath.Join(adHoc, ".wtc", "dev", "wtc"), devVersion)
+	if err := os.WriteFile(filepath.Join(adHoc, ".wtc", "dev", "version"), []byte(devVersion+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	adHocRun := exec.Command(pinned, "--version")
+	adHocRun.Dir = adHoc
+	adHocRun.Env = append(os.Environ(), "WTC_DEV_DELEGATED_FROM=", "WTC_DEV_BUILD=")
+	if raw, err := adHocRun.CombinedOutput(); err != nil || !strings.Contains(string(raw), devVersion+" (dev build, in place of 0.1.39)") {
+		t.Fatalf("ad-hoc collection did not hand over: %q %v", raw, err)
+	}
 	// The dev build run directly, through a symlinked collection path, is
 	// itself and must not hand over to itself.
 	link := filepath.Join(t.TempDir(), "collection")
