@@ -23,6 +23,10 @@
 - A failing or invalid build provider marks only its cell as an error; it no longer fails the whole status refresh.
 - The provider is called once per repository and tier, at most four at a time, instead of once per worktree row in sequence.
 
+- Long conflicting PR numbers fit narrow TUI rows while retaining the conflict marker and aligned click target, including linked numbers at the 40-column boundary.
+
+- Restart waits include readiness probes and finite jobs for running dependents, so a service restart does not finish while its tunnel is still starting.
+
 ## Compatibility
 
 - Harnesses whose `production_ref` equals `default_ref` now get one `prod` tier for that branch instead of one `tip` tier. A hook that keys on `tier` should answer `prod` for it.

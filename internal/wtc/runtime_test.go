@@ -301,6 +301,24 @@ func TestRuntimeWaitsForFiniteJobs(t *testing.T) {
 	}
 }
 
+func TestRuntimeRestartWaitsForRunningDependents(t *testing.T) {
+	for _, dependent := range []string{"ready: {log: READY}", "type: job"} {
+		t.Run(dependent, func(t *testing.T) {
+			c := runtimeFixture(t)
+			fragment := "tasks:\n web/server:\n  cmd: [true]\n  ready: {log: READY}\n web/dependent:\n  cmd: [true]\n  deps: [web/server]\n  " + dependent + "\n"
+			fixtureFile(t, filepath.Join(c.Collection, "widget/.harness/dekit.tasks.yaml"), fragment, 0644)
+			if _, err := c.RuntimeAction("up", "", 0); err != nil {
+				t.Fatal(err)
+			}
+			response := filepath.Join(c.runtimeRoot(), "fake-tasks.json")
+			fixtureFile(t, response, `{"tasks":[{"path":"widget/web/server","state":"ready"},{"path":"widget/web/dependent","state":"running"}]}`, 0600)
+			if _, err := c.RuntimeAction("restart", "widget/web/server", 25*time.Millisecond); err == nil || !strings.Contains(err.Error(), "readiness timed out") {
+				t.Fatalf("running dependent counted as ready: %v", err)
+			}
+		})
+	}
+}
+
 func TestRuntimeEndpointMetadataRerendersWithoutConfigChange(t *testing.T) {
 	c := runtimeFixture(t)
 	fragment := filepath.Join(c.Collection, "widget/.harness/dekit.tasks.yaml")

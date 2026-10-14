@@ -477,7 +477,7 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 							}
 						}
 					case "running":
-						for _, task := range tasks {
+						for _, task := range m.Tasks {
 							if task.Path == item.Path && (task.Ready || task.Kind == "job") {
 								ready = false
 							}
