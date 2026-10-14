@@ -39,11 +39,11 @@ a single-branch clone keeps the tip current.
 
 Clones are shared per user under `$XDG_DATA_HOME/wtc/bare` (default
 `~/.local/share/wtc`, or `$WTC_DATA_HOME`), and every repository added once is
-remembered there by name: the next ad-hoc collection can run
-`wtc add-repo api`. Secrets come from `$WTC_CONFIG_ROOT`, defaulting to
-`~/.config/wtc`. `.wtc/config/` takes the same `wtc.toml`, `hooks/` and
-overrides as a harness. `wtc new <slug> [repo ...]` from an ad-hoc collection starts the next task in a
-sibling folder with the same registrations. `wtc retire .` removes the
+remembered there by name: the next ad-hoc collection can run `wtc add-repo
+api`. Secrets come from `$WTC_CONFIG_ROOT`, defaulting to `~/.config/wtc`.
+`.wtc/config/` takes the same `wtc.toml`, `hooks/` and overrides as a harness.
+`wtc new <slug> [repo ...]` from an ad-hoc collection starts the next task in
+a sibling folder with the same registrations. `wtc retire .` removes the
 worktrees and the folder; owners and the per-user registry stay.
 
 ## Minimal harness

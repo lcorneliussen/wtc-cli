@@ -403,3 +403,76 @@ func TestAdHocNewCreatesSiblingWithSameRegistrations(t *testing.T) {
 		t.Fatalf("an existing sibling was overwritten: %v", err)
 	}
 }
+
+func TestAdHocNewOptionsHooksAndControlRoot(t *testing.T) {
+	root := adHocFixture(t)
+	widget := adHocSource(t, root, "widget")
+	gadget := adHocSource(t, root, "gadget")
+	c := initAdHoc(t, filepath.Join(root, "task"))
+	addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + widget})
+	// gadget is known per user only, from another collection.
+	other := initAdHoc(t, filepath.Join(root, "other"))
+	if _, err := other.RegisterAdHocRepo(AdHocRepoOptions{Spec: "file://" + gadget}); err != nil {
+		t.Fatal(err)
+	}
+	c.ConfigRoot = filepath.Join(root, "control")
+	fixtureFile(t, filepath.Join(c.ConfigRoot, "widget", "secret.txt"), "synthetic\n", 0600)
+	fixtureFile(t, filepath.Join(widget, ".gitignore"), "secret.txt\n", 0644)
+	fixtureGit(t, "-C", widget, "add", "-A")
+	fixtureGit(t, "-C", widget, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "ignore")
+	log := filepath.Join(root, "hooks.log")
+	for _, event := range []string{"new.pre", "new.post"} {
+		fixtureFile(t, filepath.Join(c.Harness, "hooks", "wtc", event+".sh"), "#!/bin/sh\necho "+event+" >> '"+log+"'\n", 0755)
+	}
+	for _, bad := range []NewOptions{
+		{Issue: "wid-1", Slug: "x"},
+		{Slug: "bad slug"},
+		{Slug: "x", Tracker: "bad key"},
+		{Slug: "x", Branch: "bad branch"},
+		{Slug: "x", Repos: []string{"widget", "widget"}},
+	} {
+		if _, err := c.NewCollection(bad); err == nil {
+			t.Fatalf("accepted %+v", bad)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "x")); !os.IsNotExist(err) {
+		t.Fatalf("a refused request created a folder: %v", err)
+	}
+	result, err := c.NewCollection(NewOptions{Slug: "next", Branch: "feature-x", Repos: []string{"widget", "gadget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"widget", "gadget"} {
+		if branch := fixtureGit(t, "-C", filepath.Join(result.Collection, name), "branch", "--show-current"); branch != "feature-x" {
+			t.Fatalf("%s is on %q, want feature-x", name, branch)
+		}
+	}
+	if info, err := os.Lstat(filepath.Join(result.Collection, "widget", "secret.txt")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("secret not linked from the inherited control root: %v", err)
+	}
+	if data, err := os.ReadFile(log); err != nil || string(data) != "new.pre\nnew.post\n" {
+		t.Fatalf("source hooks did not run in order: %q %v", data, err)
+	}
+}
+
+func TestRegistryEntryKeepsEveryRepoField(t *testing.T) {
+	offset := 7
+	repo := Repo{Name: "widget", Remote: "git@example.invalid:x/widget.git", DefaultRef: "origin/develop", Owner: "/srv/widget/.git",
+		PortOffset: &offset, Role: "role", IssuesPrefix: "wid-", ProductionRef: "origin/prod", ReleaseRef: "origin/release",
+		ProdPaths: []string{"config/prod"}, IDE: "idea", MergeStrategy: "squash", Extra: map[string]any{"custom": "kept"}}
+	path := filepath.Join(t.TempDir(), "repos.yml")
+	fixtureFile(t, path, adHocRegistryHeader, 0644)
+	if err := appendRegistryEntry(path, repo); err != nil {
+		t.Fatal(err)
+	}
+	c := &Context{Collection: filepath.Dir(path), Harness: filepath.Dir(path), AdHoc: true, ConfigRoot: t.TempDir()}
+	if err := c.load(); err != nil {
+		t.Fatal(err)
+	}
+	got := c.Registry.Repos[0]
+	if got.Owner != repo.Owner || *got.PortOffset != 7 || got.IssuesPrefix != "wid-" || got.ProductionRef != repo.ProductionRef ||
+		got.ReleaseRef != repo.ReleaseRef || len(got.ProdPaths) != 1 || got.IDE != "idea" || got.MergeStrategy != "squash" ||
+		got.Role != "role" || got.Extra["custom"] != "kept" {
+		t.Fatalf("round trip lost fields: %+v", got)
+	}
+}

@@ -380,6 +380,7 @@ type registryEntry struct {
 	Owner         string         `yaml:"owner,omitempty"`
 	PortOffset    *int           `yaml:"port_offset,omitempty"`
 	Role          string         `yaml:"role,omitempty"`
+	IssuesPrefix  string         `yaml:"issues_prefix,omitempty"`
 	ProductionRef string         `yaml:"production_ref,omitempty"`
 	ReleaseRef    string         `yaml:"release_ref,omitempty"`
 	ProdPaths     []string       `yaml:"prod_paths,omitempty"`
@@ -390,7 +391,7 @@ type registryEntry struct {
 
 func entryOf(r Repo) registryEntry {
 	return registryEntry{Name: r.Name, Remote: r.Remote, DefaultRef: r.DefaultRef, Owner: r.Owner,
-		PortOffset: r.PortOffset, Role: r.Role, ProductionRef: r.ProductionRef, ReleaseRef: r.ReleaseRef,
+		PortOffset: r.PortOffset, Role: r.Role, IssuesPrefix: r.IssuesPrefix, ProductionRef: r.ProductionRef, ReleaseRef: r.ReleaseRef,
 		ProdPaths: r.ProdPaths, IDE: r.IDE, MergeStrategy: r.MergeStrategy, Extra: r.Extra}
 }
 
@@ -524,7 +525,6 @@ func (c *Context) newAdHoc(opt NewOptions) (NewResult, error) {
 		return result, fmt.Errorf("invalid collection slug %q", opt.Slug)
 	}
 	name := opt.Slug
-	result.Source = ""
 	if opt.Tracker != "" {
 		if !collectionNamePattern.MatchString(opt.Tracker) {
 			return result, fmt.Errorf("invalid tracker key %q", opt.Tracker)
@@ -561,6 +561,16 @@ func (c *Context) newAdHoc(opt NewOptions) (NewResult, error) {
 	}
 	target, err := OpenCollection(result.Collection)
 	if err != nil {
+		return result, err
+	}
+	// Inherit the creating collection's control root, as a harness `new`
+	// does, before any secret is linked from it.
+	target.ConfigRoot = c.ConfigRoot
+	env, err := target.RenderEnv()
+	if err != nil {
+		return result, err
+	}
+	if err := target.WriteEnv(env); err != nil {
 		return result, err
 	}
 	result.Repositories = []string{}
