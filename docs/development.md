@@ -45,6 +45,7 @@ Tests that publish need a throwaway repository and a login, and skip without:
 |---|---|
 | `WTC_OPENCLAW_GITHUB_REPO=<owner>/<repo>`, `GH_TOKEN` | `GitHub`: the gateway commits, pushes and opens a draft pull request |
 | `WTC_OPENCLAW_BITBUCKET_REPO=<workspace>/<repo>`, `TWG_BBC_USER`, `TWG_BBC_TOKEN`, `WTC_OPENCLAW_BITBUCKET_SKILL=<checkout of the Bitbucket skill>` | `Bitbucket`: the skill pushes and opens the pull request |
+| `OPENAI_API_KEY` with the GitHub variables | `RealModel`: an unscripted model, told only where wtc's guidance is, adds a repository and publishes; the test checks the outcome on GitHub |
 
 Logins exist only inside the test container. The tests leave default branches
 alone and remove the branches and pull requests they create.
