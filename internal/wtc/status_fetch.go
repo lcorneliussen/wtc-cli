@@ -121,6 +121,9 @@ func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.
 			return snapshot, report, err
 		}
 		collection.StatusProgress = c.StatusProgress
+		// Its services are read below, with this collection's dekit, never
+		// with a binary named by its own manifest.
+		collection.statusSweep = true
 		c.statusProgress(fmt.Sprintf("Checking collection %d/%d", i+1, len(collections)))
 		// A workspace sweep must not execute hooks from other collections.
 		// A workspace sweep may read collection siblings but must not rewrite
@@ -132,5 +135,6 @@ func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.
 		snapshot.Repos = append(snapshot.Repos, part.Repos...)
 		snapshot.StaleCount += part.StaleCount
 	}
+	c.statusRuntime(&snapshot, true)
 	return snapshot, report, nil
 }

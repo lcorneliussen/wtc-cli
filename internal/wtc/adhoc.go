@@ -615,6 +615,15 @@ func (c *Context) newAdHoc(opt NewOptions) (NewResult, error) {
 			os.RemoveAll(result.Collection)
 		}
 	}()
+	// Settings such as [runtime] carry over, as siblings of a harness
+	// collection share its wtc.toml. Hooks stay with their collection.
+	if data, err := os.ReadFile(filepath.Join(c.Harness, "wtc.toml")); err == nil {
+		if err := os.WriteFile(filepath.Join(result.Collection, AdHocConfigDir, "wtc.toml"), data, 0644); err != nil {
+			return result, err
+		}
+	} else if !os.IsNotExist(err) {
+		return result, err
+	}
 	target, err := OpenCollection(result.Collection)
 	if err != nil {
 		return result, err
