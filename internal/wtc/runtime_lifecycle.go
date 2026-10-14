@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -336,13 +337,31 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 			if state != "running" {
 				return fmt.Errorf("runner is %s; run wtc up first", state)
 			}
-			if selector == "" {
-				selector = "**"
-			}
 			for _, item := range c.runtimeStatus(m) {
 				if item.State == "ready" || item.State == "running" || item.State == "starting" {
 					live[item.Path] = true
 				}
+			}
+			if selector == "" {
+				// Restart what runs, never a stopped tunnel or a service left
+				// off. A running dependent restarts with its dependency.
+				var running []runtimeTask
+				for _, task := range tasks {
+					if !live[task.Path] || slices.ContainsFunc(task.Deps, func(dep string) bool { return live[dep] }) {
+						continue
+					}
+					running = append(running, task)
+				}
+				if len(running) == 0 {
+					return fmt.Errorf("nothing is running; start services with wtc up")
+				}
+				tasks = running
+				for _, task := range tasks {
+					if _, err := runtimeCommand(m, false, "restart", task.Path); err != nil {
+						return err
+					}
+				}
+				break
 			}
 			if grouped {
 				if tasks, err = runtimeGroupTasks(selector, tasks, false); err != nil {

@@ -285,3 +285,28 @@ func TestInstructionDryRunMatchesReplacingDefaultWithOverride(t *testing.T) {
 		t.Fatalf("override not linked: %q %v", target, err)
 	}
 }
+
+func TestRenderSkillsOffersServicesOnlyWithTheBackend(t *testing.T) {
+	c := fixture(t)
+	skill := filepath.Join(c.Collection, ".claude", "skills", "wtc-svc")
+	if _, err := c.RenderSkills(SkillRenderOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(skill); !os.IsNotExist(err) {
+		t.Fatalf("wtc-svc offered without the dekit backend: %v", err)
+	}
+	c.Config.Runtime.Backend = "dekit"
+	if _, err := c.RenderSkills(SkillRenderOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(skill, "SKILL.md")); err != nil {
+		t.Fatalf("wtc-svc missing with the backend: %v", err)
+	}
+	c.Config.Runtime.Backend = ""
+	if _, err := c.RenderSkills(SkillRenderOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(skill); !os.IsNotExist(err) {
+		t.Fatalf("wtc-svc kept after the backend was turned off: %v", err)
+	}
+}

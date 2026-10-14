@@ -333,6 +333,21 @@ func TestServiceUpAndRestartLeaveAStoppedPublicTunnelClosed(t *testing.T) {
 			t.Fatalf("%s echo reached its public tunnel:\n%s", action, calls)
 		}
 	}
+	// An untargeted restart restarts what runs: here web's server, whose
+	// running tunnel follows it, and never echo's closed public tunnel.
+	fixtureFile(t, filepath.Join(c.runtimeRoot(), "fake-tasks.json"), `{"tasks":[{"path":"widget/web/server","state":"ready"},{"path":"widget/web/tunnel","state":"ready"},{"path":"widget/echo/cloudflare","state":"idle"}]}`, 0600)
+	os.Remove(filepath.Join(c.runtimeRoot(), "calls"))
+	if _, err := c.RuntimeAction("restart", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if calls, _ := os.ReadFile(filepath.Join(c.runtimeRoot(), "calls")); !strings.Contains(string(calls), "restart widget/web/server\n") ||
+		strings.Contains(string(calls), "restart widget/web/tunnel") || strings.Contains(string(calls), "cloudflare") || strings.Contains(string(calls), "**") {
+		t.Fatalf("untargeted restart reached what was not running:\n%s", calls)
+	}
+	fixtureFile(t, filepath.Join(c.runtimeRoot(), "fake-tasks.json"), `{"tasks":[]}`, 0600)
+	if _, err := c.RuntimeAction("restart", "", 0); err == nil || !strings.Contains(err.Error(), "nothing is running") {
+		t.Fatalf("restart with nothing running: %v", err)
+	}
 	// The committed web service starts its private autostart tunnel with it.
 	data, _ := os.ReadFile(runtimeSharedFragment(filepath.Join(c.Collection, "widget")))
 	fixtureFile(t, runtimeSharedFragment(filepath.Join(c.Collection, "widget")), strings.Replace(string(data), "  tags: [endpoint]\n", "  tags: [endpoint]\n  autostart: true\n  x-wtc: {public: false}\n", 1), 0644)
