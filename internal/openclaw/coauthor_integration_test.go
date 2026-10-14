@@ -53,6 +53,10 @@ func (c client) call(method string, params map[string]any) reply {
 }
 
 func TestCoAuthorCredit(t *testing.T) {
+	// Disabled: it has never had a GitHub-backed test tailnet and a second
+	// GitHub account to run with. Co-author credit is checked on a real
+	// deployment instead; remove this skip to run it again.
+	t.Skip("disabled; co-author credit is checked on a real deployment")
 	hub := gitHubTarget(t)
 	key := os.Getenv("WTC_TS_AUTHKEY")
 	if key == "" {
