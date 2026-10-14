@@ -151,13 +151,25 @@ documentation; no test here signs in with a verified GitHub account yet.
 
 ## The collection in the Control UI
 
-OpenClaw shows a parent session with its children nested under it, and each
-child's changes on its own. It has no view of the task as a whole. The plugin
-in [`openclaw-plugin/`](../openclaw-plugin) adds one: a **Collection** panel,
-on the parent and on every child, with a row per repository — branch, commits
-ahead of and behind the base, what the next publication would send, and the
-pull request — and a **Catch up** button that runs `wtc catch-up` in that
-child's worktree. It renders what `wtc checkouts` prints.
+OpenClaw shows a session's changes and pull request for its own checkout only,
+so a conversation whose repositories are held by owner sessions shows none of
+them. The plugin in [`openclaw-plugin/`](../openclaw-plugin) adds the view of
+the task as a whole:
+
+- a card above the message box, where OpenClaw shows a task's progress.
+  Collapsed, it shows what is not published yet, each open pull request
+  coloured by its CI, and how many of the collection's services run; expanded,
+  each repository with **Publish** and **Catch up**, and each service with its
+  address. It appears only on sessions that have a collection. The plugin
+  provides it as a composer that wraps the built-in one, selected when the
+  plugin loads; **Customize UI → Built-in** switches back.
+- a **Collection** panel with a row per repository — branch, commits ahead of
+  and behind the base, what the next publication would send, the pull request
+  with its CI, and **Catch up** and **Publish** buttons — the collection's
+  pull requests and services, and **Add repository**.
+
+Both render what `wtc status <name> --json` prints and refresh every 30
+seconds while they are open.
 
 ```sh
 openclaw config set gateway.controlUi.experimental.customPlugins true

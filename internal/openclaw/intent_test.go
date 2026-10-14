@@ -57,14 +57,16 @@ func TestProjectSource(t *testing.T) {
 		"https://github.com/example-org/api":     {"api", "", "https://github.com/example-org/api.git"},
 		"git@github.com:example-org/api.git":     {"api", "", "https://github.com/example-org/api.git"},
 		"https://github.com/example-org/api.git": {"api", "", "https://github.com/example-org/api.git"},
+		"git@bitbucket.org:example-ws/docs.git":  {"docs", "", "https://bitbucket.org/example-ws/docs.git"},
+		"https://bitbucket.org/example-ws/docs":  {"docs", "", "https://bitbucket.org/example-ws/docs.git"},
 	} {
 		name, project, gitURL, err := ProjectSource(arg)
 		if err != nil || [3]string{name, project, gitURL} != want {
 			t.Errorf("%s: got %q %q %q %v, want %q", arg, name, project, gitURL, err, want)
 		}
 	}
-	// The gateway clones nothing but GitHub.
-	for _, arg := range []string{"git@bitbucket.org:example-ws/docs.git", "https://gitlab.com/example/api", "file:///srv/api"} {
+	// Only GitHub and Bitbucket by URL.
+	for _, arg := range []string{"https://gitlab.com/example/api", "file:///srv/api"} {
 		if _, _, _, err := ProjectSource(arg); err == nil {
 			t.Errorf("%s: accepted", arg)
 		}

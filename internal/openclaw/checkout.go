@@ -302,15 +302,7 @@ func (c *Checkout) CatchUp() (CatchUp, error) {
 			return result, fmt.Errorf("%s has uncommitted changes (%s): commit them before catching up, so a conflict cannot take them along", c.Dir, ch.path)
 		}
 	}
-	fetch := []string{}
-	if c.Origin.Forge == ForgeGitHub {
-		// The agent's shell gets a GitHub token in GH_TOKEN, and git does not
-		// read it by itself. Nothing is written to the repository's config.
-		if _, err := exec.LookPath("gh"); err == nil {
-			fetch = append(fetch, "-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential")
-		}
-	}
-	fetch = append(fetch, "fetch", "--quiet", "origin", "+refs/heads/"+c.Dest+":refs/remotes/origin/"+c.Dest)
+	fetch := append(fetchCredentials(c.Origin), "fetch", "--quiet", "origin", "+refs/heads/"+c.Dest+":refs/remotes/origin/"+c.Dest)
 	if _, err := git(c.Dir, fetch...); err != nil {
 		return result, fmt.Errorf("cannot fetch %s from origin: %w", c.Dest, err)
 	}

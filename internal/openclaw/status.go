@@ -56,11 +56,14 @@ type PullRequest struct {
 	Passed  int    `json:"passed"`
 	Failed  int    `json:"failed"`
 	Running int    `json:"running"`
+	// Mergeable is whether it merges into its base: mergeable, conflicting,
+	// or unknown while GitHub is still working it out.
+	Mergeable string `json:"mergeable,omitempty"`
+	// Review is the review decision: approved, changes_requested,
+	// review_required, or empty when the repository requires none.
+	Review string `json:"review,omitempty"`
 }
 
-// CheckoutsStatus describes the checkouts at paths. With pullRequests it also asks
-// GitHub, through gh and whatever login gh has, for each GitHub checkout's
-// pull request; a checkout it cannot ask about just has none.
 // ManagedCollections finds the gateway's collections: the managed worktrees
 // under stateDir, grouped by worktree name, which is the collection's name.
 // Each repository's worktree is in a directory of its own project.
@@ -82,12 +85,15 @@ func ManagedCollections(stateDir string) (map[string][]string, error) {
 	return collections, nil
 }
 
-// GatewayProject is the name of the gateway's own clone of a GitHub
-// repository, which is its project ID, or "" when the gateway has none.
-// Clones live in stateDir/projects/<hash>/<name>, registered checkouts
-// wherever they were; this finds the clones.
+// GatewayProject is the name of the gateway's own clone of a repository,
+// which is its project ID, or "" when the gateway has none. projects.add
+// clones GitHub repositories to stateDir/projects/<hash>/<name>; the wtc
+// plugin clones others, such as Bitbucket ones, to stateDir/repos/<name> and
+// registers them under that name. Checkouts registered from anywhere else are
+// not found.
 func GatewayProject(stateDir string, origin Origin) string {
 	dirs, _ := filepath.Glob(filepath.Join(stateDir, "projects", "*", origin.Repo))
+	dirs = append(dirs, filepath.Join(stateDir, "repos", origin.Repo))
 	for _, dir := range dirs {
 		url, err := git(dir, "remote", "get-url", "origin")
 		if err != nil {
@@ -101,6 +107,9 @@ func GatewayProject(stateDir string, origin Origin) string {
 	return ""
 }
 
+// CheckoutsStatus describes the checkouts at paths. With pullRequests it also asks
+// GitHub, through gh and whatever login gh has, for each GitHub checkout's
+// pull request; a checkout it cannot ask about just has none.
 func CheckoutsStatus(paths []string, pullRequests bool) Collection {
 	c := Collection{Schema: CollectionSchema, Repos: []CheckoutStatus{}}
 	for _, p := range paths {
@@ -174,7 +183,7 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "--repo", origin.Owner+"/"+origin.Repo, "--head", branch,
-		"--state", "all", "--limit", "1", "--json", "number,url,state,isDraft,title,statusCheckRollup")
+		"--state", "all", "--limit", "1", "--json", "number,url,state,isDraft,title,statusCheckRollup,mergeable,reviewDecision")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -186,6 +195,8 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 		State   string `json:"state"`
 		IsDraft bool   `json:"isDraft"`
 		Title   string `json:"title"`
+		Merge   string `json:"mergeable"`
+		Review  string `json:"reviewDecision"`
 		Rollup  []struct {
 			Status     string `json:"status"`
 			Conclusion string `json:"conclusion"`
@@ -196,7 +207,8 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 		return nil
 	}
 	f := found[0]
-	pr := &PullRequest{Number: f.Number, URL: f.URL, State: strings.ToLower(f.State), Draft: f.IsDraft, Title: f.Title, Checks: "none"}
+	pr := &PullRequest{Number: f.Number, URL: f.URL, State: strings.ToLower(f.State), Draft: f.IsDraft, Title: f.Title, Checks: "none",
+		Mergeable: strings.ToLower(f.Merge), Review: strings.ToLower(f.Review)}
 	// Check runs report status and conclusion, commit statuses a state.
 	for _, c := range f.Rollup {
 		switch result := strings.ToUpper(c.Conclusion + c.State); {

@@ -5,7 +5,82 @@
 //
 // Plain ESM, no build step and no SDK import. Needs `wtc` on the gateway's
 // PATH, and `git`; pull requests also need `gh` with the gateway's login.
+// Bitbucket repositories use the logins of the Bitbucket plugin
+// (openclaw-bitbucket) when it is installed.
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+
 const PLUGIN_ID = "wtc";
+
+// A Bitbucket repository as a person types it: a bitbucket.org URL in https
+// or scp form, or bitbucket.org/<workspace>/<repo>.
+export function parseBitbucketRepo(spec) {
+  const m = String(spec ?? "").trim().match(/^(?:https:\/\/(?:[^@/]+@)?|git@)?bitbucket\.org[/:]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/);
+  if (!m || [m[1], m[2]].some((part) => part === "." || part === "..")) return null;
+  return { workspace: m[1], repo: m[2], cloneUrl: `https://bitbucket.org/${m[1]}/${m[2]}.git`, webUrl: `https://bitbucket.org/${m[1]}/${m[2]}` };
+}
+
+// The person a session belongs to, as the Bitbucket plugin decides it: the
+// assigned human owner, otherwise the signed-in person who created it, for a
+// spawned session that of its parent.
+async function sessionOwnerProfileId(getSessionEntry, sessionKey, agentId) {
+  let key = sessionKey;
+  for (let depth = 0; key && depth <= 5; depth += 1) {
+    const entry = await getSessionEntry({ sessionKey: key, ...(agentId ? { agentId } : {}) });
+    if (!entry) return undefined;
+    if (entry.owner?.actor?.type === "human") return entry.owner.actor.id || undefined;
+    const creator = entry.createdActor;
+    if (creator?.type === "human") return creator.source === "profile" ? creator.id || undefined : undefined;
+    key = entry.parentSessionKey ?? entry.spawnedBy;
+  }
+  return undefined;
+}
+
+// That person's Bitbucket login, from the file the Bitbucket plugin keeps
+// for its credential helper: e-mail and API token.
+function bitbucketLogin(stateDir, profileId) {
+  if (!profileId) return undefined;
+  const digest = createHash("sha256").update(profileId).digest("hex").slice(0, 40);
+  try {
+    const login = {};
+    for (const line of readFileSync(path.join(stateDir, "plugins", "bitbucket", "logins", `${digest}.login`), "utf8").split("\n")) {
+      const at = line.indexOf("=");
+      if (at > 0) login[line.slice(0, at)] = line.slice(at + 1);
+    }
+    return login.profile === profileId && login.user && login.token ? login : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Bitbucket lists repositories per workspace only: the person's workspaces
+// first, then the repositories they are a member of in each.
+export async function bitbucketRepos(login, query) {
+  const get = async (url) => {
+    const response = await fetch(`https://api.bitbucket.org/2.0/${url}`, {
+      headers: { accept: "application/json", authorization: `Basic ${Buffer.from(`${login.user}:${login.token}`).toString("base64")}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) throw new Error(`Bitbucket answered ${response.status}`);
+    return response.json();
+  };
+  const workspaces = ((await get("user/workspaces?pagelen=10")).values ?? []).map((w) => w.workspace?.slug).filter(Boolean);
+  const params = new URLSearchParams({ role: "member", pagelen: "20", sort: "-updated_on" });
+  const q = String(query ?? "").replace(/["\\]/g, "").trim();
+  if (q) params.set("q", `full_name ~ "${q}"`);
+  const pages = await Promise.all(workspaces.map((w) => get(`repositories/${encodeURIComponent(w)}?${params}`).catch(() => ({ values: [] }))));
+  return pages.flatMap((page) => page.values ?? []).map((r) => ({
+    forge: "bitbucket",
+    name: r.name ?? r.slug,
+    fullName: r.full_name,
+    cloneUrl: `https://bitbucket.org/${r.full_name}.git`,
+    webUrl: r.links?.html?.href ?? `https://bitbucket.org/${r.full_name}`,
+    private: Boolean(r.is_private),
+    description: r.description || "",
+  })).slice(0, 20);
+}
 
 // A child that owns a repository has a managed worktree to look at.
 const worktreeOf = (entry) => (entry?.worktree ? entry.workspaceDir || entry.spawnedCwd || null : null);
@@ -34,6 +109,59 @@ export default {
       }
       return { parentKey, parent: entryOf.get(parentKey), children };
     };
+
+    const stateDir = api.runtime.state.resolveStateDir(process.env);
+    const getSessionEntry = async (params) => api.runtime.agent.session.getSessionEntry(params);
+
+    // Repositories from the accounts the person connected that the gateway
+    // has no search for itself. GitHub's is the gateway's projects.searchRemote.
+    api.session.controls.registerSessionAction({
+      id: "repo-search",
+      description: "Search the Bitbucket repositories of the person this session belongs to, with their Bitbucket login.",
+      requiredScopes: ["operator.read"],
+      async handler(action) {
+        const login = bitbucketLogin(stateDir, await sessionOwnerProfileId(getSessionEntry, action.sessionKey, action.agentId));
+        if (!login) return { ok: true, result: { bitbucket: { connected: false }, repos: [] } };
+        try {
+          return { ok: true, result: { bitbucket: { connected: true, user: login.user }, repos: await bitbucketRepos(login, action.payload?.query) } };
+        } catch (err) {
+          return { ok: true, result: { bitbucket: { connected: true, user: login.user, error: String(err?.message ?? err) }, repos: [] } };
+        }
+      },
+    });
+
+    // Clones a Bitbucket repository onto the gateway, with the person's login
+    // when the repository is private. The gateway's own projects.add takes
+    // GitHub only; the Control UI registers the clone with projects.register.
+    api.session.controls.registerSessionAction({
+      id: "clone-repo",
+      description: "Clone a Bitbucket repository onto the gateway for this session's collection.",
+      requiredScopes: ["operator.write"],
+      async handler(action) {
+        const repo = parseBitbucketRepo(action.payload?.url);
+        if (!repo) return { ok: false, error: "Give a Bitbucket repository as bitbucket.org/<workspace>/<repo> or its URL." };
+        const dir = path.join(stateDir, "repos", repo.repo);
+        if (existsSync(dir)) {
+          const origin = await run(["git", "-C", dir, "remote", "get-url", "origin"]);
+          const known = parseBitbucketRepo(origin.stdout.trim());
+          if (origin.code !== 0 || known?.workspace.toLowerCase() !== repo.workspace.toLowerCase() || known?.repo.toLowerCase() !== repo.repo.toLowerCase()) {
+            return { ok: false, error: `${dir} already holds another repository.` };
+          }
+          return { ok: true, result: { path: dir, name: repo.repo, cloned: false } };
+        }
+        const login = bitbucketLogin(stateDir, await sessionOwnerProfileId(getSessionEntry, action.sessionKey, action.agentId));
+        // The token reaches git through its environment, never a URL or a config file.
+        const auth = login ? ["-c", "credential.helper=", "-c", "credential.helper=!f() { [ \"$1\" = get ] && printf 'username=x-bitbucket-api-token-auth\\npassword=%s\\n' \"$WTC_BITBUCKET_TOKEN\"; }; f"] : [];
+        const r = await run(["git", ...auth, "clone", "--quiet", repo.cloneUrl, dir], {
+          timeoutMs: 300000,
+          env: { GIT_TERMINAL_PROMPT: "0", ...(login ? { WTC_BITBUCKET_TOKEN: login.token } : {}) },
+        });
+        if (r.code !== 0) {
+          return { ok: false, error: `git clone ${repo.cloneUrl} failed${login ? "" : " (no Bitbucket login: connect one on the Bitbucket tab for private repositories)"}: ${r.stderr.trim().split("\n").pop()}` };
+        }
+        return { ok: true, result: { path: dir, name: repo.repo, cloned: true } };
+      },
+    });
 
     api.session.controls.registerSessionAction({
       id: "collection",

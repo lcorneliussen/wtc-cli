@@ -138,8 +138,12 @@ func addRepoIntents(repos []string, worktree, base string, separate bool) error 
 		}
 		task := "You own the " + repo + " worktree of collection " + worktree + ". The collection's session works in it; do nothing until it asks you to. When asked to publish, run wtc publish in your worktree and carry out its plan."
 		if gitURL != "" {
-			if cloned := openclaw.GatewayProject(gatewayStateDir(), openclaw.ParseOrigin(gitURL)); cloned != "" {
+			origin := openclaw.ParseOrigin(gitURL)
+			if cloned := openclaw.GatewayProject(gatewayStateDir(), origin); cloned != "" {
 				project, gitURL = cloned, ""
+			} else if origin.Forge != openclaw.ForgeGitHub {
+				// The gateway clones GitHub repositories only.
+				return fmt.Errorf("%s is not on the gateway yet. Ask the person to add %s with Add repository in the Collection panel, then run this again", repo, arg)
 			} else if separate {
 				task = "Work on " + repo + " for " + worktree + ". Wait for instructions from the collection's session."
 			} else {
@@ -200,6 +204,7 @@ func gatewayStatus(names []string, asJSON bool) error {
 	}
 	result := map[string]gatewayCollection{}
 	for _, name := range names {
+		openclaw.FetchBases(all[name], openclaw.FetchBaseInterval)
 		col := gatewayCollection{Collection: openclaw.CheckoutsStatus(all[name], true), Services: []wtc.RuntimeItem{}}
 		col.Folder, col.Services, col.Error = linkGatewayFolder(name, col.Repos)
 		result[name] = col
