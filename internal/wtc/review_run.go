@@ -18,14 +18,13 @@ import (
 )
 
 type ReviewRunOptions struct {
-	Strong      string
-	Standard    string
-	Fast        string
-	Lead        string
-	Parallel    int
-	Timeout     time.Duration
-	Only        []string
-	HostedFirst bool
+	Strong   string
+	Standard string
+	Fast     string
+	Lead     string
+	Parallel int
+	Timeout  time.Duration
+	Only     []string
 }
 
 type ReviewRunResult struct {
@@ -91,11 +90,6 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	}
 	if manifest.RepoDir != worktree || manifest.Slug != slug || manifest.Forge != forge {
 		return ReviewRunResult{}, fmt.Errorf("bundle repository does not match this collection")
-	}
-	if opt.HostedFirst {
-		if err := c.PrepareHostedReviewBundle(bundle); err != nil {
-			return ReviewRunResult{}, err
-		}
 	}
 	if opt.Strong == "" {
 		opt.Strong = reviewEnv("HARNESS_REVIEW_STRONG", "claude:opus")

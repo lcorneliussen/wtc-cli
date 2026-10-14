@@ -25,6 +25,9 @@ func TestHostedReviewActivityDistinguishesWaitingReportsAndUnavailable(t *testin
 		{"stale", `"reviewRequests":[],"statusCheckRollup":[]`, `[[{"user":{"login":"copilot-pull-request-reviewer"},"state":"COMMENTED","commit_id":"` + strings.Repeat("b", 40) + `"}]]`, "stale", false},
 		{"quota", `"reviewRequests":[{"login":"copilot-pull-request-reviewer"}],"statusCheckRollup":[]`, `[[{"user":{"login":"copilot-pull-request-reviewer"},"state":"COMMENTED","commit_id":"` + head + `","body":"Review unable to review: budget exceeded"}]]`, "unavailable", false},
 		{"new-run-after-error", `"reviewRequests":[],"statusCheckRollup":[{"name":"Copilot code review","status":"IN_PROGRESS"}]`, `[[{"user":{"login":"copilot-pull-request-reviewer"},"state":"COMMENTED","commit_id":"` + head + `","body":"unable to review"}]]`, "waiting", true},
+		{"failed-check-requested", `"reviewRequests":[{"login":"copilot-pull-request-reviewer"}],"statusCheckRollup":[{"name":"Copilot code review","status":"COMPLETED","conclusion":"FAILURE"}]`, `[[]]`, "unavailable", false},
+		{"failed-check-with-retry", `"reviewRequests":[{"login":"copilot-pull-request-reviewer"}],"statusCheckRollup":[{"name":"Copilot code review","status":"IN_PROGRESS"},{"name":"Copilot code review","status":"COMPLETED","conclusion":"FAILURE"}]`, `[[]]`, "waiting", true},
+		{"failed-context", `"reviewRequests":[{"login":"copilot-pull-request-reviewer"}],"statusCheckRollup":[{"name":"Copilot code review","state":"ERROR"}]`, `[[]]`, "unavailable", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := parseReviewActivity([]byte(`{"headRefOid":"`+head+`",`+tc.meta+`}`), []byte(tc.reviews), activityRaw([]any{activityThreadPage(head, false)}))

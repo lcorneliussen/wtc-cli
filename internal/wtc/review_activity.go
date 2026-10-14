@@ -151,17 +151,26 @@ func parseReviewActivity(meta, reviews, threads []byte) (ReviewActivity, error) 
 			delete(waiting, provider)
 		}
 	}
+	activeChecks := map[string]bool{}
 	for _, check := range pr.Checks {
 		provider := hostedReviewCheck(check.Name)
 		if provider == "" {
 			continue
 		}
 		if check.Status != "COMPLETED" && check.Status != "" || check.State == "PENDING" {
-			waiting[provider] = true
+			activeChecks[provider] = true
 		}
 		if check.Conclusion == "FAILURE" || check.Conclusion == "TIMED_OUT" || check.Conclusion == "CANCELLED" || check.Conclusion == "ACTION_REQUIRED" || check.State == "ERROR" || check.State == "FAILURE" {
 			latest[provider] = HostedReviewReport{Provider: provider, State: "unavailable", Head: pr.Head, Body: "Hosted review check did not complete successfully: " + check.Name}
 		}
+	}
+	for provider, report := range latest {
+		if report.State == "unavailable" {
+			delete(waiting, provider)
+		}
+	}
+	for provider := range activeChecks {
+		waiting[provider] = true
 	}
 	for _, provider := range []string{"Copilot", "Cursor"} {
 		report, ok := latest[provider]
@@ -250,9 +259,16 @@ func saveHostedReviewActivity(bundle string, activity ReviewActivity) error {
 // Preflight runs before a progress comment or any agent launch. A deferred run
 // is a scheduling decision, not a failed review.
 func (c *Context) PrepareHostedReviewBundle(bundle string) error {
-	manifest, err := readReviewManifest(bundle)
+	data, err := os.ReadFile(filepath.Join(bundle, "manifest.json"))
 	if err != nil {
 		return err
+	}
+	var manifest ReviewManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return err
+	}
+	if len(manifest.HeadSHA) < 12 || manifest.Round < 1 || manifest.RepoDir == "" {
+		return fmt.Errorf("incomplete review manifest")
 	}
 	worktree, slug, forge, err := c.ReviewRepo(manifest.Repo)
 	if err != nil {
