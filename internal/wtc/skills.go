@@ -28,7 +28,7 @@ type SkillRenderResult struct {
 // clients, while preserving hand-authored files at every destination.
 func (c *Context) RenderSkills(opt SkillRenderOptions) (SkillRenderResult, error) {
 	r := SkillRenderResult{Collection: c.Collection, DryRun: opt.DryRun, Actions: []string{}}
-	harnessName := filepath.Base(c.Harness)
+	harnessName := c.harnessRel()
 	type source struct {
 		path, target string
 		data         []byte
@@ -48,6 +48,11 @@ func (c *Context) RenderSkills(opt SkillRenderOptions) (SkillRenderResult, error
 			return r, err
 		}
 		name := parts[1]
+		if name == "wtc-svc" && c.Config.Runtime.Backend != "dekit" {
+			// Services exist only where the backend is enabled; elsewhere the
+			// skill would send agents to a command that refuses.
+			continue
+		}
 		sources[name] = source{path: filepath.Join(c.Collection, ".wtc", "skills", name, "SKILL.md"), target: "../../.wtc/skills/" + name, data: data}
 	}
 	for _, layer := range []string{"skills", filepath.Join("overlays", "skills")} {

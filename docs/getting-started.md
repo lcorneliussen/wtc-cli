@@ -1,8 +1,9 @@
 # Getting started
 
-WTC needs Git and a harness repository describing the repositories in your
-workspace. Mise manages tool versions and environment; it is optional. Herdr,
-Neovim, and an agent CLI are optional interfaces.
+WTC needs Git. A harness repository describing the repositories in your
+workspace is optional: an ad-hoc collection works from any empty folder. Mise
+manages tool versions and environment; it is optional. Herdr, Neovim, and an
+agent CLI are optional interfaces.
 
 ## Install WTC
 
@@ -15,6 +16,35 @@ mise use -g github:lcorneliussen/wtc-cli@0.1.39
 
 The workspace root is an ordinary folder. Each collection contains a worktree
 of your harness and the application repos needed for its task.
+
+## Ad-hoc collection, no harness
+
+For one task across a few repositories, skip the harness:
+
+```sh
+mkdir payments-fix && cd payments-fix
+wtc init
+wtc add-repo git@github.com:example-org/api.git
+wtc add-repo ~/code/web            # an existing checkout becomes the owner
+```
+
+The folder is the collection. Its registry, `.wtc/config/repos.yml`, is local
+and tracked nowhere. The first time a repository is added, `wtc add-repo`
+asks for the branch worktrees rest on and pull requests target, suggesting the
+remote's default; `--target <branch>` answers non-interactively. Worktrees
+always start detached at that branch, never at whatever an existing checkout
+has checked out. For an existing checkout, wtc adds that branch to the
+checkout's `remote.origin.fetch` if its refspec does not already cover it, so
+a single-branch clone keeps the tip current.
+
+Clones are shared per user under `$XDG_DATA_HOME/wtc/bare` (default
+`~/.local/share/wtc`, or `$WTC_DATA_HOME`), and every repository added once is
+remembered there by name: the next ad-hoc collection can run `wtc add-repo
+api`. Secrets come from `$WTC_CONFIG_ROOT`, defaulting to `~/.config/wtc`.
+`.wtc/config/` takes the same `wtc.toml`, `hooks/` and overrides as a harness.
+`wtc new <slug> [repo ...]` from an ad-hoc collection starts the next task in
+a sibling folder with the same registrations. `wtc retire .` removes the
+worktrees and the folder; owners and the per-user registry stay.
 
 ## Minimal harness
 
@@ -57,3 +87,9 @@ are optional; introduce them only for collection-specific preparation.
 Keep `bin/dev`, mise tasks, npm scripts, and other local commands usable outside
 WTC. Make collection-specific setup optional so developers retain the same
 local workflow.
+
+For the runtime candidate, add a small task fragment that wraps the existing
+foreground launch command. Start with the [onboarding guide](../internal/wtc/defaults/instructions/runtime.md)
+and [synthetic example](../examples/runtime/README.md). Test standalone startup,
+parallel collections, logs after shutdown, and teardown failure before adopting
+it for real resources.

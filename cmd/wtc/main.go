@@ -81,6 +81,11 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		if envAll {
+			if err := c.RequireWorkspace("env setup --all"); err != nil {
+				return err
+			}
+		}
 		if !envAll {
 			result, err := refreshEnvCollection(c, dryRun, invokeHooks)
 			if err != nil {
@@ -263,6 +268,7 @@ func run() error {
 	addAgentEnvCommand(root, &asJSON)
 	addSkillsCommands(root, &asJSON)
 	addReviewCommands(root, &asJSON)
+	addInitCommand(root, &asJSON)
 	addNewCommand(root, &asJSON)
 	addAddRepoCommand(root, &asJSON)
 	addRetireCommand(root, &asJSON)
@@ -270,6 +276,7 @@ func run() error {
 	addStatusCommand(root, &asJSON)
 	addOpenCommand(root, &asJSON)
 	addBrowseCommand(root, &asJSON)
+	addRuntimeCommands(root, &asJSON)
 	addHarnessCommands(root, &asJSON)
 	addReleaseNotesCommand(root, &asJSON)
 	args, err := normalizeStatusWatchArgs(os.Args[1:])

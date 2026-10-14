@@ -19,6 +19,9 @@ type RetireOptions struct {
 	Self bool
 	// WorkspaceID pins the Herdr workspace selected during a self handoff.
 	WorkspaceID string
+	// InPlace retires an ad-hoc collection from inside itself without Herdr:
+	// it may have no other collection to hand the work to.
+	InPlace bool
 }
 
 type RetireResult struct {
@@ -41,7 +44,10 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 		if opt.Name != filepath.Base(c.Collection) {
 			return RetireResult{}, fmt.Errorf("self-retirement target must be the current collection")
 		}
-		if opt.WorkspaceID == "" {
+		if opt.InPlace && !c.AdHoc {
+			return RetireResult{}, fmt.Errorf("in-place retirement is only for ad-hoc collections")
+		}
+		if opt.WorkspaceID == "" && !opt.InPlace {
 			return RetireResult{}, fmt.Errorf("self-retirement requires a verified Herdr workspace ID")
 		}
 	}
@@ -52,7 +58,7 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 	target := result.Collection
 	// Close the source workspace before hooks or worktree removal. Once closed,
 	// no new pane or agent turn can start against a collection being deleted.
-	if opt.Self {
+	if opt.Self && !opt.InPlace {
 		closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
 		if !closed {
 			if warning == "" {
@@ -76,63 +82,74 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 	if err := c.RunHook("retire.pre", values); err != nil {
 		return result, err
 	}
-	postRan := false
-	for _, wt := range worktrees {
-		// A self-retire loses its harness hook source when that final worktree
-		// goes away. Run the post hook after product teardown, while it exists.
-		if opt.Self && wt.name == "harness" {
-			if err := c.RunHook("retire.post", values); err != nil {
-				return result, err
-			}
-			postRan = true
-		}
-		RunRepoTeardown(wt.path)
-		args := []string{"--git-dir=" + wt.owner, "worktree", "remove"}
-		if opt.Force {
-			args = append(args, "--force")
-		}
-		args = append(args, wt.path)
-		if _, err := gitOutput(args...); err != nil {
-			return result, fmt.Errorf("remove %s: %w", wt.name, err)
-		}
-		if _, err := gitOutput("--git-dir="+wt.owner, "worktree", "prune"); err != nil {
-			return result, fmt.Errorf("prune %s: %w", wt.name, err)
-		}
-		result.Removed = append(result.Removed, wt.name)
-	}
-	if opt.Self && !postRan {
-		if err := c.RunHook("retire.post", values); err != nil {
-			return result, err
-		}
-	}
-	if !result.WorkspaceClosed {
-		closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
-		result.WorkspaceClosed = closed
-		if warning != "" {
-			result.Warnings = append(result.Warnings, warning)
-		}
-	}
-	stopRetiredStatusWatchers(target)
-	if err := removeRetiredGeneratedFiles(target); err != nil {
+	// Runtime ownership belongs to the target, not to the caller's harness.
+	runtimeTarget, err := OpenCollection(target)
+	if err != nil {
 		return result, err
 	}
-	if err := os.Remove(target); err == nil {
-		result.FolderRemoved = true
-	} else {
-		entries, readErr := os.ReadDir(target)
-		if readErr != nil {
-			return result, fmt.Errorf("remove collection folder: %w", err)
+	err = runtimeTarget.withRuntimeLock(func() error {
+		if err := runtimeTarget.retireRuntime(); err != nil {
+			return fmt.Errorf("runtime cleanup: %w", err)
 		}
-		for _, entry := range entries {
-			result.Leftovers = append(result.Leftovers, entry.Name())
+		postRan := false
+		for _, wt := range worktrees {
+			// A self-retire loses its harness hook source when that final worktree
+			// goes away. Run the post hook after product teardown, while it exists.
+			if opt.Self && wt.name == "harness" {
+				if err := c.RunHook("retire.post", values); err != nil {
+					return err
+				}
+				postRan = true
+			}
+			RunRepoTeardown(wt.path)
+			args := []string{"--git-dir=" + wt.owner, "worktree", "remove"}
+			if opt.Force {
+				args = append(args, "--force")
+			}
+			args = append(args, wt.path)
+			if _, err := gitOutput(args...); err != nil {
+				return fmt.Errorf("remove %s: %w", wt.name, err)
+			}
+			if _, err := gitOutput("--git-dir="+wt.owner, "worktree", "prune"); err != nil {
+				return fmt.Errorf("prune %s: %w", wt.name, err)
+			}
+			result.Removed = append(result.Removed, wt.name)
 		}
-	}
-	if !opt.Self {
-		if err := c.RunHook("retire.post", values); err != nil {
-			return result, err
+		if opt.Self && !postRan {
+			if err := c.RunHook("retire.post", values); err != nil {
+				return err
+			}
 		}
-	}
-	return result, nil
+		if !result.WorkspaceClosed && !opt.InPlace {
+			closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
+			result.WorkspaceClosed = closed
+			if warning != "" {
+				result.Warnings = append(result.Warnings, warning)
+			}
+		}
+		stopRetiredStatusWatchers(target)
+		if err := removeRetiredGeneratedFiles(target, runtimeTarget.AdHoc); err != nil {
+			return err
+		}
+		if err := os.Remove(target); err == nil {
+			result.FolderRemoved = true
+		} else {
+			entries, readErr := os.ReadDir(target)
+			if readErr != nil {
+				return fmt.Errorf("remove collection folder: %w", err)
+			}
+			for _, entry := range entries {
+				result.Leftovers = append(result.Leftovers, entry.Name())
+			}
+		}
+		if !opt.Self {
+			if err := c.RunHook("retire.post", values); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return result, err
 }
 
 // RetirePreflight checks the same deletion blockers as RetireCollection without
@@ -314,11 +331,18 @@ func stopRetiredStatusWatchers(target string) {
 	}
 }
 
-func removeRetiredGeneratedFiles(target string) error {
+func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 	files := []string{
 		"HANDOFF.md", ".env.collection", ".env.collection.local", "mise.toml", ".DS_Store",
 		"WTC-SCOPE.md", ".env.toolchain",
+		".wtc-runtime.lock",
 		".wtc-prs", ".wtc-prs.lock", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
+		".wtc-catch-up.json", ".wtc-catch-up.json.md",
+	}
+	if adHoc {
+		// An ad-hoc registry is remembered per user. Hand-written local
+		// hooks and config stay behind as leftovers for inspection.
+		files = append(files, filepath.Join(AdHocConfigDir, adHocRegistryFile))
 	}
 	for _, name := range files {
 		if err := os.Remove(filepath.Join(target, name)); err != nil && !os.IsNotExist(err) {
@@ -333,13 +357,25 @@ func removeRetiredGeneratedFiles(target string) error {
 	}
 	wtcDir := filepath.Join(target, ".wtc")
 	if info, err := os.Lstat(wtcDir); err == nil && info.IsDir() {
+		if info, err := os.Lstat(filepath.Join(wtcDir, "runtime", "manifest.json")); err == nil && info.Mode().IsRegular() {
+			if err := os.RemoveAll(filepath.Join(wtcDir, "runtime")); err != nil {
+				return err
+			}
+		}
+		// Services enlisted with wtc svc belong to this collection alone.
+		if info, err := os.Lstat(filepath.Join(wtcDir, "svc")); err == nil && info.IsDir() {
+			if err := os.RemoveAll(filepath.Join(wtcDir, "svc")); err != nil {
+				return err
+			}
+		}
 		if err := os.RemoveAll(filepath.Join(wtcDir, "instructions")); err != nil {
 			return err
 		}
 		if err := os.RemoveAll(filepath.Join(wtcDir, "skills")); err != nil {
 			return err
 		}
-		_ = os.Remove(wtcDir) // Other .wtc files are left for inspection.
+		_ = os.Remove(filepath.Join(target, AdHocConfigDir)) // Only when nothing hand-written remains.
+		_ = os.Remove(wtcDir)                                // Other .wtc files are left for inspection.
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}

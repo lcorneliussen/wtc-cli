@@ -79,16 +79,19 @@ func statusBuildLabel(build *StatusBuild) string {
 	if build == nil {
 		return ""
 	}
+	if build.Error != "" {
+		return "error: " + build.Error
+	}
 	glyph := ""
 	if build.Checks != nil {
 		glyph = statusGlyph(*build.Checks)
 	}
-	if build.Build == nil || *build.Build == "" {
-		return glyph
+	label := glyph
+	if build.Build != nil && *build.Build != "" {
+		label = strings.TrimSpace(glyph + " " + statusMarkdownLink(build.URL, "#"+*build.Build))
 	}
-	label := statusMarkdownLink(build.URL, "#"+*build.Build)
-	if glyph != "" {
-		return glyph + " " + label
+	if label != "" && build.HeadInBuild != nil && !*build.HeadInBuild {
+		label += " (HEAD not in build)"
 	}
 	return label
 }
@@ -131,6 +134,9 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 			name = row.Collection + "/" + row.Dir
 		}
 		parts := []string{fmt.Sprintf("**%s** (`%s`) — %s", name, branch, tree)}
+		if row.Runtime != "" {
+			parts = append(parts, "runtime "+row.Runtime)
+		}
 		if row.Ahead > 0 {
 			parts = append(parts, fmt.Sprintf("↑%d", row.Ahead))
 		}
@@ -174,6 +180,9 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 	}
 	if s.StaleCount != 0 {
 		fmt.Fprintf(&b, "\n_%d worktree(s) behind remote — catch-up needed._\n", s.StaleCount)
+	}
+	if len(s.Runtime) != 0 {
+		b.WriteString("\n## Runtime\n\n```text\n" + RuntimeText(s.Runtime) + "```\n")
 	}
 	if s.ShowCollectionColumn || !includePRs {
 		b.WriteString("\n")

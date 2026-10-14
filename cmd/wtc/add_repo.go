@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
 	"os"
+	"strings"
+
+	"github.com/charmbracelet/x/term"
 
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
@@ -9,16 +14,18 @@ import (
 )
 
 func addAddRepoCommand(root *cobra.Command, asJSON *bool) {
-	var collection, branch, worktree, base string
+	var collection, branch, name, target, worktree, base string
 	var tip bool
 	cmd := &cobra.Command{
-		Use:   "add-repo <repo> [repo ...]",
+		Use:   "add-repo <repo|clone-url|path> [...]",
 		Short: "Add repository worktrees to a collection",
 		Args:  cobra.MinimumNArgs(1),
 	}
 	cmd.Flags().StringVar(&collection, "collection", "", "Target collection name (default: current)")
 	cmd.Flags().StringVarP(&branch, "branch", "b", "", "Explicitly check out a branch in each new worktree")
 	cmd.Flags().BoolVar(&tip, "tip", false, "Compatibility flag; detached tip is the default")
+	cmd.Flags().StringVar(&name, "name", "", "Ad-hoc: registry name for a new repository (default: from its remote)")
+	cmd.Flags().StringVar(&target, "target", "", "Ad-hoc: development branch and PR target for a new repository (default: ask, or the remote's default)")
 	cmd.Flags().StringVar(&worktree, "worktree", "", "Under OpenClaw: the managed worktree name (default: this session's, or $WTC_COLLECTION)")
 	cmd.Flags().StringVar(&base, "base", "", "Under OpenClaw: base ref for the new worktree (default: the gateway's)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -36,7 +43,38 @@ func addAddRepoCommand(root *cobra.Command, asJSON *bool) {
 		if err != nil {
 			return err
 		}
-		result, err := c.AddRepositories(wtc.AddRepoOptions{Collection: collection, Repos: args, Branch: branch})
+		repos := args
+		if c.AdHoc && collection != "" {
+			// Refuse before anything is registered or prompted for.
+			if err := c.RequireWorkspace("add-repo --collection"); err != nil {
+				return err
+			}
+		}
+		if c.AdHoc {
+			if (name != "" || target != "") && len(args) != 1 {
+				return fmt.Errorf("--name and --target describe one repository")
+			}
+			var ask func(string, string) (string, error)
+			if !*asJSON && term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stderr.Fd()) {
+				in := bufio.NewReader(os.Stdin)
+				ask = func(repo, suggested string) (string, error) {
+					fmt.Fprintf(os.Stderr, "%s: development branch and PR target [%s]: ", repo, suggested)
+					answer, err := in.ReadString('\n')
+					return strings.TrimSpace(answer), err
+				}
+			}
+			repos = make([]string, 0, len(args))
+			for _, spec := range args {
+				repo, err := c.RegisterAdHocRepo(wtc.AdHocRepoOptions{Spec: spec, Name: name, Target: target, Ask: ask})
+				if err != nil {
+					return err
+				}
+				repos = append(repos, repo.Name)
+			}
+		} else if name != "" || target != "" {
+			return fmt.Errorf("--name and --target apply to ad-hoc collections; edit the harness registry instead")
+		}
+		result, err := c.AddRepositories(wtc.AddRepoOptions{Collection: collection, Repos: repos, Branch: branch})
 		if err != nil {
 			return err
 		}

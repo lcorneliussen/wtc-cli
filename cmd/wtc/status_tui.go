@@ -38,32 +38,35 @@ type statusLoadedMsg struct {
 type statusOpenedMsg struct{ err error }
 
 type statusTUIModel struct {
-	context      *wtc.Context
-	snapshot     wtc.StatusSnapshot
-	all          bool
-	procs        bool
-	reposOnly    bool
-	processes    []wtc.StatusProcess
-	noFetch      bool
-	fetchAge     time.Duration
-	noClick      bool
-	interval     time.Duration
-	background   time.Duration
-	nextRefresh  time.Time
-	lastRefresh  time.Time
-	width        int
-	height       int
-	scroll       int
-	focused      bool
-	refreshing   bool
-	showHelp     bool
-	showArchived bool
-	showLog      bool
-	progressLog  []string
-	progressStep string
-	progressKey  string
-	startedAt    time.Time
-	errorText    string
+	context        *wtc.Context
+	runtimeReading bool      // a service state read is in flight
+	runtimeReadAt  time.Time // when the last one started
+	snapshot       wtc.StatusSnapshot
+	all            bool
+	procs          bool
+	reposOnly      bool
+	processes      []wtc.StatusProcess
+	noFetch        bool
+	fetchAge       time.Duration
+	noClick        bool
+	interval       time.Duration
+	background     time.Duration
+	nextRefresh    time.Time
+	lastRefresh    time.Time
+	width          int
+	height         int
+	scroll         int
+	focused        bool
+	refreshing     bool
+	showHelp       bool
+	showArchived   bool
+	showLog        bool
+	progressLog    []string
+	progressStep   string
+	progressKey    string
+	startedAt      time.Time
+	errorText      string
+	hover          string
 }
 
 func statusTUITick() tea.Cmd {
@@ -131,7 +134,49 @@ func (m *statusTUIModel) focusLogTail() {
 }
 
 func (m statusTUIModel) Init() tea.Cmd {
-	return tea.Batch(statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge))
+	cmds := []tea.Cmd{statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge)}
+	if m.context != nil && !m.all && !m.procs {
+		cmds = append(cmds, statusTUIRuntimeTick())
+	}
+	return tea.Batch(cmds...)
+}
+
+// statusRuntimeMsg carries service states. They are read on their own short
+// cycle: a full refresh, with its fetches and forge calls, would show a
+// stopped or crashed service only minutes later.
+type statusRuntimeMsg struct {
+	items []wtc.RuntimeItem
+	at    time.Time
+}
+
+// statusRuntimeTickMsg is the one service timer. Each tick reads the states
+// when a wtc svc action signalled a change, or when the last read is older
+// than the polling interval, and otherwise just ticks again.
+type statusRuntimeTickMsg struct{}
+
+const statusRuntimeTickEvery = 500 * time.Millisecond
+
+func statusTUIRuntimeRefresh(c *wtc.Context) tea.Cmd {
+	return func() tea.Msg { return statusRuntimeMsg{items: c.RuntimeStatus(), at: time.Now()} }
+}
+
+func statusTUIRuntimeTick() tea.Cmd {
+	return tea.Tick(statusRuntimeTickEvery, func(time.Time) tea.Msg { return statusRuntimeTickMsg{} })
+}
+
+// runtimeDue says whether the next tick reads the service states.
+func (m statusTUIModel) runtimeDue(now time.Time) bool {
+	if m.runtimeReading {
+		return false
+	}
+	if signal := m.context.ServicesChangedAt(); signal.After(m.runtimeReadAt) {
+		return true
+	}
+	every := 3 * time.Second
+	if !m.focused {
+		every = 15 * time.Second
+	}
+	return now.Sub(m.runtimeReadAt) >= every
 }
 
 func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -144,6 +189,19 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BlurMsg:
 		m.focused = false
 		m.nextRefresh = time.Now().Add(m.background)
+	case statusRuntimeMsg:
+		m.snapshot.Runtime, m.runtimeReading = msg.items, false
+		return m, statusTUIRuntimeTick()
+	case statusRuntimeTickMsg:
+		if m.context == nil {
+			return m, nil
+		}
+		if now := time.Now(); m.runtimeDue(now) {
+			// Stamp the read when it starts: a signal during it reads again.
+			m.runtimeReading, m.runtimeReadAt = true, now
+			return m, statusTUIRuntimeRefresh(m.context)
+		}
+		return m, statusTUIRuntimeTick()
 	case statusRefreshStartedMsg:
 		return m, statusTUIWait(msg.events)
 	case statusProgressMsg:
@@ -187,7 +245,13 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.errorText = msg.err.Error()
 		} else {
+			// Service states from the short cycle are newer than the ones a
+			// full refresh read when it started.
+			live := m.snapshot.Runtime
 			m.snapshot = msg.snapshot
+			if live != nil && m.context != nil && !m.all && !m.procs {
+				m.snapshot.Runtime = live
+			}
 			m.processes = msg.processes
 			m.errorText = ""
 			if msg.fetched.Failed != 0 {
@@ -200,6 +264,11 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge))
 		}
 		return m, statusTUITick()
+	case tea.MouseMotionMsg:
+		m.hover = ""
+		if item, ok := m.runtimeItemAt(msg.X, msg.Y); ok {
+			m.hover = statusRuntimeHover(item)
+		}
 	case tea.MouseClickMsg:
 		header := m.headerLine()
 		refreshIndex := strings.Index(header, "refreshing")
@@ -284,6 +353,24 @@ func statusTUIFit(value string, width int) string {
 	return b.String() + strings.Repeat(" ", width-1-used) + "…"
 }
 
+func statusTUIPRConflict(pr *wtc.StatusPRFacts) bool {
+	return pr != nil && (pr.Merge == "CONFLICTING" || pr.Merge == "DIRTY")
+}
+
+func statusTUIBehind(row wtc.StatusRepo) string {
+	count := ""
+	if row.Behind > 0 {
+		count = fmt.Sprint(row.Behind)
+	}
+	if row.Conflict || statusTUIPRConflict(row.PR) {
+		return "✗" + count
+	}
+	if count == "" {
+		return "·"
+	}
+	return count
+}
+
 func statusTUIPR(pr *wtc.StatusPRFacts) string {
 	if pr == nil || pr.Number == "" {
 		return "·"
@@ -292,7 +379,12 @@ func statusTUIPR(pr *wtc.StatusPRFacts) string {
 	if pr.Draft {
 		parts = append(parts, "◇")
 	}
-	for _, token := range []string{pr.Checks, pr.Merge, pr.Review} {
+	tokens := []string{pr.Checks, pr.Merge, pr.Review}
+	if statusTUIPRConflict(pr) {
+		parts = append(parts, "✗ conflict")
+		tokens = []string{pr.Checks, pr.Review}
+	}
+	for _, token := range tokens {
 		switch token {
 		case "SUCCESS", "approved":
 			parts = append(parts, "✓")
@@ -318,19 +410,42 @@ func statusTUIPR(pr *wtc.StatusPRFacts) string {
 }
 
 type statusRepoLayout struct {
-	name, branch, pr, tree, ahead, behind, tip, prod int
-	showTree, showSync, showBuilds                   bool
+	name, branch, pr, tree, ahead, behind, tip, prod, runtime int
+	showTree, showSync, showBuilds, showRuntime               bool
+	hasTip, hasProd                                           bool
 }
 
 func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayout {
 	l := statusRepoLayout{name: 16, branch: 30, pr: 15, tree: 4, ahead: 3, behind: 3, tip: 8, prod: 8,
-		showTree: true, showSync: true, showBuilds: true}
+		showTree: true, showSync: true}
 	for _, row := range snapshot.Repos {
+		if marks := len(statusRuntimeSlots(statusRuntimeItems(snapshot, row))); marks > 0 && width >= 60 {
+			l.showRuntime = true
+			// One column of air after the marks so they do not run into PR.
+			l.runtime = max(l.runtime, len("LOCAL")+1, marks+1)
+		}
+		l.hasTip = l.hasTip || row.Tip != nil
+		l.hasProd = l.hasProd || row.Prod != nil
 		if row.Tree != "clean" {
 			l.tree = max(l.tree, runewidth.StringWidth(row.Tree))
 		}
 		l.ahead = max(l.ahead, len(fmt.Sprint(row.Ahead)))
-		l.behind = max(l.behind, len(fmt.Sprint(row.Behind)))
+		l.behind = max(l.behind, runewidth.StringWidth(statusTUIBehind(row)))
+		if statusTUIPRConflict(row.PR) {
+			prWidth := runewidth.StringWidth(statusTUIPR(row.PR))
+			if statusTUIURL(row.PR.URL) != "" {
+				prWidth += 2 // Linked number includes the arrow.
+			}
+			l.pr = max(l.pr, prWidth)
+		}
+	}
+	// Build columns exist only for the tiers a provider reported on.
+	l.showBuilds = l.hasTip || l.hasProd
+	if !l.hasTip {
+		l.tip = 0
+	}
+	if !l.hasProd {
+		l.prod = 0
 	}
 	if width >= 100 {
 		l.name = 20
@@ -351,6 +466,9 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 	}
 	other := func() int {
 		n := l.name + 1 + l.pr
+		if l.showRuntime {
+			n += 1 + l.runtime
+		}
 		if l.showTree {
 			n += 1 + l.tree
 		}
@@ -358,7 +476,7 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 			n += 1 + l.ahead + 1 + l.behind
 		}
 		if l.showBuilds {
-			n += 1 + l.tip + 1 + l.prod
+			n += l.buildsWidth()
 		}
 		return n
 	}
@@ -379,7 +497,34 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 	return l
 }
 
-func (l statusRepoLayout) prStart() int { return l.name + 1 + l.branch + 1 }
+// LOCAL sits between BRANCH and PR: what runs here comes before what is
+// under review.
+func (l statusRepoLayout) runtimeStart() int { return l.name + 1 + l.branch + 1 }
+func (l statusRepoLayout) prStart() int {
+	if l.showRuntime {
+		return l.runtimeStart() + l.runtime + 1
+	}
+	return l.runtimeStart()
+}
+
+// buildsWidth is the width of the build columns, each with its leading space.
+func (l statusRepoLayout) buildsWidth() int {
+	n := 0
+	if l.hasTip {
+		n += 1 + l.tip
+	}
+	if l.hasProd {
+		n += 1 + l.prod
+	}
+	return n
+}
+
+func (l statusRepoLayout) prodStart() int {
+	if l.hasTip {
+		return l.tipStart() + l.tip + 1
+	}
+	return l.tipStart()
+}
 func (l statusRepoLayout) tipStart() int {
 	start := l.prStart() + l.pr + 1 + l.tree
 	if l.showSync {
@@ -425,6 +570,10 @@ func statusTUIBuildCell(prefix string, build *wtc.StatusBuild) string {
 			glyph = "●"
 		}
 	}
+	if build.Error == "" && build.HeadInBuild != nil && !*build.HeadInBuild {
+		// The build is real but does not contain this row's HEAD.
+		glyph = "○"
+	}
 	cell := prefix + glyph
 	if build.Build != nil && *build.Build != "" {
 		cell += "#" + *build.Build
@@ -434,6 +583,16 @@ func statusTUIBuildCell(prefix string, build *wtc.StatusBuild) string {
 
 func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, width int, styled bool) string {
 	plain := statusTUIPR(pr)
+	if statusTUIPRConflict(pr) && runewidth.StringWidth(plain) > width {
+		// Keep the warning visible even when the number and signals do not fit.
+		marker, label := "✗ ", "#"+pr.Number
+		if styled {
+			marker = statusTUIStyle(marker, statusToneFailure)
+			label = statusTUILinkCell(label, pr.URL, statusToneLabel)
+			return statusTUIFitANSI(marker+label, width)
+		}
+		return statusTUIFit(marker+label, width)
+	}
 	if !styled || pr == nil || pr.Number == "" {
 		return statusTUIFit(plain, width)
 	}
@@ -456,15 +615,22 @@ func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, width int, styled bool) string {
 
 func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []string {
 	l := statusTUIRepoLayout(snapshot, width)
-	header := statusTUIFit("REPO", l.name) + " " + statusTUIFit("BRANCH", l.branch) + " " + statusTUIFit("PR", l.pr)
+	header := statusTUIFit("REPO", l.name) + " " + statusTUIFit("BRANCH", l.branch)
+	if l.showRuntime {
+		header += " " + statusTUIFit("LOCAL", l.runtime)
+	}
+	header += " " + statusTUIFit("PR", l.pr)
 	if l.showTree {
 		header += " " + statusTUIFit("±", l.tree)
 	}
 	if l.showSync {
 		header += " " + statusTUIFit("↑", l.ahead) + " " + statusTUIFit("↓", l.behind)
 	}
-	if l.showBuilds {
-		header += " " + statusTUIFit("TEST", l.tip) + " " + statusTUIFit("PROD", l.prod)
+	if l.showBuilds && l.hasTip {
+		header += " " + statusTUIFit("TEST", l.tip)
+	}
+	if l.showBuilds && l.hasProd {
+		header += " " + statusTUIFit("PROD", l.prod)
 	}
 	if styled {
 		header = statusTUIStyle(header, statusToneHeading)
@@ -512,19 +678,18 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 				treeCell = statusTUIStyle(treeCell, statusToneWarning)
 			}
 		}
-		line := nameCell + " " + branchCell + " " + prCell
+		line := nameCell + " " + branchCell
+		if l.showRuntime {
+			line += " " + statusRuntimeCell(statusRuntimeItems(snapshot, row), l.runtime, styled)
+		}
+		line += " " + prCell
 		if l.showTree {
 			line += " " + treeCell
 		}
 		if l.showSync {
-			ahead, behind := "·", "·"
+			ahead, behind := "·", statusTUIBehind(row)
 			if row.Ahead > 0 {
 				ahead = fmt.Sprint(row.Ahead)
-			}
-			if row.Behind > 0 {
-				behind = fmt.Sprint(row.Behind)
-			} else if row.Conflict || row.PR != nil && (row.PR.Merge == "CONFLICTING" || row.PR.Merge == "DIRTY") {
-				behind = "✗"
 			}
 			aheadCell, behindCell := statusTUIFit(ahead, l.ahead), statusTUIFit(behind, l.behind)
 			if styled {
@@ -533,7 +698,7 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 				} else {
 					aheadCell = statusTUIStyle(aheadCell, statusToneDim)
 				}
-				if row.Conflict || row.PR != nil && (row.PR.Merge == "CONFLICTING" || row.PR.Merge == "DIRTY") {
+				if row.Conflict || statusTUIPRConflict(row.PR) {
 					behindCell = statusTUIStyle(behindCell, statusToneFailure)
 				} else if row.Behind > 0 {
 					behindCell = statusTUIStyle(behindCell, statusToneWarning)
@@ -550,7 +715,12 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 				tipCell = statusTUIBuildLink(tipCell, row.Tip)
 				prodCell = statusTUIBuildLink(prodCell, row.Prod)
 			}
-			line += " " + tipCell + " " + prodCell
+			if l.hasTip {
+				line += " " + tipCell
+			}
+			if l.hasProd {
+				line += " " + prodCell
+			}
 		}
 		lines = append(lines, line)
 	}
@@ -558,6 +728,35 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 		lines = append(lines, "(no worktrees)")
 	}
 	return lines
+}
+
+// runtimeItemAt returns the service, tunnel or resource whose mark is at a cell.
+func (m statusTUIModel) runtimeItemAt(x, y int) (wtc.RuntimeItem, bool) {
+	width, height := m.width, m.height
+	if width <= 0 {
+		width = 80
+	}
+	if height <= 0 {
+		height = 24
+	}
+	if m.showLog || m.procs || x < 0 || x >= width || y < 0 || y >= max(1, height-2) {
+		return wtc.RuntimeItem{}, false
+	}
+	base := 3
+	if m.showHelp {
+		base += 4
+	}
+	rowIndex := y + m.effectiveScroll() - base
+	if rowIndex < 0 || rowIndex >= len(m.snapshot.Repos) {
+		return wtc.RuntimeItem{}, false
+	}
+	layout := statusTUIRepoLayout(m.snapshot, width)
+	items := statusRuntimeItems(m.snapshot, m.snapshot.Repos[rowIndex])
+	slots := statusRuntimeSlots(items)
+	if index := x - layout.runtimeStart(); layout.showRuntime && index >= 0 && index < min(len(slots), layout.runtime) && slots[index].item >= 0 {
+		return items[slots[index].item], true
+	}
+	return wtc.RuntimeItem{}, false
 }
 
 func (m statusTUIModel) buildClickTarget(x, y int) string {
@@ -582,13 +781,19 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	if rowIndex < 0 {
 		return ""
 	}
+	if item, ok := m.runtimeItemAt(x, y); ok {
+		if !statusRuntimeLive(item) {
+			return ""
+		}
+		return statusTUIURL(item.URL)
+	}
 	if rowIndex < len(m.snapshot.Repos) {
 		row := m.snapshot.Repos[rowIndex]
 		layout := statusTUIRepoLayout(m.snapshot, width)
 		if x < layout.name {
 			return statusTUIURL(statusTUIRepoURL(row))
 		}
-		if x >= layout.name+1 && x < layout.prStart()-1 {
+		if x >= layout.name+1 && x < layout.name+1+layout.branch {
 			return statusTUIURL(statusTUIBranchURL(row))
 		}
 		prStart := layout.prStart()
@@ -600,9 +805,10 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 		}
 		tipStart := layout.tipStart()
 		var build *wtc.StatusBuild
-		if x >= tipStart && x < tipStart+layout.tip {
+		prodStart := layout.prodStart()
+		if layout.hasTip && x >= tipStart && x < tipStart+layout.tip {
 			build = row.Tip
-		} else if x >= tipStart+layout.tip+1 && x < tipStart+layout.tip+1+layout.prod {
+		} else if layout.hasProd && x >= prodStart && x < prodStart+layout.prod {
 			build = row.Prod
 		}
 		if build != nil && build.URL != nil {
@@ -613,7 +819,13 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 	if m.reposOnly || m.snapshot.ShowCollectionColumn {
 		return ""
 	}
-	visibleIndex := rowIndex - max(1, len(m.snapshot.Repos)) - 3
+	// A service line opens whichever of its URLs is under the pointer.
+	if groups := statusRuntimeGroups(m.snapshot); len(groups) > 0 {
+		if index := rowIndex - max(1, len(m.snapshot.Repos)) - 3; index >= 0 && index < len(groups) {
+			return statusTUIURL(statusTUIRuntimeLayout(m.snapshot, width).urlAt(groups[index], x))
+		}
+	}
+	visibleIndex := rowIndex - max(1, len(m.snapshot.Repos)) - 3 - len(statusTUIRuntimeLines(m.snapshot, width, false))
 	if visibleIndex < 0 {
 		return ""
 	}
@@ -673,6 +885,32 @@ func statusTUIPRGlyph(value *string) string {
 		return "∅"
 	}
 	return "·"
+}
+
+// statusTUIFollowState names the tier a merged PR is waiting on and how that
+// tier's build stands, with the tone to show it in.
+func statusTUIFollowState(follow *wtc.StatusFollow) (string, string) {
+	if follow == nil {
+		return "merged", statusToneDim
+	}
+	if follow.Stage == "done" {
+		return "✓ built", statusToneSuccess
+	}
+	stage := "test"
+	if follow.Stage == "prod" {
+		stage = "prod"
+	}
+	switch follow.Checks {
+	case "WAITING":
+		return "→ " + stage, statusToneWarning
+	case "PENDING", "EXPECTED":
+		return "● " + stage, statusToneWarning
+	case "FAILURE", "ERROR":
+		return "✗ " + stage, statusToneFailure
+	case "UNKNOWN":
+		return "? " + stage, statusToneDim
+	}
+	return "merged", statusToneDim
 }
 
 func statusTUIMergedPR(row wtc.StatusPRRow) bool {
@@ -763,7 +1001,7 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 		} else if row.Draft {
 			state = "◇ draft"
 		} else if merged {
-			state = "merged"
+			state, _ = statusTUIFollowState(row.Follow)
 		} else if row.State == "UNKNOWN" {
 			state = "unknown"
 		}
@@ -793,6 +1031,9 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 				stateCell = statusTUIStyle(stateCell, statusToneFailure)
 			} else if row.OnBranch {
 				stateCell = statusTUIStyle(stateCell, statusToneWarning)
+			} else if merged {
+				_, tone := statusTUIFollowState(row.Follow)
+				stateCell = statusTUIStyle(stateCell, tone)
 			} else {
 				stateCell = statusTUIStyle(stateCell, statusToneDim)
 			}
@@ -909,6 +1150,7 @@ func (m statusTUIModel) contentLines() []string {
 		lines = append(lines, strings.Split(strings.TrimSuffix(wtc.StatusProcessesText(m.processes), "\n"), "\n")...)
 	} else {
 		lines = append(lines, statusTUIRepoLines(m.snapshot, width, true)...)
+		lines = append(lines, statusTUIRuntimeLines(m.snapshot, width, true)...)
 		if !m.reposOnly {
 			lines = append(lines, statusTUIPRLines(m.snapshot, width, m.showArchived, true)...)
 		}
@@ -939,6 +1181,9 @@ func (m statusTUIModel) View() tea.View {
 	if !m.nextRefresh.IsZero() && !m.refreshing {
 		footer += fmt.Sprintf(" · next %ds", max(0, int(time.Until(m.nextRefresh).Seconds())))
 	}
+	if m.hover != "" {
+		footer = m.hover
+	}
 	bodyHeight := max(1, height-2)
 	scroll := m.effectiveScroll()
 	end := min(len(lines), scroll+bodyHeight)
@@ -962,6 +1207,10 @@ func (m statusTUIModel) View() tea.View {
 	if os.Getenv("TERM") != "dumb" && (m.refreshing || visibleLink && !m.noClick) {
 		view.MouseMode = tea.MouseModeCellMotion
 	}
+	// Hover text for the LOCAL marks needs motion without a pressed button.
+	if os.Getenv("TERM") != "dumb" && !m.procs && statusTUIRepoLayout(m.snapshot, width).showRuntime {
+		view.MouseMode = tea.MouseModeAllMotion
+	}
 	return view
 }
 
@@ -982,6 +1231,9 @@ func runStatusTUI(c *wtc.Context, all, procs, reposOnly, noFetch, noClick bool, 
 				model.lastRefresh = time.Now().Add(-time.Duration(age) * time.Second)
 			}
 		}
+		// What is enlisted comes from the runtime manifest, not the shared
+		// cache another wtc may have written; states follow from Init.
+		model.snapshot.Runtime = c.RuntimeEnlisted()
 	}
 	_, err := tea.NewProgram(model).Run()
 	return err
