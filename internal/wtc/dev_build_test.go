@@ -1,0 +1,108 @@
+package wtc
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestDevVersionSortsBetweenReleases(t *testing.T) {
+	for describe, want := range map[string]string{
+		"v0.1.39-0-g69e3a79":       "0.1.39+dev.g69e3a79",
+		"v0.1.39-3-g69e3a79":       "0.1.40-dev.3+dev.g69e3a79",
+		"v0.1.39-0-g69e3a79-dirty": "0.1.40-dev.0+dev.g69e3a79.dirty",
+		"v1.2.9-12-gabc1234-dirty": "1.2.10-dev.12+dev.gabc1234.dirty",
+	} {
+		if got, err := DevVersion(describe); err != nil || got != want {
+			t.Fatalf("%s: got %q, %v; want %q", describe, got, err, want)
+		}
+	}
+	if _, err := DevVersion("69e3a79"); err == nil {
+		t.Fatal("a checkout without a release tag has no version")
+	}
+	build := func(v string) *DevBuild { return &DevBuild{Version: v} }
+	for _, tc := range []struct {
+		running, dev string
+		want         bool
+	}{
+		{"0.1.39", "0.1.40-dev.3+dev.g69e3a79", true},
+		{"0.1.39", "0.1.39+dev.g69e3a79", true},
+		{"0.1.40", "0.1.40-dev.3+dev.g69e3a79", false},
+		{"0.1.41", "0.1.40-dev.3+dev.g69e3a79", false},
+		{"dev", "0.1.40-dev.3+dev.g69e3a79", false},
+	} {
+		if got := DevBuildTakesOver(tc.running, build(tc.dev)); got != tc.want {
+			t.Fatalf("running %s, dev %s: takes over = %v", tc.running, tc.dev, got)
+		}
+	}
+	if DevBuildTakesOver("0.1.39", nil) {
+		t.Fatal("no dev build cannot take over")
+	}
+}
+
+func writeDevBuild(t *testing.T, collection, version string, mode os.FileMode) string {
+	t.Helper()
+	dir := filepath.Join(collection, ".wtc", "dev")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "wtc")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), mode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(binary, mode); err != nil {
+		t.Fatal(err)
+	}
+	if version != "" {
+		if err := os.WriteFile(filepath.Join(dir, "version"), []byte(version+"\n/src/wtc-cli\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return binary
+}
+
+func TestReadDevBuildOnlyTrustsPrivateExecutables(t *testing.T) {
+	collection := t.TempDir()
+	if ReadDevBuild(collection) != nil {
+		t.Fatal("no dev build expected")
+	}
+	binary := writeDevBuild(t, collection, "0.1.40-dev.1+dev.gabc1234", 0755)
+	build := ReadDevBuild(collection)
+	if build == nil || build.Binary != binary || build.Source != "/src/wtc-cli" {
+		t.Fatalf("dev build not read: %+v", build)
+	}
+	if err := os.Chmod(binary, 0775); err != nil {
+		t.Fatal(err)
+	}
+	if ReadDevBuild(collection) != nil {
+		t.Fatal("a group-writable binary must not be run")
+	}
+	writeDevBuild(t, collection, "not-a-version", 0755)
+	if ReadDevBuild(collection) != nil {
+		t.Fatal("a build without a valid version must not be run")
+	}
+}
+
+func TestDevBuildSourceFindsWtcCheckout(t *testing.T) {
+	collection := t.TempDir()
+	for name, module := range map[string]string{"harness": "", "app": "example.invalid/app", "ext.wtc-cli": wtcModule} {
+		dir := filepath.Join(collection, name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if module != "" {
+			if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module "+module+"\n\ngo 1.27\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if got, err := DevBuildSource(collection); err != nil || got != filepath.Join(collection, "ext.wtc-cli") {
+		t.Fatalf("source = %q, %v", got, err)
+	}
+	if err := os.RemoveAll(filepath.Join(collection, "ext.wtc-cli")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DevBuildSource(collection); err == nil {
+		t.Fatal("a collection without wtc-cli has no source")
+	}
+}
