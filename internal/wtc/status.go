@@ -58,25 +58,44 @@ type StatusBuild struct {
 	Checks *string `json:"checks"`
 	Build  *string `json:"build"`
 	URL    *string `json:"url"`
+	// SHA is the commit the build ran on, when the provider knows it.
+	SHA *string `json:"sha,omitempty"`
+	// HeadInBuild says whether this row's HEAD is contained in SHA; nil when
+	// either commit is unknown.
+	HeadInBuild *bool `json:"head_in_build,omitempty"`
+	// Error replaces the facts when the provider failed for this tier.
+	Error string `json:"error,omitempty"`
+}
+
+// StatusFollow is where a merged PR stands on its way through the build tiers:
+// the first tier that has not yet passed with the merge in it, or "done".
+type StatusFollow struct {
+	Stage  string  `json:"stage"`
+	Checks string  `json:"checks"`
+	Build  *string `json:"build,omitempty"`
+	URL    *string `json:"url,omitempty"`
 }
 
 type StatusPRRow struct {
-	Repo            string  `json:"repo"`
-	Number          string  `json:"number"`
-	State           string  `json:"state,omitempty"`
-	Checks          *string `json:"checks"`
-	Merge           *string `json:"merge"`
-	Review          *string `json:"review"`
-	Title           string  `json:"title"`
-	DisplayTitle    string  `json:"display_title"`
-	Slug            string  `json:"slug"`
-	URL             *string `json:"url"`
-	FollowTipBuild  *string `json:"follow_tip_build"`
-	FollowProdBuild *string `json:"follow_prod_build"`
-	Archived        bool    `json:"archived"`
-	MergedOn        *string `json:"merged_on"`
-	Draft           bool    `json:"draft"`
-	OnBranch        bool    `json:"on_branch"`
+	Repo            string        `json:"repo"`
+	Number          string        `json:"number"`
+	State           string        `json:"state,omitempty"`
+	Checks          *string       `json:"checks"`
+	Merge           *string       `json:"merge"`
+	Review          *string       `json:"review"`
+	Title           string        `json:"title"`
+	DisplayTitle    string        `json:"display_title"`
+	Slug            string        `json:"slug"`
+	URL             *string       `json:"url"`
+	FollowTipBuild  *string       `json:"follow_tip_build"`
+	FollowProdBuild *string       `json:"follow_prod_build"`
+	Follow          *StatusFollow `json:"follow,omitempty"`
+	MergeCommit     string        `json:"merge_commit,omitempty"`
+	Base            string        `json:"base,omitempty"`
+	Archived        bool          `json:"archived"`
+	MergedOn        *string       `json:"merged_on"`
+	Draft           bool          `json:"draft"`
+	OnBranch        bool          `json:"on_branch"`
 }
 
 type StatusOrphan struct {

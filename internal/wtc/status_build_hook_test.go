@@ -3,6 +3,7 @@ package wtc
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -51,9 +52,7 @@ func TestStatusBuildHookRejectsWrongBranch(t *testing.T) {
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\nprintf '{\"branch\":\"other\",\"checks\":\"SUCCESS\"}\\n'\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.StatusForgePreview(); err == nil {
-		t.Fatal("hook claimed build facts for a different branch")
-	}
+	statusRequireBuildError(t, c, "different branch")
 }
 
 func TestStatusBuildHookRejectsUnsafeURL(t *testing.T) {
@@ -65,9 +64,7 @@ func TestStatusBuildHookRejectsUnsafeURL(t *testing.T) {
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\nprintf '{\"checks\":\"SUCCESS\",\"url\":\"javascript:alert(1)\"}\\n'\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.StatusForgePreview(); err == nil {
-		t.Fatal("hook supplied a non-web build URL")
-	}
+	statusRequireBuildError(t, c, "invalid build URL")
 }
 
 func TestStatusBuildHookSkipsUnregisteredWorktree(t *testing.T) {
@@ -83,4 +80,22 @@ func TestStatusBuildHookSkipsUnregisteredWorktree(t *testing.T) {
 	if err := c.statusBuildFacts(&snapshot); err != nil || snapshot.Repos[0].Tip != nil {
 		t.Fatalf("unregistered row blocked status: %+v %v", snapshot, err)
 	}
+}
+
+// A provider failure marks its own cell and leaves the rest of the refresh.
+func statusRequireBuildError(t *testing.T, c *Context, want string) {
+	t.Helper()
+	snapshot, err := c.StatusForgePreview()
+	if err != nil {
+		t.Fatalf("a provider failure aborted the refresh: %v", err)
+	}
+	for _, row := range snapshot.Repos {
+		if row.Dir == "harness" {
+			if row.Tip == nil || row.Tip.Checks == nil || *row.Tip.Checks != "ERROR" || !strings.Contains(row.Tip.Error, want) {
+				t.Fatalf("tip build should carry the error %q: %+v", want, row.Tip)
+			}
+			return
+		}
+	}
+	t.Fatal("harness row missing")
 }
