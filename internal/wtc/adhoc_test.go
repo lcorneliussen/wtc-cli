@@ -399,6 +399,17 @@ func TestAdHocNewCreatesSiblingWithSameRegistrations(t *testing.T) {
 			t.Fatalf("%s lacks %q: %v\n%s", path, want, err, data)
 		}
 	}
+	// Two specs naming one repository resolve to a single entry.
+	same, err := c.NewCollection(NewOptions{Slug: "same", Repos: []string{"file://" + source, "widget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(same.Repositories) != 1 {
+		t.Fatalf("duplicate resolved names: %v", same.Repositories)
+	}
+	if _, err := OpenCollection(same.Collection); err != nil {
+		t.Fatalf("registry no longer opens: %v", err)
+	}
 	if _, err := c.NewCollection(NewOptions{Slug: "next", Tracker: "PROJ-9"}); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("an existing sibling was overwritten: %v", err)
 	}

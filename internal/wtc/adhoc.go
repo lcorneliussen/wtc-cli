@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -576,6 +577,9 @@ func (c *Context) newAdHoc(opt NewOptions) (NewResult, error) {
 	result.Repositories = []string{}
 	for _, spec := range opt.Repos {
 		if repo, err := c.Repository(spec); err == nil {
+			if _, err := target.Repository(repo.Name); err == nil {
+				continue // An earlier URL or path spec already named it.
+			}
 			if err := appendRegistryEntry(target.registryPath(), repo); err != nil {
 				return result, err
 			}
@@ -589,7 +593,9 @@ func (c *Context) newAdHoc(opt NewOptions) (NewResult, error) {
 		if err != nil {
 			return result, fmt.Errorf("%w (partial collection at %s)", err, result.Collection)
 		}
-		result.Repositories = append(result.Repositories, repo.Name)
+		if !slices.Contains(result.Repositories, repo.Name) {
+			result.Repositories = append(result.Repositories, repo.Name)
+		}
 	}
 	if len(result.Repositories) > 0 {
 		if _, err := target.AddRepositories(AddRepoOptions{Repos: result.Repositories, Branch: opt.Branch}); err != nil {
