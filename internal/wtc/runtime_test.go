@@ -149,17 +149,34 @@ func TestRuntimeLifecycleHooksAndSavedConfig(t *testing.T) {
 	}
 	fragment := filepath.Join(app, "dekit.tasks.yaml")
 	data, _ := os.ReadFile(fragment)
-	fixtureFile(t, fragment, strings.ReplaceAll(string(data), "sleep 60", "sleep 61"), 0644)
-	if _, err := c.RenderRuntime(false); err == nil {
-		t.Fatal("changed live runtime config")
+	// A changed config applies live: reload, then restart the running tasks
+	// whose definition changed; a removed task is removed from the runner.
+	fixtureFile(t, fragment, strings.Replace(string(data), "sleep 60", "sleep 61", 1), 0644)
+	os.Remove(filepath.Join(c.runtimeRoot(), "calls"))
+	if _, err := c.RenderRuntime(false); err != nil {
+		t.Fatal(err)
 	}
+	calls, _ := os.ReadFile(filepath.Join(c.runtimeRoot(), "calls"))
+	if !strings.Contains(string(calls), "runner restart\nrestart widget/web/server\n") || strings.Contains(string(calls), "restart widget/web/tunnel") || strings.Contains(string(calls), "runner stop") {
+		t.Fatalf("change not applied live to the changed task only:\n%s", calls)
+	}
+	data, _ = os.ReadFile(fragment)
+	fixtureFile(t, fragment, strings.Replace(string(data), " web/tunnel:\n  cmd: [sh, -c, 'sleep 60']\n  deps: [web/server]\n  tags: [endpoint]\n", "", 1), 0644)
+	if _, err := c.RenderRuntime(false); err != nil {
+		t.Fatal(err)
+	}
+	if calls, _ := os.ReadFile(filepath.Join(c.runtimeRoot(), "calls")); !strings.Contains(string(calls), "rm widget/web/tunnel\n") {
+		t.Fatalf("removed task left running:\n%s", calls)
+	}
+	// Restored while down, the change goes through the stopped runner.
+	fixtureFile(t, fragment, string(data), 0644)
 	if _, err := c.RuntimeAction("down", "", 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.RenderRuntime(false); err != nil {
 		t.Fatal(err)
 	}
-	calls, _ := os.ReadFile(filepath.Join(c.runtimeRoot(), "calls"))
+	calls, _ = os.ReadFile(filepath.Join(c.runtimeRoot(), "calls"))
 	if !strings.Contains(string(calls), "runner stop") {
 		t.Fatal("did not discard saved definitions")
 	}

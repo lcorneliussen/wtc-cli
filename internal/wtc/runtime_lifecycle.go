@@ -419,6 +419,30 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 		return nil
 	})
 	result.Items = c.RuntimeStatus()
+	if err != nil && (action == "up" || action == "restart") {
+		if m, mErr := c.runtimeManifest(); mErr == nil && m != nil {
+			for _, item := range result.Items {
+				named := strings.Contains(err.Error(), item.Path+":")
+				switch item.State {
+				case "exited", "failed":
+					named = true
+				case "starting", "running":
+					// Still compiling or waiting for its probe when time ran out.
+					named = named || strings.Contains(err.Error(), "timed out")
+				}
+				if !named {
+					continue
+				}
+				for _, task := range m.Tasks {
+					if task.Path == item.Path && runtimeSafeParents(m.Root, task.Log) == nil {
+						if tail := runtimeLogTail(task.Log, 40); tail != "" {
+							result.Logs = append(result.Logs, RuntimeLogTail{Path: task.Path, File: task.Log, Tail: tail})
+						}
+					}
+				}
+			}
+		}
+	}
 	return result, err
 }
 

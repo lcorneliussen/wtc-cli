@@ -43,6 +43,9 @@ type runtimeTask struct {
 	Log   string   `json:"log"`
 	Ready bool     `json:"ready"`
 	Deps  []string `json:"deps,omitempty"`
+	// Spec is a digest of the task's generated definition; a running task
+	// whose spec changes is restarted when the config is applied live.
+	Spec string `json:"spec,omitempty"`
 	// URLLog finds an endpoint URL that is only known after startup.
 	URLLog string `json:"url_log,omitempty"`
 }
@@ -66,7 +69,46 @@ type RuntimeResult struct {
 	Root   string        `json:"root"`
 	Action string        `json:"action"`
 	Items  []RuntimeItem `json:"items"`
+	// Logs holds the recent output of each task that failed or did not get
+	// ready, so a build or startup error is in the failure itself.
+	Logs []RuntimeLogTail `json:"logs,omitempty"`
 }
+
+type RuntimeLogTail struct {
+	Path string `json:"path"`
+	File string `json:"file"`
+	Tail string `json:"tail"`
+}
+
+// runtimeLogTail returns the last lines of a task log, with control
+// characters other than newlines and tabs removed.
+func runtimeLogTail(path string, lines int) string {
+	if runtimeRegular(path) != nil {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	const window = 64 << 10
+	if info, err := f.Stat(); err == nil && info.Size() > window {
+		if _, err := f.Seek(-window, io.SeekEnd); err != nil {
+			return ""
+		}
+	}
+	data, _ := io.ReadAll(io.LimitReader(f, window))
+	text := strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || r >= ' ' && r != 0x7f && (r < 0x80 || r > 0x9f) {
+			return r
+		}
+		return -1
+	}, ansiEscape.ReplaceAllString(string(data), ""))
+	all := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	return strings.Join(all[max(0, len(all)-lines):], "\n")
+}
+
+var ansiEscape = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])`)
 
 // The manifest records this root, so it is canonical: a collection reached
 // through a symlinked parent must name the same runtime.

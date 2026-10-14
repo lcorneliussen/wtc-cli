@@ -101,6 +101,12 @@ func addRuntimeCommands(root *cobra.Command, asJSON *bool) {
 				target = args[0]
 			}
 			result, err := c.RuntimeAction(action, target, wait)
+			if err != nil && !*asJSON {
+				// The task's own output is usually the actual error.
+				for _, tail := range result.Logs {
+					fmt.Fprintf(os.Stderr, "--- %s (last lines of %s)\n%s\n", tail.Path, tail.File, tail.Tail)
+				}
+			}
 			if *asJSON {
 				if emitErr := emit(envelope{OK: err == nil, Data: result, Summary: action + " runtime"}, true); emitErr != nil {
 					return emitErr

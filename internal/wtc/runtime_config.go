@@ -277,6 +277,11 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 			item.Log = filepath.Join(m.Root, "logs", filepath.FromSlash(full)+".log")
 			task["log"] = map[string]any{"enabled": true, "file": item.Log, "mode": "append"}
 			native[full] = task
+			spec, err := yaml.Marshal(task)
+			if err != nil {
+				return nil, nil, err
+			}
+			item.Spec = fmt.Sprintf("%x", sha256.Sum256(spec))
 			m.Tasks = append(m.Tasks, item)
 		}
 	}
@@ -316,6 +321,7 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 	if err != nil {
 		return nil, err
 	}
+	var reload func() error
 	if old != nil {
 		m.Resources = old.Resources
 		if err := runtimeRegular(filepath.Join(m.Root, "dekit.yaml")); err != nil {
@@ -348,11 +354,45 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 		if err != nil {
 			return nil, err
 		}
-		if state != "absent" {
-			return nil, fmt.Errorf("runtime config changed; run wtc down before rendering")
-		}
-		// Clear down's saved task definitions before applying changed config.
-		if _, err := runtimeCommand(old, false, "runner", "stop"); err != nil && !strings.Contains(err.Error(), "Runner is not running.") {
+		if state == "running" {
+			// Apply the change live: a reload adds and redefines tasks but
+			// keeps removed ones, so remove those first, and restart a
+			// running task whose definition changed.
+			kept := map[string]string{}
+			for _, task := range m.Tasks {
+				kept[task.Path] = task.Spec
+			}
+			live := map[string]bool{}
+			for _, item := range c.runtimeStatus(old) {
+				switch item.State {
+				case "ready", "running", "starting":
+					live[item.Path] = true
+				}
+			}
+			for _, task := range old.Tasks {
+				if _, ok := kept[task.Path]; !ok {
+					if _, err := runtimeCommand(old, false, "rm", task.Path); err != nil {
+						return nil, err
+					}
+				}
+			}
+			reload = func() error {
+				if _, err := runtimeCommand(m, false, "runner", "restart"); err != nil {
+					return err
+				}
+				for _, task := range old.Tasks {
+					if spec, ok := kept[task.Path]; ok && spec != task.Spec && live[task.Path] {
+						if _, err := runtimeCommand(m, false, "restart", task.Path); err != nil {
+							return err
+						}
+					}
+				}
+				return nil
+			}
+		} else if state != "absent" {
+			return nil, fmt.Errorf("runtime config changed while the runner is %s; run wtc down before rendering", state)
+		} else if _, err := runtimeCommand(old, false, "runner", "stop"); err != nil && !strings.Contains(err.Error(), "Runner is not running.") {
+			// Clear down's saved task definitions before applying changed config.
 			return nil, err
 		}
 	} else if _, err := os.Lstat(m.Root); err == nil {
@@ -388,6 +428,11 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 		return nil, err
 	}
 	complete = true
+	if reload != nil {
+		if err := reload(); err != nil {
+			return nil, fmt.Errorf("apply changed runtime config: %w", err)
+		}
+	}
 	return m, nil
 }
 
