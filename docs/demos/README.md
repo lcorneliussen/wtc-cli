@@ -35,10 +35,11 @@ are required: the remote to record and the exact CLI version to pin.
 
 [Transcript](harness.txt) · [Asciicast](harness.cast)
 
-## Runtime candidate
+## Experimental runtime
 
-The next two recordings use the opt-in dekit runtime, which no released CLI
-contains yet. They are recorded by `record_runtime.py` (see below).
+The next two recordings demonstrate the opt-in dekit runtime available from
+v0.1.40. They were captured with a prerelease candidate using
+`record_runtime.py` (see below). Runtime support remains experimental.
 
 ### Services, grouped endpoints, and logs
 

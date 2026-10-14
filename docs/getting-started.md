@@ -11,7 +11,7 @@ Install a [published release](https://github.com/lcorneliussen/wtc-cli/releases)
 With mise:
 
 ```sh
-mise use -g github:lcorneliussen/wtc-cli@0.1.39
+mise use -g github:lcorneliussen/wtc-cli@0.1.40
 ```
 
 The workspace root is an ordinary folder. Each collection contains a worktree
@@ -55,7 +55,7 @@ or the complete embedded instruction fallback.
 ```sh
 wtc harness init agent-harness \
   --remote git@github.com:example-org/agent-harness.git \
-  --cli-version 0.1.39
+  --cli-version 0.1.40
 ```
 
 The command requires an explicit version, creates six files, and refuses to
@@ -88,8 +88,8 @@ Keep `bin/dev`, mise tasks, npm scripts, and other local commands usable outside
 WTC. Make collection-specific setup optional so developers retain the same
 local workflow.
 
-For the runtime candidate, add a small task fragment that wraps the existing
-foreground launch command. Start with the [onboarding guide](../internal/wtc/defaults/instructions/runtime.md)
+For the opt-in runtime available from v0.1.40, add a small task fragment that
+wraps the existing foreground launch command. Start with the [onboarding guide](../internal/wtc/defaults/instructions/runtime.md)
 and [synthetic example](../examples/runtime/README.md). Test standalone startup,
 parallel collections, logs after shutdown, and teardown failure before adopting
 it for real resources.
