@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestReviewRunnerUsesSeparateProcessResultsAndDowngradesErrors(t *testing.T) {
+func TestReviewRunnerUsesSeparateProcessResultsAndClosesIncompleteCoverage(t *testing.T) {
 	collection := filepath.Join(t.TempDir(), "sample")
 	harness := filepath.Join(collection, "harness")
 	bundle := filepath.Join(collection, "bundle")
@@ -83,7 +83,7 @@ if [ "${FAIL_CONCERN:-}" = "$id" ]; then exit 3; fi
 	}
 	t.Setenv("FAIL_CONCERN", "code")
 	got, err = c.RunReviewBundle(bundle, opt)
-	if err != nil || got.Verdict != "pass-with-notes" {
+	if err != nil || got.Verdict != "error" {
 		t.Fatalf("failed concern could pass: %+v %v", got, err)
 	}
 	var file reviewFindingFile
@@ -116,6 +116,13 @@ if [ "${FAIL_CONCERN:-}" = "$id" ]; then exit 3; fi
 	summary, err = os.ReadFile(filepath.Join(bundle, "summary.md"))
 	if err != nil || strings.Contains(string(summary), "unselected") || strings.Contains(string(summary), "99999") {
 		t.Fatalf("selected run retained prior statistics: %s %v", summary, err)
+	}
+	if err := os.Remove(filepath.Join(bundle, "findings", "compat.json")); err != nil {
+		t.Fatal(err)
+	}
+	got, err = c.RunReviewBundle(bundle, opt)
+	if err != nil || got.Verdict != "error" {
+		t.Fatalf("missing unselected concern opened gate: %+v %v", got, err)
 	}
 }
 
@@ -174,6 +181,67 @@ printf 'complete\n'
 	}
 	if stats.InputTokens == nil || *stats.InputTokens != 120 || stats.CostUSD == nil || *stats.CostUSD < 0.029 || *stats.CostUSD > 0.031 || stats.Agent != "second" || stats.UsagePartial || stats.CostPartial {
 		t.Fatalf("fallback did not aggregate current attempts: %+v", stats)
+	}
+}
+
+func TestReviewQuotaFallbackDiscardsIncompleteAttemptOutput(t *testing.T) {
+	bundle := t.TempDir()
+	if err := os.Mkdir(filepath.Join(bundle, "findings"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	prompt := filepath.Join(bundle, "code.md")
+	if err := os.WriteFile(prompt, []byte("review"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(bundle, "agent.sh")
+	script := `#!/bin/sh
+if [ "$1" = first ]; then
+  echo '{"concern":"code","status":"ok","findings":[]}' > "$4/findings/code.json"
+  echo '{"type":"error","message":"usage limit exceeded"}'
+  exit 0
+fi
+echo '{"type":"turn.completed"}'
+`
+	if err := os.WriteFile(launcher, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WTC_REVIEW_AGENT_CMD", launcher)
+	agent, _, _, _, err := runReviewChain(bundle, bundle, prompt, "first: second:", time.Minute, filepath.Join(bundle, "stats.json"))
+	if err != nil || agent != "second" {
+		t.Fatalf("structured limit did not fallback: %s %v", agent, err)
+	}
+	if _, err := os.Stat(filepath.Join(bundle, "findings", "code.json")); !os.IsNotExist(err) {
+		t.Fatalf("limited agent's output survived fallback: %v", err)
+	}
+	for _, tc := range []struct {
+		output  string
+		limited bool
+	}{
+		{`{"is_error":true,"result":"quota exceeded"}`, true},
+		{`{"type":"error","message":"rate limit"}`, true},
+		{`{"error":{"message":"session limit"}}`, true},
+		{"usage limit\n", true},
+		{`{"type":"result","result":"Fix the quota calculation"}`, false},
+		{`{"type":"agent_message","text":"A usage limit test is missing"}`, false},
+	} {
+		if got := reviewAgentLimited([]byte(tc.output), nil); got != tc.limited {
+			t.Fatalf("limit classification %q = %t", tc.output, got)
+		}
+	}
+}
+
+func TestDefaultCommentsConcernAppliesToCodeAndConfig(t *testing.T) {
+	body, err := ReadDefault("review/concerns/comments.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"src/app.go", "lib/app.rb", "web/app.tsx", "hosts/Program.cs", "scripts/run.sh", "Dockerfile", "config/service.yml"} {
+		if !reviewConcernApplies(string(body), path+"\n") {
+			t.Fatalf("comments concern missed %s", path)
+		}
+	}
+	if reviewConcernApplies(string(body), "README.md\ndocs/guide.md\n") {
+		t.Fatal("code comments review ran for prose-only diff")
 	}
 }
 

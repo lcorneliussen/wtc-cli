@@ -10,25 +10,51 @@ after a separate reviewer process posts a passing summary for its current head.
 The review is independent of the authoring agent; do not write its findings,
 summary, or verdict yourself.
 
-1. Build a bundle with `wtc review bundle <repo> <pr>`. For a public or
+1. Inspect `wtc review activity <repo> <pr>` on GitHub before spending local
+   review time. Let an active Copilot/Cursor pass finish, then address or answer
+   and resolve its open threads. Inspect review bodies as well as inline
+   findings; `reported` is not approval. Do not start all providers together.
+   If a hosted reviewer reports a quota, budget or provider failure, record that
+   unavailable coverage and continue with local review instead of repeatedly
+   summoning it. If no hosted run exists (often on drafts), proceed locally;
+   do not trigger one just to satisfy this step. A clean hosted review still
+   requires a separate local pass. Recheck activity after every new head.
+2. Build a bundle with `wtc review bundle <repo> <pr>`. For a public or
    unknown-audience PR, add `--public` to exclude other repositories and local
    concern overlays. A known PR checks out its branch and catches up the
    collection before the diff; `--no-catch-up` skips that refresh. Branch-only
    reviews use current local refs. Inspect the bundle before giving it to an
    external reviewer.
-2. Run `wtc review run <bundle-dir>` without `--post`. Inspect `summary.md`
+3. Run `wtc review run <bundle-dir>` without `--post`. Inspect `summary.md`
    and planned inline comments against the destination's audience, then run
    `wtc review post <bundle-dir>`.
-3. Read `summary.md`, `verdict`, and any error output in `run.log`. Address or
+4. Read `summary.md`, `verdict`, and any error output in `run.log`. Address or
    answer every open finding. Use `wtc review resolve <bundle-dir> --reply
    "..."` for inline threads after answering them. A later round retains the
    original inline thread; resolve it using the bundle that first posted it.
-4. Push fixes and build a new bundle on the new head. Continue until the
+5. Push fixes and build a new bundle on the new head. Continue until the
    verdict is `pass`, or `pass-with-notes` with remaining notes answered.
-5. Only when the user has asked to mark the draft ready, use
+6. Only when the user has asked to mark the draft ready, use
    `wtc review ready <pr> --repo <repo>`. It requires a current posted review
    with a local receipt. `pending`, `error`, and stale reviews keep the gate
    closed.
+
+The runner defers GitHub PR reviews while a known hosted review is active or
+has open threads, and saves current reports plus all unresolved hosted threads
+in `prior/hosted-reviews.md`. It does not trigger providers, wait in a background
+loop, or lock out a hosted run that starts later. Use the host's completion
+notifications where available; otherwise take bounded snapshots while doing
+independent work. After an agreed wait expires or hosted evidence cannot be
+read, document the limitation before intentionally using `--hosted-first=false`;
+this changes scheduling only and never bypasses the local gate. Do not describe
+missing or failed hosted coverage as a clean review.
+
+A failed or missing local concern yields `error`, even if the lead or a hosted
+reviewer recommends approval. Rerun failed concerns with `--only <ids>` and an
+available agent chain, retaining completed concern results for this same head.
+Do not silently drop concerns when limits are exhausted. The comments concern
+produces a Delete / Refactor first / Keep plan for changed code; preserve useful
+rationale, contracts, directives and API documentation.
 
 The default model tiers come from `HARNESS_REVIEW_STRONG`,
 `HARNESS_REVIEW_STANDARD`, `HARNESS_REVIEW_FAST`, and `HARNESS_REVIEW_LEAD`.

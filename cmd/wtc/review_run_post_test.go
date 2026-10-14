@@ -25,7 +25,20 @@ func TestReviewRunPostUpdatesOneCommentOnSuccessAndFailure(t *testing.T) {
 	forgeLog := filepath.Join(bin, "forge.log")
 	gh := `#!/bin/sh
 case "$*" in
+  *'pr view 7'*'--json headRefOid,reviewRequests,statusCheckRollup'*)
+    if [ "${FAKE_HOSTED_WAITING:-}" = 1 ]; then
+      echo '{"headRefOid":"1234567890abcdef1234567890abcdef12345678","reviewRequests":[{"login":"copilot-pull-request-reviewer"}],"statusCheckRollup":[]}'
+    else
+      echo '{"headRefOid":"1234567890abcdef1234567890abcdef12345678","reviewRequests":[],"statusCheckRollup":[]}'
+    fi ;;
   *'pr view 7'*'--json headRefOid'*) echo '{"headRefOid":"1234567890abcdef1234567890abcdef12345678"}' ;;
+  *'pulls/7/reviews?per_page=100'*) echo '[[]]' ;;
+  *'api graphql'*)
+    if [ "${FAKE_HOSTED_THREAD:-}" = 1 ]; then
+      echo '[{"data":{"repository":{"pullRequest":{"headRefOid":"1234567890abcdef1234567890abcdef12345678","reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"id":"thread","isResolved":false,"isOutdated":true,"path":"feature.go","line":null,"comments":{"nodes":[{"body":"Keep important constraint","url":"https://github.com/example/app/pull/7#discussion_r1","author":{"login":"copilot-pull-request-reviewer"},"originalCommit":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}]}}]}}}}}]'
+    else
+      echo '[{"data":{"repository":{"pullRequest":{"headRefOid":"1234567890abcdef1234567890abcdef12345678","reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}]'
+    fi ;;
   *'pulls/7/comments?per_page=100'*) echo '[[]]' ;;
   *'issues/7/comments'*)
     body=$(cat)
@@ -109,5 +122,52 @@ esac
 				t.Fatalf("expected updates on one comment: %s", log)
 			}
 		})
+	}
+	t.Setenv("FAKE_HOSTED_WAITING", "1")
+	t.Setenv("FAKE_REVIEW_FAIL", "")
+	if err := os.WriteFile(forgeLog, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	os.Args = []string{"wtc", "review", "run", filepath.Join(collection, "success"), "--collection", collection, "--post", "--fast", "test:", "--lead", "test:"}
+	if err := run(); err == nil || !strings.Contains(err.Error(), "hosted review is waiting") {
+		t.Fatalf("active hosted review wasn't deferred: %v", err)
+	}
+	log, _ := os.ReadFile(forgeLog)
+	if len(log) != 0 {
+		t.Fatalf("deferred run posted progress/failure: %s", log)
+	}
+	evidence := filepath.Join(collection, "success", "prior", "hosted-reviews.md")
+	snapshot, err := os.ReadFile(evidence)
+	if err != nil || !strings.Contains(string(snapshot), "Copilot: waiting") {
+		t.Fatalf("deferred evidence missing: %s %v", snapshot, err)
+	}
+	t.Setenv("FAKE_HOSTED_WAITING", "")
+	t.Setenv("FAKE_HOSTED_THREAD", "1")
+	if err := run(); err == nil || !strings.Contains(err.Error(), "open hosted review threads") {
+		t.Fatalf("open hosted thread wasn't deferred: %v", err)
+	}
+	snapshot, err = os.ReadFile(evidence)
+	if err != nil || !strings.Contains(string(snapshot), "Keep important constraint") || !strings.Contains(string(snapshot), "outdated: true") {
+		t.Fatalf("open thread not saved: %s %v", snapshot, err)
+	}
+	log, _ = os.ReadFile(forgeLog)
+	if len(log) != 0 {
+		t.Fatalf("open-thread deferral posted progress/failure: %s", log)
+	}
+	t.Setenv("FAKE_HOSTED_THREAD", "")
+	manifestPath := filepath.Join(collection, "success", "manifest.json")
+	data, _ := os.ReadFile(manifestPath)
+	var branchManifest map[string]any
+	if err := json.Unmarshal(data, &branchManifest); err != nil {
+		t.Fatal(err)
+	}
+	branchManifest["pr"] = ""
+	data, _ = json.Marshal(branchManifest)
+	if err := os.WriteFile(manifestPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	os.Args = []string{"wtc", "review", "run", filepath.Join(collection, "success"), "--collection", collection, "--fast", "test:", "--lead", "test:"}
+	if err := run(); err != nil {
+		t.Fatalf("branch-only run failed default preflight: %v", err)
 	}
 }
