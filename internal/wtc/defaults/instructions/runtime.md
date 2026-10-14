@@ -89,10 +89,20 @@ WEB_PUBLIC_URL='https://widget-demo.example.test'
 Do not put credentials in endpoint URLs. WTC accepts HTTP(S) endpoint metadata
 without user information, a query or a fragment, and stores that public address
 in the manifest for read-only status. `x-wtc.url` can instead hold a literal
-address. Only `url` and `url_env` are supported in `x-wtc`; WTC strips that
-metadata before passing the task to dekit. Actual dynamic readiness checks use
-`ready.cmd`, which inherits the launch environment; dekit does not expand shell
-variables in argv or a literal `ready.http` string.
+address. `x-wtc` also takes `port_env` (the variable holding a service's port:
+status shows `http://127.0.0.1:<port>`, readiness defaults to that port
+accepting connections, the resolved value is put in the env of the service and
+its tunnels, and `wtc svc tunnel` builds tunnels from it), `url_log` (a
+pattern finding an address in the task's output), `tunnel`
+(`tailscale|cloudflare|ngrok|devtunnel`; usually recognised from the command),
+`public` (`true` or `false`, overriding what WTC infers), and `mark` (one
+letter for status). WTC strips that metadata before passing the task to dekit;
+dekit does not expand shell variables in argv or a literal `ready.http` string.
+
+A collection can add its own services and tunnels without changing the
+repository: `wtc svc add` and `wtc svc tunnel` write `.wtc/svc/<repo>.yaml` at
+the collection root, read together with the committed file and never
+committed. `--shared` writes the committed file instead.
 
 WTC prefixes paths with the worktree directory: `widget/web/server` and
 `widget/web/tunnel`. The first local path component groups the service with its
@@ -150,6 +160,15 @@ DB/schema/container/prefix through executable repo-owned hooks:
 .harness/runtime-teardown.sh
 ```
 
+Declare what the hooks manage, so status names each resource and teardown says
+what it removes:
+
+```yaml
+resources:
+  database: {type: postgres}
+  cache: {type: redis, mark: k}
+```
+
 Both run from the repo root with `.env.collection` then
 `.env.collection.local` loaded. The hooks can call existing mise tasks and
 provider CLIs. A provision hook requires a teardown hook. They must be
@@ -179,26 +198,32 @@ and hook logs until cleanup succeeds; never store credentials in the receipt.
 From the collection root:
 
 ```sh
-wtc runtime render --dry-run   # ownership preview; no tool required or writes
-wtc runtime render            # render only; no hooks or service startup
-wtc runtime provision         # provision only, no service startup
-wtc up                        # provision, then start saved/autostart tasks
-wtc up widget/web             # start the service/tunnel group and dependencies
-wtc restart widget/web        # restart the whole group
-wtc status --no-watch          # repo summary and grouped task/resource facts
-wtc runtime status --json      # machine-readable state; never starts a runner
-wtc logs widget/web/server --tail 100
-wtc logs widget/web/tunnel -f
-wtc down widget/web            # veto group; also stops its dependents
-wtc down                       # stop runner; keep logs, data, and saved tasks
-wtc runtime teardown           # stop runner, discard saved tasks, strict cleanup
+wtc svc                        # services, tunnels, resources and their state
+wtc svc add web --port-env WIDGET_PORT -- npm run dev   # enlist and start
+wtc svc up [web]               # provision, then start all (or one service)
+wtc svc restart web
+wtc svc logs web [--tail 100] [-f]
+wtc svc tunnel web tailscale   # private tunnel; --public for one on the internet
+wtc svc tunnel web --stop
+wtc svc down [web]             # stop one service, or the runner (logs, data kept)
+wtc svc rm web                 # stop and remove, others keep running
+wtc svc render --dry-run       # ownership preview; no tool required or writes
+wtc svc provision              # provision only, no service startup
+wtc svc --json                 # machine-readable state; never starts a runner
+wtc svc teardown               # stop runner, discard saved tasks, strict cleanup
+wtc svc dekit -- why widget/web/server   # anything else, with the pinned dekit
 ```
+
+`wtc up`, `wtc down`, `wtc restart` and `wtc logs` are shortcuts for the same
+commands. A name without its repository works when only one repository has it.
 
 `up` and `restart` wait up to 30 seconds for startup readiness; `--wait 60s`
 changes this, and `--wait 0` returns immediately. Untargeted `up` checks
 autostart tasks; explicitly name a group to wait for all its tasks. `restart`
 requires a running runner. A readiness failure remains visible in status and
-logs. **Ready means a startup probe passed**, not continuous health checking.
+logs, and the failed command's output includes the last lines of each failed
+or unready task's log, so a build error is in the failure itself. **Ready
+means a startup probe passed**, not continuous health checking.
 No `wtc start` runtime command is introduced; the session orientation skill
 keeps its existing meaning.
 
@@ -206,23 +231,19 @@ Service logs are append files under `.wtc/runtime/logs/<repo>/<task>.log`,
 available after `down`. Hook logs live under
 `.wtc/runtime/hook-logs/<repo>/provision.log` and `teardown.log`; agents can read
 those files directly. They can contain application secrets, so keep them local.
-For the native interactive console, from the collection root run:
-
-```sh
-dekit -C "$PWD/.wtc/runtime" attach
-```
-
-Use the pinned binary when a machine-global `dekit` is older. Native `why` and
-`screen --json` also work at that root. The screen is a bounded terminal buffer,
+For the native interactive console, run `wtc svc dekit -- attach`; it uses
+the pinned binary, this collection's runner and its environment. Native `why`
+and `screen --json` work the same way. The screen is a bounded terminal buffer,
 not the persistent log. Tasks dynamically added through native dekit commands
 are controlled by the runner but are not yet represented in WTC's configured
 task list.
 
-Edit repo fragments rather than generated `dekit.yaml`. If definitions or
-endpoint metadata change, first `wtc down`, then render or `up`. WTC refuses to
-replace live definitions and clears dekit's saved snapshot before applying
-changed definitions. An existing runner keeps its launch environment; use a
-full `down`/`up` after changing ports or credentials.
+Edit task files rather than generated `dekit.yaml`. A changed file applies on
+the next `wtc svc up` without stopping the runner: removed tasks are removed,
+the runner reloads its config, and running tasks whose definition changed
+restart; the others keep running. An existing runner keeps its launch
+environment apart from `port_env` values; use a full `down`/`up` after
+changing other variables or credentials.
 
 `wtc retire` verifies the target runner stopped, clears its saved definitions,
 and runs strict resource teardown **before removing any worktree**. An

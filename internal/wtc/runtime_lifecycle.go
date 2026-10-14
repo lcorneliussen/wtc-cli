@@ -175,6 +175,22 @@ func (c *Context) runtimeHooks(m *runtimeManifest, tasks []runtimeTask, hook str
 		if info.Mode()&0111 == 0 {
 			return fmt.Errorf("runtime hook must be executable: %s", path)
 		}
+		if hook == "teardown" {
+			// Say what is about to be destroyed, when the repo declares it.
+			var names []string
+			for _, d := range m.Declared {
+				if d.Dir == task.Dir {
+					name := d.Name
+					if d.Type != "" {
+						name += " (" + d.Type + ")"
+					}
+					names = append(names, name)
+				}
+			}
+			if len(names) > 0 {
+				fmt.Fprintf(os.Stderr, "%s: tearing down %s\n", task.Dir, strings.Join(names, ", "))
+			}
+		}
 		cmd := exec.Command("/bin/sh", "-c", `set -ea; [ ! -f "$1" ] || . "$1"; [ ! -f "$2" ] || . "$2"; shift 2; exec "$@"`, "wtc-runtime-hook", filepath.Join(c.Collection, ".env.collection"), filepath.Join(c.Collection, ".env.collection.local"), path)
 		cmd.Dir = worktree
 		logPath := filepath.Join(m.Root, "hook-logs", task.Dir, hook+".log")

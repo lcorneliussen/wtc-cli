@@ -20,8 +20,40 @@ func runtimeContext() (*wtc.Context, error) {
 }
 
 func addRuntimeCommands(root *cobra.Command, asJSON *bool) {
-	runtime := &cobra.Command{Use: "runtime", Short: "Inspect or render the opt-in dekit runtime"}
-	runtime.RunE = func(cmd *cobra.Command, args []string) error { return cmd.Help() }
+	runtime := &cobra.Command{Use: "svc", Aliases: []string{"services", "runtime"}, Short: "List, enlist, start and stop this collection's services and tunnels",
+		Long: `Services are a repository's long-running processes, such as a web server, with
+their tunnels and resources, run by this collection's dekit runner.
+
+A repository shares services in its committed .harness/dekit.tasks.yaml. wtc svc
+add and wtc svc tunnel write this collection's own .wtc/svc/<repo>.yaml unless
+--shared is given; that file is never committed and goes with the collection.
+
+  wtc svc                          list services, tunnels and resources
+  wtc svc add web --port-env PORT -- npm run dev
+  wtc svc up|down|restart [web]    all, or one service
+  wtc svc logs web                 recent output; -f follows
+  wtc svc tunnel web tailscale     open a tunnel; --public for one on the internet
+  wtc svc tunnel web --stop        close it
+  wtc svc rm web                   stop and remove
+  wtc svc dekit -- why web/main    anything else, with dekit itself
+
+A name without its repository works when only one repository has it.`}
+	runtime.RunE = func(cmd *cobra.Command, args []string) error {
+		c, err := runtimeContext()
+		if err != nil {
+			return err
+		}
+		items := c.RuntimeStatus()
+		if *asJSON {
+			return json.NewEncoder(os.Stdout).Encode(items)
+		}
+		if len(items) == 0 {
+			fmt.Println("No services. Enlist one with wtc svc add <name> -- <command>; wtc svc --help explains.")
+			return nil
+		}
+		fmt.Print(wtc.RuntimeText(items))
+		return nil
+	}
 	var dryRun bool
 	render := &cobra.Command{Use: "render", Short: "Render repository dekit tasks without starting services", Args: cobra.NoArgs}
 	render.Flags().BoolVar(&dryRun, "dry-run", false, "Preview task ownership without writing or requiring dekit")
@@ -40,7 +72,7 @@ func addRuntimeCommands(root *cobra.Command, asJSON *bool) {
 		fmt.Print(wtc.RuntimeText(result.Items))
 		return nil
 	}
-	status := &cobra.Command{Use: "status", Short: "Query existing runtime state without starting it", Args: cobra.NoArgs}
+	status := &cobra.Command{Use: "status", Aliases: []string{"ls", "list"}, Short: "List services and their state without starting them", Args: cobra.NoArgs}
 	status.RunE = func(cmd *cobra.Command, args []string) error {
 		c, err := runtimeContext()
 		if err != nil {
@@ -81,10 +113,26 @@ func addRuntimeCommands(root *cobra.Command, asJSON *bool) {
 		return emit(envelope{OK: true, Data: result, Summary: "runtime resources provisioned"}, *asJSON)
 	}
 	runtime.AddCommand(render, status, provision, teardown)
+	addServiceCommands(runtime, asJSON)
 	root.AddCommand(runtime)
 	for _, action := range []string{"up", "down", "restart"} {
+		runtime.AddCommand(runtimeActionCommand(action, asJSON))
+		root.AddCommand(runtimeActionCommand(action, asJSON))
+	}
+	runtime.AddCommand(runtimeLogsCommand(asJSON))
+	root.AddCommand(runtimeLogsCommand(asJSON))
+}
+
+var runtimeActionShort = map[string]string{
+	"up":      "Start this collection's services (all, or one)",
+	"down":    "Stop this collection's services (all, or one)",
+	"restart": "Restart this collection's services (all, or one)",
+}
+
+func runtimeActionCommand(action string, asJSON *bool) *cobra.Command {
+	{
 		var wait time.Duration
-		cmd := &cobra.Command{Use: action + " [repo/task-or-group]", Short: action + " the collection's opt-in dekit runtime", Args: cobra.MaximumNArgs(1)}
+		cmd := &cobra.Command{Use: action + " [service]", Short: runtimeActionShort[action], Args: cobra.MaximumNArgs(1)}
 		if action != "down" {
 			cmd.Flags().DurationVar(&wait, "wait", 30*time.Second, "Wait for selected startup readiness (0 returns immediately)")
 		}
@@ -120,16 +168,19 @@ func addRuntimeCommands(root *cobra.Command, asJSON *bool) {
 			}
 			return nil
 		}
-		root.AddCommand(cmd)
+		return cmd
 	}
+}
+
+func runtimeLogsCommand(asJSON *bool) *cobra.Command {
 	var follow bool
 	var tail int
-	logs := &cobra.Command{Use: "logs <repo/task>", Short: "Read a task's persistent logs without starting the runtime", Args: cobra.ExactArgs(1)}
+	logs := &cobra.Command{Use: "logs <service>", Short: "Read a service's or tunnel's output without starting it", Args: cobra.ExactArgs(1)}
 	logs.Flags().BoolVarP(&follow, "follow", "f", false, "Follow appended log output")
 	logs.Flags().IntVar(&tail, "tail", 100, "Number of recent lines")
 	logs.RunE = func(cmd *cobra.Command, args []string) error {
 		if *asJSON {
-			return fmt.Errorf("logs emits plain text; use wtc runtime status --json for state")
+			return fmt.Errorf("logs emits plain text; use wtc svc --json for state")
 		}
 		if tail < 0 {
 			return fmt.Errorf("--tail must be nonnegative")
@@ -151,5 +202,5 @@ func addRuntimeCommands(root *cobra.Command, asJSON *bool) {
 		reader.Stdout, reader.Stderr = os.Stdout, os.Stderr
 		return reader.Run()
 	}
-	root.AddCommand(logs)
+	return logs
 }

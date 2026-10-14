@@ -95,7 +95,7 @@ func RuntimeText(items []RuntimeItem) string {
 		return items[i].Collection+"/"+items[i].Group+"/"+items[i].Path < items[j].Collection+"/"+items[j].Group+"/"+items[j].Path
 	})
 	var b strings.Builder
-	b.WriteString("Runtime (dekit; ready = startup probe passed)\n")
+	b.WriteString("Services (dekit; ready = startup probe passed)\n")
 	group := ""
 	for _, item := range items {
 		key := item.Collection + "/" + item.Group

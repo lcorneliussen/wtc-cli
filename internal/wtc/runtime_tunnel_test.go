@@ -125,3 +125,77 @@ func TestRuntimeEnlistedComesFromTheManifestWithoutTheRunner(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceAddTunnelAndRemove(t *testing.T) {
+	c := runtimeFixture(t)
+	fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), "ECHO_PORT=43001\n", 0600)
+	if _, err := c.AddService(ServiceOptions{Service: "echo", PortEnv: "ECHO_PORT", Cmd: []string{"python3", "-m", "http.server"}, NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	local := c.runtimeLocalFragment("widget")
+	data, _ := os.ReadFile(local)
+	if !strings.Contains(string(data), "echo/main:") || !strings.Contains(string(data), "port_env: ECHO_PORT") {
+		t.Fatalf("local task file:\n%s", data)
+	}
+	shared, _ := os.ReadFile(runtimeSharedFragment(filepath.Join(c.Collection, "widget")))
+	if strings.Contains(string(shared), "echo") {
+		t.Fatal("add without --shared changed the repository's task file")
+	}
+	if _, err := c.AddService(ServiceOptions{Service: "echo", Cmd: []string{"true"}, NoStart: true}); err == nil {
+		t.Fatal("enlisted the same service twice")
+	}
+	m, _, err := c.runtimePlan("dekit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range m.Tasks {
+		if task.Path == "widget/echo/main" && (task.URL != "" || task.Source != local) {
+			// The fake runtime binary is not absolute, so nothing resolves.
+			t.Fatalf("echo: %+v", task)
+		}
+	}
+	// A public provider needs --public, and nothing is written without it.
+	if _, err := c.Tunnel(TunnelOptions{Service: "echo", Provider: "cloudflare"}); err == nil || !strings.Contains(err.Error(), "--public") {
+		t.Fatalf("opened a public tunnel without --public: %v", err)
+	}
+	if data, _ := os.ReadFile(local); strings.Contains(string(data), "cloudflare") {
+		t.Fatal("a refused tunnel was written")
+	}
+	if _, err := c.Tunnel(TunnelOptions{Service: "echo", Provider: "tailscale", Public: true}); err == nil {
+		t.Fatal("made a tailscale tunnel public")
+	}
+	// The shared web service is the repository's: rm needs --shared.
+	if _, err := c.RemoveService("widget/web", false); err == nil || !strings.Contains(err.Error(), "--shared") {
+		t.Fatalf("removed a committed service without --shared: %v", err)
+	}
+	if _, err := c.RemoveService("echo", false); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(local); strings.Contains(string(data), "echo") {
+		t.Fatalf("echo still enlisted:\n%s", data)
+	}
+}
+
+func TestRuntimeDeclaredResourcesShowByName(t *testing.T) {
+	c := runtimeFixture(t)
+	fragment := filepath.Join(c.Collection, "widget/.harness/dekit.tasks.yaml")
+	data, _ := os.ReadFile(fragment)
+	fixtureFile(t, fragment, string(data)+"resources:\n  database: {type: postgres}\n  cache: {type: redis, mark: k}\n", 0644)
+	m, _, err := c.runtimePlan("dekit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Resources = []runtimeResource{{Dir: "widget", Repo: "widget", State: "provision-hook-completed"}}
+	items := c.runtimeResourceItems(m, false)
+	if len(items) != 2 || items[0].Group != "widget/cache" || items[0].Mark != "k" || items[1].Type != "postgres" || items[1].State != "provision-hook-completed" {
+		t.Fatalf("resources: %+v", items)
+	}
+	m.Resources = nil
+	if items := c.runtimeResourceItems(m, false); len(items) != 2 || items[0].State != "unprovisioned" {
+		t.Fatalf("declared but not provisioned: %+v", items)
+	}
+	fixtureFile(t, fragment, string(data)+"resources:\n  Database: {}\n", 0644)
+	if _, _, err := c.runtimePlan("dekit"); err == nil {
+		t.Fatal("accepted an invalid resource name")
+	}
+}

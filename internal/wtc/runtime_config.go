@@ -29,6 +29,18 @@ func runtimeURLSafe(value string) error {
 }
 
 func runtimeURLFromEnv(collection, name string) (string, error) {
+	value, err := runtimeEnvValue(collection, name)
+	if err != nil {
+		return "", err
+	}
+	if err := runtimeURLSafe(value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+// runtimeEnvValue reads one variable from the collection env files.
+func runtimeEnvValue(collection, name string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", `set -ea; [ ! -f "$1" ] || . "$1"; [ ! -f "$2" ] || . "$2"; printenv "$3"`, "wtc-runtime-url", filepath.Join(collection, ".env.collection"), filepath.Join(collection, ".env.collection.local"), name)
@@ -37,13 +49,9 @@ func runtimeURLFromEnv(collection, name string) (string, error) {
 	out.limit = 4096
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("cannot read endpoint variable %s from collection env: %w", name, err)
+		return "", fmt.Errorf("cannot read %s from the collection env: %w", name, err)
 	}
-	value := strings.TrimSpace(out.String())
-	if err := runtimeURLSafe(value); err != nil {
-		return "", err
-	}
-	return value, nil
+	return strings.TrimSpace(out.String()), nil
 }
 
 func (c *Context) runtimeBinary() (string, error) {
@@ -94,33 +102,39 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 	}
 	m := &runtimeManifest{Schema: 1, Root: c.runtimeRoot(), Binary: binary, Tasks: []runtimeTask{}}
 	native := map[string]any{}
+	// The resolved port of each service, by group, for its tasks' env.
+	ports := map[string][2]string{}
 	for _, repo := range repos {
-		path := filepath.Join(repo.path, ".harness", "dekit.tasks.yaml")
-		if err := runtimeRegular(path); os.IsNotExist(err) {
-			continue
-		} else if err != nil {
-			return nil, nil, err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, nil, err
-		}
-		var fragment struct {
-			Tasks map[string]map[string]any `yaml:"tasks"`
-		}
-		decoder := yaml.NewDecoder(bytes.NewReader(data))
-		decoder.KnownFields(true)
-		if err := decoder.Decode(&fragment); err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", path, err)
-		}
-		var extra any
-		if err := decoder.Decode(&extra); err != io.EOF {
-			return nil, nil, fmt.Errorf("%s: expected one YAML document", path)
-		}
 		dir := filepath.Base(repo.path)
-		for local, task := range fragment.Tasks {
+		// The repo's committed tasks, then this collection's own additions.
+		tasks := map[string]map[string]any{}
+		source := map[string]string{}
+		for _, path := range []string{runtimeSharedFragment(repo.path), c.runtimeLocalFragment(dir)} {
+			if err := runtimeRegular(path); os.IsNotExist(err) {
+				continue
+			} else if err != nil {
+				return nil, nil, err
+			}
+			fragment, err := runtimeReadFragment(path)
+			if err != nil {
+				return nil, nil, err
+			}
+			for name, task := range fragment.Tasks {
+				if _, dup := tasks[name]; dup {
+					return nil, nil, fmt.Errorf("%s/%s is defined in both %s and %s", dir, name, source[name], path)
+				}
+				tasks[name], source[name] = task, path
+			}
+			for name, resource := range fragment.Resources {
+				if !runtimeResourceName.MatchString(name) || resource.Mark != "" && !regexp.MustCompile(`^[A-Za-z0-9]$`).MatchString(resource.Mark) {
+					return nil, nil, fmt.Errorf("%s: invalid resource %q", path, name)
+				}
+				m.Declared = append(m.Declared, runtimeDeclaredResource{Dir: dir, Repo: repo.repo, Name: name, Type: resource.Type, Mark: resource.Mark, Label: resource.Label})
+			}
+		}
+		for local, task := range tasks {
 			if !runtimeTaskPath(local) || task == nil {
-				return nil, nil, fmt.Errorf("invalid task path %q in %s", local, path)
+				return nil, nil, fmt.Errorf("invalid task path %q in %s", local, source[local])
 			}
 			full := dir + "/" + local
 			item := runtimeTask{RuntimeItem: RuntimeItem{Collection: filepath.Base(c.Collection), Repo: repo.repo, Dir: dir, Path: full, Group: dir + "/" + strings.Split(local, "/")[0], Kind: "service", State: "unconfigured"}}
@@ -128,9 +142,10 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 				item.Kind = "job"
 			}
 			item.Label, _ = task["label"].(string)
+			item.Source = source[local]
 			if metadata, ok := task["x-wtc"].(map[string]any); ok {
 				for key := range metadata {
-					if key != "url" && key != "url_env" && key != "url_log" && key != "public" && key != "mark" && key != "tunnel" {
+					if key != "url" && key != "url_env" && key != "url_log" && key != "public" && key != "mark" && key != "tunnel" && key != "port_env" {
 						return nil, nil, fmt.Errorf("%s: unsupported x-wtc field %s", full, key)
 					}
 				}
@@ -169,6 +184,26 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 							return nil, nil, err
 						}
 						item.URL = value
+					}
+				}
+				if name, _ := metadata["port_env"].(string); name != "" {
+					if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(name) {
+						return nil, nil, fmt.Errorf("%s: invalid port variable", full)
+					}
+					item.PortEnv = name
+					if filepath.IsAbs(binary) {
+						if port, err := runtimeEnvValue(c.Collection, name); err == nil && regexp.MustCompile(`^[0-9]{1,5}$`).MatchString(port) {
+							if item.URL == "" {
+								item.URL = "http://127.0.0.1:" + port
+							}
+							// Ready once the port accepts connections. The port is
+							// resolved here: a runner started before the variable
+							// existed would not see it.
+							if _, set := task["ready"]; !set {
+								task["ready"] = map[string]any{"tcp": "127.0.0.1:" + port, "timeout": "60s"}
+							}
+							ports[dir+"/"+strings.Split(local, "/")[0]] = [2]string{name, port}
+						}
 					}
 				}
 				if item.URLLog, _ = metadata["url_log"].(string); item.URLLog != "" {
@@ -277,11 +312,6 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 			item.Log = filepath.Join(m.Root, "logs", filepath.FromSlash(full)+".log")
 			task["log"] = map[string]any{"enabled": true, "file": item.Log, "mode": "append"}
 			native[full] = task
-			spec, err := yaml.Marshal(task)
-			if err != nil {
-				return nil, nil, err
-			}
-			item.Spec = fmt.Sprintf("%x", sha256.Sum256(spec))
 			m.Tasks = append(m.Tasks, item)
 		}
 	}
@@ -295,7 +325,30 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 			}
 		}
 	}
+	for i := range m.Tasks {
+		task := native[m.Tasks[i].Path].(map[string]any)
+		// A runner keeps the environment it started with; give a service and
+		// its tunnels the port it resolves to now.
+		if port, ok := ports[m.Tasks[i].Group]; ok {
+			env, _ := task["env"].(map[string]any)
+			if env == nil {
+				env = map[string]any{}
+			}
+			if _, set := env[port[0]]; !set {
+				env[port[0]] = port[1]
+			}
+			task["env"] = env
+		}
+		spec, err := yaml.Marshal(task)
+		if err != nil {
+			return nil, nil, err
+		}
+		m.Tasks[i].Spec = fmt.Sprintf("%x", sha256.Sum256(spec))
+	}
 	sort.Slice(m.Tasks, func(i, j int) bool { return m.Tasks[i].Path < m.Tasks[j].Path })
+	sort.Slice(m.Declared, func(i, j int) bool {
+		return m.Declared[i].Dir+"/"+m.Declared[i].Name < m.Declared[j].Dir+"/"+m.Declared[j].Name
+	})
 	data, err := yaml.Marshal(map[string]any{"kernel": map[string]string{"path": binary}, "tasks": native})
 	if err != nil {
 		return nil, nil, err
@@ -479,4 +532,44 @@ func (c *Context) RenderRuntime(dryRun bool) (RuntimeResult, error) {
 		}
 	}
 	return result, err
+}
+
+type runtimeFragment struct {
+	Tasks     map[string]map[string]any `yaml:"tasks"`
+	Resources map[string]struct {
+		Type  string `yaml:"type"`
+		Mark  string `yaml:"mark"`
+		Label string `yaml:"label"`
+	} `yaml:"resources"`
+}
+
+var runtimeResourceName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// runtimeSharedFragment holds a repo's committed services.
+func runtimeSharedFragment(repo string) string {
+	return filepath.Join(repo, ".harness", "dekit.tasks.yaml")
+}
+
+// runtimeLocalFragment holds services this collection added for a repo; it is
+// never committed and goes with the collection.
+func (c *Context) runtimeLocalFragment(dir string) string {
+	return filepath.Join(filepath.Dir(c.runtimeRoot()), "svc", dir+".yaml")
+}
+
+func runtimeReadFragment(path string) (runtimeFragment, error) {
+	var fragment runtimeFragment
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fragment, err
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fragment); err != nil && err != io.EOF {
+		return fragment, fmt.Errorf("%s: %w", path, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return fragment, fmt.Errorf("%s: expected one YAML document", path)
+	}
+	return fragment, nil
 }

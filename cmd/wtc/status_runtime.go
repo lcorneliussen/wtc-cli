@@ -131,7 +131,7 @@ func statusTUIRuntimeLayout(snapshot wtc.StatusSnapshot, width int) statusRuntim
 	for _, g := range statusRuntimeGroups(snapshot) {
 		l.marks = max(l.marks, len(statusRuntimeSlots(g.members)))
 		l.name = max(l.name, len([]rune(g.name)))
-		l.local = max(l.local, len([]rune(statusRuntimeURLLabel(g.local))))
+		l.local = max(l.local, len([]rune(statusRuntimeURLLabel(g.local))), len([]rune(g.resourceType())))
 		for _, provider := range statusRuntimeProviders(g.tunnels) {
 			at, ok := index[provider]
 			if !ok {
@@ -237,8 +237,8 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 		return nil
 	}
 	l := statusTUIRuntimeLayout(snapshot, width)
-	heading := "LOCAL"
-	header := strings.Repeat(" ", l.marks) + " " + statusTUIFit("REPO", l.repo) + " " + statusTUIFit("SERVICE", l.name) + " " +
+	heading := "SERVICES"
+	header := strings.Repeat(" ", l.marks) + " " + statusTUIFit("REPO", l.repo) + " " + statusTUIFit("NAME", l.name) + " " +
 		statusTUIFit("STATE", l.state) + " " + statusTUIFit("URL", l.local)
 	for _, c := range l.tunnels {
 		header += " " + statusTUIFit(c.header(), c.width)
@@ -254,10 +254,18 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 		repo, name := statusTUIFit(statusTUISafe(g.repo), l.repo), statusTUIFit(statusTUISafe(g.name), l.name)
 		stateCell := statusTUIFit(statusTUISafe(state), l.state)
 		local := statusTUIFit(statusTUISafe(statusRuntimeURLLabel(g.local)), l.local)
+		kind := g.resourceType()
 		if styled {
 			repo, name, stateCell = statusTUIStyle(repo, statusToneLabel), statusTUIStyle(name, statusToneLabel), statusTUIStyle(stateCell, tone)
 			if statusTUIURL(g.local) != "" {
 				local = statusTUIFitANSI(statusTUILinkTone(strings.TrimRight(local, " "), g.local, statusToneLink), l.local)
+			}
+		}
+		if kind != "" && g.local == "" {
+			// A resource has no address; say what it is instead.
+			local = statusTUIFit(statusTUISafe(kind), l.local)
+			if styled {
+				local = statusTUIStyle(local, statusToneDim)
 			}
 		}
 		// A tunnel that may be reachable from the internet is warning-toned.
@@ -345,7 +353,7 @@ func statusRuntimeMark(item wtc.RuntimeItem) (string, string) {
 		tone = statusToneSuccess
 	case "starting", "running", "provision-attempted":
 		tone = statusToneWarning
-	case "absent", "unconfigured", "stopped", "idle", "checking":
+	case "absent", "unconfigured", "stopped", "idle", "checking", "unprovisioned":
 		tone = statusToneDim
 	}
 	return string(letter), tone
@@ -415,6 +423,8 @@ func statusRuntimeHover(item wtc.RuntimeItem) string {
 	parts := []string{item.Path, item.Kind, item.State}
 	if item.Kind == "endpoint" {
 		parts[1] = statusRuntimeExposure(item)
+	} else if item.Kind == "resources" {
+		parts[1] = strings.TrimSpace(item.Type + " resource")
 	}
 	for _, extra := range []string{item.Label, item.URL, item.Reason, item.Error} {
 		if extra != "" {
@@ -462,4 +472,14 @@ func statusRuntimeExposure(item wtc.RuntimeItem) string {
 		reach += " (" + how + ")"
 	}
 	return what + ", " + reach
+}
+
+// resourceType is the declared type of a resource line, such as postgres.
+func (g statusRuntimeGroup) resourceType() string {
+	for _, item := range g.members {
+		if item.Kind == "resources" {
+			return item.Type
+		}
+	}
+	return ""
 }

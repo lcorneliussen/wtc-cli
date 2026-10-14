@@ -27,6 +27,13 @@ type RuntimeItem struct {
 	// ExposureBasis how wtc knows it.
 	Exposure      string `json:"exposure,omitempty"`
 	ExposureBasis string `json:"exposure_basis,omitempty"`
+	// Source is the task file the task comes from: the repo's committed one or
+	// this collection's local one.
+	Source string `json:"source,omitempty"`
+	// PortEnv names the variable holding a service's local port.
+	PortEnv string `json:"port_env,omitempty"`
+	// Type is what a resource is, such as postgres.
+	Type string `json:"type,omitempty"`
 	// Autostart tasks start with wtc up; status shows such a tunnel before it runs.
 	Autostart bool `json:"autostart,omitempty"`
 	// Mark is the one-character name status shows for the task.
@@ -56,13 +63,24 @@ type runtimeResource struct {
 	State string `json:"state"`
 }
 
+// runtimeDeclaredResource names what a repo's resource hooks manage.
+type runtimeDeclaredResource struct {
+	Dir   string `json:"dir"`
+	Repo  string `json:"repo"`
+	Name  string `json:"name"`
+	Type  string `json:"type,omitempty"`
+	Mark  string `json:"mark,omitempty"`
+	Label string `json:"label,omitempty"`
+}
+
 type runtimeManifest struct {
-	Schema    int               `json:"schema"`
-	Root      string            `json:"root"`
-	Binary    string            `json:"binary"`
-	Digest    string            `json:"digest"`
-	Tasks     []runtimeTask     `json:"tasks"`
-	Resources []runtimeResource `json:"resources,omitempty"`
+	Schema    int                       `json:"schema"`
+	Root      string                    `json:"root"`
+	Binary    string                    `json:"binary"`
+	Digest    string                    `json:"digest"`
+	Tasks     []runtimeTask             `json:"tasks"`
+	Resources []runtimeResource         `json:"resources,omitempty"`
+	Declared  []runtimeDeclaredResource `json:"declared,omitempty"`
 }
 
 type RuntimeResult struct {
@@ -259,17 +277,53 @@ func (c *Context) RuntimeEnlisted() []RuntimeItem {
 		}
 		items = append(items, item)
 	}
+	return append(items, c.runtimeResourceItems(m, true)...)
+}
+
+// runtimeResourceItems shows what resource hooks manage: one item per
+// declared resource, sharing its repo's hook state, or one unnamed item for a
+// repo that declares none.
+func (c *Context) runtimeResourceItems(m *runtimeManifest, checking bool) []RuntimeItem {
+	var items []RuntimeItem
+	recorded := map[string]bool{}
+	add := func(dir, repo, state string) {
+		if checking {
+			state = "checking"
+		}
+		named := false
+		for _, d := range m.Declared {
+			if d.Dir != dir {
+				continue
+			}
+			named = true
+			label := d.Label
+			if label == "" {
+				label = strings.TrimSpace(d.Type + " resource")
+			}
+			items = append(items, RuntimeItem{Collection: filepath.Base(c.Collection), Repo: repo, Dir: dir, Path: dir + "/@resources/" + d.Name, Group: dir + "/" + d.Name, Kind: "resources", Type: d.Type, Mark: d.Mark, State: state, Label: label})
+		}
+		if !named {
+			items = append(items, RuntimeItem{Collection: filepath.Base(c.Collection), Repo: repo, Dir: dir, Path: dir + "/@resources", Group: dir + "/resource-hook", Kind: "resources", State: state, Label: "resource hook; declare what it manages under resources: in the task file"})
+		}
+	}
 	for _, resource := range m.Resources {
-		items = append(items, RuntimeItem{Collection: filepath.Base(c.Collection), Repo: resource.Repo, Dir: resource.Dir, Path: resource.Dir + "/@resources", Group: resource.Dir + "/resources", Kind: "resources", State: "checking", Label: "resource hook"})
+		recorded[resource.Dir] = true
+		add(resource.Dir, resource.Repo, resource.State)
+	}
+	// Declared but never provisioned: up has not run the hook yet.
+	seen := map[string]bool{}
+	for _, d := range m.Declared {
+		if !recorded[d.Dir] && !seen[d.Dir] {
+			seen[d.Dir] = true
+			add(d.Dir, d.Repo, "unprovisioned")
+		}
 	}
 	return items
 }
 
 func (c *Context) runtimeStatus(m *runtimeManifest) []RuntimeItem {
 	items := make([]RuntimeItem, len(m.Tasks))
-	for _, resource := range m.Resources {
-		items = append(items, RuntimeItem{Collection: filepath.Base(c.Collection), Repo: resource.Repo, Dir: resource.Dir, Path: resource.Dir + "/@resources", Group: resource.Dir + "/resources", Kind: "resources", State: resource.State, Label: "resource hook"})
-	}
+	items = append(items, c.runtimeResourceItems(m, false)...)
 	state, err := runtimeRunnerState(m)
 	for i, task := range m.Tasks {
 		items[i] = task.RuntimeItem
@@ -376,7 +430,12 @@ func runtimeSelect(m *runtimeManifest, target string) (string, []runtimeTask, er
 		}
 	}
 	if len(tasks) == 0 {
-		return "", nil, fmt.Errorf("unknown runtime target %q", target)
+		// A name without its repository, such as web.
+		full, err := runtimeShortTarget(m, target)
+		if err != nil {
+			return "", nil, err
+		}
+		return runtimeSelect(m, full)
 	}
 	if exact {
 		return target, tasks, nil
@@ -396,8 +455,24 @@ func (c *Context) RuntimeLogPath(target string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if len(tasks) > 1 {
+		// A service name means its own process, not its tunnels.
+		var services []runtimeTask
+		for _, task := range tasks {
+			if task.Kind != "endpoint" {
+				services = append(services, task)
+			}
+		}
+		if len(services) == 1 {
+			tasks = services
+		}
+	}
 	if len(tasks) != 1 {
-		return "", fmt.Errorf("logs requires exactly one task path")
+		var paths []string
+		for _, task := range tasks {
+			paths = append(paths, task.Path)
+		}
+		return "", fmt.Errorf("name one of %s", strings.Join(paths, ", "))
 	}
 	path := tasks[0].Log
 	if err := runtimeSafeParents(m.Root, path); err != nil {
