@@ -231,6 +231,13 @@ not make the failure someone else's problem.
 
 ### 6.2 Have the reviewers actually reported yet?
 
+Use `wtc review activity <repo> <n>` for current-head Copilot/Cursor reports,
+active requests/checks and unresolved threads, including outdated ones. Finish
+hosted feedback before the next independent local review; a clean hosted pass
+still needs local verification. A draft with no hosted run can start locally.
+A budget failure is unavailable coverage: do not repeatedly re-request that bot
+or call its silence approval. See [wtc-local-review](../wtc-local-review/SKILL.md).
+
 The bots review on their own schedule, and a PR that looks unreviewed five
 minutes after opening is usually a PR whose reviewers have not run yet. Check
 before concluding anything about review state:
@@ -246,7 +253,7 @@ Three states worth telling apart, because they need different responses:
 | What you see | What it means | Do |
 |---|---|---|
 | No review from a bot that reviews this repo | It has not run yet | Start a §6.0 wait and carry on — do not call the PR reviewed, and do not sit on it |
-| `Copilot encountered an error and was unable to review` | It failed, silently | `gh pr edit <n> --add-reviewer copilot-pull-request-reviewer` to retrigger |
+| `Copilot encountered an error and was unable to review` | No completed coverage | Read the body: a confirmed quota/budget failure needs local fallback; retrigger only a transient failure, without starting another provider concurrently |
 | A review exists | It reported | §6.3 |
 
 Which bots review a repo is a property of the repo, not something to assume.

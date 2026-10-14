@@ -58,8 +58,8 @@ Keep repository development commands usable outside WTC. Optional setup and
 teardown hooks prepare worktree-specific files without replacing normal local
 commands or toolchains.
 
-The runtime candidate wraps the repository's ordinary foreground command. A Ruby
-process manager can remain the launcher; an `npx` build-and-run command or .NET
+The opt-in runtime, available from v0.1.40, wraps the repository's ordinary
+foreground command. A Ruby process manager can remain the launcher; an `npx` build-and-run command or .NET
 host works the same way. WTC does not replace those commands or split build from
 run.
 

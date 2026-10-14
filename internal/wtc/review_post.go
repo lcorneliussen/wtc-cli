@@ -187,6 +187,7 @@ func (c *Context) PostReviewBundle(bundle string, opt ReviewPostOptions) (Review
 	}
 	finalBody := body
 	if mode == "summary" {
+		finalBody = presentReviewSummary(body, manifest, reviewSourceFiles(manifest))
 		body = fmt.Sprintf("⏳ **Local review: posting findings**\n\nRound %d, head `%s`.\n\n`wtc-review v1 head=%s verdict=pending blockers=0 round=%d lead=pending`\n", manifest.Round, manifest.HeadSHA[:7], manifest.HeadSHA, manifest.Round)
 	}
 	var posted ReviewPostResult
