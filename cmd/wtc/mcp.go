@@ -57,6 +57,9 @@ func addMCPCommands(root *cobra.Command, asJSON *bool) {
 			printMCPResult(result, dryRun)
 			return nil
 		}
+		if err := c.RequireWorkspace("mcp render --all"); err != nil {
+			return err
+		}
 		collections, err := wtc.WorkspaceCollections(c.Workspace)
 		if err != nil {
 			return err

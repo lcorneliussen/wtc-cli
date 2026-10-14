@@ -127,7 +127,7 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	var err error
 	switch forge {
 	case "github.com":
-		raw, err = statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,reviewRequests,latestReviews,mergedAt,baseRefName,mergeCommit")
+		raw, err = statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,mergeable,reviewRequests,latestReviews,mergedAt,baseRefName,mergeCommit")
 	case "bitbucket.org":
 		parts := strings.SplitN(slug, "/", 2)
 		raw, err = statusJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")

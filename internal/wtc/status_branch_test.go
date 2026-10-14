@@ -34,7 +34,9 @@ func TestStatusBranchDiscoveryCachesOnlyValidAnswers(t *testing.T) {
 	script := `#!/bin/sh
 case "$2" in
   list) printf '[{"number":7,"headRefName":"topic"}]\n' ;;
-  view) printf '{"number":7,"state":"OPEN","title":"Synthetic PR","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}\n' ;;
+  view)
+    case "$*" in *mergeable,*) ;; *) exit 2 ;; esac
+    printf '{"number":7,"state":"OPEN","title":"Synthetic PR","mergeable":"CONFLICTING","mergeStateStatus":"DRAFT","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}\n' ;;
   *) exit 2 ;;
 esac
 `
@@ -47,7 +49,7 @@ esac
 		t.Fatalf("discovery failed: %q %v", number, err)
 	}
 	detail := statusEnrichRecord(PRRecord{Number: number}, "example/widget", "github.com")
-	if detail.State != "OPEN" || detail.Checks != "SUCCESS" || detail.Title != "Synthetic PR" {
+	if detail.State != "OPEN" || detail.Checks != "SUCCESS" || detail.Merge != "CONFLICTING" || detail.Title != "Synthetic PR" {
 		t.Fatalf("enrichment failed: %+v", detail)
 	}
 	if err := os.WriteFile(gh, []byte("#!/bin/sh\nexit 2\n"), 0755); err != nil {
