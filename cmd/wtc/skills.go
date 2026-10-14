@@ -36,6 +36,9 @@ func addSkillsCommands(root *cobra.Command, asJSON *bool) {
 		collections := []*wtc.Context{c}
 		failures := []string{}
 		if all {
+			if err := c.RequireWorkspace("skills render --all"); err != nil {
+				return err
+			}
 			collections = nil
 			entries, err := os.ReadDir(c.Workspace)
 			if err != nil {

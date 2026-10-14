@@ -126,6 +126,11 @@ func openSelectedCollections(c *wtc.Context, all bool, args []string) ([]string,
 	if !all && len(args) == 0 {
 		return []string{filepath.Base(c.Collection)}, nil
 	}
+	if all || len(args) != 1 || args[0] != filepath.Base(c.Collection) {
+		if err := c.RequireWorkspace("open of other collections"); err != nil {
+			return nil, err
+		}
+	}
 	if !all {
 		for _, name := range args {
 			if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
