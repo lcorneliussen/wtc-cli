@@ -86,7 +86,7 @@ func TestStatusRuntimeRowsPreservePRClicksAndWidth(t *testing.T) {
 		}
 		hover := statusRuntimeHover(snapshot.Runtime[1])
 		model.hover = hover
-		if view := ansi.Strip(model.View().Content); !strings.Contains(view, "widget/web/tunnel · endpoint · ready · https://widget.example.test") {
+		if view := ansi.Strip(model.View().Content); !strings.Contains(view, "widget/web/tunnel · protected endpoint · ready · https://widget.example.test") {
 			t.Fatalf("hover text missing from footer: %q", hover)
 		}
 	}
@@ -144,10 +144,18 @@ func TestStatusRuntimeSeparatesProtectedAndPublicTunnels(t *testing.T) {
 	if hover := statusRuntimeHover(snapshot.Runtime[2]); !strings.Contains(hover, "public endpoint") {
 		t.Errorf("hover does not say public: %q", hover)
 	}
-	// Without a public endpoint the column is absent.
+	if hover := statusRuntimeHover(snapshot.Runtime[1]); !strings.Contains(hover, "protected endpoint") {
+		t.Errorf("hover does not say protected: %q", hover)
+	}
+	// With only a protected tunnel, the empty PUBLIC column still shows that
+	// nothing is exposed; without any tunnel neither column is drawn.
 	snapshot.Runtime = snapshot.Runtime[:2]
+	if plain := ansi.Strip(strings.Join(statusTUIModel{width: 120, height: 40, snapshot: snapshot}.contentLines(), "\n")); !strings.Contains(plain, "TUNNEL    PUBLIC") {
+		t.Fatalf("PUBLIC column missing beside a protected tunnel: %s", plain)
+	}
+	snapshot.Runtime = snapshot.Runtime[:1]
 	if plain := ansi.Strip(strings.Join(statusTUIModel{width: 120, height: 40, snapshot: snapshot}.contentLines(), "\n")); strings.Contains(plain, "PUBLIC") {
-		t.Fatal("PUBLIC column shown without a public endpoint")
+		t.Fatal("PUBLIC column shown without any endpoint")
 	}
 }
 

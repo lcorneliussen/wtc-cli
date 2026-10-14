@@ -93,12 +93,16 @@ func statusTUIRuntimeLayout(snapshot wtc.StatusSnapshot, width int) statusRuntim
 		l.local = max(l.local, len([]rune(statusRuntimeURLLabel(g.local))))
 	}
 	l.name, l.local = min(l.name, max(7, width/6)), min(l.local, max(5, width/3))
-	// TUNNEL holds protected endpoints; PUBLIC appears only when one exists.
+	// TUNNEL holds protected endpoints and PUBLIC the ones reachable from the
+	// internet. Both appear once any endpoint exists, so an empty PUBLIC
+	// column says plainly that nothing is exposed.
 	l.tunnel = len("TUNNEL")
 	for _, g := range statusRuntimeGroups(snapshot) {
 		l.tunnel = max(l.tunnel, statusRuntimeLinksWidth(g.tunnels))
-		if len(g.public) > 0 {
-			l.public = max(l.public, len("PUBLIC"), statusRuntimeLinksWidth(g.public))
+		for _, item := range g.members {
+			if item.Kind == "endpoint" {
+				l.public = max(l.public, len("PUBLIC"), statusRuntimeLinksWidth(g.public))
+			}
 		}
 	}
 	return l
@@ -326,8 +330,10 @@ func statusRuntimeCell(items []wtc.RuntimeItem, width int, styled bool) string {
 // statusRuntimeHover is the footer text for the mark under the pointer.
 func statusRuntimeHover(item wtc.RuntimeItem) string {
 	parts := []string{item.Path, item.Kind, item.State}
-	if item.Public {
-		parts[1] = "public " + item.Kind
+	if item.Kind == "endpoint" && item.Public {
+		parts[1] = "public endpoint, reachable from the internet"
+	} else if item.Kind == "endpoint" {
+		parts[1] = "protected endpoint"
 	}
 	for _, extra := range []string{item.Label, item.URL, item.Reason, item.Error} {
 		if extra != "" {

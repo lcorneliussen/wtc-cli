@@ -392,19 +392,14 @@ func statusTUIRepoLayout(snapshot wtc.StatusSnapshot, width int) statusRepoLayou
 	return l
 }
 
-func (l statusRepoLayout) prStart() int { return l.name + 1 + l.branch + 1 }
-func (l statusRepoLayout) runtimeStart() int {
-	start := l.prStart() + l.pr
-	if l.showTree {
-		start += 1 + l.tree
+// LOCAL sits between BRANCH and PR: what runs here comes before what is
+// under review.
+func (l statusRepoLayout) runtimeStart() int { return l.name + 1 + l.branch + 1 }
+func (l statusRepoLayout) prStart() int {
+	if l.showRuntime {
+		return l.runtimeStart() + l.runtime + 1
 	}
-	if l.showSync {
-		start += 1 + l.ahead + 1 + l.behind
-	}
-	if l.showBuilds {
-		start += 1 + l.tip + 1 + l.prod
-	}
-	return start + 1
+	return l.runtimeStart()
 }
 func (l statusRepoLayout) tipStart() int {
 	start := l.prStart() + l.pr + 1 + l.tree
@@ -482,7 +477,11 @@ func statusTUIRepoPRCell(pr *wtc.StatusPRFacts, width int, styled bool) string {
 
 func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []string {
 	l := statusTUIRepoLayout(snapshot, width)
-	header := statusTUIFit("REPO", l.name) + " " + statusTUIFit("BRANCH", l.branch) + " " + statusTUIFit("PR", l.pr)
+	header := statusTUIFit("REPO", l.name) + " " + statusTUIFit("BRANCH", l.branch)
+	if l.showRuntime {
+		header += " " + statusTUIFit("LOCAL", l.runtime)
+	}
+	header += " " + statusTUIFit("PR", l.pr)
 	if l.showTree {
 		header += " " + statusTUIFit("±", l.tree)
 	}
@@ -491,9 +490,6 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 	}
 	if l.showBuilds {
 		header += " " + statusTUIFit("TEST", l.tip) + " " + statusTUIFit("PROD", l.prod)
-	}
-	if l.showRuntime {
-		header += " " + statusTUIFit("LOCAL", l.runtime)
 	}
 	if styled {
 		header = statusTUIStyle(header, statusToneHeading)
@@ -541,7 +537,11 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 				treeCell = statusTUIStyle(treeCell, statusToneWarning)
 			}
 		}
-		line := nameCell + " " + branchCell + " " + prCell
+		line := nameCell + " " + branchCell
+		if l.showRuntime {
+			line += " " + statusRuntimeCell(statusRuntimeItems(snapshot, row), l.runtime, styled)
+		}
+		line += " " + prCell
 		if l.showTree {
 			line += " " + treeCell
 		}
@@ -580,9 +580,6 @@ func statusTUIRepoLines(snapshot wtc.StatusSnapshot, width int, styled bool) []s
 				prodCell = statusTUIBuildLink(prodCell, row.Prod)
 			}
 			line += " " + tipCell + " " + prodCell
-		}
-		if l.showRuntime {
-			line += " " + statusRuntimeCell(statusRuntimeItems(snapshot, row), l.runtime, styled)
 		}
 		lines = append(lines, line)
 	}
@@ -652,7 +649,7 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 		if x < layout.name {
 			return statusTUIURL(statusTUIRepoURL(row))
 		}
-		if x >= layout.name+1 && x < layout.prStart()-1 {
+		if x >= layout.name+1 && x < layout.name+1+layout.branch {
 			return statusTUIURL(statusTUIBranchURL(row))
 		}
 		prStart := layout.prStart()
