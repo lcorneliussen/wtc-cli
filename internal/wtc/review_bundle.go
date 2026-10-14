@@ -244,7 +244,7 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 		return ReviewBundle{}, err
 	}
 	baseSHA := strings.TrimSpace(string(baseBytes))
-	diff, err := reviewGit(worktree, "diff", "--no-color", baseSHA, headSHA)
+	diff, err := reviewGit(worktree, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", baseSHA, headSHA)
 	if err != nil {
 		return ReviewBundle{}, err
 	}
