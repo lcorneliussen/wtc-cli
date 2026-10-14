@@ -48,7 +48,10 @@ func (b bitbucket) do(method, path string, body any, into any) int {
 		b.t.Fatal(err)
 	}
 	req.SetBasicAuth(b.user, b.token)
-	req.Header.Set("Content-Type", "application/json")
+	// Bitbucket refuses a JSON content type without a body.
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		b.t.Fatalf("%s %s: %v", method, path, err)
@@ -119,9 +122,13 @@ func TestBitbucketConversation(t *testing.T) {
 	branch := Branch(worktree)
 	t.Cleanup(func() {
 		for _, pr := range hub.open(branch) {
-			hub.do("POST", fmt.Sprintf("/pullrequests/%d/decline", pr.ID), nil, nil)
+			if code := hub.do("POST", fmt.Sprintf("/pullrequests/%d/decline", pr.ID), nil, nil); code != 200 {
+				t.Errorf("declining pull request %d: HTTP %d; decline it by hand", pr.ID, code)
+			}
 		}
-		hub.do("DELETE", "/refs/branches/"+url.PathEscape(branch), nil, nil)
+		if code := hub.do("DELETE", "/refs/branches/"+url.PathEscape(branch), nil, nil); code != 204 && code != 404 {
+			t.Errorf("deleting %s: HTTP %d; delete it by hand", branch, code)
+		}
 	})
 
 	project := g.call("projects.register", map[string]any{"path": "/home/node/repos/target", "name": "target"})

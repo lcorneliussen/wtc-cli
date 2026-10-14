@@ -208,7 +208,6 @@ git fetch -q /tmp/origins/api.git main && git merge -q --no-edit FETCH_HEAD`)
 func TestNotYetCovered(t *testing.T) {
 	for name, needs := range map[string]string{
 		"a model reads a wtc plan and acts on it by itself":   "a model account: the conversation tests script the model",
-		"a Bitbucket pull request from a publish intent":      "a Bitbucket token and a throwaway repository",
 		"a sandboxed run with its private checkout":           "a container runtime the gateway can reach",
 		"co-author credit on a child prompted via the parent": "verified GitHub identities on people's profiles",
 	} {
