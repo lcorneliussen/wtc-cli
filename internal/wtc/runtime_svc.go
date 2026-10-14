@@ -260,6 +260,7 @@ func (c *Context) AddService(opt ServiceOptions) (RuntimeResult, error) {
 // file. A service from the repo's committed file needs shared: that is a repo
 // change.
 func (c *Context) RemoveService(service string, shared bool) (RuntimeResult, error) {
+	defer c.signalServicesChanged()
 	repo, name, err := c.runtimeServiceRepo(service, true)
 	if err != nil {
 		return RuntimeResult{}, err
@@ -488,4 +489,35 @@ func runtimeDekitDuration(d time.Duration) string {
 		return fmt.Sprintf("%dms", d.Milliseconds())
 	}
 	return fmt.Sprintf("%ds", int(d.Seconds()))
+}
+
+// statusSignalPath is touched after each wtc svc action so that a running
+// status view reads the service states at once instead of on its next poll.
+func (c *Context) statusSignalPath() string {
+	return filepath.Join(c.runtimeRoot(), "services-changed")
+}
+
+func (c *Context) signalServicesChanged() {
+	// Only a collection that has services: retiring one without them must
+	// not leave a file behind.
+	if _, err := os.Stat(c.runtimeRoot()); err != nil {
+		return
+	}
+	path := c.statusSignalPath()
+	now := time.Now()
+	if err := os.Chtimes(path, now, now); os.IsNotExist(err) {
+		_ = os.WriteFile(path, nil, 0644)
+	}
+}
+
+// ServicesChangedAt is when a wtc svc action last finished, or zero.
+func (c *Context) ServicesChangedAt() time.Time {
+	if c == nil {
+		return time.Time{}
+	}
+	info, err := os.Stat(c.statusSignalPath())
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
 }

@@ -214,6 +214,19 @@ func TestRuntimeResourceOnlyChangeReachesTheManifest(t *testing.T) {
 	if m, _ := c.runtimeManifest(); len(m.Declared) != 1 || m.Declared[0].Type != "postgres" {
 		t.Fatalf("declared resources not saved: %+v", m.Declared)
 	}
+	if c.ServicesChangedAt().IsZero() {
+		t.Fatal("rendering changed services without telling a status view")
+	}
+}
+
+func TestNoServicesSignalWithoutServices(t *testing.T) {
+	c := runtimeFixture(t)
+	if err := c.RetireRuntime(); err != nil {
+		t.Fatal(err)
+	}
+	if !c.ServicesChangedAt().IsZero() {
+		t.Fatal("retiring a collection without services left a signal file")
+	}
 }
 
 func TestServiceTunnelTemplatesAndRemovingTheLastService(t *testing.T) {

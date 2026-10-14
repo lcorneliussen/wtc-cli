@@ -519,6 +519,9 @@ func runtimeWrite(path string, data []byte) error {
 }
 
 func (c *Context) RenderRuntime(dryRun bool) (RuntimeResult, error) {
+	if !dryRun {
+		defer c.signalServicesChanged()
+	}
 	result := RuntimeResult{Root: c.runtimeRoot(), Action: "render", Items: []RuntimeItem{}}
 	var m *runtimeManifest
 	var err error

@@ -38,33 +38,35 @@ type statusLoadedMsg struct {
 type statusOpenedMsg struct{ err error }
 
 type statusTUIModel struct {
-	context      *wtc.Context
-	snapshot     wtc.StatusSnapshot
-	all          bool
-	procs        bool
-	reposOnly    bool
-	processes    []wtc.StatusProcess
-	noFetch      bool
-	fetchAge     time.Duration
-	noClick      bool
-	interval     time.Duration
-	background   time.Duration
-	nextRefresh  time.Time
-	lastRefresh  time.Time
-	width        int
-	height       int
-	scroll       int
-	focused      bool
-	refreshing   bool
-	showHelp     bool
-	showArchived bool
-	showLog      bool
-	progressLog  []string
-	progressStep string
-	progressKey  string
-	startedAt    time.Time
-	errorText    string
-	hover        string
+	context        *wtc.Context
+	runtimeReading bool      // a service state read is in flight
+	runtimeReadAt  time.Time // when the last one started
+	snapshot       wtc.StatusSnapshot
+	all            bool
+	procs          bool
+	reposOnly      bool
+	processes      []wtc.StatusProcess
+	noFetch        bool
+	fetchAge       time.Duration
+	noClick        bool
+	interval       time.Duration
+	background     time.Duration
+	nextRefresh    time.Time
+	lastRefresh    time.Time
+	width          int
+	height         int
+	scroll         int
+	focused        bool
+	refreshing     bool
+	showHelp       bool
+	showArchived   bool
+	showLog        bool
+	progressLog    []string
+	progressStep   string
+	progressKey    string
+	startedAt      time.Time
+	errorText      string
+	hover          string
 }
 
 func statusTUITick() tea.Cmd {
@@ -134,7 +136,7 @@ func (m *statusTUIModel) focusLogTail() {
 func (m statusTUIModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge)}
 	if m.context != nil && !m.all && !m.procs {
-		cmds = append(cmds, statusTUIRuntimeRefresh(m.context))
+		cmds = append(cmds, statusTUIRuntimeTick())
 	}
 	return tea.Batch(cmds...)
 }
@@ -142,20 +144,39 @@ func (m statusTUIModel) Init() tea.Cmd {
 // statusRuntimeMsg carries service states. They are read on their own short
 // cycle: a full refresh, with its fetches and forge calls, would show a
 // stopped or crashed service only minutes later.
-type statusRuntimeMsg struct{ items []wtc.RuntimeItem }
-
-type statusRuntimeTickMsg struct{}
-
-func statusTUIRuntimeRefresh(c *wtc.Context) tea.Cmd {
-	return func() tea.Msg { return statusRuntimeMsg{items: c.RuntimeStatus()} }
+type statusRuntimeMsg struct {
+	items []wtc.RuntimeItem
+	at    time.Time
 }
 
-func statusTUIRuntimeTick(focused bool) tea.Cmd {
+// statusRuntimeTickMsg is the one service timer. Each tick reads the states
+// when a wtc svc action signalled a change, or when the last read is older
+// than the polling interval, and otherwise just ticks again.
+type statusRuntimeTickMsg struct{}
+
+const statusRuntimeTickEvery = 500 * time.Millisecond
+
+func statusTUIRuntimeRefresh(c *wtc.Context) tea.Cmd {
+	return func() tea.Msg { return statusRuntimeMsg{items: c.RuntimeStatus(), at: time.Now()} }
+}
+
+func statusTUIRuntimeTick() tea.Cmd {
+	return tea.Tick(statusRuntimeTickEvery, func(time.Time) tea.Msg { return statusRuntimeTickMsg{} })
+}
+
+// runtimeDue says whether the next tick reads the service states.
+func (m statusTUIModel) runtimeDue(now time.Time) bool {
+	if m.runtimeReading {
+		return false
+	}
+	if signal := m.context.ServicesChangedAt(); signal.After(m.runtimeReadAt) {
+		return true
+	}
 	every := 3 * time.Second
-	if !focused {
+	if !m.focused {
 		every = 15 * time.Second
 	}
-	return tea.Tick(every, func(time.Time) tea.Msg { return statusRuntimeTickMsg{} })
+	return now.Sub(m.runtimeReadAt) >= every
 }
 
 func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -169,10 +190,18 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focused = false
 		m.nextRefresh = time.Now().Add(m.background)
 	case statusRuntimeMsg:
-		m.snapshot.Runtime = msg.items
-		return m, statusTUIRuntimeTick(m.focused)
+		m.snapshot.Runtime, m.runtimeReading = msg.items, false
+		return m, statusTUIRuntimeTick()
 	case statusRuntimeTickMsg:
-		return m, statusTUIRuntimeRefresh(m.context)
+		if m.context == nil {
+			return m, nil
+		}
+		if now := time.Now(); m.runtimeDue(now) {
+			// Stamp the read when it starts: a signal during it reads again.
+			m.runtimeReading, m.runtimeReadAt = true, now
+			return m, statusTUIRuntimeRefresh(m.context)
+		}
+		return m, statusTUIRuntimeTick()
 	case statusRefreshStartedMsg:
 		return m, statusTUIWait(msg.events)
 	case statusProgressMsg:

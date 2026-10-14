@@ -3,6 +3,8 @@ package main
 import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -276,5 +278,36 @@ func TestStatusTUIServiceStatesRefreshOnTheirOwnCycle(t *testing.T) {
 	next, _ = next.(statusTUIModel).Update(statusLoadedMsg{snapshot: wtc.StatusSnapshot{Collection: "fixture", Runtime: []wtc.RuntimeItem{running}}, at: time.Now()})
 	if got := next.(statusTUIModel).snapshot.Runtime[0].State; got != "absent" {
 		t.Fatalf("full refresh replaced a newer service state with %q", got)
+	}
+}
+
+func TestStatusTUIReadsServicesWhenSignalledOrDue(t *testing.T) {
+	collection := t.TempDir()
+	c := &wtc.Context{Collection: collection}
+	if err := os.MkdirAll(filepath.Join(collection, ".wtc", "runtime"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	model := statusTUIModel{context: c, focused: true, runtimeReadAt: now}
+	if model.runtimeDue(now.Add(time.Second)) {
+		t.Fatal("read again before the interval without a signal")
+	}
+	if !model.runtimeDue(now.Add(3 * time.Second)) {
+		t.Fatal("not read after the interval")
+	}
+	signal := filepath.Join(collection, ".wtc", "runtime", "services-changed")
+	if err := os.WriteFile(signal, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Second)
+	if err := os.Chtimes(signal, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if !model.runtimeDue(now.Add(time.Second)) {
+		t.Fatal("a wtc svc signal did not trigger a read")
+	}
+	model.runtimeReading = true
+	if model.runtimeDue(now.Add(10 * time.Second)) {
+		t.Fatal("started a second read while one is in flight")
 	}
 }

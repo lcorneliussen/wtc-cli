@@ -230,6 +230,7 @@ func (c *Context) runtimeHooks(m *runtimeManifest, tasks []runtimeTask, hook str
 }
 
 func (c *Context) RuntimeAction(action, target string, wait time.Duration) (RuntimeResult, error) {
+	defer c.signalServicesChanged()
 	result := RuntimeResult{Root: c.runtimeRoot(), Action: action, Items: []RuntimeItem{}}
 	err := c.withRuntimeLock(func() error {
 		m, err := c.runtimeManifest()
@@ -478,6 +479,7 @@ func runtimeURLReachable(url string, budget time.Duration) bool {
 // RetireRuntime uses the target's manifest even if runtime opt-in was removed.
 // An unconfirmed shutdown or failed teardown keeps the worktrees and record.
 func (c *Context) RetireRuntime() error {
+	defer c.signalServicesChanged()
 	if _, err := os.Lstat(filepath.Join(c.runtimeRoot(), "manifest.json")); os.IsNotExist(err) {
 		return nil
 	}
