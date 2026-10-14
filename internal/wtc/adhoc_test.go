@@ -441,6 +441,19 @@ func TestAdHocNewCreatesSiblingWithSameRegistrations(t *testing.T) {
 	if _, err := c.NewCollection(NewOptions{Slug: "next", Tracker: "PROJ-9"}); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("an existing sibling was overwritten: %v", err)
 	}
+	// A typo is refused before anything exists; an unreachable remote leaves
+	// nothing behind either, so the corrected rerun is not blocked.
+	for _, spec := range []string{"widgte", "file://" + filepath.Join(root, "missing.git")} {
+		if _, err := c.NewCollection(NewOptions{Slug: "retry", Repos: []string{spec}}); err == nil {
+			t.Fatalf("%s was accepted", spec)
+		}
+		if _, err := os.Lstat(filepath.Join(root, "retry")); !os.IsNotExist(err) {
+			t.Fatalf("a failed new with %s left a folder behind: %v", spec, err)
+		}
+	}
+	if _, err := c.NewCollection(NewOptions{Slug: "retry", Repos: []string{"widget"}}); err != nil {
+		t.Fatalf("corrected rerun: %v", err)
+	}
 }
 
 func TestAdHocNewOptionsHooksAndControlRoot(t *testing.T) {

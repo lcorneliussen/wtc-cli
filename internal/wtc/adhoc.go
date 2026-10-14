@@ -537,6 +537,27 @@ func (c *Context) harnessRel() string {
 	return filepath.Base(c.Harness)
 }
 
+// checkAdHocSpec rejects a bare repository name that neither this collection
+// nor the per-user registry knows, before anything is created for it.
+func (c *Context) checkAdHocSpec(spec string) error {
+	if _, err := c.Repository(spec); err == nil || !validRepoName.MatchString(spec) {
+		return nil
+	}
+	if _, err := os.Stat(spec); err == nil {
+		return nil
+	}
+	user, err := loadUserRegistry()
+	if err != nil {
+		return err
+	}
+	for _, r := range user.Repos {
+		if r.Name == spec {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown repository %q: pass a clone URL or a path to a checkout the first time", spec)
+}
+
 // newAdHoc creates a sibling ad-hoc collection next to this one. Repositories
 // keep this collection's registration (owner, tip, ports); other names and
 // URLs resolve through the per-user registry as in add-repo.
@@ -575,6 +596,9 @@ func (c *Context) newAdHoc(opt NewOptions) (NewResult, error) {
 			return result, fmt.Errorf("repository %q was requested more than once", spec)
 		}
 		seen[spec] = true
+		if err := c.checkAdHocSpec(spec); err != nil {
+			return result, err
+		}
 	}
 	values := map[string]string{"collection": result.Collection, "source": result.Source, "branch": result.IntendedBranch}
 	if err := c.RunHook("new.pre", values); err != nil {
@@ -583,6 +607,14 @@ func (c *Context) newAdHoc(opt NewOptions) (NewResult, error) {
 	if _, err := InitAdHoc(result.Collection); err != nil {
 		return result, err
 	}
+	// Until worktrees exist, a failure removes the folder InitAdHoc created,
+	// so a corrected rerun is not blocked by "collection already exists".
+	registered := false
+	defer func() {
+		if !registered {
+			os.RemoveAll(result.Collection)
+		}
+	}()
 	target, err := OpenCollection(result.Collection)
 	if err != nil {
 		return result, err
@@ -614,12 +646,13 @@ func (c *Context) newAdHoc(opt NewOptions) (NewResult, error) {
 		}
 		repo, err := target.RegisterAdHocRepo(AdHocRepoOptions{Spec: spec})
 		if err != nil {
-			return result, fmt.Errorf("%w (partial collection at %s)", err, result.Collection)
+			return result, err
 		}
 		if !slices.Contains(result.Repositories, repo.Name) {
 			result.Repositories = append(result.Repositories, repo.Name)
 		}
 	}
+	registered = true
 	if len(result.Repositories) > 0 {
 		if _, err := target.AddRepositories(AddRepoOptions{Repos: result.Repositories, Branch: opt.Branch}); err != nil {
 			return result, fmt.Errorf("%w (partial collection at %s)", err, result.Collection)
