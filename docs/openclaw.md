@@ -112,6 +112,22 @@ GitHub token. There:
   the sandbox.
 - A repository on another forge cannot be published from a sandbox.
 
+## Credit for the people who asked
+
+The gateway commits as its own GitHub identity and adds a `Co-authored-by`
+trailer for each person who prompted the session, provided their gateway
+profile has a **verified** GitHub account. Only the sign-in can verify one:
+Cloudflare Access with GitHub as the identity provider, or a Tailscale Serve
+login made with GitHub. A token, a password, any other identity provider, and
+a "My GitHub" connection made for publishing do not. A person who signs in
+another way gets no credit unless an administrator links their profile to a
+GitHub-verified one.
+
+Repository sessions created with `sessions_spawn`, which is what
+`wtc add-repo` asks for, take the parent session's contributors with them, so
+people need only talk to the collection's session. This comes from OpenClaw's
+documentation; no test here signs in with a verified GitHub account yet.
+
 ## The collection in the Control UI
 
 OpenClaw shows a parent session with its children nested under it, and each
