@@ -384,6 +384,41 @@ func TestAdHocCheckoutOwnerFetchesTargetAndForgetsDeletedCheckouts(t *testing.T)
 	}
 }
 
+func TestAdHocServicesEnlistRunAndRetireWithTheCollection(t *testing.T) {
+	root := adHocFixture(t)
+	c := initAdHoc(t, filepath.Join(root, "task"))
+	addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + adHocSource(t, root, "widget")})
+	c.Config.Runtime = runtimeFixture(t).Config.Runtime
+	fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), "WIDGET_WEB_PORT=43011\n", 0600)
+	if _, err := c.AddService(ServiceOptions{Service: "web", PortEnv: "WIDGET_WEB_PORT", Cmd: []string{"python3", "-m", "http.server"}, NoStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	items := c.RuntimeEnlisted()
+	if len(items) != 1 || items[0].Path != "widget/web/main" || items[0].URL != "http://127.0.0.1:43011" {
+		t.Fatalf("ad-hoc service not enlisted: %+v", items)
+	}
+	if _, err := os.Stat(c.runtimeLocalFragment("widget")); err != nil {
+		t.Fatalf("no collection-local task file: %v", err)
+	}
+	// A sibling made with wtc new keeps the runtime setting.
+	fixtureFile(t, filepath.Join(c.Harness, "wtc.toml"), "[runtime]\nbackend = \"dekit\"\n", 0644)
+	next, err := c.NewCollection(NewOptions{Slug: "next"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sibling, err := OpenCollection(next.Collection); err != nil || sibling.Config.Runtime.Backend != "dekit" {
+		t.Fatalf("sibling lost the runtime setting: %v", err)
+	}
+	result, err := c.RetireCollection(RetireOptions{Name: "task", Self: true, InPlace: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the hand-written config stays for inspection, not the services.
+	if _, err := os.Stat(filepath.Join(c.Collection, ".wtc", "svc")); !os.IsNotExist(err) || len(result.Leftovers) != 1 {
+		t.Fatalf("services outlived the collection: %+v %v", result, err)
+	}
+}
+
 func TestAdHocNewCreatesSiblingWithSameRegistrations(t *testing.T) {
 	root := adHocFixture(t)
 	source := adHocSource(t, root, "widget", "develop")

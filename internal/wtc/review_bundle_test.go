@@ -51,6 +51,7 @@ func TestPublicReviewBundleUsesBaseConcernsAndExcludesLocalOverlays(t *testing.T
 	}
 	git("add", ".")
 	git("commit", "-m", "add feature")
+	git("config", "diff.noprefix", "true")
 	if err := os.MkdirAll(filepath.Join(harness, "review", "concerns.d"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +68,14 @@ func TestPublicReviewBundleUsesBaseConcernsAndExcludesLocalOverlays(t *testing.T
 	}
 	if first.Files != 1 || first.Concerns != 1 || first.Manifest.Round != 1 {
 		t.Fatalf("unexpected bundle: %+v", first)
+	}
+	patch, err := os.ReadFile(filepath.Join(first.Dir, "diff.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	positions, err := parseReviewDiff(patch)
+	if err != nil || !positions.contains("feature file.go", 1) {
+		t.Fatalf("Git-generated space path or configured prefix broke inline positions: %q %v", patch, err)
 	}
 	if _, err := os.Stat(filepath.Join(first.Dir, "concerns", "code.md")); err != nil {
 		t.Fatal(err)

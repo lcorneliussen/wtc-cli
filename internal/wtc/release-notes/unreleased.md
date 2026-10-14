@@ -2,12 +2,19 @@
 
 ## Added
 
+- `wtc review activity` shows Copilot/Cursor reports, active review requests/checks and unresolved hosted threads on GitHub. Local runs defer active hosted reviews and open feedback by default, retaining their evidence in the bundle. Hosted budget failures allow an independent local pass; a submitted hosted report never replaces it.
+- GitHub local-review summaries use verdict marks, exact-head source links and collapsible concern/history/stats sections. Blockers, major findings and cleanup plans remain visible. Bitbucket keeps plain Markdown.
+- A default comments concern gives a Delete / Refactor first / Keep plan for changed code, preserving useful rationale, contracts, compatibility notes, directives and public API documentation.
+
 - `wtc status` follows builds without a harness hook. The test tier is each repository's `default_ref` branch, and the prod tier is `production_ref` (or `release_ref`). GitHub builds come from the branch head's check rollup, and Bitbucket builds from the newest branch pipeline, using the `bb` login or `BB_USERNAME`/`BB_API_TOKEN`.
 - Merged PRs are followed again: the PR table shows the tier still waiting for a passing build that contains the merge (`→ test`, `● prod`, `✗ test`, `✓ built`). The follow starts at the tier that builds the PR's base branch; PRs merged into other branches are not followed. The merge commit and base are recorded in `.wtc-prs` as a separate `# merged-commit` row.
 - Repository rows show a build as `○` when their HEAD is not in it.
 - `status.build.sh` may return `sha`, the commit a build ran on, and `{"use_default":true}` to hand one request to the built-in provider. Requests now include `forge`.
 
 ## Fixed
+
+- Git-generated diff headers for filenames containing spaces keep their correct path, and review bundles force canonical `a/` and `b/` prefixes regardless of local diff settings. These follow-up regressions were found by the independent review of #84.
+- Failed or missing local review concerns now yield `error` instead of a gate-opening `pass-with-notes`. Structured quota errors also try configured fallback agents when a CLI exits successfully, and retry attempts discard incomplete output from the limited agent.
 
 - Review posting skips GitHub inline findings outside the PR diff and position-related HTTP 422 rejections, recording `skipped: not in diff` while keeping the finding in the summary ([#82](https://github.com/lcorneliussen/wtc-cli/issues/82)). Authentication, network and other validation failures still leave the review pending, with forge diagnostics retained for retry.
 - PR merge conflicts are explicit in `wtc status`: repository rows show `✗ conflict` in the PR cell and retain the upstream count with a conflict marker (for example, `✗3`). Compact views keep the warning visible even when sync columns are hidden. GitHub's `mergeable` field detects conflicts even when its merge-state label says draft; passing checks and a clean local checkout do not hide the conflict.

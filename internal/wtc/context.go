@@ -54,6 +54,10 @@ type Config struct {
 	Secrets struct {
 		ProdPaths []string `toml:"prod_paths"`
 	} `toml:"secrets"`
+	Runtime struct {
+		Backend string `toml:"backend"`
+		Binary  string `toml:"binary"`
+	} `toml:"runtime"`
 }
 type Context struct {
 	Collection string   `json:"collection"`
@@ -69,6 +73,9 @@ type Context struct {
 	// callers that only need the snapshot.
 	StatusProgress  func(string) `json:"-"`
 	previewPortBase *int
+	// statusSweep marks a collection read by another collection's status
+	// sweep, which reads its services itself with its own trusted binary.
+	statusSweep bool
 }
 
 var validRepoName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)

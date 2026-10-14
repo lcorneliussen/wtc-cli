@@ -30,6 +30,7 @@ func parseReviewDiff(data []byte) (reviewDiffLines, error) {
 			inHunk = false
 		case !inHunk && strings.HasPrefix(line, "+++ "):
 			path = strings.TrimPrefix(line, "+++ ")
+			path, _, _ = strings.Cut(path, "\t")
 			if strings.HasPrefix(path, `"`) {
 				var err error
 				path, err = strconv.Unquote(path)
