@@ -34,10 +34,10 @@ func (c *Context) AddRepositories(opt AddRepoOptions) (AddRepoResult, error) {
 		}
 	}
 	path := c.Collection
-	if opt.Collection != "" && c.AdHoc {
-		return result, fmt.Errorf("an ad-hoc collection has no sibling collections; run add-repo inside the target")
-	}
 	if opt.Collection != "" {
+		if err := c.RequireWorkspace("add-repo --collection"); err != nil {
+			return result, err
+		}
 		if !collectionNamePattern.MatchString(opt.Collection) {
 			return result, fmt.Errorf("invalid collection name %q", opt.Collection)
 		}

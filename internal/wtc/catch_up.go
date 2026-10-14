@@ -175,10 +175,10 @@ func (c *Context) CatchUpInventory(opt CatchUpOptions) (CatchUpReport, []catchUp
 		selectors[name] = false
 	}
 	collections := append([]string(nil), opt.Collections...)
-	if c.AdHoc && (opt.All || len(collections) > 1 || len(collections) == 1 && collections[0] != filepath.Base(c.Collection)) {
-		// The parent of an ad-hoc collection is not a workspace; its other
-		// folders are unrelated.
-		return report, nil, fmt.Errorf("an ad-hoc collection catches up only itself")
+	if opt.All || len(collections) > 1 || len(collections) == 1 && collections[0] != filepath.Base(c.Collection) {
+		if err := c.RequireWorkspace("catch-up of other collections"); err != nil {
+			return report, nil, err
+		}
 	}
 	if opt.All {
 		dirs, err := WorkspaceCollections(c.Workspace)

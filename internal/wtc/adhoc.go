@@ -268,6 +268,9 @@ func (c *Context) RegisterAdHocRepo(opt AdHocRepoOptions) (Repo, error) {
 		if existing.Remote != repo.Remote {
 			return Repo{}, fmt.Errorf("the name %s already stands for %s in this collection; choose another with --name", existing.Name, existing.Remote)
 		}
+		if opt.Target != "" && existing.DefaultRef != repo.DefaultRef {
+			return Repo{}, fmt.Errorf("%s is already registered with development tip %s", existing.Name, existing.DefaultRef)
+		}
 		return existing, nil
 	}
 	if err := appendRegistryEntry(c.registryPath(), repo); err != nil {
@@ -435,6 +438,15 @@ func saveUserRegistry(current Registry, repo Repo) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// RequireWorkspace refuses an operation on other collections. The parent of
+// an ad-hoc collection is not a workspace; its other folders are unrelated.
+func (c *Context) RequireWorkspace(operation string) error {
+	if c.AdHoc {
+		return fmt.Errorf("%s: an ad-hoc collection has no workspace of collections", operation)
+	}
+	return nil
 }
 
 // harnessRel is the harness directory relative to the collection, for links

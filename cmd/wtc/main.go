@@ -81,8 +81,10 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		if envAll && c.AdHoc {
-			return fmt.Errorf("an ad-hoc collection has no workspace to sweep")
+		if envAll {
+			if err := c.RequireWorkspace("env setup --all"); err != nil {
+				return err
+			}
 		}
 		if !envAll {
 			result, err := refreshEnvCollection(c, dryRun, invokeHooks)

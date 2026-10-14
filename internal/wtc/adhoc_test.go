@@ -272,3 +272,46 @@ func TestRemoteKeySeparatesHostsAndRejectsTraversal(t *testing.T) {
 		}
 	}
 }
+
+func TestAdHocCatchUpStatusAndRenderedLinks(t *testing.T) {
+	root := adHocFixture(t)
+	source := adHocSource(t, root, "widget")
+	c := initAdHoc(t, filepath.Join(root, "task"))
+	fixtureFile(t, filepath.Join(c.Harness, "skills", "local-skill", "SKILL.md"), "---\nname: local-skill\n---\n", 0644)
+	fixtureFile(t, filepath.Join(c.Harness, "instructions", "secrets.md"), "# Local secrets policy\n", 0644)
+	addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + source})
+	for _, path := range []string{".claude/skills/local-skill/SKILL.md", ".wtc/instructions/secrets.md"} {
+		data, err := os.ReadFile(filepath.Join(c.Collection, path))
+		if err != nil {
+			t.Fatalf("rendered link %s does not resolve: %v", path, err)
+		}
+		if path == ".wtc/instructions/secrets.md" && string(data) != "# Local secrets policy\n" {
+			t.Fatalf("instruction override not linked: %q", data)
+		}
+	}
+	if _, err := c.RegisterAdHocRepo(AdHocRepoOptions{Spec: "file://" + source, Target: "other"}); err == nil {
+		t.Fatal("re-adding by URL silently ignored a different target")
+	}
+	fixtureFile(t, filepath.Join(source, "next.txt"), "next\n", 0644)
+	fixtureGit(t, "-C", source, "add", "-A")
+	fixtureGit(t, "-C", source, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "next")
+	report, err := c.CatchUp(CatchUpOptions{})
+	if err != nil {
+		t.Fatalf("catch-up failed: %v\n%s", err, report.Markdown())
+	}
+	want := fixtureGit(t, "-C", source, "rev-parse", "HEAD")
+	if got := fixtureGit(t, "-C", filepath.Join(c.Collection, "widget"), "rev-parse", "HEAD"); got != want {
+		t.Fatalf("catch-up left widget at %s, want %s", got, want)
+	}
+	snapshot, _, err := c.StatusLiveSnapshot(false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, repo := range snapshot.Repos {
+		found = found || repo.Repo == "widget"
+	}
+	if !found {
+		t.Fatalf("status did not list the ad-hoc worktree: %+v", snapshot.Repos)
+	}
+}
