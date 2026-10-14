@@ -85,6 +85,9 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 			if args[0] == "." || args[0] == ".." || filepath.Base(args[0]) != args[0] {
 				return fmt.Errorf("expected a collection name")
 			}
+			if err := c.RequireWorkspace("status <collection>"); err != nil {
+				return err
+			}
 			c, err = wtc.OpenCollection(filepath.Join(c.Workspace, args[0]))
 			if err != nil {
 				return err

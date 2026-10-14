@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
 )
 
@@ -72,6 +73,8 @@ func userOwnerPath(remote string) (string, error) {
 	return filepath.Join(append([]string{root, "bare"}, key...)...) + ".git", nil
 }
 
+var defaultPorts = map[string]string{"ssh": "22", "git+ssh": "22", "https": "443", "http": "80", "git": "9418"}
+
 func remoteKey(remote string) ([]string, error) {
 	var host, path string
 	switch {
@@ -81,6 +84,11 @@ func remoteKey(remote string) ([]string, error) {
 			return nil, fmt.Errorf("invalid remote %q: %w", remote, err)
 		}
 		host, path = u.Hostname(), u.Path
+		// Hostnames cannot contain "_", so a non-default port appended with it
+		// keeps two servers on one host apart without colliding with a name.
+		if port := u.Port(); port != "" && port != defaultPorts[u.Scheme] {
+			host += "_" + port
+		}
 		if u.Scheme == "file" {
 			host = "local"
 		}
@@ -282,7 +290,7 @@ func (c *Context) RegisterAdHocRepo(opt AdHocRepoOptions) (Repo, error) {
 	if err := appendRegistryEntry(c.registryPath(), repo); err != nil {
 		return Repo{}, err
 	}
-	if err := saveUserRegistry(user, repo); err != nil {
+	if err := saveUserRegistry(repo); err != nil {
 		return Repo{}, err
 	}
 	if err := c.load(); err != nil {
@@ -443,9 +451,27 @@ func loadUserRegistry() (Registry, error) {
 }
 
 // saveUserRegistry remembers the latest choice for a repository so the next
-// ad-hoc collection can add it by name.
-func saveUserRegistry(current Registry, repo Repo) error {
+// ad-hoc collection can add it by name. It reloads under a lock, so concurrent
+// registrations from different collections do not drop each other's entries.
+func saveUserRegistry(repo Repo) error {
 	path, err := userRegistryPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	fd, err := unix.Open(path+".lock", unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
+	if err != nil {
+		return fmt.Errorf("open user registry lock: %w", err)
+	}
+	lock := os.NewFile(uintptr(fd), path+".lock")
+	defer lock.Close()
+	if err := unix.Flock(fd, unix.LOCK_EX); err != nil {
+		return fmt.Errorf("lock user registry: %w", err)
+	}
+	defer unix.Flock(fd, unix.LOCK_UN)
+	current, err := loadUserRegistry()
 	if err != nil {
 		return err
 	}
@@ -462,9 +488,6 @@ func saveUserRegistry(current Registry, repo Repo) error {
 	}
 	data, err := yaml.Marshal(out)
 	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".repos.tmp-")

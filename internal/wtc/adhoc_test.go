@@ -1,9 +1,11 @@
 package wtc
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -259,10 +261,12 @@ func TestAdHocRefusesWorkspaceOperationsAndRetiresInPlace(t *testing.T) {
 
 func TestRemoteKeySeparatesHostsAndRejectsTraversal(t *testing.T) {
 	for remote, want := range map[string]string{
-		"git@github.com:acme/api.git":        "github.com/acme/api",
-		"https://github.com/acme/api":        "github.com/acme/api",
-		"ssh://git@git.example:22/x/api.git": "git.example/x/api",
-		"/srv/git/api.git":                   "local/srv/git/api",
+		"git@github.com:acme/api.git":          "github.com/acme/api",
+		"https://github.com/acme/api":          "github.com/acme/api",
+		"ssh://git@git.example:22/x/api.git":   "git.example/x/api",
+		"ssh://git@git.example:2222/x/api.git": "git.example_2222/x/api",
+		"https://git.example:8443/x/api":       "git.example_8443/x/api",
+		"/srv/git/api.git":                     "local/srv/git/api",
 	} {
 		key, err := remoteKey(remote)
 		if err != nil || strings.Join(key, "/") != want {
@@ -273,6 +277,30 @@ func TestRemoteKeySeparatesHostsAndRejectsTraversal(t *testing.T) {
 		if _, err := remoteKey(remote); err == nil {
 			t.Fatalf("accepted %q", remote)
 		}
+	}
+}
+
+func TestUserRegistryKeepsConcurrentRegistrations(t *testing.T) {
+	t.Setenv("WTC_DATA_HOME", t.TempDir())
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs <- saveUserRegistry(Repo{Name: fmt.Sprintf("repo%d", i), Remote: fmt.Sprintf("https://example.invalid/repo%d.git", i), DefaultRef: "origin/main"})
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := loadUserRegistry()
+	if err != nil || len(r.Repos) != 16 {
+		t.Fatalf("kept %d of 16 registrations: %v", len(r.Repos), err)
 	}
 }
 
