@@ -225,9 +225,6 @@ func TestAdHocRefusesWorkspaceOperationsAndRetiresInPlace(t *testing.T) {
 	root := adHocFixture(t)
 	c := initAdHoc(t, filepath.Join(root, "task"))
 	addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + adHocSource(t, root, "widget")})
-	if _, err := c.NewCollection(NewOptions{Slug: "next"}); err == nil {
-		t.Fatal("wtc new is not available in ad-hoc collections yet")
-	}
 	if _, _, err := c.CatchUpInventory(CatchUpOptions{All: true, DryRun: true}); err == nil {
 		t.Fatal("an ad-hoc collection must not sweep its parent folder")
 	}
@@ -384,5 +381,150 @@ func TestAdHocCheckoutOwnerFetchesTargetAndForgetsDeletedCheckouts(t *testing.T)
 	}
 	if owner, err := second.bareFor("service"); err != nil || !strings.Contains(owner, filepath.Join("data", "bare")) {
 		t.Fatalf("owner did not fall back to the cache: %s %v", owner, err)
+	}
+}
+
+func TestAdHocNewCreatesSiblingWithSameRegistrations(t *testing.T) {
+	root := adHocFixture(t)
+	source := adHocSource(t, root, "widget", "develop")
+	c := initAdHoc(t, filepath.Join(root, "task"))
+	addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + source, Target: "develop"})
+	registry := filepath.Join(c.Harness, "repos.yml")
+	data, err := os.ReadFile(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, registry, string(data)+"    port_offset: 3\n", 0644)
+	if c, err = OpenCollection(c.Collection); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.NewCollection(NewOptions{PR: "widget#1"}); err == nil {
+		t.Fatal("--pr needs a harness registry")
+	}
+	result, err := c.NewCollection(NewOptions{Slug: "next", Tracker: "PROJ-9", Repos: []string{"widget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Collection != filepath.Join(root, "proj-9-next") || result.IntendedBranch != "proj-9-next" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	next, err := OpenCollection(result.Collection)
+	if err != nil || !next.AdHoc {
+		t.Fatalf("sibling is not an ad-hoc collection: %v", err)
+	}
+	repo, err := next.Repository("widget")
+	if err != nil || repo.DefaultRef != "origin/develop" || repo.PortOffset == nil || *repo.PortOffset != 3 {
+		t.Fatalf("registration was not carried over: %+v %v", repo, err)
+	}
+	want := fixtureGit(t, "-C", source, "rev-parse", "develop")
+	worktree := filepath.Join(result.Collection, "widget")
+	if got := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("sibling worktree at %s, want %s", got, want)
+	}
+	for path, want := range map[string]string{"HANDOFF.md": "git switch -c proj-9-next", ".env.collection": "WIDGET_PORT="} {
+		data, err := os.ReadFile(filepath.Join(result.Collection, path))
+		if err != nil || !strings.Contains(string(data), want) {
+			t.Fatalf("%s lacks %q: %v\n%s", path, want, err, data)
+		}
+	}
+	// Two specs naming one repository resolve to a single entry.
+	same, err := c.NewCollection(NewOptions{Slug: "same", Repos: []string{"file://" + source, "widget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(same.Repositories) != 1 {
+		t.Fatalf("duplicate resolved names: %v", same.Repositories)
+	}
+	if _, err := OpenCollection(same.Collection); err != nil {
+		t.Fatalf("registry no longer opens: %v", err)
+	}
+	if _, err := c.NewCollection(NewOptions{Slug: "next", Tracker: "PROJ-9"}); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("an existing sibling was overwritten: %v", err)
+	}
+	// A typo is refused before anything exists; an unreachable remote leaves
+	// nothing behind either, so the corrected rerun is not blocked.
+	for _, spec := range []string{"widgte", "file://" + filepath.Join(root, "missing.git")} {
+		if _, err := c.NewCollection(NewOptions{Slug: "retry", Repos: []string{spec}}); err == nil {
+			t.Fatalf("%s was accepted", spec)
+		}
+		if _, err := os.Lstat(filepath.Join(root, "retry")); !os.IsNotExist(err) {
+			t.Fatalf("a failed new with %s left a folder behind: %v", spec, err)
+		}
+	}
+	if _, err := c.NewCollection(NewOptions{Slug: "retry", Repos: []string{"widget"}}); err != nil {
+		t.Fatalf("corrected rerun: %v", err)
+	}
+}
+
+func TestAdHocNewOptionsHooksAndControlRoot(t *testing.T) {
+	root := adHocFixture(t)
+	widget := adHocSource(t, root, "widget")
+	gadget := adHocSource(t, root, "gadget")
+	c := initAdHoc(t, filepath.Join(root, "task"))
+	addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + widget})
+	// gadget is known per user only, from another collection.
+	other := initAdHoc(t, filepath.Join(root, "other"))
+	if _, err := other.RegisterAdHocRepo(AdHocRepoOptions{Spec: "file://" + gadget}); err != nil {
+		t.Fatal(err)
+	}
+	c.ConfigRoot = filepath.Join(root, "control")
+	fixtureFile(t, filepath.Join(c.ConfigRoot, "widget", "secret.txt"), "synthetic\n", 0600)
+	fixtureFile(t, filepath.Join(widget, ".gitignore"), "secret.txt\n", 0644)
+	fixtureGit(t, "-C", widget, "add", "-A")
+	fixtureGit(t, "-C", widget, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "ignore")
+	log := filepath.Join(root, "hooks.log")
+	for _, event := range []string{"new.pre", "new.post"} {
+		fixtureFile(t, filepath.Join(c.Harness, "hooks", "wtc", event+".sh"), "#!/bin/sh\necho "+event+" >> '"+log+"'\n", 0755)
+	}
+	for _, bad := range []NewOptions{
+		{Issue: "wid-1", Slug: "x"},
+		{Slug: "bad slug"},
+		{Slug: "x", Tracker: "bad key"},
+		{Slug: "x", Branch: "bad branch"},
+		{Slug: "x", Repos: []string{"widget", "widget"}},
+	} {
+		if _, err := c.NewCollection(bad); err == nil {
+			t.Fatalf("accepted %+v", bad)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "x")); !os.IsNotExist(err) {
+		t.Fatalf("a refused request created a folder: %v", err)
+	}
+	result, err := c.NewCollection(NewOptions{Slug: "next", Branch: "feature-x", Repos: []string{"widget", "gadget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"widget", "gadget"} {
+		if branch := fixtureGit(t, "-C", filepath.Join(result.Collection, name), "branch", "--show-current"); branch != "feature-x" {
+			t.Fatalf("%s is on %q, want feature-x", name, branch)
+		}
+	}
+	if info, err := os.Lstat(filepath.Join(result.Collection, "widget", "secret.txt")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("secret not linked from the inherited control root: %v", err)
+	}
+	if data, err := os.ReadFile(log); err != nil || string(data) != "new.pre\nnew.post\n" {
+		t.Fatalf("source hooks did not run in order: %q %v", data, err)
+	}
+}
+
+func TestRegistryEntryKeepsEveryRepoField(t *testing.T) {
+	offset := 7
+	repo := Repo{Name: "widget", Remote: "git@example.invalid:x/widget.git", DefaultRef: "origin/develop", Owner: "/srv/widget/.git",
+		PortOffset: &offset, Role: "role", IssuesPrefix: "wid-", ProductionRef: "origin/prod", ReleaseRef: "origin/release",
+		ProdPaths: []string{"config/prod"}, IDE: "idea", MergeStrategy: "squash", Extra: map[string]any{"custom": "kept"}}
+	path := filepath.Join(t.TempDir(), "repos.yml")
+	fixtureFile(t, path, adHocRegistryHeader, 0644)
+	if err := appendRegistryEntry(path, repo); err != nil {
+		t.Fatal(err)
+	}
+	c := &Context{Collection: filepath.Dir(path), Harness: filepath.Dir(path), AdHoc: true, ConfigRoot: t.TempDir()}
+	if err := c.load(); err != nil {
+		t.Fatal(err)
+	}
+	got := c.Registry.Repos[0]
+	if got.Owner != repo.Owner || *got.PortOffset != 7 || got.IssuesPrefix != "wid-" || got.ProductionRef != repo.ProductionRef ||
+		got.ReleaseRef != repo.ReleaseRef || len(got.ProdPaths) != 1 || got.IDE != "idea" || got.MergeStrategy != "squash" ||
+		got.Role != "role" || got.Extra["custom"] != "kept" {
+		t.Fatalf("round trip lost fields: %+v", got)
 	}
 }
