@@ -141,8 +141,8 @@ func TestStatusRuntimeHasAColumnPerTunnelProvider(t *testing.T) {
 			t.Errorf("%s opened %q", name, got)
 		}
 	}
-	if !strings.Contains(lines[y], "\x1b[33mcalm-river") || !strings.Contains(lines[y], "\x1b[36m:8443") {
-		t.Errorf("public tunnel not warning-toned or tailnet tunnel not link-toned: %q", lines[y])
+	if !strings.Contains(lines[y], "\x1b[33mcalm-river") || !strings.Contains(lines[y], "\x1b[32m:8443") {
+		t.Errorf("public tunnel not warning-toned or running tailnet tunnel not green: %q", lines[y])
 	}
 	if hover := statusRuntimeHover(snapshot.Runtime[2]); !strings.Contains(hover, "public, reachable from the internet") {
 		t.Errorf("hover does not say public: %q", hover)
@@ -160,7 +160,7 @@ func TestStatusRuntimeHasAColumnPerTunnelProvider(t *testing.T) {
 		t.Fatalf("idle tunnel shown or running one missing: %s", plain)
 	}
 	snapshot.Runtime[2].Autostart = true
-	if plain := render(); !strings.Contains(plain, "CLOUDFLARE") || !strings.Contains(plain, ":8443     idle") {
+	if plain := render(); !strings.Contains(plain, "CLOUDFLARE") || !strings.Contains(plain, ":8443     stopped") {
 		t.Fatalf("default tunnel not shown with its state: %s", plain)
 	}
 }
@@ -234,5 +234,26 @@ func TestStatusTUIRuntimeMessageReplacesEnlistedStates(t *testing.T) {
 	next, _ := model.Update(statusRuntimeMsg{items: []wtc.RuntimeItem{ready}})
 	if plain := ansi.Strip(strings.Join(next.(statusTUIModel).contentLines(), "\n")); !strings.Contains(plain, "ready") || !strings.Contains(plain, ":3000") {
 		t.Fatalf("runtime state not applied: %s", plain)
+	}
+}
+
+func TestStatusRuntimePortColourFollowsState(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	for state, want := range map[string]string{"ready": "\x1b[32m", "starting": "\x1b[33m", "absent": "\x1b[2m", "exited": "\x1b[31m"} {
+		item := wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/server", Group: "widget/web", Kind: "service", State: state, URL: "http://127.0.0.1:3000"}
+		model := statusTUIModel{width: 100, height: 30, snapshot: wtc.StatusSnapshot{Collection: "fixture", Runtime: []wtc.RuntimeItem{item}}}
+		lines := strings.Join(model.contentLines(), "\n")
+		if !strings.Contains(lines, want+":3000") {
+			t.Errorf("%s: port not toned %q: %q", state, want, lines)
+		}
+		if linked := strings.Contains(lines, "\x1b]8;;http://127.0.0.1:3000"); linked != (state == "ready" || state == "starting") {
+			t.Errorf("%s: port linked = %v", state, linked)
+		}
+	}
+	if got := statusRuntimeState(wtc.RuntimeItem{State: "absent"}); got != "stopped" {
+		t.Errorf("absent reads %q", got)
+	}
+	if _, tone := statusRuntimeMark(wtc.RuntimeItem{Kind: "resources", Group: "w/database", State: "provision-hook-completed"}); tone == statusToneSuccess {
+		t.Error("a provisioned resource looks like a running one")
 	}
 }

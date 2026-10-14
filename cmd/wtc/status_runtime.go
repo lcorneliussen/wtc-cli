@@ -15,6 +15,8 @@ type statusRuntimeGroup struct {
 	repo, name string
 	members    []wtc.RuntimeItem
 	local      string
+	localLive  bool              // the service with the local URL is running
+	localTone  string            // its state colour
 	tunnels    []wtc.RuntimeItem // shown endpoints, in task order
 	notes      []string
 }
@@ -36,7 +38,8 @@ func statusRuntimeGroups(snapshot wtc.StatusSnapshot) []statusRuntimeGroup {
 				g.tunnels = append(g.tunnels, item)
 			}
 		} else if item.URL != "" && g.local == "" {
-			g.local = item.URL
+			g.local, g.localLive = item.URL, statusRuntimeLive(item)
+			_, g.localTone = statusRuntimeMark(item)
 		}
 		for _, note := range []string{item.Reason, item.Error} {
 			if note != "" {
@@ -87,7 +90,7 @@ func statusRuntimeURLLabel(raw string) string {
 
 // state is the member state that most needs attention, with its tone.
 func (g statusRuntimeGroup) state() (string, string) {
-	rank := map[string]int{statusToneDim: 1, statusToneSuccess: 2, statusToneWarning: 3, statusToneFailure: 4}
+	rank := map[string]int{statusToneDim: 1, statusToneLabel: 2, statusToneSuccess: 2, statusToneWarning: 3, statusToneFailure: 4}
 	state, tone := "", ""
 	for _, item := range g.members {
 		if _, t := statusRuntimeMark(item); rank[t] > rank[tone] {
@@ -205,6 +208,9 @@ func statusRuntimeLinksWidth(tunnels []wtc.RuntimeItem) int {
 // urlAt is the URL drawn at a column of a group's line.
 func (l statusRuntimeLayout) urlAt(g statusRuntimeGroup, x int) string {
 	if x >= l.localStart() && x < l.localStart()+min(l.local, len([]rune(statusRuntimeURLLabel(g.local)))) {
+		if !g.localLive {
+			return ""
+		}
 		return g.local
 	}
 	for _, c := range l.tunnels {
@@ -212,6 +218,9 @@ func (l statusRuntimeLayout) urlAt(g statusRuntimeGroup, x int) string {
 		for _, item := range statusRuntimeOf(g.tunnels, c.provider) {
 			label := len([]rune(statusRuntimeTunnelLabel(item)))
 			if x >= start && x < start+label {
+				if !statusRuntimeLive(item) {
+					return ""
+				}
 				return item.URL
 			}
 			start += label + 2
@@ -222,8 +231,12 @@ func (l statusRuntimeLayout) urlAt(g statusRuntimeGroup, x int) string {
 
 // statusRuntimeState shortens the hook fact the way the repo summary does.
 func statusRuntimeState(item wtc.RuntimeItem) string {
-	if item.Kind == "resources" && item.State == "provision-hook-completed" {
+	switch {
+	case item.Kind == "resources" && item.State == "provision-hook-completed":
 		return "provisioned"
+	case item.State == "absent" || item.State == "idle":
+		// No runner, or a task it is not running: stopped, in plain words.
+		return "stopped"
 	}
 	return item.State
 }
@@ -257,8 +270,12 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 		kind := g.resourceType()
 		if styled {
 			repo, name, stateCell = statusTUIStyle(repo, statusToneLabel), statusTUIStyle(name, statusToneLabel), statusTUIStyle(stateCell, tone)
-			if statusTUIURL(g.local) != "" {
-				local = statusTUIFitANSI(statusTUILinkTone(strings.TrimRight(local, " "), g.local, statusToneLink), l.local)
+			// The port takes its service's state colour: grey before it starts,
+			// green while it runs, red when it failed; a link only while it runs.
+			if statusTUIURL(g.local) != "" && g.localLive {
+				local = statusTUIFitANSI(statusTUILinkTone(strings.TrimRight(local, " "), g.local, g.localTone), l.local)
+			} else if g.local != "" {
+				local = statusTUIStyle(local, g.localTone)
 			}
 		}
 		if kind != "" && g.local == "" {
@@ -280,14 +297,16 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 					tail += "  "
 				}
 				text := statusTUISafe(statusRuntimeTunnelLabel(item))
-				tone := statusToneLink
-				if statusRuntimeExposed(item) {
+				// Like the port: the state colour, except that a running tunnel on
+				// the internet is warning-toned.
+				_, tone := statusRuntimeMark(item)
+				if statusRuntimeExposed(item) && statusRuntimeLive(item) {
 					tone = statusToneWarning
 				}
-				if styled && statusTUIURL(item.URL) != "" {
+				if styled && statusTUIURL(item.URL) != "" && statusRuntimeLive(item) {
 					text = statusTUILinkTone(text, item.URL, tone)
 				} else if styled {
-					text = statusTUIStyle(text, statusToneDim)
+					text = statusTUIStyle(text, tone)
 				}
 				tail += text
 			}
@@ -348,6 +367,18 @@ func statusRuntimeMark(item wtc.RuntimeItem) (string, string) {
 		letter = []rune(item.Mark)[0]
 	}
 	tone := statusToneFailure
+	if item.Kind == "resources" {
+		// A resource exists or not; it does not run, so it is never green.
+		switch item.State {
+		case "provision-hook-completed":
+			return string(letter), statusToneLabel
+		case "provision-attempted":
+			return string(letter), statusToneWarning
+		case "checking", "unprovisioned":
+			return string(letter), statusToneDim
+		}
+		return string(letter), statusToneFailure
+	}
 	switch item.State {
 	case "ready", "provision-hook-completed", "done":
 		tone = statusToneSuccess
@@ -412,7 +443,7 @@ func statusRuntimeCell(items []wtc.RuntimeItem, width int, styled bool) string {
 		letter, tone := statusRuntimeMark(items[slot.item])
 		if styled {
 			// A letter with an address is a terminal link to it, like a PR number.
-			if raw := statusTUIURL(items[slot.item].URL); raw != "" {
+			if raw := statusTUIURL(items[slot.item].URL); raw != "" && statusRuntimeLive(items[slot.item]) {
 				letter = statusTUILinkTone(letter, raw, tone)
 			} else {
 				letter = statusTUIStyle(letter, tone)
@@ -430,6 +461,9 @@ func statusRuntimeHover(item wtc.RuntimeItem) string {
 		parts[1] = statusRuntimeExposure(item)
 	} else if item.Kind == "resources" {
 		parts[1] = strings.TrimSpace(item.Type + " resource")
+		if item.State == "provision-hook-completed" {
+			parts[2] = "provisioned: created by the repo's provision hook, kept by down, removed by teardown or retire"
+		}
 	}
 	for _, extra := range []string{item.Label, item.URL, item.Reason, item.Error} {
 		if extra != "" {
@@ -487,4 +521,13 @@ func (g statusRuntimeGroup) resourceType() string {
 		}
 	}
 	return ""
+}
+
+// statusRuntimeLive is true while a task runs, so its address can answer.
+func statusRuntimeLive(item wtc.RuntimeItem) bool {
+	switch item.State {
+	case "ready", "running", "starting":
+		return true
+	}
+	return false
 }

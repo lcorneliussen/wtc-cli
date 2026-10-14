@@ -656,6 +656,9 @@ func (m statusTUIModel) buildClickTarget(x, y int) string {
 		return ""
 	}
 	if item, ok := m.runtimeItemAt(x, y); ok {
+		if !statusRuntimeLive(item) {
+			return ""
+		}
 		return statusTUIURL(item.URL)
 	}
 	if rowIndex < len(m.snapshot.Repos) {
