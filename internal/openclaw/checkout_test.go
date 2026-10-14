@@ -271,3 +271,33 @@ func TestStatus(t *testing.T) {
 		t.Errorf("a directory that is no checkout: %+v", got.Repos[1])
 	}
 }
+
+func TestPlanPublishInASandboxCopy(t *testing.T) {
+	// What a sandbox gets: the session's branch, no origin, the skills mirror.
+	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
+	git("remote", "remove", "origin")
+	c, err := OpenCheckout(c.Dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Private {
+		t.Fatal("a checkout without origin is not taken for a sandbox's copy")
+	}
+	write(t, c, "notes.md", "one\n")
+	write(t, c, ".openclaw/sandbox-skills/github/SKILL.md", "mirror\n")
+	plan, err := c.PlanPublish(PublishOptions{Title: "Add notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := plan.Intents[0]
+	if in.Tool != ToolGitHubPublish || in.Forge != ForgeUnknown || in.Args.(PublishArgs).Title != "Add notes" {
+		t.Fatalf("intent %+v", in)
+	}
+	if strings.Join(plan.Pending, " ") != "notes.md" {
+		t.Fatalf("pending %v: the skills mirror is not the agent's work", plan.Pending)
+	}
+	write(t, c, ".env", "TOKEN=x\n")
+	if _, err := c.PlanPublish(PublishOptions{}); err == nil || !strings.Contains(err.Error(), ".env") {
+		t.Fatalf("a .env in a sandbox's copy: %v", err)
+	}
+}

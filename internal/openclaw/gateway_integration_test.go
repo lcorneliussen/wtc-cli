@@ -10,13 +10,18 @@ package openclaw
 // by WTC_OPENCLAW_IMAGE (or the default below) plus a Git and a GitHub CLI
 // recent enough to publish, and the wtc binary built from this checkout.
 // OpenClaw refuses to allocate a worktree with less than about 4 GiB free, so
-// the gateway's state lives on memory-backed filesystems.
+// the gateway's state lives on memory-backed filesystems, or, for a gateway
+// that runs its agents' commands in sandbox containers, on the Docker host's
+// disk (see gatewayOptions.sandbox).
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -49,11 +54,21 @@ const stubModel = `,
                   "contextWindow": 200000, "maxTokens": 8192 } ] } } },
   "tools": { "toolSearch": false }`
 
-func gatewayStart(stub bool) string {
-	model, defaults, start := "", "", ""
+// gatewayStart writes the gateway's configuration and starts it. sandbox is
+// the agents' sandbox configuration, or empty to run their commands on the
+// gateway.
+func gatewayStart(stub bool, sandbox string) string {
+	model, defaults, start := "", []string{}, ""
 	if stub {
-		model, defaults = stubModel, `"defaults": { "model": { "primary": "stub/stub-model" } }, `
+		model, defaults = stubModel, append(defaults, `"model": { "primary": "stub/stub-model" }`)
 		start = "mkdir -p /tmp/stub && nohup node /tmp/stub-model.mjs > /tmp/stub/stub.log 2>&1 &\n"
+	}
+	if sandbox != "" {
+		defaults = append(defaults, `"sandbox": `+sandbox)
+	}
+	agents := ""
+	if len(defaults) > 0 {
+		agents = `"defaults": { ` + strings.Join(defaults, ", ") + ` }, `
 	}
 	return `
 cd /app
@@ -61,7 +76,7 @@ cat > "$OPENCLAW_CONFIG_PATH" <<JSON
 { "gateway": { "mode": "local", "bind": "loopback", "port": 18789,
                "auth": { "mode": "token", "token": "t" },
                "tools": { "allow": ["sessions_spawn", "github_publish"] } },
-  "agents": { ` + defaults + `"entries": { "dev": { "workspace": "$OPENCLAW_STATE_DIR/workspaces/dev" } } }` + model + ` }
+  "agents": { ` + agents + `"entries": { "dev": { "workspace": "$OPENCLAW_STATE_DIR/workspaces/dev" } } }` + model + ` }
 JSON
 ` + start + gatewayBoot
 }
@@ -130,6 +145,51 @@ func testImage(t *testing.T) string {
 	return imageTag
 }
 
+var (
+	sandboxOnce sync.Once
+	sandboxTag  string
+	sandboxErr  string
+)
+
+// sandboxImage builds the image the gateway starts sandbox containers from:
+// OpenClaw's default sandbox image plus the wtc binary of the gateway image.
+func sandboxImage(t *testing.T) string {
+	t.Helper()
+	gatewayImage := testImage(t)
+	sandboxOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "wtc-openclaw-sandbox")
+		if err != nil {
+			sandboxErr = "temp dir: " + err.Error()
+			return
+		}
+		defer os.RemoveAll(dir)
+		tag := strings.Replace(gatewayImage, "wtc-openclaw-test:", "wtc-openclaw-sandbox:", 1)
+		dockerfile := filepath.Join("testdata", "sandbox.Dockerfile")
+		if out, err := exec.Command("docker", "build", "-q", "--build-arg", "GATEWAY_IMAGE="+gatewayImage, "-f", dockerfile, "-t", tag, dir).CombinedOutput(); err != nil {
+			sandboxErr = "docker build: " + err.Error() + "\n" + string(out)
+			return
+		}
+		sandboxTag = tag
+	})
+	if sandboxErr != "" {
+		t.Fatal(sandboxErr)
+	}
+	return sandboxTag
+}
+
+// sandboxRoot is the directory on the Docker host that holds the state of
+// sandboxed gateways, one directory per test.
+const sandboxRoot = "/var/lib/wtc-openclaw-e2e"
+
+// onDockerHost runs script as root in a throwaway container that sees the
+// Docker host's /var/lib at /host-var-lib, and its Docker socket.
+func onDockerHost(script string) (string, error) {
+	out, err := exec.Command("docker", "run", "--rm", "--user", "0", "--entrypoint", "sh",
+		"-v", "/var/lib:/host-var-lib", "-v", "/var/run/docker.sock:/var/run/docker.sock",
+		imageTag, "-c", script).CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
 type gateway struct {
 	t         *testing.T
 	container string
@@ -138,6 +198,8 @@ type gateway struct {
 	secrets []string
 	// hidden are further values that must not show up in failure output.
 	hidden []string
+	// sandboxPrefix names the sandbox containers of a sandboxed gateway.
+	sandboxPrefix string
 }
 
 type gatewayOptions struct {
@@ -154,20 +216,61 @@ type gatewayOptions struct {
 	stubModel bool
 	// plugin installs the collection plugin from ../../openclaw-plugin.
 	plugin bool
+	// sandbox runs every session's commands in a Docker sandbox container,
+	// which the gateway starts on the Docker daemon the tests use, through
+	// its socket. The daemon resolves bind mounts on its own host, and
+	// OpenClaw translates the paths it mounts only for sources that are bind
+	// mounts into the gateway, so /home/node is a directory on the Docker
+	// host instead of memory; that also leaves room for OpenClaw's worktree
+	// reserve.
+	sandbox bool
 }
 
 func startGateway(t *testing.T, opt gatewayOptions) *gateway {
 	t.Helper()
-	out, err := exec.Command("docker", "run", "-d",
-		"--tmpfs", "/home/node:size=9g,uid=1000,gid=1000,exec", "--tmpfs", "/tmp:size=6g,exec",
-		"--entrypoint", "sleep", testImage(t), "infinity").CombinedOutput()
+	keep := os.Getenv("WTC_OPENCLAW_KEEP") != ""
+	home := []string{"--tmpfs", "/home/node:size=9g,uid=1000,gid=1000,exec"}
+	sandbox := ""
+	g := &gateway{t: t, secrets: opt.secrets}
+	if opt.sandbox {
+		image := sandboxImage(t)
+		id := make([]byte, 6)
+		_, _ = rand.Read(id)
+		g.sandboxPrefix = "wtc-sbx-" + hex.EncodeToString(id) + "-"
+		dir := sandboxRoot + "/" + hex.EncodeToString(id)
+		seen := "/host-var-lib/" + strings.TrimPrefix(dir, "/var/lib/")
+		// The gateway's user needs the group that owns the socket.
+		group, err := onDockerHost("mkdir -p " + seen + " && chown 1000:1000 " + seen + " && stat -c %g /var/run/docker.sock")
+		if err != nil {
+			t.Fatalf("preparing %s on the Docker host: %v\n%s", dir, err, group)
+		}
+		t.Cleanup(func() {
+			if keep {
+				t.Logf("kept %s on the Docker host and the sandbox containers named %s*", dir, g.sandboxPrefix)
+				return
+			}
+			// The sandbox containers are the gateway's; it leaves them running.
+			names, _ := exec.Command("docker", "ps", "-aq", "--filter", "name=^"+g.sandboxPrefix).Output()
+			if ids := strings.Fields(string(names)); len(ids) > 0 {
+				_ = exec.Command("docker", append([]string{"rm", "-f"}, ids...)...).Run()
+			}
+			if out, err := onDockerHost("rm -rf " + seen + " && { rmdir " + path.Dir(seen) + " 2>/dev/null || true; }"); err != nil {
+				t.Logf("removing %s on the Docker host: %v\n%s", dir, err, out)
+			}
+		})
+		home = []string{"-v", dir + ":/home/node", "-v", "/var/run/docker.sock:/var/run/docker.sock", "--group-add", group}
+		sandbox = `{ "mode": "all", "backend": "docker", "scope": "session",
+                "docker": { "image": "` + image + `", "containerPrefix": "` + g.sandboxPrefix + `" } }`
+	}
+	args := append(append([]string{"run", "-d"}, home...), "--tmpfs", "/tmp:size=6g,exec", "--entrypoint", "sleep", testImage(t), "infinity")
+	out, err := exec.Command("docker", args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("docker run: %v\n%s", err, out)
 	}
-	g := &gateway{t: t, container: strings.TrimSpace(string(out)), secrets: opt.secrets}
+	g.container = strings.TrimSpace(string(out))
 	t.Cleanup(func() {
 		// WTC_OPENCLAW_KEEP leaves the gateway running for a look inside.
-		if os.Getenv("WTC_OPENCLAW_KEEP") != "" {
+		if keep {
 			t.Logf("kept container %s", g.container)
 			return
 		}
@@ -190,7 +293,7 @@ func startGateway(t *testing.T, opt gatewayOptions) *gateway {
 		}
 		g.put("/tmp/stub-model.mjs", stub)
 	}
-	if out, err := g.bash(gatewayPrepare + opt.repos + gatewayStart(opt.stubModel)); err != nil {
+	if out, err := g.bash(gatewayPrepare + opt.repos + gatewayStart(opt.stubModel, sandbox)); err != nil {
 		t.Fatalf("gateway setup: %v\n%s", err, g.redact(out))
 	}
 	if opt.plugin {

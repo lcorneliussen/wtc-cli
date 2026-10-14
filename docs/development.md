@@ -37,7 +37,12 @@ enough to publish, and `wtc` from this checkout) and run:
 - whole conversations, in which a scripted model
   (`testdata/stub-model.mjs`) makes real agent turns run `wtc` and carry out
   its plans;
-- the collection plugin from `openclaw-plugin/`.
+- the collection plugin from `openclaw-plugin/`;
+- a conversation whose commands run in OpenClaw's Docker sandbox, from an
+  image built out of `testdata/sandbox.Dockerfile`. Its gateway gets the
+  Docker socket at `/var/run/docker.sock` and keeps its state on the Docker
+  host under `/var/lib/wtc-openclaw-e2e/`, because the daemon resolves the
+  sandbox's bind mounts there.
 
 Tests that publish need a throwaway repository and a login, and skip without:
 
@@ -45,9 +50,10 @@ Tests that publish need a throwaway repository and a login, and skip without:
 |---|---|
 | `WTC_OPENCLAW_GITHUB_REPO=<owner>/<repo>`, `GH_TOKEN` | `GitHub`: the gateway commits, pushes and opens a draft pull request |
 | `WTC_OPENCLAW_BITBUCKET_REPO=<workspace>/<repo>`, `TWG_BBC_USER`, `TWG_BBC_TOKEN`, `WTC_OPENCLAW_BITBUCKET_SKILL=<checkout of the Bitbucket skill>` | `Bitbucket`: the skill pushes and opens the pull request |
+| the GitHub variables | `SandboxedConversation`: a sandboxed agent turn runs `wtc publish` and `github_publish` opens the draft pull request |
 | `OPENAI_API_KEY` with the GitHub variables | `RealModel`: an unscripted model, told only where wtc's guidance is, adds a repository and publishes; the test checks the outcome on GitHub |
 
 Logins exist only inside the test container. The tests leave default branches
 alone and remove the branches and pull requests they create.
-`WTC_OPENCLAW_KEEP=1` leaves the gateway container running for a look inside,
-and `TestNotYetCovered` lists what no test reaches yet.
+`WTC_OPENCLAW_KEEP=1` leaves the gateway container running for a look inside
+(with its sandbox containers and state directory), and `TestNotYetCovered` lists what no test reaches yet.

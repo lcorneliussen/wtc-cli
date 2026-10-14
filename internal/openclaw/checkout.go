@@ -19,6 +19,9 @@ type Checkout struct {
 	Origin   Origin
 	Repo     string
 	Dest     string // the branch a pull request goes into
+	// Private is a checkout without an origin: the copy of the worktree a
+	// sandbox gets. Only the gateway knows its repository and base.
+	Private bool
 }
 
 func git(dir string, args ...string) (string, error) {
@@ -60,6 +63,7 @@ func OpenCheckout(dir, dest string) (*Checkout, error) {
 		c.Origin = ParseOrigin(url)
 	} else {
 		c.Origin = Origin{Forge: ForgeUnknown}
+		c.Private = true
 	}
 	c.Repo = c.Origin.Repo
 	if c.Repo == "" {
@@ -81,7 +85,7 @@ func OpenCheckout(dir, dest string) (*Checkout, error) {
 			}
 		}
 	}
-	if c.Dest == "" {
+	if c.Dest == "" && !c.Private {
 		return nil, errors.New("cannot tell which branch pull requests go into; pass --dest")
 	}
 	return c, nil
@@ -155,6 +159,11 @@ func (c *Checkout) pending() ([]change, error) {
 		if len(f) < 4 {
 			continue
 		}
+		// OpenClaw mirrors its skills into a sandbox's checkout and leaves
+		// them out of a publication.
+		if strings.HasPrefix(f[3:], sandboxSkills) {
+			continue
+		}
 		changes = append(changes, change{f[:2], f[3:]})
 		if f[0] == 'R' || f[0] == 'C' {
 			i++ // the path it was renamed or copied from
@@ -162,6 +171,8 @@ func (c *Checkout) pending() ([]change, error) {
 	}
 	return changes, nil
 }
+
+const sandboxSkills = ".openclaw/sandbox-skills/"
 
 // Names that hold credentials more often than source. A publication commits
 // every uncommitted file in the worktree, so one of these lying around would
@@ -215,6 +226,22 @@ func (c *Checkout) PlanPublish(opt PublishOptions) (Plan, error) {
 	branch := c.Branch()
 	if published := c.publishedHead(); published != "" && !gitOK(c.Dir, "merge-base", "--is-ancestor", published, "HEAD") {
 		return Plan{}, fmt.Errorf("%s no longer contains %.12s, which was published: its history was rewritten (rebase, amend or reset), and published history is never rewritten. Put the changes on top of %.12s again (`git reset --soft %.12s` keeps them), or continue in a new session for a replacement pull request", branch, published, published, published)
+	}
+	if c.Private {
+		// A sandbox's copy names neither repository nor base: the gateway
+		// takes both from the session, and decides whether it can publish.
+		plan := NewPlan(intent(ActionPublish, ActorRepoSession, c.Repo, ToolGitHubPublish, PublishArgs{Title: opt.Title, Body: opt.Body}))
+		plan.Intents[0].Forge = ForgeUnknown
+		plan.Pending = pending
+		plan.Warnings = append(plan.Warnings,
+			"This checkout has no origin (a sandbox's private copy), so wtc cannot check the forge, the base branch or what was published before. The gateway publishes GitHub repositories only: for any other forge, publish from the repository's session outside the sandbox.")
+		if len(pending) > 0 {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("The gateway will commit all %d pending paths. Check the list: anything that does not belong to the work has to go first.", len(pending)))
+		}
+		if workflows {
+			plan.Warnings = append(plan.Warnings, "GitHub Actions workflow definitions changed. The gateway publishes those only for a requester with full operator write access.")
+		}
+		return plan, nil
 	}
 	dest := "refs/remotes/origin/" + c.Dest
 	hasDest := gitOK(c.Dir, "rev-parse", "--verify", "--quiet", dest)

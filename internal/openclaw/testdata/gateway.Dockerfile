@@ -4,7 +4,9 @@
 #
 # OpenClaw 2026.10.2 verifies Git attributes with `git var GIT_ATTR_GLOBAL`,
 # which needs Git 2.42; the image ships 2.39. Publication also needs `gh` on
-# PATH, which the image does not ship either.
+# PATH, which the image does not ship either. A gateway that runs its agents'
+# commands in sandbox containers starts them with the Docker CLI, through a
+# mounted socket.
 ARG OPENCLAW_IMAGE
 
 FROM debian:bookworm-slim AS tools
@@ -38,9 +40,25 @@ RUN set -eu; \
     tar -xzf /tmp/gh.tar.gz -C /tmp; \
     install -D -m 0755 "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /out/usr/local/bin/gh
 
+# Docker publishes no checksums; these were taken from the pinned tarballs.
+ARG DOCKER_VERSION=28.5.1
+ARG DOCKER_SHA256_AMD64=5c0d19f31fece1accd0358bb8cff591fe25d7b6cba19f0fd412cbfdc07f75ff6
+ARG DOCKER_SHA256_ARM64=de54e37157f45a43f42f6271302372d95c0eb992cc35ecaee74989bb14058c94
+RUN set -eu; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) arch=x86_64; sum="$DOCKER_SHA256_AMD64" ;; \
+      arm64) arch=aarch64; sum="$DOCKER_SHA256_ARM64" ;; \
+      *) echo "unsupported arch: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    curl --fail --silent --show-error --location --output /tmp/docker.tgz \
+      "https://download.docker.com/linux/static/stable/${arch}/docker-${DOCKER_VERSION}.tgz"; \
+    echo "${sum}  /tmp/docker.tgz" | sha256sum --check --strict; \
+    tar -xzf /tmp/docker.tgz -C /tmp docker/docker; \
+    install -D -m 0755 /tmp/docker/docker /out/usr/local/bin/docker
+
 FROM ${OPENCLAW_IMAGE}
 USER root
 COPY --from=tools /out/usr/local/ /usr/local/
 COPY wtc /usr/local/bin/wtc
 USER node
-RUN git --version && gh --version && wtc --help >/dev/null
+RUN git --version && gh --version && docker --version && wtc --help >/dev/null

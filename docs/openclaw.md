@@ -94,6 +94,24 @@ A skill for that forge carries it out, pushing from the session's worktree
 with a login the gateway gives the session. Nothing commits for the agent
 there: `wtc publish` refuses a worktree with uncommitted work.
 
+## In a sandbox
+
+When an agent's commands run in an OpenClaw sandbox, the shell sees a private
+copy of the worktree: the session's branch, no `origin`, no network and no
+GitHub token. There:
+
+- `wtc publish` still refuses what is not safe, but cannot check the forge,
+  the base branch or earlier publications. It plans `github_publish` and
+  leaves the repository to the gateway, which takes it from the session. It
+  ignores the skills OpenClaw mirrors into the copy (`.openclaw/sandbox-skills/`).
+- The gateway offers `github_publish` in a sandbox only when it is allowed
+  there: `tools.sandbox.tools.alsoAllow: ["github_publish"]`. The tool runs on
+  the gateway, so this gives the sandbox no credential.
+  `tools.github.allowInSandbox` is not needed and would put the token inside.
+- `wtc catch-up` cannot fetch. Catch up from the repository's session outside
+  the sandbox.
+- A repository on another forge cannot be published from a sandbox.
+
 ## The collection in the Control UI
 
 OpenClaw shows a parent session with its children nested under it, and each
