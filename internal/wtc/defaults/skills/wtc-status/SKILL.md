@@ -80,11 +80,16 @@ in `$WTC_CONFIG_ROOT/wtc.env`.
   An `unknown` state means the forge lookup was unavailable; it does not prove
   the PR is open. Older merged entries can be hidden behind the `a` toggle.
   The refresh log distinguishes recorded merges from live PR checks.
-- TEST and PROD cells show builds supplied by an executable
-  `harness/hooks/wtc/status.build.sh`. Their HTTP(S) URLs are
-  direct terminal links, and the hook can supply build numbers for GitHub or
-  Bitbucket. They are also ordinary mouse targets unless `--no-click` is set.
-  The `wtc customize` guide documents the read-only JSON hook contract.
+- TEST and PROD cells show the newest build of `default_ref` and of
+  `production_ref` (or `release_ref`), from GitHub checks or Bitbucket
+  Pipelines by default, or from a harness `hooks/wtc/status.build.sh`. A
+  column appears only when some repository has a build in that tier. `○`
+  means the row's HEAD is not in that build. The cells are terminal links,
+  and also ordinary mouse targets unless `--no-click` is set.
+- A merged PR's state shows the build tier it is still waiting on: `→ test`
+  (no build with the merge yet), `● prod` (running), `✗ test` (failed), `?`
+  (cannot be attributed), then `✓ built`. Until it reads `✓ built`, the merge
+  has not reached every tier. The `wtc customize` guide documents providers.
 
 ## Answer the actual question
 

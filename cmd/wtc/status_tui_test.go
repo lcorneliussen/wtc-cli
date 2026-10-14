@@ -59,7 +59,7 @@ func TestStatusTUILinksColorsAndClickTargets(t *testing.T) {
 	}
 	branchOnly := statusTUIModel{width: 80, height: 16, snapshot: wtc.StatusSnapshot{Collection: "fixture",
 		Repos: []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "feature", PR: &wtc.StatusPRFacts{Number: "7", URL: prURL}}}}}
-	if branchOnly.View().MouseMode != tea.MouseModeCellMotion || branchOnly.buildClickTarget(35, 3) != prURL {
+	if branchOnly.View().MouseMode != tea.MouseModeCellMotion || branchOnly.buildClickTarget(statusTUIRepoLayout(branchOnly.snapshot, 80).prStart(), 3) != prURL {
 		t.Fatal("discovered branch PR did not enable its ordinary click target")
 	}
 	t.Setenv("NO_COLOR", "1")
@@ -303,7 +303,7 @@ func TestStatusTUIConflictsUseThemeColorsWithoutExtraColumn(t *testing.T) {
 	}
 }
 
-func TestStatusTUIKeepsBuildColumnsAndMutesMergedPRs(t *testing.T) {
+func TestStatusTUIHidesBuildColumnsWithoutFactsAndMutesMergedPRs(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")
 	merged, passed := "MERGED", "SUCCESS"
@@ -314,9 +314,16 @@ func TestStatusTUIKeepsBuildColumnsAndMutesMergedPRs(t *testing.T) {
 			Merge: &merged, Checks: &passed}}}
 	repos := statusTUIRepoLines(snapshot, 100, false)
 	if !strings.Contains(repos[0], "±") || !strings.Contains(repos[0], "↑") ||
-		!strings.Contains(repos[0], "↓") || !strings.Contains(repos[0], "TEST") ||
-		!strings.Contains(repos[0], "PROD") || runewidth.StringWidth(repos[0]) > 100 {
-		t.Fatalf("repo columns disappeared without build facts: %q", repos[0])
+		!strings.Contains(repos[0], "↓") || strings.Contains(repos[0], "TEST") ||
+		strings.Contains(repos[0], "PROD") || runewidth.StringWidth(repos[0]) > 100 {
+		t.Fatalf("build columns shown without build facts: %q", repos[0])
+	}
+	prodOnly := snapshot
+	prodOnly.Repos = []wtc.StatusRepo{{Dir: "widget", BranchDisplay: "main", Tree: "clean",
+		Prod: &wtc.StatusBuild{Branch: "main", Checks: &passed}}}
+	repos = statusTUIRepoLines(prodOnly, 100, false)
+	if strings.Contains(repos[0], "TEST") || !strings.Contains(repos[0], "PROD") || !strings.Contains(repos[1], "P✓") {
+		t.Fatalf("a production-only provider should show only PROD: %q", repos)
 	}
 	prs := statusTUIPRLines(snapshot, 100, false, true)
 	if len(prs) != 4 || !strings.Contains(ansi.Strip(prs[2]), "PR") ||
@@ -645,5 +652,30 @@ func TestStatusOneShotTableCanHidePRSection(t *testing.T) {
 	repos := statusTable(snapshot, true, 80)
 	if !strings.Contains(full, "Synthetic PR") || strings.Contains(repos, "Synthetic PR") || !strings.Contains(repos, "widget") {
 		t.Fatalf("repository-only table wrong: full=%s repos=%s", full, repos)
+	}
+}
+
+func TestStatusTUIFollowStateNamesWaitingTier(t *testing.T) {
+	for _, tc := range []struct {
+		follow      *wtc.StatusFollow
+		state, tone string
+	}{
+		{nil, "merged", statusToneDim},
+		{&wtc.StatusFollow{Stage: "tip", Checks: "WAITING"}, "→ test", statusToneWarning},
+		{&wtc.StatusFollow{Stage: "prod", Checks: "PENDING"}, "● prod", statusToneWarning},
+		{&wtc.StatusFollow{Stage: "tip", Checks: "FAILURE"}, "✗ test", statusToneFailure},
+		{&wtc.StatusFollow{Stage: "prod", Checks: "ERROR"}, "✗ prod", statusToneFailure},
+		{&wtc.StatusFollow{Stage: "tip", Checks: "UNKNOWN"}, "? test", statusToneDim},
+		{&wtc.StatusFollow{Stage: "done", Checks: "SUCCESS"}, "✓ built", statusToneSuccess},
+	} {
+		if state, tone := statusTUIFollowState(tc.follow); state != tc.state || tone != tc.tone {
+			t.Fatalf("%+v: got %q/%q, want %q/%q", tc.follow, state, tone, tc.state, tc.tone)
+		}
+	}
+	merged := "MERGED"
+	snapshot := wtc.StatusSnapshot{Collection: "fixture", PRs: []wtc.StatusPRRow{{Repo: "widget", Number: "8",
+		State: "MERGED", Merge: &merged, Title: "Shipped", Follow: &wtc.StatusFollow{Stage: "prod", Checks: "WAITING"}}}}
+	if prs := statusTUIPRLines(snapshot, 100, false, false); !strings.Contains(prs[3], "→ prod") {
+		t.Fatalf("PR table should show the tier the merge waits on: %q", prs)
 	}
 }

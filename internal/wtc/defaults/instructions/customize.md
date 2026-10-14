@@ -66,30 +66,74 @@ to regenerate a local tool configuration after the collection env changes.
 
 ### Status build facts
 
-`wtc status` can read build results from an executable
-`harness/hooks/wtc/status.build.sh`. This is a read-only data provider, called
-once for each repository's development branch (`tier: "tip"`) and again for a
-distinct `production_ref` (`tier: "prod"`). It is not a lifecycle hook. It
-receives JSON on stdin:
+`wtc status` follows builds for every registered repository out of the box.
+Each repository has up to two tiers. The **test** tier (`tip`) is the
+`default_ref` branch. The **prod** tier (`prod`) is `production_ref`, or
+`release_ref` if that is what the registry sets. When `production_ref` names
+the `default_ref` branch itself, production deploys from the development tip
+and that branch is reported as `prod` only.
+
+The built-in provider asks the forge about the newest build of each tier's
+branch:
+
+- **GitHub**: the check rollup of the branch's head commit, linked to its
+  Actions run, through `gh api graphql`.
+- **Bitbucket**: the newest branch pipeline, through the Bitbucket REST API.
+  Credentials come from `BB_API_USER`/`BB_API_PASS`, `BB_USERNAME`/`BB_API_TOKEN`
+  or `ATLASSIAN_ACCOUNT_EMAIL`/`ATLASSIAN_API_TOKEN`, and otherwise from the
+  `bb` CLI login in `~/.config/bb/config.json`.
+
+Every build carries the commit it ran on. Status uses that commit twice:
+
+- A repository row shows a build's cell as `○` (dimmed) when the row's HEAD
+  is not contained in that build, for example on a feature branch.
+- A merged PR is **followed** until each tier has a passing build that
+  contains its merge commit. The follow starts at the tier that builds the
+  PR's base branch, so a hotfix merged into the production branch waits on
+  prod only, and a PR merged into any other branch (a stacked PR, a release
+  branch no tier builds) is not followed. The PR table's state column shows the tier it
+  waits on: `→ test` (no build with the merge yet), `● test` (running),
+  `✗ prod` (failed), `? test` (the build cannot be attributed), then
+  `✓ built`. Merge commits are recorded in `.wtc-prs` with the final merge
+  facts; a merge recorded by an older wtc without its commit shows as plainly
+  `merged`. Archived PRs are not followed.
+
+A provider failure marks only its own cell as an error (`✗`, with the message
+in JSON, Markdown and the refresh log); the rest of the refresh is kept. The
+TUI shows a TEST or PROD column only when some repository has a build in that
+tier, so a repository without CI shows no build columns.
+
+#### Customizing with `status.build.sh`
+
+An executable `harness/hooks/wtc/status.build.sh` replaces the built-in
+provider for the whole harness. It is a read-only data provider, not a
+lifecycle hook, called once per repository and tier, with up to four calls
+running at a time. It receives JSON on stdin:
 
 ```json
-{"collection":"demo","repo":"widget","worktree":"/path/to/demo/widget","slug":"example/widget","branch":"main","tier":"tip"}
+{"collection":"demo","repo":"widget","worktree":"/path/to/demo/widget","slug":"example/widget","forge":"github.com","branch":"main","tier":"tip"}
 ```
 
-Return one JSON object with `checks` (`SUCCESS`, `FAILURE`, `PENDING`, or
-`NONE`), optional `build` and `url`, and optionally the same `branch`:
+Return one JSON object with `checks` (`SUCCESS`, `FAILURE`, `PENDING`,
+`NONE`, `ERROR` or `EXPECTED`), and optionally `build`, `url`, `sha` (the
+commit the build ran on, 7 to 64 hex characters) and the same `branch`:
 
 ```json
-{"checks":"SUCCESS","build":"123","url":"https://example.invalid/build/123"}
+{"checks":"SUCCESS","build":"123","url":"https://example.invalid/build/123","sha":"0123abc"}
 ```
 
-An empty response or `null` hides that build cell. Keep the provider
-read-only, fast, and safe to call during watched status refreshes. The CLI
-stops a call after 15 seconds, rejects invalid JSON or a different branch,
-and never infers a passing build when the provider cannot answer. The TUI
-shows `T` and `P` cells only when build facts exist; clicking a cell opens its
-HTTP(S) URL unless `--no-click` is set. A harness without this provider has
-no build columns.
+- Without `sha`, rows and merged PRs cannot be attributed to the build: rows
+  keep the plain cell, and a followed PR shows `?`.
+- `{"use_default":true}` hands this one request to the built-in provider, so
+  a hook can customize some repositories or tiers and keep the default for
+  the rest.
+- An empty response or `null` means there is no build to show.
+
+Keep the provider fast and safe to call during watched refreshes. The CLI
+stops a call after 15 seconds, rejects invalid JSON, a different branch, a
+non-HTTP(S) URL or a malformed commit, and never infers a passing build when
+the provider cannot answer. Clicking a build cell opens its URL unless
+`--no-click` is set.
 
 ### Browse view
 
