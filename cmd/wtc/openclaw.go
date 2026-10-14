@@ -125,15 +125,25 @@ func addRepoIntents(repos []string, worktree, base string) error {
 		return errors.New("which worktree name? Pass --worktree <issue-id>-<slug>: every repository of the collection gets a worktree of that name, on branch " + openclaw.BranchPrefix + "<name>")
 	}
 	var intents []openclaw.Intent
-	for _, repo := range repos {
-		in, err := openclaw.AddRepo(repo, repo, worktree, base, "Work on "+repo+" for "+worktree+". Wait for instructions from the collection's session.")
+	var projects []string
+	for _, arg := range repos {
+		repo, project, gitURL, err := openclaw.ProjectSource(arg)
+		if err != nil {
+			return err
+		}
+		in, err := openclaw.AddRepo(repo, project, gitURL, worktree, base, "Work on "+repo+" for "+worktree+". Wait for instructions from the collection's session.")
 		if err != nil {
 			return err
 		}
 		intents = append(intents, in)
+		if project != "" {
+			projects = append(projects, project)
+		}
 	}
 	plan := openclaw.NewPlan(intents...)
-	plan.Warnings = append(plan.Warnings, "Each repository must be a project on the gateway under the name given here ("+strings.Join(repos, ", ")+").")
+	if len(projects) > 0 {
+		plan.Warnings = append(plan.Warnings, "Each of "+strings.Join(projects, ", ")+" must be a project on the gateway under that name. For a GitHub repository that is not, pass owner/name instead: the gateway clones it.")
+	}
 	return printPlan(plan)
 }
 

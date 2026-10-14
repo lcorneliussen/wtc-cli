@@ -79,7 +79,7 @@ func TestSandboxedConversation(t *testing.T) {
 	}
 	defaultBranch := g.sh("git -C /home/node/repos/target branch --show-current")
 	parent := g.call("sessions.create", map[string]any{"agentId": "dev", "label": worktree}).str("key")
-	add, err := AddRepo("target", "target", worktree, "", "Work on target")
+	add, err := AddRepo("target", "target", "", worktree, "", "Work on target")
 	if err != nil {
 		t.Fatal(err)
 	}

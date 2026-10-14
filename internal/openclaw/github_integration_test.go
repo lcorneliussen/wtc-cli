@@ -118,7 +118,7 @@ func TestGitHubPublication(t *testing.T) {
 		t.Fatalf("origin %+v from %v", origin, project)
 	}
 	parent := g.call("sessions.create", map[string]any{"agentId": "dev", "label": worktree}).str("key")
-	add, err := AddRepo("target", "target", worktree, "", "Work on target")
+	add, err := AddRepo("target", "target", "", worktree, "", "Work on target")
 	if err != nil {
 		t.Fatal(err)
 	}

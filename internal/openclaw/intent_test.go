@@ -7,7 +7,7 @@ import (
 )
 
 func TestIntentJSON(t *testing.T) {
-	add, err := AddRepo("api", "api", "72-openclaw-host", "main", "Work on api")
+	add, err := AddRepo("api", "api", "", "72-openclaw-host", "main", "Work on api")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,16 +37,47 @@ func TestIntentJSON(t *testing.T) {
 }
 
 func TestAddRepoRejectsWhatTheGatewayWould(t *testing.T) {
-	if _, err := AddRepo("api", "", "72-x", "", "t"); err == nil {
+	if _, err := AddRepo("api", "", "", "72-x", "", "t"); err == nil {
 		t.Fatal("accepted an empty project")
 	}
 	for _, name := range []string{"", "Feat-X", "feat/x", "feat_x", "-x", strings.Repeat("a", 65)} {
-		if _, err := AddRepo("api", "api", name, "", "t"); err == nil {
+		if _, err := AddRepo("api", "api", "", name, "", "t"); err == nil {
 			t.Fatalf("accepted worktree name %q", name)
 		}
 	}
 	if got := Branch("72-openclaw-host"); got != "openclaw/72-openclaw-host" {
 		t.Fatalf("branch %q", got)
+	}
+}
+
+func TestProjectSource(t *testing.T) {
+	for arg, want := range map[string][3]string{
+		"api":                                    {"api", "api", ""},
+		"example-org/api":                        {"api", "", "https://github.com/example-org/api.git"},
+		"https://github.com/example-org/api":     {"api", "", "https://github.com/example-org/api.git"},
+		"git@github.com:example-org/api.git":     {"api", "", "https://github.com/example-org/api.git"},
+		"https://github.com/example-org/api.git": {"api", "", "https://github.com/example-org/api.git"},
+	} {
+		name, project, gitURL, err := ProjectSource(arg)
+		if err != nil || [3]string{name, project, gitURL} != want {
+			t.Errorf("%s: got %q %q %q %v, want %q", arg, name, project, gitURL, err, want)
+		}
+	}
+	// The gateway clones nothing but GitHub.
+	for _, arg := range []string{"git@bitbucket.org:example-ws/docs.git", "https://gitlab.com/example/api", "file:///srv/api"} {
+		if _, _, _, err := ProjectSource(arg); err == nil {
+			t.Errorf("%s: accepted", arg)
+		}
+	}
+	add, err := AddRepo("api", "", "https://github.com/example-org/api.git", "72-x", "", "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args := add.Args.(SpawnArgs); args.ProjectGitURL != "https://github.com/example-org/api.git" || args.ProjectID != "" {
+		t.Fatalf("spawn args %+v", args)
+	}
+	if _, err := AddRepo("api", "api", "https://github.com/example-org/api.git", "72-x", "", "t"); err == nil {
+		t.Fatal("accepted both a project and a GitHub URL")
 	}
 }
 

@@ -153,17 +153,38 @@ func ValidWorktreeName(name string) bool { return worktreeName.MatchString(name)
 // Branch is the branch a managed worktree named worktree gets.
 func Branch(worktree string) string { return BranchPrefix + worktree }
 
-// AddRepo asks the parent session for a child that owns a worktree of project.
-// worktree is the collection's <issue-id>-<slug>; baseRef may be empty.
-func AddRepo(repo, project, worktree, baseRef, task string) (Intent, error) {
-	if project == "" {
-		return Intent{}, fmt.Errorf("add-repo %s: no OpenClaw project", repo)
+var gitHubShorthand = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
+
+// ProjectSource reads what add-repo was given: the name of a project the
+// gateway has registered, or a GitHub repository (owner/name, or an HTTPS or
+// git@github.com URL) that the gateway clones itself. name is the
+// repository's short name.
+func ProjectSource(arg string) (name, project, gitURL string, err error) {
+	if !strings.Contains(arg, "://") && !strings.HasPrefix(arg, "git@") && !gitHubShorthand.MatchString(arg) {
+		return arg, arg, "", nil
+	}
+	if gitHubShorthand.MatchString(arg) {
+		arg = "https://github.com/" + arg
+	}
+	origin := ParseOrigin(arg)
+	if origin.Forge != ForgeGitHub || origin.Owner == "" || origin.Repo == "" {
+		return "", "", "", fmt.Errorf("add-repo %s: the gateway clones only GitHub repositories; register a checkout of any other one as a gateway project and pass its name", arg)
+	}
+	return origin.Repo, "", "https://github.com/" + origin.Owner + "/" + origin.Repo + ".git", nil
+}
+
+// AddRepo asks the parent session for a child that owns a worktree of a
+// registered project, or of a GitHub repository at gitURL that the gateway
+// clones. worktree is the collection's <issue-id>-<slug>; baseRef may be empty.
+func AddRepo(repo, project, gitURL, worktree, baseRef, task string) (Intent, error) {
+	if (project == "") == (gitURL == "") {
+		return Intent{}, fmt.Errorf("add-repo %s: give an OpenClaw project or a GitHub URL", repo)
 	}
 	if !ValidWorktreeName(worktree) {
 		return Intent{}, fmt.Errorf("add-repo %s: %q is not a valid OpenClaw worktree name (lowercase letters, digits and hyphens, at most 64)", repo, worktree)
 	}
 	return intent(ActionAddRepo, ActorParent, repo, ToolSessionsSpawn, SpawnArgs{
-		Task: task, Label: worktree + " " + repo, ProjectID: project,
+		Task: task, Label: worktree + " " + repo, ProjectID: project, ProjectGitURL: gitURL,
 		Worktree: true, WorktreeName: worktree, WorktreeBaseRef: baseRef, Visible: true,
 	}), nil
 }

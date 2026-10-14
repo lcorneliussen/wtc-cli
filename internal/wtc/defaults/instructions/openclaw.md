@@ -13,6 +13,11 @@ worktrees and publishing change, because the gateway owns both:
   with a managed worktree on branch `openclaw/<name>`. `<name>` is the
   collection's `<issue-id>-<slug>`: lowercase letters, digits and hyphens.
 
+`<repo>` is the name of a project registered on the gateway, or a GitHub
+repository, as `owner/name` or its URL: the gateway clones that itself, with
+its own GitHub login. A repository on another forge has to be registered as a
+project by a gateway admin first.
+
 So `wtc` does not act there. It checks, then prints a **plan**: JSON on
 stdout with the `intents` for you to carry out, and one line per intent on
 stderr saying how. An intent with a `tool` means: call that tool with the
@@ -24,7 +29,7 @@ args, and do not do the work some other way.
 | add a repository | `wtc add-repo <repo> --worktree <name>` in the parent | call `sessions_spawn` once per intent |
 | publish work | `wtc publish --title "<what changed>"` in the repository's child | call `github_publish`; off GitHub, hand the plan to the forge's skill |
 | take in upstream changes | `wtc catch-up` in the child | publish again to send the merge |
-| see the collection | `sessions_list`, plus `git status` in a child | — |
+| see the collection | `wtc status` (prints a `sessions_list` intent); `wtc checkouts .` in a child | call `sessions_list` |
 
 ## Publishing safely
 

@@ -29,6 +29,13 @@ digits and hyphens, at most 64 characters.
 | add a repository | `wtc add-repo <repo> --worktree <name>` in the parent | calls `sessions_spawn` with each intent's `args` |
 | publish | `wtc publish --title "…"` in the repository's child | calls `github_publish` with the intent's `args` |
 | catch up | `wtc catch-up` in the child | publishes again to send the merge |
+| see the collection | `wtc status` | calls `sessions_list`; the children are the repositories |
+
+`<repo>` names a project registered on the gateway, or a GitHub repository as
+`owner/name` or URL. For a GitHub repository the intent carries
+`projectGitUrl`, and the gateway clones it into its managed projects area with
+its own GitHub login, so no admin has to register it first. Other forges have
+no such path: a gateway admin registers a checkout as a project.
 
 Each of the first two prints a plan and does nothing else:
 

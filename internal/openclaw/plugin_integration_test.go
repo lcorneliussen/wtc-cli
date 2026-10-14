@@ -49,7 +49,7 @@ func TestCollectionPlugin(t *testing.T) {
 	}
 	keys := map[string]string{}
 	for _, repo := range []string{"api", "docs"} {
-		in, _ := AddRepo(repo, repo, worktree, "", "Work on "+repo)
+		in, _ := AddRepo(repo, repo, "", worktree, "", "Work on "+repo)
 		keys[repo] = g.createFromIntent(parent, in).str("key")
 	}
 	g.sh("cd " + g.worktreePath("api", worktree) + ` && echo one > one.txt && git add . && git commit -qm "One" && echo stray > stray.txt`)

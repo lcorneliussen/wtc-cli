@@ -50,7 +50,7 @@ func TestGatewayContract(t *testing.T) {
 	children := map[string]string{}
 	t.Run("add-repo creates a child that owns the worktree", func(t *testing.T) {
 		for repo, base := range map[string]string{"api": "", "web": "develop", "docs": ""} {
-			in, err := AddRepo(repo, repo, worktree, base, "Work on "+repo)
+			in, err := AddRepo(repo, repo, "", worktree, base, "Work on "+repo)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -86,7 +86,7 @@ func TestGatewayContract(t *testing.T) {
 	}
 
 	t.Run("a worktree name is taken once per repository", func(t *testing.T) {
-		in, _ := AddRepo("api", "api", worktree, "", "again")
+		in, _ := AddRepo("api", "api", "", worktree, "", "again")
 		r := g.createFromIntent(parent, in)
 		if !r.failed() || !strings.Contains(r.str("error", "message"), "already in use") {
 			t.Fatalf("second api worktree of the same name: %v", r)
@@ -187,7 +187,7 @@ git fetch -q /tmp/origins/api.git main && git merge -q --no-edit FETCH_HEAD`)
 	})
 
 	t.Run("sessions_spawn needs a model before it looks at the intent", func(t *testing.T) {
-		in, _ := AddRepo("api", "api", worktree+"-tool", "", "Work on api")
+		in, _ := AddRepo("api", "api", "", worktree+"-tool", "", "Work on api")
 		r := g.invoke(in.Tool, parent, in.Args)
 		details, _ := r["result"].(map[string]any)["details"].(map[string]any)
 		if msg, _ := details["error"].(string); !strings.Contains(msg, "is not usable") {
