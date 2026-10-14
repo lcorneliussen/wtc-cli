@@ -34,8 +34,10 @@
   ad-hoc folder. Named repositories keep their registration (owner, tip,
   ports); `--tracker` and `--branch` work as usual, while `--issue` and
   `--pr` need a harness registry.
-- In ad-hoc collections, every `--all` sweep, `--collection`, and `open`,
-  `catch-up` or `retire` of another collection are refused for now.
+- In ad-hoc collections, every `--all` sweep, `add-repo --collection`, and
+  `open`, `status`, `browse`, `catch-up` or `retire` of another collection
+  are refused for now. Commands given an explicit `--collection <path>` act
+  on that path as if run from it.
 
 Harness-backed workspaces are unchanged and need no harness upgrade, with one
 exception: `wtc retire` now also removes the generated `.wtc-catch-up.json`

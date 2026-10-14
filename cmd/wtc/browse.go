@@ -80,6 +80,9 @@ func addBrowseCommand(root *cobra.Command, asJSON *bool) {
 			if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
 				return fmt.Errorf("expected a collection name")
 			}
+			if err := c.RequireWorkspace("browse <collection>"); err != nil {
+				return err
+			}
 			c, err = wtc.OpenCollection(filepath.Join(c.Workspace, name))
 			if err != nil {
 				return err

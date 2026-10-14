@@ -40,11 +40,17 @@ func TestInitThenRetireInPlaceOutsideHerdr(t *testing.T) {
 		{"env", "setup", "--all"},
 		{"catch-up", "--all"},
 		{"retire", "other"},
+		{"status", "--no-watch", "other"},
 		{"add-repo", "--collection", "other", "https://example.invalid/never-contacted.git"},
 	} {
 		if err := runWTC(t, args...); err == nil || !strings.Contains(err.Error(), "ad-hoc") {
 			t.Fatalf("%v reached beyond an ad-hoc collection: %v", args, err)
 		}
+	}
+	// browse refuses --json, so it runs without the flag runWTC adds.
+	os.Args = []string{"wtc", "browse", "other"}
+	if err := run(); err == nil || !strings.Contains(err.Error(), "ad-hoc") {
+		t.Fatalf("browse reached beyond an ad-hoc collection: %v", err)
 	}
 	c, err := wtc.Discover(dir)
 	if err != nil {
