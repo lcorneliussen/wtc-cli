@@ -9,6 +9,7 @@
 
 ## Fixed
 
+- Review posting skips GitHub inline findings outside the PR diff and position-related HTTP 422 rejections, recording `skipped: not in diff` while keeping the finding in the summary ([#82](https://github.com/lcorneliussen/wtc-cli/issues/82)). Authentication, network and other validation failures still leave the review pending, with forge diagnostics retained for retry.
 - PR merge conflicts are explicit in `wtc status`: repository rows show `✗ conflict` in the PR cell and retain the upstream count with a conflict marker (for example, `✗3`). Compact views keep the warning visible even when sync columns are hidden. GitHub's `mergeable` field detects conflicts even when its merge-state label says draft; passing checks and a clean local checkout do not hide the conflict.
 - The TUI and terminal tables show TEST and PROD columns only for tiers with build facts, as documented ([#58](https://github.com/lcorneliussen/wtc-cli/issues/58)).
 - A failing or invalid build provider marks only its cell as an error; it no longer fails the whole status refresh.
@@ -31,10 +32,14 @@
   `$XDG_DATA_HOME/wtc/bare`, and added repositories are remembered by name for
   later ad-hoc collections.
 - `wtc retire .` retires an ad-hoc collection in place when Herdr is not in use.
-- In ad-hoc collections, `wtc new`, every `--all` sweep, `add-repo
-  --collection`, and `open`, `status`, `browse`, `catch-up` or `retire` of
-  another collection are refused for now. Commands given an explicit
-  `--collection <path>` act on that path as if run from it.
+- `wtc new <slug> [repo ...]` from an ad-hoc collection creates a sibling
+  ad-hoc folder. Named repositories keep their registration (owner, tip,
+  ports); `--tracker` and `--branch` work as usual, while `--issue` and
+  `--pr` need a harness registry.
+- In ad-hoc collections, every `--all` sweep, `add-repo --collection`, and
+  `open`, `status`, `browse`, `catch-up` or `retire` of another collection
+  are refused for now. Commands given an explicit `--collection <path>` act
+  on that path as if run from it.
 
 Harness-backed workspaces are unchanged and need no harness upgrade, with one
 exception: `wtc retire` now also removes the generated `.wtc-catch-up.json`

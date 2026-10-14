@@ -35,7 +35,7 @@ var githubSlugPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9
 func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	result := NewResult{}
 	if c.AdHoc {
-		return result, fmt.Errorf("wtc new does not support ad-hoc collections yet; run `wtc init` in a new folder")
+		return c.newAdHoc(opt)
 	}
 	if (opt.Issue != "" && opt.Tracker != "") || (opt.PR != "" && (opt.Issue != "" || opt.Tracker != "")) {
 		return result, fmt.Errorf("choose one source: issue, tracker, or PR")
