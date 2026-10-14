@@ -29,8 +29,11 @@ func (c *Context) Repository(name string) (Repo, error) {
 }
 
 // HarnessRepoName resolves the registry identity of harness/, which need not
-// be named harness in a downstream registry.
+// be named harness in a downstream registry. An ad-hoc collection has none.
 func (c *Context) HarnessRepoName() (string, error) {
+	if c.AdHoc {
+		return "", nil
+	}
 	if name := os.Getenv("WTC_HARNESS_REPO"); name != "" {
 		if _, err := c.Repository(name); err != nil {
 			return "", err
@@ -56,8 +59,15 @@ func (c *Context) HarnessRepoName() (string, error) {
 }
 
 func (c *Context) bareFor(name string) (string, error) {
-	if _, err := c.Repository(name); err != nil {
+	repo, err := c.Repository(name)
+	if err != nil {
 		return "", err
+	}
+	if c.AdHoc {
+		if repo.Owner != "" {
+			return repo.Owner, nil
+		}
+		return userOwnerPath(repo.Remote)
 	}
 	data, err := os.ReadFile(filepath.Join(c.Harness, ".harness-repos"))
 	if err != nil && !os.IsNotExist(err) {
@@ -80,6 +90,10 @@ func (c *Context) ensureBare(repo Repo) (string, error) {
 		return "", err
 	}
 	if _, err := os.Stat(bare); os.IsNotExist(err) {
+		if repo.Owner != "" {
+			// An existing checkout is owned by the user; never re-create it.
+			return "", fmt.Errorf("owner of %q is missing: %s", repo.Name, bare)
+		}
 		if repo.Remote == "" {
 			return "", fmt.Errorf("repository %q has no remote", repo.Name)
 		}

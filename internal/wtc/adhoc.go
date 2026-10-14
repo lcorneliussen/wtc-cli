@@ -1,0 +1,447 @@
+package wtc
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// AdHocConfigDir holds an ad-hoc collection's registry, wtc.toml, hooks and
+// overrides — the same shape as a harness, so the collection can later be
+// promoted to one. It sits inside .wtc but is never generated.
+const AdHocConfigDir = ".wtc/config"
+
+const adHocRegistryFile = "repos.yml"
+
+const adHocRegistryHeader = `# Repo registry of this ad-hoc collection — local, tracked nowhere.
+# ` + "`wtc add-repo <clone-url|path-to-checkout>`" + ` appends to it. Fields match a
+# harness registry; ` + "`owner`" + ` names an existing checkout that owns the worktrees.
+schema_version: 1
+repos:
+`
+
+var scpRemote = regexp.MustCompile(`^(?:[^@/]+@)?([^:/]+):(.+)$`)
+
+// UserConfigRoot is the per-user control root for secrets of ad-hoc
+// collections, used when WTC_CONFIG_ROOT is unset.
+func UserConfigRoot() (string, error) {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return filepath.Join(dir, "wtc"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "wtc"), nil
+}
+
+// UserDataRoot holds the per-user owner cache and repo registry shared by
+// every ad-hoc collection.
+func UserDataRoot() (string, error) {
+	if dir := os.Getenv("WTC_DATA_HOME"); dir != "" {
+		return dir, nil
+	}
+	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
+		return filepath.Join(dir, "wtc"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".local", "share", "wtc"), nil
+}
+
+// userOwnerPath keys the shared owner cache by remote location rather than by
+// name, so two repositories that share a basename never share an owner.
+func userOwnerPath(remote string) (string, error) {
+	root, err := UserDataRoot()
+	if err != nil {
+		return "", err
+	}
+	key, err := remoteKey(remote)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(append([]string{root, "bare"}, key...)...) + ".git", nil
+}
+
+func remoteKey(remote string) ([]string, error) {
+	var host, path string
+	switch {
+	case strings.Contains(remote, "://"):
+		u, err := url.Parse(remote)
+		if err != nil {
+			return nil, fmt.Errorf("invalid remote %q: %w", remote, err)
+		}
+		host, path = u.Hostname(), u.Path
+		if u.Scheme == "file" {
+			host = "local"
+		}
+	case filepath.IsAbs(remote):
+		host, path = "local", remote
+	default:
+		m := scpRemote.FindStringSubmatch(remote)
+		if m == nil {
+			return nil, fmt.Errorf("cannot derive an owner location from remote %q", remote)
+		}
+		host, path = m[1], m[2]
+	}
+	parts := []string{host}
+	for _, part := range strings.Split(strings.TrimSuffix(strings.Trim(path, "/"), ".git"), "/") {
+		parts = append(parts, part)
+	}
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "\\\r\n\x00") {
+			return nil, fmt.Errorf("cannot derive an owner location from remote %q", remote)
+		}
+	}
+	return parts, nil
+}
+
+type InitResult struct {
+	Collection string `json:"collection"`
+	Registry   string `json:"registry"`
+}
+
+// InitAdHoc turns an empty folder into a collection without a harness
+// repository. It never contacts a remote; repositories join with add-repo.
+func InitAdHoc(dir string) (InitResult, error) {
+	result := InitResult{}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return result, err
+	}
+	if existing, err := Discover(abs); err == nil {
+		return result, fmt.Errorf("already inside a collection: %s", existing.Collection)
+	}
+	if info, err := os.Lstat(abs); err == nil {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return result, fmt.Errorf("collection target must be a real directory: %s", abs)
+		}
+		entries, err := os.ReadDir(abs)
+		if err != nil {
+			return result, err
+		}
+		for _, entry := range entries {
+			if entry.Name() != ".DS_Store" {
+				// Retire deletes the collection folder, so it must hold
+				// nothing that wtc did not put there.
+				return result, fmt.Errorf("folder is not empty: %s", abs)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return result, err
+	}
+	config := filepath.Join(abs, AdHocConfigDir)
+	if err := os.MkdirAll(config, 0755); err != nil {
+		return result, err
+	}
+	result.Collection, result.Registry = abs, filepath.Join(config, adHocRegistryFile)
+	if err := os.WriteFile(result.Registry, []byte(adHocRegistryHeader), 0644); err != nil {
+		return result, err
+	}
+	c, err := OpenCollection(abs)
+	if err != nil {
+		return result, err
+	}
+	if err := c.ValidateEnvSupport(); err != nil {
+		return result, err
+	}
+	env, err := c.RenderEnv()
+	if err != nil {
+		return result, err
+	}
+	if err := c.WriteEnv(env); err != nil {
+		return result, err
+	}
+	if err := c.EnsureEnvSupport(); err != nil {
+		return result, err
+	}
+	if err := c.TrustMise(); err != nil {
+		return result, err
+	}
+	if _, err := c.RenderSkills(SkillRenderOptions{SeedScope: true}); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+type AdHocRepoOptions struct {
+	// Spec is a registry name, a clone URL, or a path to an existing checkout.
+	Spec string
+	// Name overrides the name derived from the remote.
+	Name string
+	// Target is the branch worktrees rest on and pull requests target.
+	Target string
+	// Ask, when set, chooses the target for a repository seen for the first
+	// time. It receives the remote's default branch as the suggestion.
+	Ask func(name, suggested string) (string, error)
+}
+
+// RegisterAdHocRepo resolves a spec to a repository in this collection's
+// registry, recording it there and in the per-user registry when new.
+func (c *Context) RegisterAdHocRepo(opt AdHocRepoOptions) (Repo, error) {
+	if !c.AdHoc {
+		return Repo{}, errors.New("only an ad-hoc collection registers repositories on demand; edit the harness registry instead")
+	}
+	if opt.Name == "" {
+		if repo, err := c.Repository(opt.Spec); err == nil {
+			if opt.Target != "" && repo.DefaultRef != "origin/"+opt.Target {
+				return Repo{}, fmt.Errorf("%s is already registered with development tip %s", repo.Name, repo.DefaultRef)
+			}
+			return repo, nil
+		}
+	}
+	user, err := loadUserRegistry()
+	if err != nil {
+		return Repo{}, err
+	}
+	var repo Repo
+	known := false
+	if validRepoName.MatchString(opt.Spec) && opt.Name == "" {
+		if _, statErr := os.Stat(opt.Spec); statErr != nil {
+			for _, r := range user.Repos {
+				if r.Name == opt.Spec {
+					repo, known = r, true
+				}
+			}
+			if !known {
+				return Repo{}, fmt.Errorf("unknown repository %q: pass a clone URL or a path to a checkout the first time", opt.Spec)
+			}
+		}
+	}
+	if !known {
+		repo, err = describeRemoteSpec(opt.Spec, opt.Name)
+		if err != nil {
+			return Repo{}, err
+		}
+		for _, r := range user.Repos {
+			if r.Name == repo.Name && r.Remote != repo.Remote {
+				return Repo{}, fmt.Errorf("the name %s already stands for %s; choose another with --name", r.Name, r.Remote)
+			}
+			if r.Name == repo.Name && repo.Owner == "" {
+				repo.Owner, repo.DefaultRef = r.Owner, r.DefaultRef
+				known = true
+			}
+		}
+	}
+	if repo.Name == "harness" {
+		return Repo{}, errors.New("the name harness is reserved; choose another with --name")
+	}
+	target := opt.Target
+	if target == "" && !known {
+		suggested, err := remoteDefaultBranch(repo.Remote)
+		if err != nil {
+			return Repo{}, err
+		}
+		target = suggested
+		if opt.Ask != nil {
+			if target, err = opt.Ask(repo.Name, suggested); err != nil {
+				return Repo{}, err
+			}
+			if target == "" {
+				target = suggested
+			}
+		}
+	}
+	if target != "" {
+		if _, err := gitOutput("check-ref-format", "--branch", target); err != nil {
+			return Repo{}, fmt.Errorf("invalid target branch %q", target)
+		}
+		heads, err := gitOutput("ls-remote", "--heads", repo.Remote, "refs/heads/"+target)
+		if err != nil {
+			return Repo{}, err
+		}
+		if heads == "" {
+			return Repo{}, fmt.Errorf("%s has no branch %s", repo.Remote, target)
+		}
+		repo.DefaultRef = "origin/" + target
+	}
+	if existing, err := c.Repository(repo.Name); err == nil {
+		if existing.Remote != repo.Remote {
+			return Repo{}, fmt.Errorf("the name %s already stands for %s in this collection; choose another with --name", existing.Name, existing.Remote)
+		}
+		return existing, nil
+	}
+	if err := appendRegistryEntry(c.registryPath(), repo); err != nil {
+		return Repo{}, err
+	}
+	if err := saveUserRegistry(user, repo); err != nil {
+		return Repo{}, err
+	}
+	if err := c.load(); err != nil {
+		return Repo{}, err
+	}
+	return c.Repository(repo.Name)
+}
+
+// describeRemoteSpec reads a clone URL, or an existing checkout that will
+// own the worktrees. A checkout's own branch never decides the tip.
+func describeRemoteSpec(spec, name string) (Repo, error) {
+	repo := Repo{Remote: spec}
+	if info, err := os.Stat(spec); err == nil && info.IsDir() {
+		owner, err := gitOutput("-C", spec, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			return Repo{}, fmt.Errorf("%s is not a Git checkout: %w", spec, err)
+		}
+		remote, err := gitOutput("-C", spec, "remote", "get-url", "origin")
+		if err != nil {
+			return Repo{}, fmt.Errorf("%s has no origin remote to take branches from", spec)
+		}
+		repo.Owner, repo.Remote = owner, remote
+	} else if _, err := remoteKey(spec); err != nil {
+		return Repo{}, fmt.Errorf("unknown repository %q: pass a clone URL or a path to a checkout", spec)
+	}
+	repo.Name = name
+	if repo.Name == "" {
+		key, err := remoteKey(repo.Remote)
+		if err != nil {
+			return Repo{}, err
+		}
+		repo.Name = key[len(key)-1]
+	}
+	if !validRepoName.MatchString(repo.Name) {
+		return Repo{}, fmt.Errorf("invalid repository name %q; choose one with --name", repo.Name)
+	}
+	return repo, nil
+}
+
+func remoteDefaultBranch(remote string) (string, error) {
+	out, err := gitOutput("ls-remote", "--symref", remote, "HEAD")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if fields := strings.Fields(line); len(fields) == 3 && fields[0] == "ref:" && fields[2] == "HEAD" {
+			return strings.TrimPrefix(fields[1], "refs/heads/"), nil
+		}
+	}
+	return "", fmt.Errorf("cannot tell the default branch of %s; pass --target", remote)
+}
+
+type registryEntry struct {
+	Name       string `yaml:"name"`
+	Remote     string `yaml:"remote"`
+	DefaultRef string `yaml:"default_ref"`
+	Owner      string `yaml:"owner,omitempty"`
+}
+
+func entryOf(r Repo) registryEntry {
+	return registryEntry{Name: r.Name, Remote: r.Remote, DefaultRef: r.DefaultRef, Owner: r.Owner}
+}
+
+// appendRegistryEntry adds text instead of re-encoding the file, so comments
+// and hand-added fields survive. The result must still parse to the entry.
+func appendRegistryEntry(path string, repo Repo) error {
+	old, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	item, err := yaml.Marshal([]registryEntry{entryOf(repo)})
+	if err != nil {
+		return err
+	}
+	var b bytes.Buffer
+	b.Write(old)
+	if len(old) > 0 && old[len(old)-1] != '\n' {
+		b.WriteByte('\n')
+	}
+	for _, line := range strings.SplitAfter(string(item), "\n") {
+		if line != "" {
+			b.WriteString("  " + line)
+		}
+	}
+	var check Registry
+	if err := yaml.Unmarshal(b.Bytes(), &check); err != nil || len(check.Repos) == 0 || check.Repos[len(check.Repos)-1].Name != repo.Name {
+		return fmt.Errorf("cannot append to %s; add %s under repos: by hand", path, repo.Name)
+	}
+	return os.WriteFile(path, b.Bytes(), 0644)
+}
+
+type userRegistry struct {
+	SchemaVersion int             `yaml:"schema_version"`
+	Repos         []registryEntry `yaml:"repos"`
+}
+
+func userRegistryPath() (string, error) {
+	root, err := UserDataRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, adHocRegistryFile), nil
+}
+
+func loadUserRegistry() (Registry, error) {
+	path, err := userRegistryPath()
+	if err != nil {
+		return Registry{}, err
+	}
+	var r Registry
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return r, nil
+	}
+	if err != nil {
+		return r, err
+	}
+	if err := yaml.Unmarshal(data, &r); err != nil {
+		return r, fmt.Errorf("%s: %w", path, err)
+	}
+	return r, nil
+}
+
+// saveUserRegistry remembers the latest choice for a repository so the next
+// ad-hoc collection can add it by name.
+func saveUserRegistry(current Registry, repo Repo) error {
+	path, err := userRegistryPath()
+	if err != nil {
+		return err
+	}
+	out := userRegistry{SchemaVersion: 1}
+	replaced := false
+	for _, r := range current.Repos {
+		if r.Name == repo.Name {
+			r, replaced = repo, true
+		}
+		out.Repos = append(out.Repos, entryOf(r))
+	}
+	if !replaced {
+		out.Repos = append(out.Repos, entryOf(repo))
+	}
+	data, err := yaml.Marshal(out)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".repos.tmp-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(append([]byte("# Repositories added to ad-hoc collections, by name. Written by wtc.\n"), data...)); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// harnessRel is the harness directory relative to the collection, for links
+// rendered at the collection root.
+func (c *Context) harnessRel() string {
+	if rel, err := filepath.Rel(c.Collection, c.Harness); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.Base(c.Harness)
+}

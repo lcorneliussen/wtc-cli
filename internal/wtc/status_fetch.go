@@ -89,6 +89,9 @@ func (c *Context) StatusLiveSnapshot(all, noFetch bool) (StatusSnapshot, StatusF
 
 func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.Duration) (StatusSnapshot, StatusFetchReport, error) {
 	var report StatusFetchReport
+	if all && c.AdHoc {
+		return StatusSnapshot{}, report, fmt.Errorf("an ad-hoc collection has no workspace to sweep")
+	}
 	if !noFetch {
 		var err error
 		report, err = c.StatusRefreshRefsWithAge(all, maxAge)

@@ -19,6 +19,9 @@ type RetireOptions struct {
 	Self bool
 	// WorkspaceID pins the Herdr workspace selected during a self handoff.
 	WorkspaceID string
+	// InPlace retires an ad-hoc collection from inside itself without Herdr:
+	// it may have no other collection to hand the work to.
+	InPlace bool
 }
 
 type RetireResult struct {
@@ -41,7 +44,10 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 		if opt.Name != filepath.Base(c.Collection) {
 			return RetireResult{}, fmt.Errorf("self-retirement target must be the current collection")
 		}
-		if opt.WorkspaceID == "" {
+		if opt.InPlace && !c.AdHoc {
+			return RetireResult{}, fmt.Errorf("in-place retirement is only for ad-hoc collections")
+		}
+		if opt.WorkspaceID == "" && !opt.InPlace {
 			return RetireResult{}, fmt.Errorf("self-retirement requires a verified Herdr workspace ID")
 		}
 	}
@@ -52,7 +58,7 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 	target := result.Collection
 	// Close the source workspace before hooks or worktree removal. Once closed,
 	// no new pane or agent turn can start against a collection being deleted.
-	if opt.Self {
+	if opt.Self && !opt.InPlace {
 		closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
 		if !closed {
 			if warning == "" {
@@ -105,7 +111,7 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 			return result, err
 		}
 	}
-	if !result.WorkspaceClosed {
+	if !result.WorkspaceClosed && !opt.InPlace {
 		closed, warning := c.closeRetiredWorkspaceID(opt.Name, opt.WorkspaceID)
 		result.WorkspaceClosed = closed
 		if warning != "" {
@@ -320,6 +326,9 @@ func removeRetiredGeneratedFiles(target string) error {
 		"WTC-SCOPE.md", ".env.toolchain",
 		".wtc-prs", ".wtc-prs.lock", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
 	}
+	// An ad-hoc registry is remembered per user. Hand-written local hooks
+	// and config stay behind as leftovers for inspection.
+	files = append(files, filepath.Join(AdHocConfigDir, adHocRegistryFile))
 	for _, name := range files {
 		if err := os.Remove(filepath.Join(target, name)); err != nil && !os.IsNotExist(err) {
 			return err
@@ -339,7 +348,8 @@ func removeRetiredGeneratedFiles(target string) error {
 		if err := os.RemoveAll(filepath.Join(wtcDir, "skills")); err != nil {
 			return err
 		}
-		_ = os.Remove(wtcDir) // Other .wtc files are left for inspection.
+		_ = os.Remove(filepath.Join(target, AdHocConfigDir)) // Only when nothing hand-written remains.
+		_ = os.Remove(wtcDir)                                // Other .wtc files are left for inspection.
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}

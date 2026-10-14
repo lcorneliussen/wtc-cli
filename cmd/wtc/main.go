@@ -81,6 +81,9 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		if envAll && c.AdHoc {
+			return fmt.Errorf("an ad-hoc collection has no workspace to sweep")
+		}
 		if !envAll {
 			result, err := refreshEnvCollection(c, dryRun, invokeHooks)
 			if err != nil {
@@ -262,6 +265,7 @@ func run() error {
 	addAgentEnvCommand(root, &asJSON)
 	addSkillsCommands(root, &asJSON)
 	addReviewCommands(root, &asJSON)
+	addInitCommand(root, &asJSON)
 	addNewCommand(root, &asJSON)
 	addAddRepoCommand(root, &asJSON)
 	addRetireCommand(root, &asJSON)

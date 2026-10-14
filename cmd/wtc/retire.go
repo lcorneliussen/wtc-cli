@@ -31,6 +31,13 @@ func addRetireCommand(root *cobra.Command, asJSON *bool) {
 		if args[0] != "." {
 			name = args[0]
 		}
+		if name == filepath.Base(c.Collection) && c.AdHoc && os.Getenv("HERDR_ENV") != "1" {
+			result, err := c.RetireCollection(wtc.RetireOptions{Name: name, Force: force, Self: true, InPlace: true})
+			if err != nil {
+				return err
+			}
+			return emitRetireResult(name, result, *asJSON)
+		}
 		if name == filepath.Base(c.Collection) {
 			return handoffSelfRetire(c, name, force, *asJSON)
 		}

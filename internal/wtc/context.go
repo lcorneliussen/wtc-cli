@@ -25,6 +25,7 @@ type Repo struct {
 	ProdPaths     []string       `yaml:"prod_paths" json:"prod_paths,omitempty"`
 	IDE           string         `yaml:"ide" json:"ide,omitempty"`
 	MergeStrategy string         `yaml:"merge_strategy" json:"merge_strategy,omitempty"`
+	Owner         string         `yaml:"owner" json:"owner,omitempty"` // ad-hoc only: an existing checkout's Git dir
 	Extra         map[string]any `yaml:",inline" json:"extra,omitempty"`
 }
 type Registry struct {
@@ -61,6 +62,9 @@ type Context struct {
 	Registry   Registry `json:"registry"`
 	Config     Config   `json:"-"`
 	ConfigRoot string   `json:"config_root"`
+	// AdHoc marks a collection without a harness repository. Its Harness is the
+	// collection-local config directory and its registry is tracked nowhere.
+	AdHoc bool `json:"ad_hoc,omitempty"`
 	// StatusProgress receives human-readable collector steps. It is nil for
 	// callers that only need the snapshot.
 	StatusProgress  func(string) `json:"-"`
@@ -76,9 +80,11 @@ func Discover(start string) (*Context, error) {
 	}
 	dir := abs
 	for {
-		candidate := filepath.Join(dir, "harness", ".harness-repos.yml")
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return OpenCollection(dir)
+		for _, marker := range []string{filepath.Join("harness", ".harness-repos.yml"), filepath.Join(AdHocConfigDir, adHocRegistryFile)} {
+			candidate := filepath.Join(dir, marker)
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				return OpenCollection(dir)
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -86,7 +92,7 @@ func Discover(start string) (*Context, error) {
 		}
 		dir = parent
 	}
-	return nil, errors.New("not inside a worktree collection (harness/.harness-repos.yml not found)")
+	return nil, errors.New("not inside a worktree collection (harness/.harness-repos.yml not found); run `wtc init` to make this folder an ad-hoc collection")
 }
 
 func OpenCollection(dir string) (*Context, error) {
@@ -94,21 +100,34 @@ func OpenCollection(dir string) (*Context, error) {
 	if err != nil {
 		return nil, err
 	}
-	info, err := os.Stat(filepath.Join(abs, "harness", ".harness-repos.yml"))
-	if err != nil {
-		return nil, fmt.Errorf("not a collection: %s", abs)
-	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("not a collection: %s", abs)
-	}
 	c := &Context{Collection: abs, Harness: filepath.Join(abs, "harness"), Workspace: filepath.Dir(abs)}
+	info, err := os.Stat(filepath.Join(c.Harness, ".harness-repos.yml"))
+	if err != nil {
+		adHoc, adHocErr := os.Stat(filepath.Join(abs, AdHocConfigDir, adHocRegistryFile))
+		if adHocErr != nil || adHoc.IsDir() {
+			return nil, fmt.Errorf("not a collection: %s", abs)
+		}
+		c.Harness, c.AdHoc = filepath.Join(abs, AdHocConfigDir), true
+	} else if info.IsDir() {
+		return nil, fmt.Errorf("not a collection: %s", abs)
+	}
 	if err := c.load(); err != nil {
 		return nil, err
 	}
 	return c, nil
 }
+
+// registryPath is the tracked registry of a harness or the local registry of
+// an ad-hoc collection.
+func (c *Context) registryPath() string {
+	if c.AdHoc {
+		return filepath.Join(c.Harness, adHocRegistryFile)
+	}
+	return filepath.Join(c.Harness, ".harness-repos.yml")
+}
+
 func (c *Context) load() error {
-	b, err := os.ReadFile(filepath.Join(c.Harness, ".harness-repos.yml"))
+	b, err := os.ReadFile(c.registryPath())
 	if err != nil {
 		return err
 	}
@@ -129,7 +148,19 @@ func (c *Context) load() error {
 			c.Registry.Repos = append(c.Registry.Repos, c.Registry.NonDefault[name]...)
 		}
 	}
-	if len(c.Registry.Repos) == 0 {
+	if !c.AdHoc {
+		// Only a local registry may point at an owner; elsewhere the key stays
+		// opaque metadata, as before ad-hoc collections existed.
+		for i, r := range c.Registry.Repos {
+			if r.Owner != "" {
+				if r.Extra == nil {
+					c.Registry.Repos[i].Extra = map[string]any{}
+				}
+				c.Registry.Repos[i].Extra["owner"], c.Registry.Repos[i].Owner = r.Owner, ""
+			}
+		}
+	}
+	if len(c.Registry.Repos) == 0 && !c.AdHoc {
 		return errors.New("registry contains no repositories")
 	}
 	seen := map[string]bool{}
@@ -172,6 +203,13 @@ func (c *Context) load() error {
 				c.ConfigRoot = strings.Trim(value, "'\"")
 				break
 			}
+		}
+	}
+	if c.ConfigRoot == "" && c.AdHoc {
+		// An ad-hoc collection has no workspace; its secrets are per user.
+		c.ConfigRoot, err = UserConfigRoot()
+		if err != nil {
+			return err
 		}
 	}
 	if c.ConfigRoot == "" {
