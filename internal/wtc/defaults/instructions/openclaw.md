@@ -1,41 +1,48 @@
 # Under OpenClaw
 
 `wtc host` prints `openclaw` when a command runs under an OpenClaw gateway: in
-an agent's shell, whatever tool runs it, or in the Control UI's terminal. There the rules for creating
-worktrees and publishing change, because the gateway owns both:
+an agent's shell, whatever tool runs it, or in the Control UI's terminal. There
+the gateway owns worktrees and publishing:
 
-- a command in the agent's shell holds no git credential and cannot reach the
-  gateway;
-- the gateway only publishes a worktree it created itself, for the session
-  that owns it;
-- one session owns one repository. A collection is the session the task
-  started in (the **parent**) plus one **child session per repository**, each
-  with a managed worktree on branch `openclaw/<name>`. `<name>` is the
-  collection's `<issue-id>-<slug>`: lowercase letters, digits and hyphens.
+- a command in the agent's shell holds no git credential;
+- the gateway publishes only a worktree it created, for the session that owns
+  it, and each session owns at most one.
 
-`<repo>` is the name of a project registered on the gateway, or a GitHub
-repository, as `owner/name` or its URL: the gateway clones that itself, with
-its own GitHub login. A repository on another forge has to be registered as a
-project by a gateway admin first.
+## One conversation, many repositories
 
-A collection is not a folder here: it is the gateway's managed worktrees of
-one name, one per repository. Never `wtc init` or `wtc new` a folder
-collection under OpenClaw (wtc refuses): the gateway can neither see nor
-publish it. `wtc status` lists the collections with each repository's branch,
-pending changes and pull request.
+A task is driven from **one conversation**: the one it started in. For each
+repository, `wtc add-repo` has the gateway create a managed worktree on branch
+`openclaw/<name>`, held by a **hidden owner** session that does nothing on its
+own. `<name>` is the collection's `<issue-id>-<slug>`: lowercase letters,
+digits and hyphens. You work in all the worktrees yourself, from the
+**collection folder**: one link per repository to its worktree.
 
-So `wtc` does not act there. It checks, then prints a **plan**: JSON on
-stdout with the `intents` for you to carry out, and one line per intent on
-stderr saying how. An intent with a `tool` means: call that tool with the
-intent's `args`, unchanged, in the session `actor` names. Do not edit the
-args, and do not do the work some other way.
+    wtc status <name>          # the folder, each repository, its PR, services
+    cd <folder>/<repo>         # edit, build, test, commit here
+
+`<repo>` is a project on the gateway, or a GitHub `owner/name` or URL that the
+gateway has cloned. If it has not, `wtc add-repo` says so: ask the person to
+add it with **Add repository** in the Collection panel, then add it again. A
+separate conversation per repository is for swarming, and only when the person
+asks for one (`--separate`, or a spawn of your own with `visible: true`).
+
+Never `wtc init` or `wtc new` under OpenClaw (wtc refuses): the gateway can
+neither see nor publish a folder collection of its own.
+
+`wtc` does not act on the gateway's behalf. It checks, then prints a **plan**:
+JSON on stdout with the `intents` for you to carry out, and one line per
+intent on stderr saying how. An intent with a `tool` means: call that tool
+with the intent's `args`, unchanged, in the session `actor` names. Do not edit
+the args, and do not do the work some other way.
 
 | You want to | Run | Then |
 |---|---|---|
-| add a repository | `wtc add-repo <repo> --worktree <name>` in the parent | call `sessions_spawn` once per intent |
-| publish work | `wtc publish --title "<what changed>"` in the repository's child | call `github_publish`; off GitHub, hand the plan to the forge's skill |
-| take in upstream changes | `wtc catch-up` in the child | publish again to send the merge |
-| see the collection | `wtc status [<name>]`, anywhere | — |
+| add a repository | `wtc add-repo <repo> --worktree <name>` | call `sessions_spawn` once per intent |
+| see the collection | `wtc status [<name>]` | — |
+| check before publishing | `wtc publish --title "<what changed>"` in `<folder>/<repo>` | — |
+| publish | the person presses **Publish** for the repository in the Collection panel; or `sessions_send` the owner: "Run wtc publish --title '…' and carry out its plan." | — |
+| take in upstream changes | `wtc catch-up` in `<folder>/<repo>` | publish again to send the merge |
+| run a service | `wtc svc add <name> --port-env <VAR> -- <cmd>` in the folder | `wtc svc` shows it; the panel too |
 
 ## Publishing safely
 

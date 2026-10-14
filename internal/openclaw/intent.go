@@ -174,8 +174,13 @@ func ProjectSource(arg string) (name, project, gitURL string, err error) {
 }
 
 // AddRepo asks the parent session for a child that owns a worktree of a
-// registered project, or of a GitHub repository at gitURL that the gateway
+// project on the gateway, or of a GitHub repository at gitURL that the gateway
 // clones. worktree is the collection's <issue-id>-<slug>; baseRef may be empty.
+//
+// The owner of a project's worktree is a hidden subagent: the collection's
+// session works in the worktree itself, and the owner only holds it for
+// publication. The gateway clones a repository only for a visible session, so
+// a gitURL makes the owner a conversation of its own.
 func AddRepo(repo, project, gitURL, worktree, baseRef, task string) (Intent, error) {
 	if (project == "") == (gitURL == "") {
 		return Intent{}, fmt.Errorf("add-repo %s: give an OpenClaw project or a GitHub URL", repo)
@@ -185,7 +190,7 @@ func AddRepo(repo, project, gitURL, worktree, baseRef, task string) (Intent, err
 	}
 	return intent(ActionAddRepo, ActorParent, repo, ToolSessionsSpawn, SpawnArgs{
 		Task: task, Label: worktree + " " + repo, ProjectID: project, ProjectGitURL: gitURL,
-		Worktree: true, WorktreeName: worktree, WorktreeBaseRef: baseRef, Visible: true,
+		Worktree: true, WorktreeName: worktree, WorktreeBaseRef: baseRef, Visible: gitURL != "",
 	}), nil
 }
 

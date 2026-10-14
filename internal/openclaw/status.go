@@ -50,6 +50,12 @@ type PullRequest struct {
 	URL    string `json:"url"`
 	State  string `json:"state"`
 	Draft  bool   `json:"draft"`
+	Title  string `json:"title,omitempty"`
+	// Checks is the CI of its head: success, failure, pending or none.
+	Checks  string `json:"checks"`
+	Passed  int    `json:"passed"`
+	Failed  int    `json:"failed"`
+	Running int    `json:"running"`
 }
 
 // CheckoutsStatus describes the checkouts at paths. With pullRequests it also asks
@@ -74,6 +80,25 @@ func ManagedCollections(stateDir string) (map[string][]string, error) {
 		}
 	}
 	return collections, nil
+}
+
+// GatewayProject is the name of the gateway's own clone of a GitHub
+// repository, which is its project ID, or "" when the gateway has none.
+// Clones live in stateDir/projects/<hash>/<name>, registered checkouts
+// wherever they were; this finds the clones.
+func GatewayProject(stateDir string, origin Origin) string {
+	dirs, _ := filepath.Glob(filepath.Join(stateDir, "projects", "*", origin.Repo))
+	for _, dir := range dirs {
+		url, err := git(dir, "remote", "get-url", "origin")
+		if err != nil {
+			continue
+		}
+		o := ParseOrigin(url)
+		if o.Forge == origin.Forge && strings.EqualFold(o.Owner, origin.Owner) && strings.EqualFold(o.Repo, origin.Repo) {
+			return filepath.Base(dir)
+		}
+	}
+	return ""
 }
 
 func CheckoutsStatus(paths []string, pullRequests bool) Collection {
@@ -149,7 +174,7 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "--repo", origin.Owner+"/"+origin.Repo, "--head", branch,
-		"--state", "all", "--limit", "1", "--json", "number,url,state,isDraft")
+		"--state", "all", "--limit", "1", "--json", "number,url,state,isDraft,title,statusCheckRollup")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -160,9 +185,36 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 		URL     string `json:"url"`
 		State   string `json:"state"`
 		IsDraft bool   `json:"isDraft"`
+		Title   string `json:"title"`
+		Rollup  []struct {
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+			State      string `json:"state"`
+		} `json:"statusCheckRollup"`
 	}
 	if json.Unmarshal(out, &found) != nil || len(found) == 0 {
 		return nil
 	}
-	return &PullRequest{Number: found[0].Number, URL: found[0].URL, State: strings.ToLower(found[0].State), Draft: found[0].IsDraft}
+	f := found[0]
+	pr := &PullRequest{Number: f.Number, URL: f.URL, State: strings.ToLower(f.State), Draft: f.IsDraft, Title: f.Title, Checks: "none"}
+	// Check runs report status and conclusion, commit statuses a state.
+	for _, c := range f.Rollup {
+		switch result := strings.ToUpper(c.Conclusion + c.State); {
+		case c.Status != "" && c.Status != "COMPLETED", result == "PENDING", result == "EXPECTED":
+			pr.Running++
+		case result == "SUCCESS", result == "NEUTRAL", result == "SKIPPED":
+			pr.Passed++
+		default:
+			pr.Failed++
+		}
+	}
+	switch {
+	case pr.Failed > 0:
+		pr.Checks = "failure"
+	case pr.Running > 0:
+		pr.Checks = "pending"
+	case pr.Passed > 0:
+		pr.Checks = "success"
+	}
+	return pr
 }

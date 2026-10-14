@@ -15,7 +15,7 @@ import (
 
 func addAddRepoCommand(root *cobra.Command, asJSON *bool) {
 	var collection, branch, name, target, worktree, base string
-	var tip bool
+	var tip, separate bool
 	cmd := &cobra.Command{
 		Use:   "add-repo <repo|clone-url|path> [...]",
 		Short: "Add repository worktrees to a collection",
@@ -28,9 +28,10 @@ func addAddRepoCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().StringVar(&target, "target", "", "Ad-hoc: development branch and PR target for a new repository (default: ask, or the remote's default)")
 	cmd.Flags().StringVar(&worktree, "worktree", "", "Under OpenClaw: the managed worktree name (default: this session's, or $WTC_COLLECTION)")
 	cmd.Flags().StringVar(&base, "base", "", "Under OpenClaw: base ref for the new worktree (default: the gateway's)")
+	cmd.Flags().BoolVar(&separate, "separate", false, "Under OpenClaw: a GitHub repository the gateway has not cloned yet becomes a conversation of its own")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if currentHost() == openclaw.HostOpenClaw {
-			return addRepoIntents(args, worktree, base)
+			return addRepoIntents(args, worktree, base, separate)
 		}
 		if tip {
 			_, _ = os.Stderr.WriteString("note: --tip is already the default\n")

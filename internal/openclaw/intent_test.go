@@ -16,7 +16,7 @@ func TestIntentJSON(t *testing.T) {
 		intent Intent
 		want   string
 	}{
-		{"add-repo", add, `{"host":"openclaw","version":1,"action":"add-repo","actor":"parent","repo":"api","tool":"sessions_spawn","args":{"task":"Work on api","label":"72-openclaw-host api","projectId":"api","worktree":true,"worktreeName":"72-openclaw-host","worktreeBaseRef":"main","visible":true}}`},
+		{"add-repo", add, `{"host":"openclaw","version":1,"action":"add-repo","actor":"parent","repo":"api","tool":"sessions_spawn","args":{"task":"Work on api","label":"72-openclaw-host api","projectId":"api","worktree":true,"worktreeName":"72-openclaw-host","worktreeBaseRef":"main","visible":false}}`},
 		{"publish on GitHub", Publish("api", ParseOrigin("https://github.com/example-org/api.git"), "72-openclaw-host", "main", "Add thing", ""),
 			`{"host":"openclaw","version":1,"action":"publish","actor":"repo-session","repo":"api","forge":"github","tool":"github_publish","args":{"title":"Add thing"}}`},
 		{"publish on Bitbucket", Publish("docs", ParseOrigin("git@bitbucket.org:example-ws/docs.git"), "72-openclaw-host", "main", "Add thing", ""),

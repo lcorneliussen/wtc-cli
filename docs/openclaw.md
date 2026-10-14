@@ -11,15 +11,25 @@ gateway's exec tool does, or when `OPENCLAW_STATE_DIR` is: agents on another
 runtime (Codex's bash tool) and the Control UI's terminal only inherit the
 gateway's environment.
 
-## A collection is a session and its children
+## One conversation, many repositories
 
-One OpenClaw session owns one repository. A collection therefore maps onto:
+One OpenClaw session owns at most one managed worktree, and the gateway
+publishes a worktree only for its owner. wtc keeps that, but a task is still
+driven from one conversation:
 
 | wtc | OpenClaw |
 |---|---|
-| the collection (one task) | the session the task started in — the **parent** |
-| a repository in it | a **child session** owning a gateway-managed worktree |
+| the collection (one task) | the conversation the task started in |
+| a repository in it | a gateway-managed worktree, held by a **hidden owner** (a subagent session) |
+| the collection folder | `$OPENCLAW_STATE_DIR/wtc-collections/<name>`: a link per repository to its worktree, kept by `wtc status`; services run here |
 | the branch | `openclaw/<name>`; `<name>` is the collection's `<issue-id>-<slug>` |
+
+The conversation edits, builds and commits in the worktrees through the
+folder. The owners only hold the worktrees for publication, which the
+Collection panel's **Publish** button starts with the gateway's own
+`sessions.github.publish`, as the chat's Publish PR button does for a
+session's single checkout. A conversation per repository, for swarming, is
+an explicit choice: `wtc add-repo --separate`.
 
 The branch prefix is fixed by OpenClaw. The name must be lowercase letters,
 digits and hyphens, at most 64 characters.
@@ -28,16 +38,18 @@ digits and hyphens, at most 64 characters.
 
 | To | The agent runs | And then |
 |---|---|---|
-| add a repository | `wtc add-repo <repo> --worktree <name>` in the parent | calls `sessions_spawn` with each intent's `args` |
-| publish | `wtc publish --title "…"` in the repository's child | calls `github_publish` with the intent's `args` |
-| catch up | `wtc catch-up` in the child | publishes again to send the merge |
-| see the collection | `wtc status [<name>]` | reads it: every managed worktree of that name is one repository |
+| add a repository | `wtc add-repo <repo> --worktree <name>` | calls `sessions_spawn` with each intent's `args` |
+| see the collection | `wtc status [<name>]` | reads it: folder, repositories, pull requests, services |
+| check a publication | `wtc publish --title "…"` in `<folder>/<repo>` | the person publishes from the panel, or the owner calls `github_publish` |
+| catch up | `wtc catch-up` in `<folder>/<repo>` | publishes again to send the merge |
 
-`<repo>` names a project registered on the gateway, or a GitHub repository as
-`owner/name` or URL. For a GitHub repository the intent carries
-`projectGitUrl`, and the gateway clones it into its managed projects area with
-its own GitHub login, so no admin has to register it first. Other forges have
-no such path: a gateway admin registers a checkout as a project.
+`<repo>` names a project on the gateway, or a GitHub repository as
+`owner/name` or URL. A GitHub repository the gateway has already cloned gets a
+hidden owner by its project name. One it has not is added with **Add
+repository** in the Collection panel (the gateway's `projects.add`, with the
+person's authority); `--separate` instead has the gateway clone it for a
+conversation of its own (`projectGitUrl`, which OpenClaw allows only for
+visible sessions). Other forges: a gateway admin registers a checkout.
 
 Each of the first two prints a plan and does nothing else:
 

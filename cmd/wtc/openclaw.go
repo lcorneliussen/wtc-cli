@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
+	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
 
@@ -115,7 +117,7 @@ committed, and outside a gateway-managed worktree.`,
 // addRepoIntents is add-repo under OpenClaw: one sessions_spawn intent per
 // repository, for the collection's session to carry out. The gateway creates
 // the worktrees, so that it owns them and can publish them.
-func addRepoIntents(repos []string, worktree, base string) error {
+func addRepoIntents(repos []string, worktree, base string, separate bool) error {
 	if worktree == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			worktree = openclaw.CurrentWorktree(cwd)
@@ -134,7 +136,17 @@ func addRepoIntents(repos []string, worktree, base string) error {
 		if err != nil {
 			return err
 		}
-		in, err := openclaw.AddRepo(repo, project, gitURL, worktree, base, "Work on "+repo+" for "+worktree+". Wait for instructions from the collection's session.")
+		task := "You own the " + repo + " worktree of collection " + worktree + ". The collection's session works in it; do nothing until it asks you to. When asked to publish, run wtc publish in your worktree and carry out its plan."
+		if gitURL != "" {
+			if cloned := openclaw.GatewayProject(gatewayStateDir(), openclaw.ParseOrigin(gitURL)); cloned != "" {
+				project, gitURL = cloned, ""
+			} else if separate {
+				task = "Work on " + repo + " for " + worktree + ". Wait for instructions from the collection's session."
+			} else {
+				return fmt.Errorf("%s is not on the gateway yet. Ask the person to add %s with Add repository in the Collection panel, then run this again. Only if they want %s as a conversation of its own: --separate", repo, arg, repo)
+			}
+		}
+		in, err := openclaw.AddRepo(repo, project, gitURL, worktree, base, task)
 		if err != nil {
 			return err
 		}
@@ -176,12 +188,7 @@ func catchUpCheckout(dest string, asJSON bool) error {
 // it is the managed worktrees of one name, one per repository, each owned by
 // a session of its own. Without a name it shows every collection.
 func gatewayStatus(names []string, asJSON bool) error {
-	stateDir := os.Getenv("OPENCLAW_STATE_DIR")
-	if stateDir == "" {
-		home, _ := os.UserHomeDir()
-		stateDir = filepath.Join(home, ".openclaw")
-	}
-	all, err := openclaw.ManagedCollections(stateDir)
+	all, err := openclaw.ManagedCollections(gatewayStateDir())
 	if err != nil {
 		return err
 	}
@@ -191,9 +198,11 @@ func gatewayStatus(names []string, asJSON bool) error {
 		}
 		sort.Strings(names)
 	}
-	result := map[string]openclaw.Collection{}
+	result := map[string]gatewayCollection{}
 	for _, name := range names {
-		result[name] = openclaw.CheckoutsStatus(all[name], true)
+		col := gatewayCollection{Collection: openclaw.CheckoutsStatus(all[name], true), Services: []wtc.RuntimeItem{}}
+		col.Folder, col.Services, col.Error = linkGatewayFolder(name, col.Repos)
+		result[name] = col
 	}
 	if asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -211,6 +220,9 @@ func gatewayStatus(names []string, asJSON bool) error {
 		}
 		fmt.Fprintf(w, "%s\n", name)
 		repos := result[name].Repos
+		if folder := result[name].Folder; folder != "" {
+			fmt.Fprintf(w, "  folder %s\n", folder)
+		}
 		if len(repos) == 0 {
 			fmt.Fprintln(w, "  (no repositories)")
 			continue
@@ -235,8 +247,54 @@ func gatewayStatus(names []string, asJSON bool) error {
 			}
 			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n", r.Repo, r.Branch, base, pending, pr)
 		}
+		for _, svc := range result[name].Services {
+			fmt.Fprintf(w, "  service %s\t%s\t%s\t%s\t\n", svc.Path, svc.Kind, svc.State, svc.URL)
+		}
+		if e := result[name].Error; e != "" {
+			fmt.Fprintf(w, "  folder: %s\n", e)
+		}
 	}
 	return w.Flush()
+}
+
+// gatewayCollection is one collection as wtc status shows it under OpenClaw.
+type gatewayCollection struct {
+	openclaw.Collection
+	// Folder holds the collection as one folder: a link per repository to its
+	// managed worktree. Services run there.
+	Folder   string            `json:"folder,omitempty"`
+	Services []wtc.RuntimeItem `json:"services"`
+	Error    string            `json:"error,omitempty"`
+}
+
+// linkGatewayFolder keeps the collection's folder in step with its worktrees
+// and reads the services running for it.
+func linkGatewayFolder(name string, repos []openclaw.CheckoutStatus) (string, []wtc.RuntimeItem, string) {
+	var linked []wtc.LinkedRepo
+	for _, r := range repos {
+		if r.Error != "" || r.Repo == "" {
+			continue
+		}
+		remote, err := exec.Command("git", "-C", r.Path, "remote", "get-url", "origin").Output()
+		if err != nil {
+			continue
+		}
+		base := r.Base
+		if base == "" {
+			base = "origin/main"
+		}
+		linked = append(linked, wtc.LinkedRepo{Name: r.Repo, Remote: strings.TrimSpace(string(remote)), DefaultRef: base, Path: r.Path})
+	}
+	folder := filepath.Join(gatewayStateDir(), "wtc-collections", name)
+	c, err := wtc.LinkGatewayCollection(folder, linked)
+	if err != nil {
+		return folder, []wtc.RuntimeItem{}, err.Error()
+	}
+	services := c.RuntimeStatus()
+	if services == nil {
+		services = []wtc.RuntimeItem{}
+	}
+	return folder, services, ""
 }
 
 // refuseUnderGateway stops commands that make folder collections: under
@@ -247,4 +305,13 @@ func refuseUnderGateway(command string) error {
 		return nil
 	}
 	return fmt.Errorf("wtc %s makes a folder collection, which the OpenClaw gateway cannot see or publish. Here a collection is managed worktrees of one name: wtc add-repo <owner/name> --worktree <name> starts one, and wtc status lists them (wtc docs instructions/openclaw.md)", command)
+}
+
+// gatewayStateDir is where the gateway keeps its projects and worktrees.
+func gatewayStateDir() string {
+	if dir := os.Getenv("OPENCLAW_STATE_DIR"); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".openclaw")
 }

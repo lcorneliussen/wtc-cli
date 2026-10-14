@@ -1,6 +1,7 @@
-// wtc for OpenClaw: a collection is the session a task started in plus one
-// child session per repository, each owning a gateway-managed worktree. The
-// gateway knows the sessions; `wtc` knows the checkouts. This joins the two.
+// wtc for OpenClaw: a collection is the conversation a task started in plus,
+// per repository, a gateway-managed worktree held by an owner session (hidden
+// unless someone wants a conversation per repository). The gateway knows the
+// sessions; `wtc` knows the checkouts and services. This joins the two.
 //
 // Plain ESM, no build step and no SDK import. Needs `wtc` on the gateway's
 // PATH, and `git`; pull requests also need `gh` with the gateway's login.
@@ -49,12 +50,22 @@ export default {
           warnings: [],
         };
         if (children.length === 0) return { ok: true, result };
-        const status = await run(["wtc", "checkouts", ...children.map((c) => worktreeOf(c.entry))]);
+        // The collection's name is its worktrees' name. wtc status reads
+        // them, keeps the collection's folder and reports its services.
+        const names = [...new Set(children.map((c) => String(c.entry.worktree?.branch ?? "").replace(/^openclaw\//, "")).filter(Boolean))];
         let checkouts = [];
-        try {
-          checkouts = JSON.parse(status.stdout).repos;
-        } catch {
-          result.warnings.push(`wtc checkouts failed (exit ${status.code}): ${(status.stderr || status.stdout).trim().slice(0, 300) || "is wtc on the gateway's PATH?"}`);
+        result.services = [];
+        for (const name of names) {
+          const status = await run(["wtc", "status", name, "--json"], { env: { OPENCLAW_SHELL: "exec" } });
+          try {
+            const col = JSON.parse(status.stdout)[name] ?? {};
+            checkouts.push(...(col.repos ?? []));
+            result.services.push(...(col.services ?? []));
+            if (col.folder) result.collection.folder = col.folder;
+            if (col.error) result.warnings.push(`collection folder: ${col.error}`);
+          } catch {
+            result.warnings.push(`wtc status failed (exit ${status.code}): ${(status.stderr || status.stdout).trim().slice(0, 300) || "is wtc on the gateway's PATH?"}`);
+          }
         }
         const byPath = new Map(checkouts.map((c) => [c.path, c]));
         result.repos = children
@@ -62,6 +73,8 @@ export default {
             sessionKey,
             label: entry.label ?? entry.displayName ?? null,
             project: entry.projectId ?? null,
+            // A hidden owner has no conversation of its own.
+            owner: sessionKey.includes(":subagent:") ? "hidden" : "conversation",
             ...(byPath.get(worktreeOf(entry)) ?? { path: worktreeOf(entry), branch: entry.worktree?.branch ?? null, error: "no status" }),
           }))
           .sort((a, b) => String(a.project ?? a.repo).localeCompare(String(b.project ?? b.repo)));
