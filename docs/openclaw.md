@@ -26,7 +26,7 @@ driven from one conversation:
 
 The conversation edits, builds and commits in the worktrees through the
 folder. The owners only hold the worktrees for publication, which the
-Collection panel's **Publish** button starts with the gateway's own
+Collection panel's **Push + PR** button starts with the gateway's own
 `sessions.github.publish`, as the chat's Publish PR button does for a
 session's single checkout. A conversation per repository, for swarming, is
 an explicit choice: `wtc add-repo --separate`.
@@ -157,19 +157,23 @@ them. The plugin in [`openclaw-plugin/`](../openclaw-plugin) adds the view of
 the task as a whole:
 
 - a card above the message box, where OpenClaw shows a task's progress.
-  Collapsed, it shows what is not published yet, each open pull request
+  Collapsed, it shows what is not pushed yet, each open pull request
   coloured by its CI, and how many of the collection's services run; expanded,
-  each repository with **Publish** and **Catch up**, and each service with its
-  address. It appears only on sessions that have a collection. The plugin
+  each repository on its branch with **Push + PR** (**Push** once it has a pull
+  request) and **Catch up**, and each service on one line with its address and
+  its tunnels, as `wtc status` shows them. A tunnel started as a service of its
+  own is marked, with **Consolidate** asking the conversation to open it again
+  with `wtc svc tunnel`. It appears only on sessions that have a collection. The plugin
   provides it as a composer that wraps the built-in one, selected when the
   plugin loads; **Customize UI → Built-in** switches back.
 - a **Collection** panel with a row per repository — branch, commits ahead of
   and behind the base, what the next publication would send, the pull request
-  with its CI, and **Catch up** and **Publish** buttons — the collection's
+  with its CI, and **Catch up** and **Push + PR** buttons — the collection's
   pull requests and services, and **Add repository**.
 
 Both render what `wtc status <name> --json` prints and refresh every 30
-seconds while they are open.
+seconds while they are open. `node --test openclaw-plugin/test/*.test.mjs`
+renders them against a minimal DOM.
 
 ```sh
 openclaw config set gateway.controlUi.experimental.customPlugins true

@@ -66,6 +66,15 @@ A tunnel on the internet — `cloudflare` (quick tunnel), `ngrok`, an anonymous
 a public link in so many words, and say that anyone with the link can reach
 the service. Status shows public tunnels in the warning colour.
 
+Always open a tunnel with `wtc svc tunnel <service>`, never as a service of its
+own (`wtc svc add …/tunnel -- cloudflared …`) or in your shell: only then is it
+in the group of the service it exposes, starts after it, and shows with it on
+one line. A tunnel that shows as a line of its own was started the other way.
+Consolidate it: note its provider, `wtc svc rm <that line>`, then
+`wtc svc tunnel <service> <provider>` (with `--public` only if it was a public
+one the user asked for), and give the user the new address — a quick tunnel's
+address changes.
+
 ## Stop, remove
 
 `wtc svc down <name>` stops it; `wtc svc rm <name>` stops it with its tunnels

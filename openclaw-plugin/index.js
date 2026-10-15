@@ -8,7 +8,7 @@
 // Bitbucket repositories use the logins of the Bitbucket plugin
 // (openclaw-bitbucket) when it is installed.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 const PLUGIN_ID = "wtc";
@@ -130,6 +130,51 @@ export default {
       },
     });
 
+    // The branches of a repository and its default, for choosing the branch a
+    // collection works against before adding it. Read with git, so GitHub
+    // and Bitbucket behave the same, with the gateway's GitHub login and the
+    // person's Bitbucket login for private repositories.
+    api.session.controls.registerSessionAction({
+      id: "repo-branches",
+      description: "List the branches of a GitHub or Bitbucket repository, or of a project on the gateway.",
+      requiredScopes: ["operator.read"],
+      async handler(action) {
+        let url = String(action.payload?.url ?? "");
+        let cwd;
+        const project = String(action.payload?.project ?? "");
+        if (project) {
+          if (!/^[A-Za-z0-9._-]+$/.test(project) || project === "." || project === "..") return { ok: false, error: "not a project name" };
+          const dirs = [path.join(stateDir, "repos", project)];
+          try {
+            for (const hash of readdirSync(path.join(stateDir, "projects"))) dirs.unshift(path.join(stateDir, "projects", hash, project));
+          } catch { /* no clones yet */ }
+          cwd = dirs.find((d) => existsSync(path.join(d, ".git")));
+          if (!cwd) return { ok: false, error: `${project} is not on the gateway` };
+          url = "origin";
+        } else if (!/^https:\/\/(github\.com|bitbucket\.org)\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?(\.git)?$/.test(url)) {
+          return { ok: false, error: "give a GitHub or Bitbucket https URL" };
+        }
+        const origin = cwd ? (await run(["git", "-C", cwd, "remote", "get-url", "origin"])).stdout.trim() : url;
+        const env = { GIT_TERMINAL_PROMPT: "0" };
+        let auth = [];
+        if (/github\.com/.test(origin)) {
+          auth = ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"];
+        } else if (/bitbucket\.org/.test(origin)) {
+          const login = bitbucketLogin(stateDir, await sessionOwnerProfileId(getSessionEntry, action.sessionKey, action.agentId));
+          if (login) {
+            auth = ["-c", "credential.helper=", "-c", "credential.helper=!f() { [ \"$1\" = get ] && printf 'username=x-bitbucket-api-token-auth\\npassword=%s\\n' \"$WTC_BITBUCKET_TOKEN\"; }; f"];
+            env.WTC_BITBUCKET_TOKEN = login.token;
+          }
+        }
+        const r = await run(["git", ...(cwd ? ["-C", cwd] : []), ...auth, "ls-remote", "--symref", url, "HEAD", "refs/heads/*"], { timeoutMs: 30000, env });
+        if (r.code !== 0) return { ok: false, error: `cannot read the branches: ${r.stderr.trim().split("\n").pop()}` };
+        const lines = r.stdout.split("\n");
+        const head = lines.map((l) => l.match(/^ref: refs\/heads\/(\S+)\s+HEAD$/)).find(Boolean)?.[1] ?? null;
+        const branches = lines.map((l) => l.match(/^[0-9a-f]{40}\s+refs\/heads\/(\S+)$/)?.[1]).filter(Boolean);
+        return { ok: true, result: { defaultBranch: head, branches } };
+      },
+    });
+
     // Clones a Bitbucket repository onto the gateway, with the person's login
     // when the repository is private. The gateway's own projects.add takes
     // GitHub only; the Control UI registers the clone with projects.register.
@@ -207,6 +252,23 @@ export default {
           }))
           .sort((a, b) => String(a.project ?? a.repo).localeCompare(String(b.project ?? b.repo)));
         return { ok: true, result };
+      },
+    });
+
+    // Restarts one of the collection's services, from its folder.
+    api.session.controls.registerSessionAction({
+      id: "svc-restart",
+      description: "Restart one service of this session's collection (wtc svc restart).",
+      requiredScopes: ["operator.write"],
+      async handler(action) {
+        const group = String(action.payload?.group ?? "");
+        if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(group)) return { ok: false, error: "name a service as <repo>/<service>" };
+        if (!action.sessionKey || !action.agentId) return { ok: false, error: "sessionKey and agentId are required" };
+        const { children } = collectionOf(action.agentId, action.sessionKey);
+        const name = children.map((c) => String(c.entry.worktree?.branch ?? "").replace(/^openclaw\//, "")).find(Boolean);
+        if (!name) return { ok: false, error: "this session has no collection" };
+        const r = await run(["wtc", "svc", "restart", group], { cwd: path.join(stateDir, "wtc-collections", name), timeoutMs: 120000, env: { OPENCLAW_SHELL: "exec" } });
+        return r.code === 0 ? { ok: true, result: { message: `${group} restarted` } } : { ok: false, error: (r.stderr || r.stdout).trim().slice(-400) || `exit ${r.code}` };
       },
     });
 

@@ -15,8 +15,9 @@
 - `wtc add-repo` takes GitHub and Bitbucket URLs. The gateway clones GitHub
   repositories itself; a Bitbucket one has to be added in the Control UI first.
 - `openclaw-plugin/` is an OpenClaw plugin for the Control UI: a collection
-  card above the message box (what is unpublished, pull requests with CI,
-  conflict and review state, what is behind, running services), a panel with
-  Publish and Catch up per repository, and adding repositories from the
+  card above the message box (each repository's branch, what is not pushed,
+  pull requests with CI, conflict and review state, what is behind, services
+  with their tunnels on one line), a panel with Push + PR and Catch up per
+  repository, and adding repositories from the
   gateway, GitHub or the person's Bitbucket workspaces. `wtc checkouts` prints
   the status of checkouts as JSON for it.
