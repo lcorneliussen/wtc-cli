@@ -14,6 +14,9 @@ func addInitCommand(root *cobra.Command, asJSON *bool) {
 		Args:  cobra.MaximumNArgs(1),
 	}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := refuseUnderGateway("init"); err != nil {
+			return err
+		}
 		dir, err := os.Getwd()
 		if err != nil {
 			return err

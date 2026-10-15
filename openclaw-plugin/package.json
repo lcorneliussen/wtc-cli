@@ -1,0 +1,14 @@
+{
+  "name": "openclaw-plugin-wtc",
+  "version": "0.1.0",
+  "description": "A collection view for OpenClaw: the repositories of one task, each in its own session, in one panel",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "files": ["index.js", "dist", "openclaw.plugin.json"],
+  "openclaw": {
+    "extensions": ["./index.js"],
+    "install": { "minHostVersion": ">=2026.10.2" },
+    "compat": { "pluginApi": ">=2026.10.2" }
+  }
+}
