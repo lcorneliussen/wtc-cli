@@ -6,15 +6,22 @@ package openclaw
 // and is asked in plain words; the test checks what happened on the gateway
 // and on GitHub, not what the model said.
 //
-//	OPENAI_API_KEY=… WTC_OPENCLAW_GITHUB_REPO=<owner>/<throwaway-repo> GH_TOKEN=… \
+//	WTC_OPENCLAW_GITHUB_REPO=<owner>/<throwaway-repo> GH_TOKEN=… \
 //	  go test -tags openclaw_integration ./internal/openclaw/ -run RealModel -v
+//
+// The model runs on the person's own Codex sign-in when there is one
+// ($CODEX_HOME or ~/.codex), so a run on a workstation spends their
+// subscription. Under CI, or without a sign-in, it needs OPENAI_API_KEY,
+// which is billed per token.
 //
 // A model is not deterministic: a failure here is a finding about how well
 // an agent follows wtc's plans, and the log says what the agent did.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -61,11 +68,15 @@ func (g *gateway) transcript(sessionKey string) string {
 
 func TestRealModelConversation(t *testing.T) {
 	hub := gitHubTarget(t)
-	key := os.Getenv("OPENAI_API_KEY")
-	if key == "" {
-		t.Skip("needs OPENAI_API_KEY for the gateway's default model")
+	login, key := modelCredential(t)
+	secrets := []string{"GH_TOKEN=" + hub.token}
+	if key != "" {
+		secrets = append(secrets, "OPENAI_API_KEY="+key)
 	}
-	g := startGateway(t, gatewayOptions{repos: hub.clone(), secrets: []string{"GH_TOKEN=" + hub.token, "OPENAI_API_KEY=" + key}, plugin: true})
+	g := startGateway(t, gatewayOptions{repos: hub.clone(), secrets: secrets, plugin: true})
+	if login != nil {
+		g.signInCodex(login)
+	}
 	g.put(agentWorkspace+"/AGENTS.md", []byte(wtcPointer))
 	if r := g.call("projects.register", map[string]any{"path": "/home/node/repos/target", "name": "target"}); r.str("id") != "target" {
 		t.Fatalf("projects.register: %v", r)
@@ -131,4 +142,74 @@ func TestRealModelConversation(t *testing.T) {
 		}
 	})
 	t.Logf("child's transcript:\n%s", g.transcript(child.str("key")))
+}
+
+// modelCredential is what the gateway's default model runs on: the person's
+// Codex sign-in, outside CI, or else an API key.
+func modelCredential(t *testing.T) (login []byte, key string) {
+	t.Helper()
+	if os.Getenv("CI") == "" {
+		dir := os.Getenv("CODEX_HOME")
+		if dir == "" {
+			home, _ := os.UserHomeDir()
+			dir = filepath.Join(home, ".codex")
+		}
+		if login, err := os.ReadFile(filepath.Join(dir, "auth.json")); err == nil {
+			t.Logf("model: the Codex sign-in in %s", dir)
+			return login, ""
+		}
+	}
+	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+		t.Log("model: OPENAI_API_KEY")
+		return nil, key
+	}
+	t.Skip("needs a Codex sign-in (~/.codex, outside CI) or OPENAI_API_KEY for the gateway's default model")
+	return nil, ""
+}
+
+// signInCodex gives the gateway's agent the access token of a Codex sign-in
+// as its OpenAI credential. Only the access token goes in: the gateway cannot
+// refresh it, so the sign-in it came from stays valid. An expired one is
+// renewed by using Codex once.
+func (g *gateway) signInCodex(login []byte) {
+	g.t.Helper()
+	var auth struct {
+		Tokens struct {
+			AccessToken string `json:"access_token"`
+		} `json:"tokens"`
+	}
+	var all any
+	_ = json.Unmarshal(login, &all)
+	g.hidden = append(g.hidden, jsonStrings(all)...)
+	if err := json.Unmarshal(login, &auth); err != nil || auth.Tokens.AccessToken == "" {
+		g.t.Fatalf("the Codex sign-in has no access token: %v", err)
+	}
+	cmd := g.exec("bash", "-c", gatewayEnv+`node dist/index.js models auth paste-token --provider openai --agent dev 2>&1 | tail -2
+node dist/index.js models status --agent dev 2>&1 | grep -E 'OAuth|openai'`)
+	cmd.Stdin = strings.NewReader(auth.Tokens.AccessToken + "\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "status=usable") {
+		g.t.Fatalf("signing the gateway in with Codex: %v\n%s", err, g.redact(string(out)))
+	}
+}
+
+// jsonStrings is every string in a decoded JSON value.
+func jsonStrings(v any) []string {
+	switch v := v.(type) {
+	case string:
+		return []string{v}
+	case map[string]any:
+		var out []string
+		for _, e := range v {
+			out = append(out, jsonStrings(e)...)
+		}
+		return out
+	case []any:
+		var out []string
+		for _, e := range v {
+			out = append(out, jsonStrings(e)...)
+		}
+		return out
+	}
+	return nil
 }
