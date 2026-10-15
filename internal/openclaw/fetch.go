@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -34,33 +35,49 @@ func fetchCredentials(origin Origin) []string {
 // alone. It only moves remote-tracking refs, never a worktree, and a failed
 // fetch leaves the last known base in place.
 func FetchBases(paths []string, maxAge time.Duration) {
-	seen := map[string]bool{}
-	var wg sync.WaitGroup
+	type clone struct {
+		dir      string
+		origin   Origin
+		branches []string
+	}
+	clones := map[string]*clone{}
+	var order []string
 	for _, p := range paths {
 		common, err := git(p, "rev-parse", "--path-format=absolute", "--git-common-dir")
-		if err != nil || seen[common] {
+		if err != nil {
 			continue
 		}
-		seen[common] = true
+		c := clones[common]
+		if c == nil {
+			c = &clone{dir: p, origin: Origin{Forge: ForgeUnknown}}
+			if url, err := git(p, "remote", "get-url", "origin"); err == nil {
+				c.origin = ParseOrigin(url)
+			}
+			clones[common] = c
+			order = append(order, common)
+		}
+		// Worktrees of one clone may have different bases.
+		if b := baseBranch(p); b != "" && !slices.Contains(c.branches, b) {
+			c.branches = append(c.branches, b)
+		}
+	}
+	var wg sync.WaitGroup
+	for _, common := range order {
+		c := clones[common]
 		marker := filepath.Join(common, "wtc-base-fetched")
-		if info, err := os.Stat(marker); err == nil && time.Since(info.ModTime()) < maxAge {
+		if info, err := os.Stat(marker); err == nil && time.Since(info.ModTime()) < maxAge || len(c.branches) == 0 {
 			continue
-		}
-		branch := baseBranch(p)
-		if branch == "" {
-			continue
-		}
-		origin := Origin{Forge: ForgeUnknown}
-		if url, err := git(p, "remote", "get-url", "origin"); err == nil {
-			origin = ParseOrigin(url)
 		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			args := append([]string{"-C", p}, fetchCredentials(origin)...)
-			args = append(args, "fetch", "--quiet", "--no-tags", "origin", "+refs/heads/"+branch+":refs/remotes/origin/"+branch)
+			args := append([]string{"-C", c.dir}, fetchCredentials(c.origin)...)
+			args = append(args, "fetch", "--quiet", "--no-tags", "origin")
+			for _, b := range c.branches {
+				args = append(args, "+refs/heads/"+b+":refs/remotes/origin/"+b)
+			}
 			cmd := exec.CommandContext(ctx, "git", args...)
 			cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 			if cmd.Run() == nil {
@@ -71,9 +88,35 @@ func FetchBases(paths []string, maxAge time.Duration) {
 	wg.Wait()
 }
 
-// baseBranch is the branch status measures against: origin's HEAD, else the
-// first of main, master and develop that origin has.
+// The branch a collection chose for a repository, when it is not origin's
+// default: recorded per managed branch in the clone's git config, so every
+// worktree of the clone knows its own. wtc add-repo --base records it.
+const baseKey = "wtcbase"
+
+// RecordBase notes branch as the base of the managed worktree name in the
+// clone at dir: what it is compared with, caught up from and published to.
+func RecordBase(dir, name, branch string) error {
+	_, err := git(dir, "config", "branch."+Branch(name)+"."+baseKey, strings.TrimPrefix(branch, "origin/"))
+	return err
+}
+
+// recordedBase is the base recorded for the branch checked out at dir, or "".
+func recordedBase(dir string) string {
+	branch, _ := git(dir, "branch", "--show-current")
+	if branch == "" {
+		return ""
+	}
+	base, _ := git(dir, "config", "--get", "branch."+branch+"."+baseKey)
+	return base
+}
+
+// baseBranch is the branch status measures against: the recorded base,
+// otherwise origin's HEAD, else the first of main, master and develop that
+// origin has.
 func baseBranch(dir string) string {
+	if b := recordedBase(dir); b != "" {
+		return b
+	}
 	if head, err := git(dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil && head != "" {
 		return strings.TrimPrefix(head, "origin/")
 	}

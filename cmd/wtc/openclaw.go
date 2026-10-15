@@ -131,6 +131,11 @@ func addRepoIntents(repos []string, worktree, base string, separate bool) error 
 	}
 	var intents []openclaw.Intent
 	var projects []string
+	// A base is a branch of origin; the gateway takes it as a ref.
+	branch := strings.TrimPrefix(base, "origin/")
+	if branch != "" {
+		base = "origin/" + branch
+	}
 	for _, arg := range repos {
 		repo, project, gitURL, err := openclaw.ProjectSource(arg)
 		if err != nil {
@@ -139,8 +144,15 @@ func addRepoIntents(repos []string, worktree, base string, separate bool) error 
 		task := "You own the " + repo + " worktree of collection " + worktree + ". The collection's session works in it; do nothing until it asks you to. When asked to publish, run wtc publish in your worktree and carry out its plan."
 		if gitURL != "" {
 			origin := openclaw.ParseOrigin(gitURL)
-			if cloned := openclaw.GatewayProject(gatewayStateDir(), origin); cloned != "" {
-				project, gitURL = cloned, ""
+			if dir := openclaw.GatewayProjectDir(gatewayStateDir(), origin); dir != "" {
+				project, gitURL = filepath.Base(dir), ""
+				if branch != "" {
+					// What the worktree is compared with, caught up from and
+					// published to, not only where it starts.
+					if err := openclaw.RecordBase(dir, worktree, branch); err != nil {
+						return fmt.Errorf("recording %s as the base of %s: %w", branch, repo, err)
+					}
+				}
 			} else if origin.Forge != openclaw.ForgeGitHub {
 				// The gateway clones GitHub repositories only.
 				return fmt.Errorf("%s is not on the gateway yet. Ask the person to add %s with Add repository in the Collection panel, then run this again", repo, arg)
@@ -148,6 +160,13 @@ func addRepoIntents(repos []string, worktree, base string, separate bool) error 
 				task = "Work on " + repo + " for " + worktree + ". Wait for instructions from the collection's session."
 			} else {
 				return fmt.Errorf("%s is not on the gateway yet. Ask the person to add %s with Add repository in the Collection panel, then run this again. Only if they want %s as a conversation of its own: --separate", repo, arg, repo)
+			}
+		}
+		if gitURL == "" && branch != "" {
+			if dir := openclaw.GatewayProjectDirByName(gatewayStateDir(), project); dir != "" {
+				if err := openclaw.RecordBase(dir, worktree, branch); err != nil {
+					return fmt.Errorf("recording %s as the base of %s: %w", branch, repo, err)
+				}
 			}
 		}
 		in, err := openclaw.AddRepo(repo, project, gitURL, worktree, base, task)

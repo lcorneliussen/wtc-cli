@@ -288,7 +288,7 @@ func TestStatus(t *testing.T) {
 	if got.Schema != CollectionSchema || len(got.Repos) != 2 {
 		t.Fatalf("collection %+v", got)
 	}
-	want := CheckoutStatus{Path: c.Dir, Repo: "docs", Forge: ForgeBitbucket, Branch: "openclaw/72-add-thing", Base: "origin/main",
+	want := CheckoutStatus{Path: c.Dir, Repo: "docs", Owner: "example-ws", Forge: ForgeBitbucket, Branch: "openclaw/72-add-thing", Base: "origin/main",
 		Ahead: 2, Dirty: 2, Untracked: 1, Published: true, Unpublished: 1}
 	if got.Repos[0] != want {
 		t.Errorf("got  %+v\nwant %+v", got.Repos[0], want)
@@ -325,5 +325,33 @@ func TestPlanPublishInASandboxCopy(t *testing.T) {
 	write(t, c, ".env", "TOKEN=x\n")
 	if _, err := c.PlanPublish(PublishOptions{}); err == nil || !strings.Contains(err.Error(), ".env") {
 		t.Fatalf("a .env in a sandbox's copy: %v", err)
+	}
+}
+
+func TestRecordedBase(t *testing.T) {
+	c, git := managedWorktree(t, "git@bitbucket.org:example-ws/docs.git")
+	// develop is two commits past main; the worktree starts on main.
+	git("branch", "develop")
+	write(t, c, "a.md", "a\n")
+	git("add", ".")
+	git("commit", "-qm", "a")
+	git("update-ref", "refs/remotes/origin/develop", "HEAD")
+	git("reset", "-q", "--hard", "origin/main")
+	if err := RecordBase(c.Dir, "72-add-thing", "origin/develop"); err != nil {
+		t.Fatal(err)
+	}
+	got := CheckoutsStatus([]string{c.Dir}, false).Repos[0]
+	if got.Base != "origin/develop" || got.Behind != 1 {
+		t.Errorf("status against the recorded base: %+v", got)
+	}
+	opened, err := OpenCheckout(c.Dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Dest != "develop" {
+		t.Errorf("publishes to %q, want develop", opened.Dest)
+	}
+	if b := baseBranch(c.Dir); b != "develop" {
+		t.Errorf("fetches %q, want develop", b)
 	}
 }

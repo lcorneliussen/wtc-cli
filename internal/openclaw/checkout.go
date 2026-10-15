@@ -43,7 +43,8 @@ func gitOK(dir string, args ...string) bool {
 }
 
 // OpenCheckout reads the managed worktree dir is in. dest overrides the
-// branch pull requests go into; empty means origin's default branch.
+// branch pull requests go into; empty means the base recorded for the
+// worktree, else origin's default branch.
 func OpenCheckout(dir, dest string) (*Checkout, error) {
 	top, err := git(dir, "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -72,6 +73,9 @@ func OpenCheckout(dir, dest string) (*Checkout, error) {
 		if common, err := git(top, "rev-parse", "--path-format=absolute", "--git-common-dir"); err == nil {
 			c.Repo = filepath.Base(strings.TrimSuffix(filepath.Clean(common), string(filepath.Separator)+".git"))
 		}
+	}
+	if c.Dest == "" {
+		c.Dest = recordedBase(top)
 	}
 	if c.Dest == "" {
 		head, _ := git(top, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
