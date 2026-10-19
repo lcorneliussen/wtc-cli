@@ -33,7 +33,13 @@ func printPlan(plan openclaw.Plan) error {
 			openclaw.ActorRepoSession: "in this repository's session",
 			openclaw.ActorCurrent:     "in this session",
 		}[in.Actor]
-		if in.Tool != "" {
+		if in.Action == openclaw.ActionPublish {
+			how := " with the skill for " + string(in.Forge)
+			if in.Tool != "" {
+				how = " with the " + in.Tool + " tool and its args, unchanged"
+			}
+			fmt.Fprintf(os.Stderr, "wtc: nothing was done. Publishing is the person's: tell them it is ready to push with ↑ in the collection card. Only if they asked you to publish, carry out this intent %s%s.\n", who, how)
+		} else if in.Tool != "" {
 			fmt.Fprintf(os.Stderr, "wtc: nothing was done. Call the %s tool %s with this intent's args, unchanged.\n", in.Tool, who)
 		} else {
 			fmt.Fprintf(os.Stderr, "wtc: nothing was done. Carry out this %s intent %s with the skill for %s.\n", in.Action, who, in.Forge)

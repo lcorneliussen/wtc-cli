@@ -142,6 +142,7 @@ migration boundary and the role of the boilerplate.
 | [Environment and ports](internal/wtc/defaults/instructions/hooks-and-env.md) | Collection environment, mise, and port assignments |
 | [Secrets](internal/wtc/defaults/instructions/secrets.md) | Shared credential files and worktree links |
 | [Agent instructions and skills](internal/wtc/defaults/instructions/skills.md) | Project guidance and collection procedures |
+| [wtc under OpenClaw](docs/openclaw.md) | A team gateway: collections in conversations, the collection card, `wtc openclaw install` |
 | [Development and validation](docs/development.md) | Build, test, and contribute to WTC |
 
 The installed customization guide is available with `wtc customize`.

@@ -29,6 +29,13 @@
   the status of checkouts as JSON for it. A new tunnel can also be the
   gateway's own OpenClaw portal, offered last as "needs ingress" when the
   gateway has no portal ingress.
+- `wtc openclaw install` installs the plugin on a gateway, from the `wtc`
+  binary itself, so plugin and `wtc` always match. The plugin now also gives
+  agents a `wtc` skill that points them at `wtc docs instructions/openclaw.md`.
+  `docs/openclaw.md` has an install walkthrough.
+- Under OpenClaw, publishing is the person's: the instructions, the `wtc-pr`
+  skills and `wtc publish` tell the agent to report that work is ready to
+  push with ↑ in the collection card, and to publish itself only when asked.
 - `wtc svc tunnel <service> tailscale --public` now says that Tailscale
   tunnels are tailnet-only and names cloudflare, ngrok and devtunnel for a
   public link.

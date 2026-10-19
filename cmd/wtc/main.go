@@ -263,6 +263,7 @@ func run() error {
 	root.AddCommand(customize)
 	addPRCommands(root, &asJSON)
 	addHostCommands(root, &asJSON)
+	addOpenClawCommands(root)
 	addRegistryCommands(root, &asJSON)
 	addMCPCommands(root, &asJSON)
 	addSecretsCommands(root, &asJSON)
