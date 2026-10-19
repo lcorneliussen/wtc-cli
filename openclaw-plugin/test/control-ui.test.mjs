@@ -206,28 +206,63 @@ test("composer: no card for a session without repositories", async () => {
   view.dispose();
 });
 
+// The card's cells, row by row: a table is a grid of a header and rows of
+// as many cells, as in wtc status.
+const tables = (node) => [...node.all()].filter((n) => n.className === "wtc-table").map((t) => {
+  const cells = t.children;
+  const width = t.style.cssText.match(/grid-template-columns:([^;]*)/)[1].split(" ").filter((w) => w && !/^\d|^\)|^minmax\(0,$/.test(w)).length;
+  const rows = [];
+  for (let i = 0; i < cells.length; i += width) rows.push(cells.slice(i, i + width).map((c) => {
+    // A choice reads as its prompt, not its options.
+    const pick = [...c.all()].find((n) => n.tagName === "SELECT");
+    return pick ? pick.children[0].textContent : c.textContent;
+  }));
+  return rows;
+});
+
 test("composer: the card for a busy collection", async () => {
   const { host, view } = await mount("composer", busy);
   const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
   assert.ok(card, "the card is shown");
   assert.equal(host.children[0], card, "above the message box");
-  const all = texts(card);
-  assert.ok(all.includes("3 repos: 1 file, 3 commits to push"));
-  assert.ok(all.includes("api: 3 behind"));
-  assert.ok(all.includes("api #7 · conflict"));
-  // Services are marked ■ (some running) or ▶ (none), not with a dot.
-  assert.ok(all.includes("■1/2 services running"));
-  assert.ok(buttons(card).includes("Resolve"));
-  // The branch of every repository.
-  assert.equal(all.filter((t) => t === "openclaw/test").length, 3);
-  assert.equal(all.filter((t) => t === "preview").length, 1);
+  const [repos, services] = tables(card);
+  // A column per fact, in its place; "·" where there is none.
+  assert.deepEqual(repos, [
+    ["Repo", "Branch", "±", "↑", "↓", "PR", "C", "M", "R"],
+    ["api", "openclaw/test", "·", "2", "3", "#7", "✗", "✗", "○"],
+    ["web", "openclaw/test", "1", "↑", "·", "·", "·", "·", "·"],
+    ["hooks", "openclaw/test", "·", "1", "·", "·", "·", "·", "·"],
+  ]);
+  // A service and its tunnel are one row; the tunnel has its column.
+  assert.deepEqual(services.map((r) => r.slice(1)), [
+    ["Service", "Repo", "State", "URL", "cloudflare", ""],
+    ["preview", "api", "ready", ":42201", "calm-river✕", "+"],
+    ["worker", "api", "exited (exit 1)", "·", "·", "+"],
+  ]);
+  assert.ok(titled(card, "preview is running. Stop it"));
+  assert.ok(titled(card, "Start all services"));
+  assert.ok(titled(card, "Close the cloudflare tunnel"));
+  view.dispose();
+});
+
+test("composer: the actions are on the facts they change", async () => {
+  const { host, view } = await mount("composer", busy);
+  const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
+  const named = (re) => [...card.all()].find((n) => n.tagName === "BUTTON" && re.test(n.title));
+  calls.length = 0;
+  await named(/^3 new on main\. Catch up/).onclick();
+  assert.deepEqual(calls.map((c) => c.actionId), ["catch-up"]);
+  await named(/^#7 conflicts with main\. Resolve/).onclick();
+  assert.match(calls.at(-1).message, /Pull request #7 of api conflicts/);
+  // Bitbucket is pushed by the conversation.
+  await named(/^1 commit to push\./).onclick();
+  assert.equal(calls.at(-1).message, "Push hooks to its branch and open a draft pull request.");
   view.dispose();
 });
 
 test("composer: a repository without a branch yet", async () => {
   const { host, view } = await mount("composer", collection([repo("api", { branch: null })]));
   assert.ok(texts(host).includes("at main"));
-  assert.ok(texts(host).includes("all pushed"));
   view.dispose();
 });
 
@@ -272,18 +307,13 @@ test("panel: a new tunnel, and one whose client is missing", async () => {
   view.dispose();
 });
 
-test("composer: start and stop all in the rows only with more than one service", async () => {
+test("composer: start and stop all only with more than one service", async () => {
   const one = await mount("composer", collection([repo("api")], [
     { group: "api/web", path: "api/web/main", repo: "api", kind: "service", label: "preview", state: "absent" },
   ]));
   assert.ok(titled(one.host, "preview: absent. Start it"));
-  const detail = [...one.host.all()].find((n) => n.className === "wtc-collection-card").children.find((n) => n.tagName === "DIV");
-  assert.equal(titled(detail, "Start all services"), undefined);
+  assert.equal(titled(one.host, "Start all services"), undefined);
   one.view.dispose();
-  const { host, view } = await mount("composer", busy);
-  assert.ok(titled(host, "Start all services"));
-  assert.ok(titled(host, "Stop all services"));
-  view.dispose();
 });
 
 test("panel: the ways to a service", async () => {
@@ -329,14 +359,17 @@ test("panel: a portal of the gateway beside its service", async () => {
   open.view.dispose();
 });
 
-test("composer: the collection's actions on the summary while collapsed", async () => {
+test("composer: collapsed, the same facts summed", async () => {
   const { host, view } = await mount("composer", busy);
   const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
   const summary = card.children.find((n) => n.tagName === "SUMMARY");
-  assert.deepEqual(buttons(summary).filter((b) => b.length > 1), ["Push 3", "Catch up", "▶ Start all", "■ Stop all"]);
-  // Open, the rows have them and the summary does not repeat them.
+  assert.equal(summary.children[1].textContent, "±1↑3↓3PR1 ✗svc▶1/2");
+  // ↑ pushes every repository, ↓ catches every one up.
+  assert.ok(titled(summary, "Push api, web, hooks, each to its pull request or a new draft one"));
+  assert.ok([...summary.all()].some((n) => n.tagName === "BUTTON" && /^Catch up api \(3\)/.test(n.title)));
+  // Open, the tables have them and the summary does not repeat them.
   card.open = true;
   for (const fn of card.listeners.toggle) fn();
-  assert.deepEqual(buttons(summary).filter((b) => b.length > 1), []);
+  assert.equal(summary.children[1].textContent, "");
   view.dispose();
 });

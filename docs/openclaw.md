@@ -156,38 +156,41 @@ so a conversation whose repositories are held by owner sessions shows none of
 them. The plugin in [`openclaw-plugin/`](../openclaw-plugin) adds the view of
 the task as a whole:
 
-- a card above the message box, where OpenClaw shows a task's progress.
-  Collapsed, it shows what is not pushed yet, each open pull request
-  coloured by its CI, and how many of the collection's services run, each with
-  its action for the whole collection: **Push** (every repository with
-  something to push), **Catch up** (every one behind) and **Start all** or
-  **Stop all**; expanded,
-  each repository on its branch with **Push + PR** (**Push** once it has a pull
-  request) and **Catch up**, and each service on one line with its address and
-  its tunnels, as `wtc status` shows them. A service leads with a small button,
-  where a repository has its forge icon, that is its state: ■ stops a running
-  one, ▶ starts a stopped one, ↻ restarts a failed one; with more than one
-  service, **Start all** and **Stop all** sit above them. Each open tunnel
-  links to its address and closes with ✕, a closed one is a **▶ provider**
-  button to open it again. A new way in opens with **+ Tunnel…** and a choice:
-  first the gateway's own OpenClaw portal, then a public Cloudflare or ngrok
-  link for when a portal does not work, a dev tunnel for the person's account,
-  and Tailscale when the plugin's `teamTailnet` setting says the gateway's
-  tailnet is the team's rather than a person's; a Tailscale tunnel is never
-  public, a public link is Cloudflare's or ngrok's. Without portal ingress on
-  the gateway (`gateway.portals.ingress`, or Tailscale run by the gateway), a
-  portal answers at the gateway's own address, so it is offered last, marked
-  "needs ingress". With one way left, the button
-  names it (**+ gateway**). A provider whose client is not on the gateway's
-  PATH says "install first", and the conversation is asked to install it. An
-  open portal links as **gateway**, marked ⚠ when its address is one the
-  browser cannot reach (a container's, without portal ingress on the gateway).
-  A service's own address is on the gateway, often inside a container, so it
-  shows as its port only. A tunnel
-  started as a service of its own is marked, with **Consolidate** asking the
-  conversation to open it again with `wtc svc tunnel`. It appears only on sessions that have a collection. The plugin
-  provides it as a composer that wraps the built-in one, selected when the
-  plugin loads; **Customize UI → Built-in** switches back.
+- a card above the message box, where OpenClaw shows a task's progress. It
+  is `wtc status`'s tables: every fact has its column, always in the same
+  place, and `·` where there is none. **Repo Branch ± ↑ ↓ PR C M R** is a row
+  per repository: files changed, commits to push, commits behind the base,
+  the pull request, its CI, whether it merges and its review. **Service Repo
+  State URL** is a row per service, then a column per way in (an OpenClaw
+  portal or a tunnel provider) and a **+** that opens a new one. Collapsed, the
+  card shows the same facts summed, in the same order: **± ↑ ↓ PR svc**.
+
+  What can be done about a fact is done on it, so actions have their place
+  too: the ↑ count pushes (opening a draft pull request when there is none;
+  a Bitbucket repository is pushed by the conversation), the ↓ count catches
+  up, a ✗ under **M** asks the conversation to resolve the conflict, and a
+  service's ▶, ■ or ↻ starts, stops or restarts it. The same marks in the
+  header of the services act on all of them, and collapsed, ↑, ↓ and the
+  services' mark act on the whole collection.
+
+  An open tunnel shows the first part of its address, links to it and closes
+  with ✕; a closed one is a ▶ to open it again. **+** offers, in order, the
+  gateway's own OpenClaw portal, a public Cloudflare or ngrok link for when a
+  portal does not work, a dev tunnel for the person's account, and Tailscale
+  when the plugin's `teamTailnet` setting says the gateway's tailnet is the
+  team's rather than a person's; a Tailscale tunnel is never public, a public
+  link is Cloudflare's or ngrok's. Without portal ingress on the gateway
+  (`gateway.portals.ingress`, or Tailscale run by the gateway), a portal
+  answers at the gateway's own address, so it is offered last, marked "needs
+  ingress", and an open one is marked ⚠ when the browser cannot reach its
+  address. A provider whose client is not on the gateway's PATH says "install
+  first", and the conversation is asked to install it. A service's own address
+  is on the gateway, often inside a container, so it shows as its port only. A
+  tunnel started as a service of its own is marked, with **Consolidate** asking
+  the conversation to open it again with `wtc svc tunnel`. The card appears
+  only on sessions that have a collection. The plugin provides it as a
+  composer that wraps the built-in one, selected when the plugin loads;
+  **Customize UI → Built-in** switches back.
 - a **Collection** panel with a row per repository — branch, commits ahead of
   and behind the base, what the next publication would send, the pull request
   with its CI, and **Catch up** and **Push + PR** buttons — the collection's
