@@ -27,8 +27,9 @@ driven from one conversation:
 The conversation edits, builds and commits in the worktrees through the
 folder. The owners only hold the worktrees for publication, which the
 collection card's ↑ starts with the gateway's own `sessions.github.publish`,
-as the chat's Publish PR button does for a session's single checkout. A conversation per repository, for swarming, is
-an explicit choice: `wtc add-repo --separate`.
+as the chat's Publish PR button does for a session's single checkout. A
+conversation per repository, for swarming, is an explicit choice:
+`wtc add-repo --separate`.
 
 The branch prefix is fixed by OpenClaw. The name must be lowercase letters,
 digits and hyphens, at most 64 characters.
@@ -39,7 +40,7 @@ digits and hyphens, at most 64 characters.
 |---|---|---|
 | add a repository | `wtc add-repo <repo> --worktree <name>` | calls `sessions_spawn` with each intent's `args` |
 | see the collection | `wtc status [<name>]` | reads it: folder, repositories, pull requests, services |
-| check a publication | `wtc publish --title "…"` in `<folder>/<repo>` | the person publishes from the panel, or the owner calls `github_publish` |
+| check a publication | `wtc publish --title "…"` in `<folder>/<repo>` | tells the person it is ready: they push it with ↑ in the card. Only when they ask the agent to publish does the owner call `github_publish` |
 | catch up | `wtc catch-up` in `<folder>/<repo>` | publishes again to send the merge |
 
 `<repo>` names a project on the gateway, or a GitHub repository as
@@ -221,19 +222,50 @@ Both render what `wtc status <name> --json` prints and refresh every 30
 seconds while they are open. `node --test openclaw-plugin/test/*.test.mjs`
 renders them against a minimal DOM.
 
-```sh
-openclaw config set gateway.controlUi.experimental.customPlugins true
-openclaw plugins install -l /path/to/openclaw-plugin
-```
+## Install
 
-## What the gateway needs
+On the gateway's host, as the user the gateway runs as. In a container, the
+first two steps belong in its image.
 
-- `wtc` on the `PATH` of the gateway and of the agents' shells.
-- Git 2.42 or newer and the GitHub CLI. OpenClaw 2026.10.2 checks Git
-  attributes with `git var GIT_ATTR_GLOBAL` before it publishes; its image
-  ships Git 2.39 and no `gh`, and publication fails there with "workspace
-  attributes could not be verified".
-- For pushing from the card, each person's own GitHub connection
-  (**Settings → Profile → GitHub connections → For me**). An agent's
-  `github_publish` uses the gateway's shared identity instead.
-- Each repository registered as a project.
+1. **`wtc`** on the `PATH` of the gateway and of the agents' shells: a
+   [release](https://github.com/lcorneliussen/wtc-cli/releases)'s
+   `wtc_<version>_linux_<arch>.tar.gz` unpacked into `/usr/local/bin`, or
+   `mise use -g github:lcorneliussen/wtc-cli@<version>`.
+2. **Git 2.42 or newer and the GitHub CLI.** OpenClaw 2026.10.2 checks Git
+   attributes with `git var GIT_ATTR_GLOBAL` before it publishes; its image
+   ships Git 2.39 and no `gh`, and publication fails there with "workspace
+   attributes could not be verified".
+3. **The plugin**, which brings the collection card, the Collection panel and
+   the agent's `wtc` skill:
+
+   ```sh
+   wtc openclaw install
+   ```
+
+   It is embedded in `wtc`, so it is always the plugin of that version. It
+   turns on custom Control UI plugins
+   (`gateway.controlUi.experimental.customPlugins`) and runs
+   `openclaw plugins install … --force`. Restart the gateway if the card does
+   not appear. Run it again after every `wtc` upgrade. For a gateway on
+   another host, `wtc openclaw install --dir ./wtc-plugin` writes the plugin
+   for `openclaw plugins install ./wtc-plugin --force` there.
+4. **Bitbucket**, if repositories live there:
+
+   ```sh
+   openclaw plugins install git:github.com/lcorneliussen/openclaw-bitbucket@v0.3.0 --accept-capabilities
+   openclaw config set plugins.entries.bitbucket.config.execLogin false
+   ```
+
+   `execLogin false` keeps people's Bitbucket logins out of the agents'
+   commands, so that pushing goes only through the card.
+5. **Each person** connects their own accounts, which the gateway pushes
+   with: GitHub under **Settings → Profile → GitHub connections → For me**,
+   Bitbucket on `/plugins/bitbucket/connect` opened in its own tab. The card
+   says so the first time it needs one.
+6. **Repositories** the gateway clones itself: **Add repository** in the
+   Collection panel, or the gateway's own project settings.
+
+To check: `openclaw plugins list` shows **Worktree Collection** with the `wtc`
+version, `openclaw skills list` shows `wtc` as ready, and a conversation asked
+to "start the collection 1-try-wtc with <owner/repo>" gets a card above its
+message box.

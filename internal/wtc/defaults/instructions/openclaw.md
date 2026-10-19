@@ -40,7 +40,7 @@ the args, and do not do the work some other way.
 | add a repository | `wtc add-repo <repo> --worktree <name>` | call `sessions_spawn` once per intent |
 | see the collection | `wtc status [<name>]` | — |
 | check before publishing | `wtc publish --title "<what changed>"` in `<folder>/<repo>` | — |
-| publish | the person presses **Publish** for the repository in the Collection panel; or `sessions_send` the owner: "Run wtc publish --title '…' and carry out its plan." | — |
+| publish | nothing: tell the person it is ready. They push it with **↑** for the repository in the collection card, as themselves, after confirming | — |
 | take in upstream changes | `wtc catch-up` in `<folder>/<repo>` | publish again to send the merge |
 | run a service | `wtc svc add <name> --port-env <VAR> -- <cmd>` in the folder | `wtc svc` shows it; the panel too |
 
@@ -60,13 +60,22 @@ publish the wrong thing:
   worktree, so read the plan's `pending` list before you call the tool:
   anything that is not part of the work has to be removed or ignored first.
 
-On GitHub the gateway then commits what is pending, pushes the branch and
-opens or updates a **draft** pull request after your turn ends. The result
-arrives in the session without starting a new turn. People merge.
+**Pushing is the person's.** The collection card's ↑ has the gateway push
+the repository with their own GitHub or Bitbucket account, after they
+confirm. On GitHub the gateway commits what is pending first, so the
+`pending` list matters there too; on Bitbucket only what is committed is
+pushed, so commit first. Either way it opens or updates a **draft** pull
+request. People merge.
 
-On another forge the plan's intent has a `forge` and no `tool`: the gateway
-brokers nothing there. Commit first, then hand the plan to that forge's
-skill, which pushes from the worktree. Never force-push.
+Only when the person explicitly asks *you* to publish, carry out the plan
+yourself, in the repository's session (`sessions_send` its owner: "Run wtc
+publish --title '…' and carry out its plan."). On GitHub that is the
+`github_publish` tool: the gateway commits, pushes and opens the draft pull
+request as its own GitHub identity after your turn ends, and the result
+arrives in the session without a new turn. On another forge the intent has a
+`forge` and no `tool`: commit first, then hand the plan to that forge's
+skill. If the skill says the gateway keeps logins out of your commands, you
+cannot push there: the person pushes from the card. Never force-push.
 
 ## Catching up
 
@@ -75,5 +84,5 @@ never rebases and never pushes. A conflicted merge is aborted and reported:
 merge by hand, resolve, commit. Rebasing a published branch makes it
 unpublishable.
 
-Never run `git push` yourself in a GitHub worktree, and never `git rebase` or
-`git commit --amend` on commits that were published.
+Never run `git push` yourself, and never `git rebase` or `git commit --amend`
+on commits that were published.

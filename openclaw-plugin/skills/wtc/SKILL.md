@@ -1,0 +1,30 @@
+---
+name: wtc
+description: "Worktree collections under OpenClaw: one task across several repositories, driven from one conversation. Use when a task names an issue, spans repositories, or the person mentions wtc, a collection, the Collection panel or its card; before adding a repository, publishing, catching up or running a service for it."
+metadata: { "openclaw": { "emoji": "🗂️", "requires": { "bins": ["wtc", "git"] } } }
+---
+
+# wtc
+
+`wtc` is on this gateway's PATH, and the gateway shows a conversation's
+collection in the Control UI: a card above the message box and a Collection
+panel. Its instructions come with the binary, so they always match it:
+
+```bash
+wtc docs instructions/openclaw.md
+```
+
+Read that before the first `wtc` command of a task and follow it. In short:
+
+- `wtc add-repo <repo> --worktree <issue-id>-<slug>` creates nothing: it
+  prints `sessions_spawn` intents. Call `sessions_spawn` once per intent,
+  with its `args` unchanged.
+- `wtc status <name>` shows the collection folder; edit, build, test and
+  commit in `<folder>/<repo>`.
+- **Pushing is the person's.** When work is committed, run
+  `wtc publish --title "…"` in `<folder>/<repo>` to check it, and tell the
+  person it is ready: they push it with ↑ for that repository in the card,
+  as themselves, after confirming. Carry out the publish plan yourself only
+  when they explicitly ask you to. Never `git push`.
+- `wtc catch-up` in `<folder>/<repo>` merges the base in; it never rebases
+  and never pushes.
