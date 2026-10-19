@@ -61,3 +61,55 @@ func TestOpenClawInstallRunsOpenClaw(t *testing.T) {
 		t.Fatalf("openclaw was called with:\n%s", calls)
 	}
 }
+
+func TestOpenClawInstallFlagsAndErrors(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "wtc")
+	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %s: %v", out, err)
+	}
+	bin := filepath.Join(root, "bin")
+	log := filepath.Join(root, "calls")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(path string, args ...string) (string, error) {
+		cmd := exec.Command(binary, append([]string{"openclaw", "install"}, args...)...)
+		cmd.Env = append(os.Environ(), "PATH="+path)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	// --dir writes the plugin and calls nothing.
+	dir := filepath.Join(root, "plugin")
+	if out, err := run(bin, "--dir", dir); err != nil || !strings.Contains(out, "openclaw plugins install "+dir) {
+		t.Fatalf("--dir: %s %v", out, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "openclaw.plugin.json")); err != nil {
+		t.Fatal("--dir wrote no plugin")
+	}
+
+	// Without openclaw on the PATH it says where to run it.
+	if out, err := run(bin); err == nil || !strings.Contains(out, "openclaw is not on the PATH") {
+		t.Fatalf("no openclaw: %s %v", out, err)
+	}
+
+	// --no-config installs without touching the setting; a failing
+	// openclaw is an error.
+	fake := "#!/bin/sh\necho \"$*\" >> " + log + "\n[ -z \"$FAIL\" ]\n"
+	if err := os.WriteFile(filepath.Join(bin, "openclaw"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(bin, "--no-config"); err != nil {
+		t.Fatalf("--no-config: %s %v", out, err)
+	}
+	calls, _ := os.ReadFile(log)
+	if lines := strings.Split(strings.TrimSpace(string(calls)), "\n"); len(lines) != 1 || !strings.HasPrefix(lines[0], "plugins install ") {
+		t.Fatalf("--no-config called openclaw with:\n%s", calls)
+	}
+	cmd := exec.Command(binary, "openclaw", "install")
+	cmd.Env = append(os.Environ(), "PATH="+bin, "FAIL=1")
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "openclaw config set") {
+		t.Fatalf("a failing openclaw was not reported: %s %v", out, err)
+	}
+}
