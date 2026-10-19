@@ -1,0 +1,332 @@
+package openclaw
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// Checkout is a session's gateway-managed worktree, seen through plain git.
+type Checkout struct {
+	Dir      string
+	Worktree string // the managed worktree's name; the branch is openclaw/<name>
+	Origin   Origin
+	Repo     string
+	Dest     string // the branch a pull request goes into
+	// Private is a checkout without an origin: the copy of the worktree a
+	// sandbox gets. Only the gateway knows its repository and base.
+	Private bool
+}
+
+func git(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+			return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(exit.Stderr)))
+		}
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return strings.TrimRight(string(out), "\n"), nil
+}
+
+func gitOK(dir string, args ...string) bool {
+	_, err := git(dir, args...)
+	return err == nil
+}
+
+// OpenCheckout reads the managed worktree dir is in. dest overrides the
+// branch pull requests go into; empty means the base recorded for the
+// worktree, else origin's default branch.
+func OpenCheckout(dir, dest string) (*Checkout, error) {
+	top, err := git(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, errors.New("not in a git checkout: publishing and catching up work in the session that owns a repository")
+	}
+	branch, _ := git(top, "branch", "--show-current")
+	name, managed := strings.CutPrefix(branch, BranchPrefix)
+	if !managed || !ValidWorktreeName(name) {
+		at := "a detached HEAD"
+		if branch != "" {
+			at = "branch " + branch
+		}
+		return nil, fmt.Errorf("%s is on %s, not on an %s<name> branch: the gateway only publishes a session's managed worktree. Ask the collection's session to add this repository", top, at, BranchPrefix)
+	}
+	c := &Checkout{Dir: top, Worktree: name, Dest: dest}
+	if url, err := git(top, "remote", "get-url", "origin"); err == nil {
+		c.Origin = ParseOrigin(url)
+	} else {
+		c.Origin = Origin{Forge: ForgeUnknown}
+		c.Private = true
+	}
+	c.Repo = c.Origin.Repo
+	if c.Repo == "" {
+		// A managed worktree's directory is named after the worktree; the
+		// repository's name is its main checkout's.
+		if common, err := git(top, "rev-parse", "--path-format=absolute", "--git-common-dir"); err == nil {
+			c.Repo = filepath.Base(strings.TrimSuffix(filepath.Clean(common), string(filepath.Separator)+".git"))
+		}
+	}
+	if c.Dest == "" {
+		c.Dest = recordedBase(top)
+	}
+	if c.Dest == "" {
+		head, _ := git(top, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+		c.Dest = strings.TrimPrefix(head, "origin/")
+	}
+	if c.Dest == "" {
+		for _, candidate := range []string{"main", "master", "develop"} {
+			if gitOK(top, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+candidate) {
+				c.Dest = candidate
+				break
+			}
+		}
+	}
+	if c.Dest == "" && !c.Private {
+		return nil, errors.New("cannot tell which branch pull requests go into; pass --dest")
+	}
+	return c, nil
+}
+
+// CurrentWorktree is the managed worktree name of the checkout dir is in, or
+// empty when dir is not in one.
+func CurrentWorktree(dir string) string {
+	branch, _ := git(dir, "branch", "--show-current")
+	if name, ok := strings.CutPrefix(branch, BranchPrefix); ok && ValidWorktreeName(name) {
+		return name
+	}
+	return ""
+}
+
+// Branch is the checkout's branch.
+func (c *Checkout) Branch() string { return Branch(c.Worktree) }
+
+func (c *Checkout) inProgress() string {
+	for marker, what := range map[string]string{
+		"MERGE_HEAD": "a merge", "rebase-merge": "a rebase", "rebase-apply": "a rebase",
+		"CHERRY_PICK_HEAD": "a cherry-pick", "REVERT_HEAD": "a revert", "BISECT_LOG": "a bisect",
+	} {
+		p, err := git(c.Dir, "rev-parse", "--path-format=absolute", "--git-path", marker)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			return what
+		}
+	}
+	return ""
+}
+
+// publicationMarker is the trailer the gateway puts on the commit it creates
+// for a publication.
+const publicationMarker = "OpenClaw-Publication:"
+
+// publishedHead is the newest commit known to have been published from this
+// branch, or empty. The gateway pushes without updating a remote-tracking
+// ref, so the evidence is local: the branch's reflog remembers the commits
+// the gateway marked, also after an amend or a rebase moved the branch off
+// them. A remote-tracking ref counts too when something did fetch one.
+func (c *Checkout) publishedHead() string {
+	branch := c.Branch()
+	if log, err := git(c.Dir, "log", "-g", "-n", "500", "--format=%H%x00%B%x01", "refs/heads/"+branch); err == nil {
+		for _, entry := range strings.Split(log, "\x01") {
+			hash, body, _ := strings.Cut(strings.TrimSpace(entry), "\x00")
+			if hash != "" && strings.Contains(body, publicationMarker) {
+				return hash
+			}
+		}
+	}
+	if hash, err := git(c.Dir, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch); err == nil {
+		return hash
+	}
+	return ""
+}
+
+type change struct{ status, path string }
+
+func (c *Checkout) pending() ([]change, error) {
+	out, err := git(c.Dir, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+	var changes []change
+	fields := strings.Split(out, "\x00")
+	for i := 0; i < len(fields); i++ {
+		f := fields[i]
+		if len(f) < 4 {
+			continue
+		}
+		// OpenClaw mirrors its skills into a sandbox's checkout and leaves
+		// them out of a publication.
+		if strings.HasPrefix(f[3:], sandboxSkills) {
+			continue
+		}
+		changes = append(changes, change{f[:2], f[3:]})
+		if f[0] == 'R' || f[0] == 'C' {
+			i++ // the path it was renamed or copied from
+		}
+	}
+	return changes, nil
+}
+
+const sandboxSkills = ".openclaw/sandbox-skills/"
+
+// Names that hold credentials more often than source. A publication commits
+// every uncommitted file in the worktree, so one of these lying around would
+// be pushed with the work.
+var sensitive = regexp.MustCompile(`(?i)^(\.env(\..*)?|.*\.(pem|key|p12|pfx|keystore|jks)|id_(rsa|dsa|ecdsa|ed25519)|\.netrc|\.npmrc|\.pypirc|credentials(\.json)?|secrets?\.(json|ya?ml|env))$`)
+var harmless = regexp.MustCompile(`(?i)\.(example|sample|template|dist)$`)
+
+func sensitiveName(p string) bool {
+	base := path.Base(p)
+	return sensitive.MatchString(base) && !harmless.MatchString(base)
+}
+
+func workflowPath(p string) bool {
+	ok, _ := path.Match(".github/workflows/*.y*ml", p)
+	return ok
+}
+
+// PublishOptions are what the caller chooses about a publication.
+type PublishOptions struct {
+	Title, Body    string
+	AllowSensitive bool
+}
+
+// PlanPublish checks that publishing this checkout is safe and returns the
+// intent for it. It reads and never writes: no commit, no fetch, no push.
+func (c *Checkout) PlanPublish(opt PublishOptions) (Plan, error) {
+	if what := c.inProgress(); what != "" {
+		return Plan{}, fmt.Errorf("%s is in progress in %s: finish or abort it before publishing", what, c.Dir)
+	}
+	changes, err := c.pending()
+	if err != nil {
+		return Plan{}, err
+	}
+	var pending, secrets []string
+	workflows := false
+	for _, ch := range changes {
+		if strings.Contains(ch.status, "U") || ch.status == "AA" || ch.status == "DD" {
+			return Plan{}, fmt.Errorf("%s has unresolved conflicts (%s): resolve them before publishing", c.Dir, ch.path)
+		}
+		pending = append(pending, ch.path)
+		if ch.status[0] != 'D' && ch.status[1] != 'D' && sensitiveName(ch.path) {
+			secrets = append(secrets, ch.path)
+		}
+		workflows = workflows || workflowPath(ch.path)
+	}
+	sort.Strings(pending)
+	if len(secrets) > 0 && !opt.AllowSensitive {
+		return Plan{}, fmt.Errorf("uncommitted files that look like credentials would be published: %s. Remove or gitignore them, or pass --allow-sensitive if they are meant to be committed", strings.Join(secrets, ", "))
+	}
+
+	branch := c.Branch()
+	if published := c.publishedHead(); published != "" && !gitOK(c.Dir, "merge-base", "--is-ancestor", published, "HEAD") {
+		return Plan{}, fmt.Errorf("%s no longer contains %.12s, which was published: its history was rewritten (rebase, amend or reset), and published history is never rewritten. Put the changes on top of %.12s again (`git reset --soft %.12s` keeps them), or continue in a new session for a replacement pull request", branch, published, published, published)
+	}
+	if c.Private {
+		// A sandbox's copy names neither repository nor base: the gateway
+		// takes both from the session, and decides whether it can publish.
+		plan := NewPlan(intent(ActionPublish, ActorRepoSession, c.Repo, ToolGitHubPublish, PublishArgs{Title: opt.Title, Body: opt.Body}))
+		plan.Intents[0].Forge = ForgeUnknown
+		plan.Pending = pending
+		plan.Warnings = append(plan.Warnings,
+			"This checkout has no origin (a sandbox's private copy), so wtc cannot check the forge, the base branch or what was published before. The gateway publishes GitHub repositories only: for any other forge, publish from the repository's session outside the sandbox.")
+		if len(pending) > 0 {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("The gateway will commit all %d pending paths. Check the list: anything that does not belong to the work has to go first.", len(pending)))
+		}
+		if workflows {
+			plan.Warnings = append(plan.Warnings, "GitHub Actions workflow definitions changed. The gateway publishes those only for a requester with full operator write access.")
+		}
+		return plan, nil
+	}
+	dest := "refs/remotes/origin/" + c.Dest
+	hasDest := gitOK(c.Dir, "rev-parse", "--verify", "--quiet", dest)
+	if hasDest && !gitOK(c.Dir, "merge-base", "HEAD", dest) {
+		return Plan{}, fmt.Errorf("%s shares no history with origin/%s", branch, c.Dest)
+	}
+	if hasDest {
+		ahead, _ := git(c.Dir, "rev-list", "--count", dest+"..HEAD")
+		if ahead == "0" && len(pending) == 0 {
+			return Plan{}, fmt.Errorf("nothing to publish: %s has no commits and no changes beyond origin/%s", branch, c.Dest)
+		}
+		if names, err := git(c.Dir, "diff", "--name-only", dest+"...HEAD"); err == nil {
+			for _, p := range strings.Split(names, "\n") {
+				workflows = workflows || workflowPath(p)
+			}
+		}
+	}
+
+	plan := NewPlan(Publish(c.Repo, c.Origin, c.Worktree, c.Dest, opt.Title, opt.Body))
+	plan.Pending = pending
+	if c.Origin.Forge != ForgeGitHub {
+		if len(pending) > 0 {
+			return Plan{}, fmt.Errorf("commit your work first: the gateway only commits for GitHub, and %d uncommitted paths would stay behind (%s)", len(pending), strings.Join(pending, ", "))
+		}
+		plan.Warnings = append(plan.Warnings, "The gateway publishes to GitHub only. This intent names no tool: push the branch and open the pull request with the skill for "+string(c.Origin.Forge)+", and never force-push.")
+	} else if len(pending) > 0 {
+		plan.Warnings = append(plan.Warnings, fmt.Sprintf("The gateway will commit all %d pending paths. Check the list: anything that does not belong to the work has to go first.", len(pending)))
+	}
+	if workflows {
+		plan.Warnings = append(plan.Warnings, "GitHub Actions workflow definitions changed. The gateway publishes those only for a requester with full operator write access.")
+	}
+	return plan, nil
+}
+
+// CatchUp is the result of merging the destination branch into the checkout.
+type CatchUp struct {
+	Branch string `json:"branch"`
+	Dest   string `json:"dest"`
+	Merged bool   `json:"merged"`
+	Head   string `json:"head"`
+	Note   string `json:"note,omitempty"`
+}
+
+// CatchUp fetches the destination branch and merges it. It never rebases and
+// never pushes: published history stays as it is, and the gateway publishes
+// the merge with the next publication. A conflicted merge is aborted.
+func (c *Checkout) CatchUp() (CatchUp, error) {
+	result := CatchUp{Branch: c.Branch(), Dest: c.Dest}
+	if what := c.inProgress(); what != "" {
+		return result, fmt.Errorf("%s is in progress in %s: finish or abort it first", what, c.Dir)
+	}
+	changes, err := c.pending()
+	if err != nil {
+		return result, err
+	}
+	for _, ch := range changes {
+		if ch.status != "??" {
+			return result, fmt.Errorf("%s has uncommitted changes (%s): commit them before catching up, so a conflict cannot take them along", c.Dir, ch.path)
+		}
+	}
+	fetch := append(fetchCredentials(c.Origin), "fetch", "--quiet", "origin", "+refs/heads/"+c.Dest+":refs/remotes/origin/"+c.Dest)
+	if _, err := git(c.Dir, fetch...); err != nil {
+		return result, fmt.Errorf("cannot fetch %s from origin: %w", c.Dest, err)
+	}
+	dest := "refs/remotes/origin/" + c.Dest
+	if gitOK(c.Dir, "merge-base", "--is-ancestor", dest, "HEAD") {
+		result.Head, _ = git(c.Dir, "rev-parse", "HEAD")
+		result.Note = "already contains origin/" + c.Dest
+		return result, nil
+	}
+	if _, mergeErr := git(c.Dir, "merge", "--no-edit", "--quiet", dest); mergeErr != nil {
+		conflicts, _ := git(c.Dir, "diff", "--name-only", "--diff-filter=U")
+		if c.inProgress() != "" {
+			_, _ = git(c.Dir, "merge", "--abort")
+		}
+		if strings.TrimSpace(conflicts) == "" {
+			return result, fmt.Errorf("merging origin/%s into %s failed, and the checkout is as before: %w", c.Dest, c.Branch(), mergeErr)
+		}
+		return result, fmt.Errorf("merging origin/%s into %s conflicts in: %s. The merge was aborted and the checkout is as before. Merge by hand with `git merge origin/%s`, resolve, commit — do not rebase", c.Dest, c.Branch(), strings.Join(strings.Fields(conflicts), ", "), c.Dest)
+	}
+	result.Merged = true
+	result.Head, _ = git(c.Dir, "rev-parse", "HEAD")
+	return result, nil
+}

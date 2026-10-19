@@ -6,13 +6,14 @@ import (
 	"os"
 	"strings"
 
+	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
 
 func addCatchUpCommand(root *cobra.Command, asJSON *bool) {
 	var opt wtc.CatchUpOptions
-	var repos string
+	var repos, dest string
 	var harnessOnly bool
 	cmd := &cobra.Command{Use: "catch-up [collection ...]", Short: "Catch up selected worktree collections"}
 	cmd.Flags().BoolVar(&opt.All, "all", false, "Select every collection in the workspace (clean only)")
@@ -26,7 +27,11 @@ func addCatchUpCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&opt.NoMCP, "no-mcp", false, "Skip MCP refresh")
 	cmd.Flags().BoolVar(&opt.NoEnv, "no-env", false, "Skip environment refresh")
 	cmd.Flags().BoolVar(&opt.NoSecrets, "no-secrets", false, "Skip secret links")
+	cmd.Flags().StringVar(&dest, "dest", "", "Under OpenClaw: branch to merge in (default: origin's default branch)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if currentHost() == openclaw.HostOpenClaw {
+			return catchUpCheckout(dest, *asJSON)
+		}
 		if harnessOnly && repos != "" {
 			return fmt.Errorf("--harness-only and --repos cannot be combined")
 		}

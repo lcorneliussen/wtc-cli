@@ -347,7 +347,7 @@ func runtimeTunnelTemplate(provider, portEnv string, public bool) (cmd, ready st
 	switch provider {
 	case "tailscale":
 		if public {
-			return "", "", fmt.Errorf("a public tailscale tunnel (Funnel) only serves ports 443, 8443 and 10000; declare it by hand in the task file")
+			return "", "", fmt.Errorf("tailscale tunnels are tailnet-only; use cloudflare, ngrok or devtunnel for a public link")
 		}
 		return "exec tailscale serve --https=" + port + " " + local, "Available within your tailnet", nil
 	case "cloudflare":

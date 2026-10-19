@@ -5,6 +5,8 @@ description: Bring another repository into an existing worktree collection as a 
 
 # Add a repo to a live wtc
 
+**Under OpenClaw** (`wtc host` prints `openclaw`) `wtc add-repo <repo> --worktree <name>` creates nothing: it prints one `sessions_spawn` intent per repository for the collection's session to carry out, so that the gateway owns the worktrees — see [openclaw.md](../../instructions/openclaw.md).
+
 Collections start scoped to what the task looked like at the beginning. When
 it turns out to need another repo, add it — that is cheaper and more correct
 than a second collection or a stray clone somewhere else on disk.

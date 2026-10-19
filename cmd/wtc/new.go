@@ -22,6 +22,9 @@ func addNewCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&open, "open", false, "Open the new collection in herdr")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "Leave the collection unopened")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := refuseUnderGateway("new"); err != nil {
+			return err
+		}
 		if open && noOpen {
 			return fmt.Errorf("--open and --no-open cannot be combined")
 		}
