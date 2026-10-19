@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
 
 func TestCompatibility(t *testing.T) {
@@ -17,6 +19,9 @@ func TestCompatibility(t *testing.T) {
 		{">=0.4,<0.5", "0.5.0", false},
 		{">=0.4,<0.5", "dev", false},
 		{"invalid", "0.4.2", false},
+		{">=0.4.1,<0.5", "0.4.2-dev.3+dev.gabc1234", true},
+		{">=0.4.1,<0.5", "0.4.1+dev.gabc1234.dirty", true},
+		{">=0.4,<0.5", "0.5.1-dev.1+dev.gabc1234", false},
 	}
 	for _, c := range cases {
 		if got := compatible(c.requirement, c.version); got != c.want {
@@ -73,5 +78,14 @@ func TestEnvPreflightsPinAndShowsMiseDryRun(t *testing.T) {
 	out, err = cmd.CombinedOutput()
 	if err != nil || !strings.Contains(string(out), `"github:lcorneliussen/wtc-cli" = "0.1.1"`) {
 		t.Fatalf("named setup dry run did not show pin: %s, %v", out, err)
+	}
+}
+
+func TestDevBuildVersionsPassTheHarnessRange(t *testing.T) {
+	for _, describe := range []string{"v0.1.39-0-g69e3a79", "v0.1.39-3-g69e3a79", "v0.1.39-3-g69e3a79-dirty"} {
+		v, err := wtc.DevVersion(describe)
+		if err != nil || !compatible(">=0.1.39,<0.2", v) {
+			t.Fatalf("dev build %s (%s) should satisfy the range its release does: %v", v, describe, err)
+		}
 	}
 }
