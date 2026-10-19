@@ -374,6 +374,10 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 		if err := os.RemoveAll(filepath.Join(wtcDir, "skills")); err != nil {
 			return err
 		}
+		// A dev build is regenerated with wtc dev install.
+		if err := os.RemoveAll(devBuildDir(target)); err != nil {
+			return err
+		}
 		_ = os.Remove(filepath.Join(target, AdHocConfigDir)) // Only when nothing hand-written remains.
 		_ = os.Remove(wtcDir)                                // Other .wtc files are left for inspection.
 	} else if err != nil && !os.IsNotExist(err) {

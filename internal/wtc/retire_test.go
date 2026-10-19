@@ -15,6 +15,9 @@ func TestRetireCollectionRunsTeardownAndKeepsRemoteRefs(t *testing.T) {
 	}
 	target := result.Collection
 	fixtureFile(t, filepath.Join(target, ".wtc-prs.lock"), "", 0600)
+	// A dev build is generated and must not keep the folder alive.
+	fixtureFile(t, filepath.Join(target, ".wtc", "dev", "wtc"), "#!/bin/sh\n", 0755)
+	fixtureFile(t, filepath.Join(target, ".wtc", "dev", "version"), "0.1.40-dev.1+dev.gabc1234\n", 0644)
 	widget := filepath.Join(target, "widget")
 	if err := os.Remove(filepath.Join(widget, "init-ran")); err != nil {
 		t.Fatal(err)
