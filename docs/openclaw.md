@@ -26,9 +26,8 @@ driven from one conversation:
 
 The conversation edits, builds and commits in the worktrees through the
 folder. The owners only hold the worktrees for publication, which the
-Collection panel's **Push + PR** button starts with the gateway's own
-`sessions.github.publish`, as the chat's Publish PR button does for a
-session's single checkout. A conversation per repository, for swarming, is
+collection card's ↑ starts with the gateway's own `sessions.github.publish`,
+as the chat's Publish PR button does for a session's single checkout. A conversation per repository, for swarming, is
 an explicit choice: `wtc add-repo --separate`.
 
 The branch prefix is fixed by OpenClaw. The name must be lowercase letters,
@@ -166,8 +165,8 @@ the task as a whole:
   card shows the same facts summed, in the same order: **± ↑ ↓ PR svc**.
 
   What can be done about a fact is done on it, so actions have their place
-  too: the ↑ count pushes (opening a draft pull request when there is none;
-  a Bitbucket repository is pushed by the conversation), the ↓ count catches
+  too: the ↑ count pushes, opening a draft pull request when there is none,
+  the ↓ count catches
   up, a ✗ under **M** asks the conversation to resolve the conflict, and a
   service's ▶, ■ or ↻ starts, stops or restarts it. The same marks in the
   header of the services act on all of them, and collapsed, ↑, ↓ and the
@@ -191,10 +190,26 @@ the task as a whole:
   only on sessions that have a collection. The plugin provides it as a
   composer that wraps the built-in one, selected when the plugin loads;
   **Customize UI → Built-in** switches back.
-- a **Collection** panel with a row per repository — branch, commits ahead of
-  and behind the base, what the next publication would send, the pull request
-  with its CI, and **Catch up** and **Push + PR** buttons — the collection's
-  pull requests and services, and **Add repository**.
+
+  Pushing is the person's, never the agent's. The gateway publishes the
+  repository's worktree with the person's own GitHub connection
+  (**Settings → Profile → GitHub connections → For me**), which only the
+  gateway holds, and only once they confirm: the first click on ↑ asks the
+  gateway, which then waits, and ↑ becomes **confirm ↑** naming the account.
+  The gateway's shared GitHub account, often the `gh` login its agents use
+  too, is never used for it; without a personal connection ↑ says where to
+  connect one. The gateway does not push Bitbucket repositories yet, so their
+  ↑ shows what is waiting without a button; the card never asks the
+  conversation to push. **Resolve** asks it to merge and commit, not to push.
+- a **Collection** panel beside the conversation (⤢ on the card) with the
+  collection's name, branch and folder, the same repository and service
+  tables with the same actions, wtc status's pull request table (**PR Repo
+  State C M R Title**), and **Add repository**.
+
+Narrow, as beside a conversation, in a narrow window or on a phone (under
+520 pixels), every row wraps into two lines: first what it is (the repository
+and its branch, the service and its repository), then its facts, still in
+their columns under the header, which wraps the same way.
 
 Both render what `wtc status <name> --json` prints and refresh every 30
 seconds while they are open. `node --test openclaw-plugin/test/*.test.mjs`
@@ -212,5 +227,7 @@ openclaw plugins install -l /path/to/openclaw-plugin
   attributes with `git var GIT_ATTR_GLOBAL` before it publishes; its image
   ships Git 2.39 and no `gh`, and publication fails there with "workspace
   attributes could not be verified".
-- A GitHub identity for the agent, connected in the gateway's settings.
+- For pushing from the card, each person's own GitHub connection
+  (**Settings → Profile → GitHub connections → For me**). An agent's
+  `github_publish` uses the gateway's shared identity instead.
 - Each repository registered as a project.

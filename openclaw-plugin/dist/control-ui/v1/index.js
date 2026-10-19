@@ -28,22 +28,61 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const link = (text, href) => (/^https?:\/\//.test(href ?? "") ? el("a", { textContent: text, href, target: "_blank", rel: "noopener noreferrer" }) : text);
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
-const prLabel = (pr) => `#${pr.number} ${pr.draft && pr.state === "open" ? "draft" : pr.state}`;
 const isRunning = (s) => s.state === "ready" || s.state === "running";
 const isFailed = (s) => s.state === "failed" || (s.state === "exited" && s.exit_code > 0);
 const serviceState = (s) => `${s.state ?? "?"}${s.exit_code > 0 ? ` (exit ${s.exit_code})` : ""}`;
 
-// Publishes an owner's worktree: commits what is pending, pushes the branch
-// and opens or updates a draft pull request.
+// Pushing is the person's, through the gateway, never the agent's: the
+// gateway publishes an owner's worktree (commits what is pending, pushes the
+// branch, opens or updates a draft pull request) with the person's own
+// GitHub connection, which only the gateway holds, and only after they
+// confirm it. The shared account the gateway may also have (often the
+// gh login its agents use too) is never used for it.
+const CONNECT_GITHUB = "connect your own GitHub account first";
+// The Control UI's own pages sit under its base path, before /chat and the like.
+const appHref = (path) => {
+  const here = typeof location === "undefined" ? "" : location.pathname.replace(/\/(chat|dashboard|settings|sessions|share|skills|worktrees|agents)(\/.*)?$/, "");
+  return `${here.replace(/\/$/, "")}${path}`;
+};
+const personalAccount = (options) => {
+  const mine = options?.personal;
+  return mine?.state === "connected" && mine.account && mine.generation ? mine : null;
+};
+// Asks the gateway to publish; returns the confirmation it waits for, if any.
 async function publishRepo(host, agentId, r, say) {
   const name = r.repo ?? r.project;
+  const target = { sessionKey: r.sessionKey, agentId };
+  const mine = personalAccount(await host.request("sessions.github.options", target));
+  if (!mine) {
+    say(`${name}: ${CONNECT_GITHUB}.`);
+    return { connect: true };
+  }
   say(`Pushing ${name}…`);
   const out = await host.request("sessions.github.publish", {
-    sessionKey: r.sessionKey, agentId, idempotencyKey: uuid(), selection: { source: "shared" },
+    ...target, idempotencyKey: uuid(), selection: { source: "personal", account: mine.account, generation: mine.generation },
   });
-  if (out?.status === "published") say(`${name}: pushed ${out.url ?? ""}`);
-  else if (out?.status === "needs_confirmation") say(`${name}: the gateway asks for confirmation; open Publish in the owner session.`);
-  else say(`${name}: ${out?.status ?? "done"}${out?.error ? ` — ${out.error.message ?? out.error}` : ""}`);
+  return settle(host, target, name, out, say);
+}
+async function confirmRepo(host, agentId, r, pending, say) {
+  const name = r.repo ?? r.project;
+  const target = { sessionKey: r.sessionKey, agentId };
+  say(`Pushing ${name}…`);
+  const out = await host.request("sessions.github.confirm", { ...target, requestId: pending.requestId, ...pending.confirmation });
+  return settle(host, target, name, out, say);
+}
+// What a publish or confirm came back with: done, failed, or a confirmation
+// to ask the person for (its account, generation and digest, from status).
+async function settle(host, target, name, out, say) {
+  if (out?.status === "needs_confirmation") {
+    const status = await host.request("sessions.github.status", { ...target, requestId: out.requestId }).catch(() => null);
+    const c = status?.confirmation ?? out.confirmation ?? null;
+    if (!c) { say(`${name}: the gateway waits for a confirmation; confirm it under Publish in the owner session.`); return null; }
+    say(`${name}: confirm to push as @${c.account?.login ?? "you"}.`);
+    return { requestId: out.requestId, confirmation: { generation: c.generation, account: c.account, requestDigest: c.requestDigest } };
+  }
+  if (out?.status === "published") say(`${name}: pushed ${out.url ?? out.pullRequestUrl ?? ""}`.trim());
+  else say(`${name}: ${out?.status ?? "done"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${out.message}` : ""}`);
+  return null;
 }
 
 async function catchUpRepo(host, agentId, r, say) {
@@ -117,13 +156,6 @@ const prState = (pr) => [
   pr.mergeable === "conflicting" ? "conflicts with its base" : "",
   { approved: "approved", changes_requested: "changes requested", review_required: "review required" }[pr.review] ?? "",
 ].filter(Boolean);
-const prBadges = (pr) => [
-  pr.checks && pr.checks !== "none" ? chip(ciText(pr), TONE[pr.checks], `${pr.passed} passed, ${pr.failed} failed, ${pr.running} running`) : null,
-  pr.state === "open" && pr.mergeable === "conflicting" ? chip("conflict", TONE.failure, "Conflicts with its base branch: catch up and resolve") : null,
-  pr.state === "open" && pr.review === "approved" ? chip("approved", TONE.success) : null,
-  pr.state === "open" && pr.review === "changes_requested" ? chip("changes requested", TONE.failure) : null,
-  pr.state === "open" && pr.review === "review_required" ? chip("review required", TONE.none) : null,
-];
 // Forge marks before repository names, the way people know their repositories.
 const FORGE_PATHS = {
   github: "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12",
@@ -209,7 +241,6 @@ const askConversation = (host, sessionKey, message) => host.request("sessions.se
 // Pushing goes to the repository's own branch and, without one yet, opens a
 // draft pull request for it.
 const pushTitle = (pr) => pr ? `Commit what is pending and push it to #${pr.number}` : "Commit what is pending, push the branch and open a draft pull request";
-const pushRequest = (name, pr) => pr ? `Push ${name} to its pull request #${pr.number}.` : `Push ${name} to its branch and open a draft pull request.`;
 
 // Services. wtc svc starts, stops and restarts them (one, or all without a
 // group) and opens or closes their tunnels; the gateway runs it in the
@@ -275,14 +306,6 @@ function stateButton(g, svc) {
   if (g.failed) return stateGlyph("↻", `${g.label}: ${g.state}. Restart it`, TONE.failure, () => svc.run({ op: "restart", group: g.group }, `Restarting ${g.label}…`));
   if (g.running) return stateGlyph("■", `${g.label} is running. Stop it`, TONE.success, () => svc.run({ op: "down", group: g.group }, `Stopping ${g.label}…`));
   return stateGlyph("▶", `${g.label}: ${g.state}. Start it`, TONE.none, () => svc.run({ op: "up", group: g.group }, `Starting ${g.label}…`));
-}
-// Start all and stop all, for a collection with services.
-function allButtons(groups, svc) {
-  if (svc.busy("*")) return [busyMark()];
-  return [
-    groups.some((g) => !g.running) ? pill(groups.length > 1 ? "▶ Start all" : "▶ Start", "Start all services", () => svc.run({ op: "up" }, "Starting all services…")) : null,
-    groups.some((g) => g.running) ? pill(groups.length > 1 ? "■ Stop all" : "■ Stop", "Stop all services", () => svc.run({ op: "down" }, "Stopping all services…")) : null,
-  ];
 }
 // A service's tunnels: a running one links to its address and closes with ✕,
 // a closed one is a ▶ button to open it again. A new one opens through the
@@ -372,96 +395,98 @@ function newTunnel(g, svc, data = {}, { compact = false } = {}) {
   };
   return pick;
 }
-function tunnelControls(g, svc, data = {}) {
-  return [
-    ...portalsOf(g, data).map((p) => portalNode(g, p, svc)),
-    ...g.tunnels.map((t) => tunnelNode(g, t, svc)),
-    newTunnel(g, svc, data),
-  ].filter(Boolean);
-}
 
 // "wtc Collection", wtc linking to the project.
 const brand = (size) => css(el("span", {},
   css(el("a", { textContent: "wtc", href: HOME, target: "_blank", rel: "noopener noreferrer", title: "wtc — worktree collections (opens on GitHub)" }),
     "color:var(--accent, inherit);text-decoration:none;font-weight:700"),
   el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
-const dot = (tone) => css(el("span"), `flex:none;width:7px;height:7px;border-radius:50%;background:${tone}`);
-// mark replaces the dot: services show ▶ or ■, so they read apart from commits.
-const chip = (text, tone, title, mark) => css(el("span", { title: title ?? "" }, mark ? css(el("span", { textContent: mark }), `flex:none;color:${tone};font-size:9px`) : dot(tone), text),
-  "display:inline-flex;align-items:center;gap:5px;padding:0 8px;border-radius:10px;border:1px solid var(--border, rgba(0,0,0,.12));font-size:12px;line-height:20px;white-space:nowrap");
 
-function mountComposer(container, context) {
-  let ctx = context;
-  let watch = null;
-  let key = null;
-  let entry = null;
-  let note = "";
+// The collection as wtc status's tables, for the card and the panel alike: a
+// column per fact, always in its place, "·" where there is none. What can be
+// done about a fact is done on it: the ↑ count pushes, the ↓ count catches up,
+// a conflict is resolved, a service's state starts or stops it.
+//
+// v is the view: { host, key(), agent(), svc, say(text), refresh(), pause(on),
+// rerender() }. Narrow, a row wraps into two lines: what it is (the repository
+// and its branch, the service), then its facts under the header, still in
+// their columns.
+const NARROW_PX = 520;
+function collectionTables(v) {
   // Repositories being pushed, and being caught up.
   const busy = new Set();
   const catching = new Set();
-
-  const card = css(el("details", { className: "wtc-collection-card", open: remembered() }),
-    "box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset, 36px));max-width:var(--chat-thread-max-width, 48rem);margin:8px auto 0;background:var(--card, #fff);color:var(--text, inherit);border:1px solid var(--border, rgba(0,0,0,.08));border-radius:25px;font:inherit;font-size:14px");
-  const summary = css(el("summary"), "list-style:none;display:flex;align-items:center;gap:8px;padding:6px 8px 6px 13px;cursor:pointer");
-  const detail = css(el("div"), "padding:4px 18px 14px 18px;display:grid;gap:14px");
-  card.append(summary, detail);
-  card.addEventListener("toggle", () => remember(card.open));
-  const composer = el("div");
-  container.append(composer);
-  const unmountDefault = ctx.mountDefault(composer);
-
-  const iconButton = (text, title, run) => {
-    const b = css(el("button", { type: "button", textContent: text, title }),
-      "border:0;background:transparent;color:var(--muted, #888);cursor:pointer;font:inherit;padding:2px 6px;border-radius:8px");
-    b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); run(); };
-    return b;
-  };
-  const say = (text) => { note = text; if (entry) render(entry); };
-  const svcBusy = new Set();
-  const svc = {
-    busy: (k) => svcBusy.has(k),
-    ask: (text) => askConversation(ctx.host, key, text),
-    async run(payload, doing, k = payload.group ?? "*") {
-      svcBusy.add(k);
-      say(doing);
-      try {
-        const r = await svcRequest(ctx.host, key, agentOf(ctx), payload);
-        note = "";
-        return r;
-      } catch (err) {
-        note = String(err?.message ?? err);
-      } finally {
-        svcBusy.delete(k);
-        await watch?.refresh();
-        if (entry) render(entry);
-      }
-    },
-  };
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
   const toPush = (r) => r.unpublished || (!r.pullRequest ? r.ahead ?? 0 : 0);
   const pushable = (r) => !r.error && (r.dirty || toPush(r) > 0);
   const nameOf = (r) => r.repo ?? r.project ?? r.label;
   const baseOf = (r) => (r.base ? r.base.replace(/^origin\//, "") : "base");
+  // Pushes waiting for the person's confirmation, by owner session.
+  const confirming = new Map();
+  // Whether the person has their own GitHub connection: unknown until asked,
+  // asked again at most every 30 seconds while something waits to be pushed.
+  let mine = undefined;
+  let askedAt = 0;
+  let showConnect = false;
+  function checkAccount(repos) {
+    const r = repos.find((x) => x.forge === "github" && pushable(x));
+    if (!r || Date.now() - askedAt < 30000) return;
+    askedAt = Date.now();
+    v.host.request("sessions.github.options", { sessionKey: r.sessionKey, agentId: v.agent() })
+      .then((o) => {
+        const now = personalAccount(o);
+        if (now) showConnect = false;
+        if (!!now !== !!mine || mine === undefined) { mine = now; v.rerender(); }
+      }, () => {});
+  }
+  // How to connect it: shown once a push needed it, until it is there.
+  function notice() {
+    if (!showConnect || mine) return null;
+    const open = el("a", { textContent: "Open Settings → Profile", href: appHref("/settings/profile") });
+    open.style.cssText = "color:var(--accent, inherit);font-weight:600";
+    const close = smallButton("✕", "Hide", () => { showConnect = false; v.rerender(); });
+    return css(el("div", { className: "wtc-connect" },
+      css(el("div", {}, css(el("strong", { textContent: "Pushing needs your own GitHub account" }), ""), close), "display:flex;justify-content:space-between;align-items:center;gap:8px"),
+      el("div", { textContent: "The gateway pushes for you with it, after you confirm each push; the agent never gets it." }),
+      css(el("ol", {},
+        el("li", {}, open, ", then GitHub connections → Connect."),
+        el("li", { textContent: "Choose For me (not For the system), open github.com/login/device and enter the code shown." }),
+        el("li", { textContent: "Approve, including workflow. Then press ↑ again." })), "margin:0;padding-left:18px;display:grid;gap:2px"),
+      css(el("div", { textContent: "A GitHub identity under Agents → Tools is the agent's own; it is not used for pushing." }), "color:var(--muted, #888)")),
+    "font-size:12px;line-height:1.45;display:grid;gap:4px;padding:8px 10px;border:1px solid var(--border-strong, rgba(128,128,128,.4));border-radius:12px");
+  }
   async function publish(r) {
+    if (r.forge !== "github") return;
     busy.add(r.sessionKey);
-    watch?.pause(true);
-    render(entry);
+    v.pause(true);
+    v.rerender();
     try {
-      if (r.forge === "github") await publishRepo(ctx.host, agentOf(ctx), r, say);
-      else await askConversation(ctx.host, key, pushRequest(nameOf(r), r.pullRequest));
+      const pending = confirming.get(r.sessionKey);
+      confirming.delete(r.sessionKey);
+      const next = pending
+        ? await confirmRepo(v.host, v.agent(), r, pending, v.say)
+        : await publishRepo(v.host, v.agent(), r, v.say);
+      if (next?.connect) { mine = null; showConnect = true; v.reveal?.(); }
+      else {
+        // It is connected: look again rather than keep "not connected".
+        if (mine === null) { mine = undefined; askedAt = 0; showConnect = false; }
+        if (next) confirming.set(r.sessionKey, next);
+      }
+    } catch (err) {
+      v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`);
     } finally {
       busy.delete(r.sessionKey);
-      watch?.pause(false);
-      await watch?.refresh();
+      v.pause(false);
+      await v.refresh();
     }
   }
   async function catchUp(list) {
     list.forEach((r) => catching.add(r.sessionKey));
-    render(entry);
-    try { for (const r of list) await catchUpRepo(ctx.host, agentOf(ctx), r, say); } finally {
+    v.rerender();
+    try { for (const r of list) await catchUpRepo(v.host, v.agent(), r, v.say); } finally {
       list.forEach((r) => catching.delete(r.sessionKey));
-      await watch?.refresh();
+      await v.refresh();
     }
   }
   async function pushAll(list) {
@@ -483,20 +508,35 @@ function mountComposer(container, context) {
       e?.preventDefault();
       e?.stopPropagation();
       b.disabled = true;
-      try { await run(); } catch (err) { say(String(err?.message ?? err)); } finally { b.disabled = false; }
+      try { await run(); } catch (err) { v.say(String(err?.message ?? err)); } finally { b.disabled = false; }
     };
     return b;
   };
   const working = () => muted("…", "Working");
-  const table = (columns, rows) => {
+  // columns: { head, title, width, align, under }. Narrow, a column marked
+  // under (a repository's branch, a service's repository) goes below the
+  // cell before it, so that every fact keeps its column under one header,
+  // as wtc status keeps them when it narrows.
+  const table = (columns, rows, narrow = false) => {
     const align = (c) => (c.align === "center" ? "justify-self:center;" : "");
+    const shown = columns.map((c, i) => i).filter((i) => !(narrow && columns[i].under));
     const grid = css(el("div", { className: "wtc-table" }),
-      `display:grid;grid-template-columns:${columns.map((c) => c.width ?? "auto").join(" ")};column-gap:14px;row-gap:4px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums`);
-    grid.append(...columns.map((c) => css(el("span", { title: c.title ?? "" }, c.head ?? ""),
-      `${align(c)}font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted, #888);white-space:nowrap`)));
+      `display:grid;grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${narrow ? 8 : 14}px;row-gap:${narrow ? 6 : 4}px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums`);
+    const empty = (value) => value == null || value === "" || value === 0;
+    grid.append(...shown.map((i) => css(el("span", { title: columns[i].title ?? "" }, columns[i].head ?? ""),
+      `${align(columns[i])}font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted, #888);white-space:nowrap`)));
     for (const row of rows) {
-      grid.append(...row.map((v, i) => css(el("span", {}, v == null || v === "" || v === 0 ? DOT() : v),
-        `${align(columns[i])}min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap`)));
+      grid.append(...shown.map((i) => {
+        const c = columns[i];
+        const below = narrow && columns[i + 1]?.under && !empty(row[i + 1]) ? row[i + 1] : null;
+        const value = empty(row[i]) ? DOT() : row[i];
+        if (below) {
+          return css(el("span", {}, css(el("span", {}, value), "display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;white-space:nowrap"),
+            css(el("span", {}, below), "display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px")),
+          `${align(c)}min-width:0;display:grid;gap:1px`);
+        }
+        return css(el("span", {}, value), `${align(c)}min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap`);
+      }));
     }
     return grid;
   };
@@ -504,7 +544,7 @@ function mountComposer(container, context) {
   // REPO BRANCH ± ↑ ↓ PR C M R, as in wtc status.
   const REPO_COLUMNS = [
     { head: "Repo", width: "minmax(0,max-content)" },
-    { head: "Branch", width: "minmax(0,1fr)" },
+    { head: "Branch", width: "minmax(0,1fr)", under: true },
     { head: "±", title: "Changed files not committed yet", align: "center" },
     { head: "↑", title: "Commits to push: click to push them, opening a draft pull request if there is none", align: "center" },
     { head: "↓", title: "Commits on the base not merged in: click to catch up", align: "center" },
@@ -520,6 +560,19 @@ function mountComposer(container, context) {
     if (href) Object.assign(label, { href, target: "_blank", rel: "noopener noreferrer" });
     return css(el("span", {}, forgeIcon(r.forge, 13), label), "display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%");
   };
+  // ↑: the push, as a button only where the gateway pushes it (GitHub, with
+  // the person's own account); a confirmation waiting is "confirm ↑".
+  function pushCell(r, n) {
+    if (!pushable(r)) return null;
+    const label = n ? `↑ ${n}` : "↑";
+    const what = [r.dirty ? plural(r.dirty, "file") : "", n ? plural(n, "commit") : ""].filter(Boolean).join(" and ");
+    if (r.forge !== "github") return toned(label, TONE.pending, `${what} to push. The gateway does not push ${r.forge ?? "this forge"}'s repositories yet, and the card does not hand pushing to the agent.`);
+    const pending = confirming.get(r.sessionKey);
+    if (pending) return count(`confirm ${label}`, `Push ${what} of ${nameOf(r)} as @${pending.confirmation.account?.login ?? "you"}`, TONE.success, () => publish(r));
+    // Asked again on the click, so a connection just made is used at once.
+    if (mine === null) return count(label, `${what} to push. Pushing needs your own GitHub account: click to push, or for how to connect it`, TONE.none, () => publish(r));
+    return count(label, `${what} to push. ${pushTitle(r.pullRequest)}, with your own GitHub account, after you confirm`, TONE.pending, () => publish(r));
+  }
   function repoRow(r) {
     const pr = r.pullRequest;
     const open = pr?.state === "open";
@@ -529,7 +582,7 @@ function mountComposer(container, context) {
       : null;
     const conflict = open && pr.mergeable === "conflicting"
       ? count("✗", `#${pr.number} conflicts with ${baseOf(r)}. Resolve: ask the conversation to merge the base in and resolve the conflicts`, TONE.failure,
-        () => askConversation(ctx.host, key, `Pull request #${pr.number} of ${nameOf(r)} conflicts with its base. Merge the base branch into ${nameOf(r)}, resolve the conflicts and commit.`))
+        () => askConversation(v.host, v.key(), `Pull request #${pr.number} of ${nameOf(r)} conflicts with its base. Merge the base branch into ${nameOf(r)}, resolve the conflicts and commit. Don't push: pushing is mine, through the gateway.`))
       : null;
     const review = open ? { approved: toned("✓", TONE.success, "approved"), changes_requested: toned("✗", TONE.failure, "changes requested"), review_required: muted("○", "review required") }[pr.review] ?? null : null;
     return [
@@ -537,8 +590,8 @@ function mountComposer(container, context) {
       r.error ? toned(r.error, TONE.failure, r.error)
         : css(el("code", { textContent: r.branch ?? `at ${baseOf(r)}`, title: r.branch ? `${r.branch}, ${r.ahead ?? 0} ahead of ${baseOf(r)}` : "No branch yet: the first push creates one" }), "font-size:12px;color:var(--muted, #888)"),
       r.dirty ? toned(String(r.dirty), TONE.pending, `${plural(r.dirty, "file")} changed, not committed yet`) : null,
-      busy.has(r.sessionKey) ? working() : pushable(r) ? count(n || "↑", `${[r.dirty ? plural(r.dirty, "file") : "", n ? plural(n, "commit") : ""].filter(Boolean).join(" and ")} to push. ${pushTitle(pr)}`, TONE.pending, () => publish(r)) : null,
-      catching.has(r.sessionKey) ? working() : r.behind ? count(r.behind, `${r.behind} new on ${baseOf(r)}. Catch up: merge them in; never rebases, never pushes`, TONE.pending, () => catchUp([r])) : null,
+      busy.has(r.sessionKey) ? working() : pushCell(r, n),
+      catching.has(r.sessionKey) ? working() : r.behind ? count(`↓ ${r.behind}`, `${r.behind} new on ${baseOf(r)}. Catch up: merge them in; never rebases, never pushes`, TONE.pending, () => catchUp([r])) : null,
       pr ? css(el("span", { title: pr.title ?? "" }, link(`#${pr.number}`, pr.url), pr.draft && open ? muted("draft") : pr.state !== "open" ? muted(pr.state) : null), "display:inline-flex;gap:4px") : null,
       ci, conflict, review,
     ];
@@ -547,29 +600,29 @@ function mountComposer(container, context) {
   // ▶/■ NAME REPO STATE URL, then a column per way in (gateway, cloudflare…)
   // and the + that opens a new one.
   const slug = (url) => { try { return new URL(url).hostname.split(".")[0]; } catch { return url; } };
-  function serviceTable(groups, data) {
+  function serviceTable(groups, data, narrow = false) {
     const ways = [];
     for (const g of groups) {
       if (portalsOf(g, data).length && !ways.includes("gateway")) ways.push("gateway");
       for (const t of g.tunnels) if (!ways.includes(tunnelName(t))) ways.push(tunnelName(t));
     }
-    const all = groups.length > 1 && !svc.busy("*")
+    const all = groups.length > 1 && !v.svc.busy("*")
       ? css(el("span", {},
-        groups.some((g) => !g.running) ? stateGlyph("▶", "Start all services", TONE.none, () => svc.run({ op: "up" }, "Starting all services…")) : null,
-        groups.some((g) => g.running) ? stateGlyph("■", "Stop all services", TONE.success, () => svc.run({ op: "down" }, "Stopping all services…")) : null),
+        groups.some((g) => !g.running) ? stateGlyph("▶", "Start all services", TONE.none, () => v.svc.run({ op: "up" }, "Starting all services…")) : null,
+        groups.some((g) => g.running) ? stateGlyph("■", "Stop all services", TONE.success, () => v.svc.run({ op: "down" }, "Stopping all services…")) : null),
       "display:inline-flex;gap:2px")
-      : svc.busy("*") ? busyMark() : "";
+      : v.svc.busy("*") ? busyMark() : "";
     const columns = [
       { head: all, width: groups.length > 1 ? "max-content" : "14px" },
-      { head: "Service", width: "minmax(0,max-content)" },
-      { head: "Repo", width: "minmax(0,max-content)" },
+      { head: "Service", width: narrow ? "minmax(0,1fr)" : "minmax(0,max-content)" },
+      { head: "Repo", width: "minmax(0,max-content)", under: true },
       { head: "State" },
       { head: "URL", title: "Where it listens on the gateway" },
       ...ways.map((w) => ({ head: w, title: w === "gateway" ? "OpenClaw portals" : `${w} tunnels` })),
       { head: "", width: "minmax(0,1fr)" },
     ];
     const rows = groups.map((g) => [
-      stateButton(g, svc),
+      stateButton(g, v.svc),
       css(el("span", { textContent: g.label, title: g.group ?? "" }), "font-weight:600;color:var(--text-strong, inherit)"),
       g.repo ? muted(g.repo) : null,
       g.loose ? toned("separate tunnel", TONE.pending, "Started apart from the service it exposes")
@@ -578,25 +631,26 @@ function mountComposer(container, context) {
       ...ways.map((w) => {
         if (w === "gateway") {
           const ps = portalsOf(g, data);
-          return ps.length ? portalNode(g, ps[0], svc, "open") : null;
+          return ps.length ? portalNode(g, ps[0], v.svc, "open") : null;
         }
         const t = g.tunnels.find((x) => tunnelName(x) === w);
-        return t ? tunnelNode(g, t, svc, { label: t.url ? slug(t.url) : "open", opener: (title, run) => stateGlyph("▶", title, TONE.none, run) }) : null;
+        return t ? tunnelNode(g, t, v.svc, { label: t.url ? slug(t.url) : "open", opener: (title, run) => stateGlyph("▶", title, TONE.none, run) }) : null;
       }),
       css(el("span", {}, g.loose
-        ? count("Consolidate", "Ask the conversation to open it with wtc svc tunnel instead", "inherit", () => askConversation(ctx.host, key, consolidate(g)))
-        : newTunnel(g, svc, data, { compact: true }) ?? ""), "justify-self:end"),
+        ? count("Consolidate", "Ask the conversation to open it with wtc svc tunnel instead", "inherit", () => askConversation(v.host, v.key(), consolidate(g)))
+        : newTunnel(g, v.svc, data, { compact: true }) ?? ""), "justify-self:end"),
     ]);
-    return table(columns, rows);
+    return table(columns, rows, narrow);
   }
 
   // Collapsed, the same facts summed, in the same order: ± ↑ ↓, the pull
   // requests, the services. ↑ pushes and ↓ catches up every repository.
   function totals(repos, groups) {
-    const slot = (head, value, title) => css(el("span", { title: title ?? "" }, muted(head), value ?? DOT()),
+    // An action says what it is (↑ 3), a fact has its head before it (± 1).
+    const slot = (head, value, title) => css(el("span", { title: title ?? "" }, value?.tagName === "BUTTON" ? null : muted(head), value ?? DOT()),
       "display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums");
     const files = repos.reduce((n, r) => n + (r.dirty ?? 0), 0);
-    const ready = repos.filter(pushable);
+    const ready = repos.filter((r) => pushable(r) && r.forge === "github");
     const commits = ready.reduce((n, r) => n + toPush(r), 0);
     const behind = repos.filter((r) => r.behind > 0);
     const prs = repos.filter((r) => r.pullRequest?.state === "open");
@@ -604,23 +658,105 @@ function mountComposer(container, context) {
     const out = [
       slot("±", files ? toned(String(files), TONE.pending) : null, "Changed files not committed yet"),
       slot("↑", ready.some((r) => busy.has(r.sessionKey)) ? working() : ready.length
-        ? count(commits || "↑", `Push ${ready.map(nameOf).join(", ")}, each to its pull request or a new draft one`, TONE.pending, () => pushAll(ready)) : null),
+        ? count(commits ? `↑ ${commits}` : "↑", `Push ${ready.map(nameOf).join(", ")}, each to its pull request or a new draft one`, TONE.pending, () => pushAll(ready)) : null),
       slot("↓", behind.some((r) => catching.has(r.sessionKey)) ? working() : behind.length
-        ? count(behind.reduce((n, r) => n + r.behind, 0), `Catch up ${behind.map((r) => `${nameOf(r)} (${r.behind})`).join(", ")}: merge the base in; never rebases, never pushes`, TONE.pending, () => catchUp(behind)) : null),
+        ? count(`↓ ${behind.reduce((n, r) => n + r.behind, 0)}`, `Catch up ${behind.map((r) => `${nameOf(r)} (${r.behind})`).join(", ")}: merge the base in; never rebases, never pushes`, TONE.pending, () => catchUp(behind)) : null),
       slot("PR", prs.length ? toned(`${prs.length}${worst && prTone(worst) === TONE.failure ? " ✗" : worst && prTone(worst) === TONE.success ? " ✓" : ""}`, prTone(worst),
         prs.map((r) => `${nameOf(r)} #${r.pullRequest.number}: ${[r.pullRequest.title, ...prState(r.pullRequest)].filter(Boolean).join(", ")}`).join("\n")) : null),
     ];
     if (groups.length) {
       const up = groups.filter((g) => g.running).length;
-      const glyph = svc.busy("*") ? busyMark() : up < groups.length
-        ? stateGlyph("▶", groups.length > 1 ? "Start all services" : `Start ${groups[0].label}`, TONE.none, () => svc.run({ op: "up" }, "Starting all services…"))
-        : stateGlyph("■", groups.length > 1 ? "Stop all services" : `Stop ${groups[0].label}`, TONE.success, () => svc.run({ op: "down" }, "Stopping all services…"));
+      const glyph = v.svc.busy("*") ? busyMark() : up < groups.length
+        ? stateGlyph("▶", groups.length > 1 ? "Start all services" : `Start ${groups[0].label}`, TONE.none, () => v.svc.run({ op: "up" }, "Starting all services…"))
+        : stateGlyph("■", groups.length > 1 ? "Stop all services" : `Stop ${groups[0].label}`, TONE.success, () => v.svc.run({ op: "down" }, "Stopping all services…"));
       out.push(css(el("span", { title: groups.map((g) => `${g.label}: ${g.state}`).join("\n") }, muted("svc"), glyph,
         toned(`${up}/${groups.length}`, groups.some((g) => g.failed) ? TONE.failure : up ? TONE.success : TONE.none)),
       "display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums"));
     }
     return out;
   }
+
+  function prTable(repos, narrow = false) {
+    const open = repos.filter((r) => r.pullRequest);
+    const columns = [
+      { head: "PR" },
+      { head: "Repo", width: "minmax(0,max-content)" },
+      { head: "State" },
+      { head: "C", title: "CI", align: "center" },
+      { head: "M", title: "Merges with its base", align: "center" },
+      { head: "R", title: "Review", align: "center" },
+      { head: "Title", width: "minmax(0,1fr)" },
+    ];
+    return table(columns, open.map((r) => {
+      const pr = r.pullRequest;
+      const [, , , , , , ci, conflict, review] = repoRow(r);
+      return [link(`#${pr.number}`, pr.url), muted(nameOf(r)), muted(pr.draft && pr.state === "open" ? "draft" : pr.state), ci, conflict, review,
+        css(el("span", { textContent: pr.title ?? "", title: pr.title ?? "" }), "overflow:hidden;text-overflow:ellipsis")];
+    }), narrow);
+  }
+  return { table, checkAccount, notice, repoTable: (repos, narrow) =>
+    // Narrow, the repository (with its branch below) takes the room the
+    // branch had.
+    table(narrow ? REPO_COLUMNS.map((c, i) => (i === 0 ? { ...c, width: "minmax(0,1fr)" } : c)) : REPO_COLUMNS, repos.map(repoRow), narrow), serviceTable, totals, prTable };
+}
+
+function mountComposer(container, context) {
+  let ctx = context;
+  let watch = null;
+  let key = null;
+  let entry = null;
+  let note = "";
+
+  const card = css(el("details", { className: "wtc-collection-card", open: remembered() }),
+    "box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset, 36px));max-width:var(--chat-thread-max-width, 48rem);margin:8px auto 0;background:var(--card, #fff);color:var(--text, inherit);border:1px solid var(--border, rgba(0,0,0,.08));border-radius:25px;font:inherit;font-size:14px");
+  const summary = css(el("summary"), "list-style:none;display:flex;align-items:center;gap:8px;padding:6px 8px 6px 13px;cursor:pointer");
+  const detail = css(el("div"), "padding:4px 18px 14px 18px;display:grid;gap:14px");
+  card.append(summary, detail);
+  card.addEventListener("toggle", () => remember(card.open));
+  const composer = el("div");
+  container.append(composer);
+  const unmountDefault = ctx.mountDefault(composer);
+
+  const iconButton = (text, title, run) => {
+    const b = css(el("button", { type: "button", textContent: text, title }),
+      "border:0;background:transparent;color:var(--muted, #888);cursor:pointer;font:inherit;padding:2px 6px;border-radius:8px");
+    b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); run(); };
+    return b;
+  };
+  const say = (text) => { note = text; if (entry) render(entry); };
+  // Narrow (a phone, a narrow window), rows wrap into two lines.
+  let narrow = false;
+  const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([e]) => {
+    const now = e.contentRect.width > 0 && e.contentRect.width < NARROW_PX;
+    if (now !== narrow) { narrow = now; if (entry) render(entry); }
+  });
+  sized?.observe(card);
+  const svcBusy = new Set();
+  const svc = {
+    busy: (k) => svcBusy.has(k),
+    ask: (text) => askConversation(ctx.host, key, text),
+    async run(payload, doing, k = payload.group ?? "*") {
+      svcBusy.add(k);
+      say(doing);
+      try {
+        const r = await svcRequest(ctx.host, key, agentOf(ctx), payload);
+        note = "";
+        return r;
+      } catch (err) {
+        note = String(err?.message ?? err);
+      } finally {
+        svcBusy.delete(k);
+        await watch?.refresh();
+        if (entry) render(entry);
+      }
+    },
+  };
+  const tables = collectionTables({
+    get host() { return ctx.host; }, key: () => key, agent: () => agentOf(ctx), svc, say,
+    // What a push needs (the how-to of connecting GitHub) shows open.
+    reveal: () => { if (!card.open) { card.open = true; remember(true); } },
+    refresh: () => watch?.refresh(), pause: (on) => watch?.pause(on), rerender: () => entry && render(entry),
+  });
 
   function render(next) {
     entry = next;
@@ -632,7 +768,7 @@ function mountComposer(container, context) {
     const groups = serviceGroups(entry.data.services ?? []);
     summary.replaceChildren(
       brand("14px"),
-      css(el("span", {}, ...(card.open ? [] : totals(repos, groups))), "flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding-left:6px"),
+      css(el("span", {}, ...(card.open ? [] : tables.totals(repos, groups))), "flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding-left:6px"),
       // What an action is doing or why it failed shows here.
       css(el("span", {}, note ? css(el("span", { textContent: note, title: note }), "color:var(--muted, #888);font-size:12px;max-width:22em;overflow:hidden;text-overflow:ellipsis") : null,
         iconButton("↻", `Updated ${ago(entry.at)}. Refresh`, () => void watch?.refresh()),
@@ -640,7 +776,8 @@ function mountComposer(container, context) {
         css(el("span", { textContent: card.open ? "⌃" : "⌄" }), "color:var(--muted, #888);padding:0 6px")),
       "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
     );
-    detail.replaceChildren(...[table(REPO_COLUMNS, repos.map(repoRow)), groups.length ? serviceTable(groups, entry.data) : null].filter(Boolean));
+    tables.checkAccount(repos);
+    detail.replaceChildren(...[tables.repoTable(repos, narrow), tables.notice(), groups.length ? tables.serviceTable(groups, entry.data, narrow) : null].filter(Boolean));
     if (card.parentNode !== container) container.prepend(card);
   }
   card.addEventListener("toggle", () => entry && render(entry));
@@ -669,6 +806,7 @@ function mountComposer(container, context) {
     },
     dispose() {
       clearInterval(tick);
+      sized?.disconnect();
       watch?.dispose();
       card.remove();
       unmountDefault?.();
@@ -683,7 +821,6 @@ function mountCollection(container, context) {
   let ctx = context;
   let entry = null;
   let watch = null;
-  const busy = new Set();
 
   const root = css(el("section", { className: "wtc-collection" }),
     "position:relative;padding:14px 16px;font:inherit;font-size:14px;color:var(--text, inherit);overflow:auto;height:100%;box-sizing:border-box;display:grid;gap:14px;align-content:start");
@@ -694,8 +831,6 @@ function mountCollection(container, context) {
     "font-family:var(--mono, ui-monospace, monospace);font-size:12px;color:var(--muted, #888);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0");
   const heading = (text, ...extra) => css(el("div", {}, css(el("span", { textContent: text }), "font-size:12px;font-weight:600;color:var(--muted, #888)"), ...extra),
     "display:flex;align-items:center;gap:8px;margin-bottom:6px");
-  const card = (...kids) => css(el("div", {}, ...kids),
-    "background:var(--card, transparent);border:1px solid var(--border, rgba(128,128,128,.25));border-radius:var(--radius-lg, 14px);padding:10px 12px;display:grid;gap:6px;min-width:0");
   const row = (...kids) => css(el("div", {}, ...kids), "display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap");
   const button = (text, title, run, primary) => {
     const b = css(el("button", { textContent: text, type: "button", title }),
@@ -722,17 +857,6 @@ function mountCollection(container, context) {
   let note = "";
   const say = (text) => { note = text; log.textContent = text; log.style.minHeight = text ? "1em" : "0"; };
 
-  async function publish(r) {
-    busy.add(r.sessionKey);
-    watch?.pause(true);
-    render();
-    try { await publishRepo(ctx.host, ctx.props.agentId, r, say); } finally {
-      busy.delete(r.sessionKey);
-      watch?.pause(false);
-      await watch?.refresh();
-    }
-  }
-
   const sessionKeyOf = () => entry?.data?.collection?.sessionKey ?? ctx.props.sessionKey;
   const svcBusy = new Set();
   const svc = {
@@ -756,10 +880,18 @@ function mountCollection(container, context) {
     },
   };
 
-  async function catchUp(r) {
-    await catchUpRepo(ctx.host, ctx.props.agentId, r, say);
-    await watch?.refresh();
-  }
+  const tables = collectionTables({
+    get host() { return ctx.host; }, key: sessionKeyOf, agent: () => ctx.props.agentId, svc, say,
+    refresh: () => watch?.refresh(), pause: (on) => watch?.pause(on), rerender: () => render(),
+  });
+  // The panel is often narrow, beside the conversation or on a phone: rows
+  // then wrap into two lines.
+  let narrow = false;
+  const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([e]) => {
+    const now = e.contentRect.width > 0 && e.contentRect.width < NARROW_PX;
+    if (now !== narrow) { narrow = now; render(); }
+  });
+  sized?.observe(root);
 
   // Adding a repository: what is typed is a GitHub owner/name, a GitHub or
   // Bitbucket URL, or a search. The search offers the projects the gateway
@@ -952,60 +1084,6 @@ function mountCollection(container, context) {
     return css(el("div", {}, input, results), "display:grid;gap:6px");
   })();
 
-  function repoCard(r, branch) {
-    const name = r.repo ?? r.project ?? r.label;
-    const what = [r.dirty ? plural(r.dirty, "file") : "", r.unpublished ? plural(r.unpublished, "commit") : ""].filter(Boolean).join(", ");
-    const pr = r.pullRequest;
-    const actions = css(el("span"), "margin-left:auto;display:flex;gap:6px");
-    if (busy.has(r.sessionKey)) actions.append(muted("Pushing…"));
-    else if (!r.error) {
-      if (r.behind) actions.append(button("Catch up", "Merge the base branch into this worktree. Never rebases, never pushes.", () => catchUp(r)));
-      if (pr?.state === "open" && pr.mergeable === "conflicting") actions.append(button("Resolve", "Ask the conversation to merge the base branch in and resolve the conflicts",
-        () => askConversation(ctx.host, sessionKeyOf(), `Pull request #${pr.number} of ${name} conflicts with its base. Merge the base branch into ${name}, resolve the conflicts and commit.`)));
-      if (what || (!pr && r.ahead > 0)) {
-        actions.append(r.forge === "github"
-          ? button(pr ? "Push" : "Push + PR", pushTitle(pr), () => publish(r), true)
-          : button(pr ? "Push" : "Push + PR", pushTitle(pr), () => askConversation(ctx.host, sessionKeyOf(), pushRequest(name, pr)), true));
-      }
-    }
-    const base = r.base ? r.base.replace(/^origin\//, "") : "base";
-    const position = r.ahead ? `${r.ahead} ahead of ${base}` : r.behind ? `on ${base}` : `even with ${base}`;
-    const lines = [
-      row(repoTitle(r), actions),
-      row(r.branch && r.branch !== branch ? mono(r.branch) : null, r.branch && r.branch !== branch ? muted("·") : null,
-        muted(r.error ?? position), what || r.conflicted || r.behind ? null : muted("· clean")),
-    ];
-    if (what || r.conflicted || r.behind) {
-      lines.push(row(
-        r.behind ? chip(`${r.behind} behind ${base}`, TONE.pending, `${r.base} has ${plural(r.behind, "commit")} this worktree does not: Catch up merges them in`) : null,
-        what ? chip(`${what} to push`, TONE.pending) : null,
-        r.conflicted ? chip(`${r.conflicted} in conflict`, TONE.failure) : null));
-    }
-    if (pr) {
-      const badges = prBadges(pr).filter(Boolean);
-      const ci = badges.length ? badges : [muted("no checks")];
-      lines.push(css(el("div", {},
-        css(el("div", { textContent: pr.title ?? `Pull request #${pr.number}`, title: pr.title ?? "" }), "font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"),
-        row(css(el("span", {}, link(prLabel(pr), pr.url)), "font-size:12px;white-space:nowrap"), ...ci)),
-      "display:grid;gap:4px;padding-top:8px;border-top:1px solid var(--border, rgba(128,128,128,.2))"));
-    }
-    return card(...lines);
-  }
-
-  // A service with its tunnels: the local address, then one link per tunnel.
-  function serviceRow(g) {
-    return css(el("div", {}, stateButton(g, svc),
-      css(el("span", { textContent: g.label }), "font-weight:600"),
-      muted([g.repo, g.state].filter(Boolean).join(" · ")),
-      g.loose ? chip("separate tunnel", TONE.pending, "Started apart from the service it exposes") : null,
-      css(el("span", {},
-        g.loose ? button("Consolidate", "Ask the conversation to open it with wtc svc tunnel instead", () => askConversation(ctx.host, sessionKeyOf(), consolidate(g))) : null,
-        g.url ? address(g.url) : null,
-        ...tunnelControls(g, svc, entry.data)),
-      "margin-left:auto;font-size:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap")),
-    "display:flex;align-items:center;gap:8px;padding:8px 12px;flex-wrap:wrap");
-  }
-
   function render() {
     if (!entry?.data) {
       header.replaceChildren(css(el("div", { textContent: entry?.error ? `The collection could not be loaded: ${entry.error}` : "Loading…" }), "color:var(--muted, #888)"));
@@ -1026,28 +1104,22 @@ function mountCollection(container, context) {
       data.collection.folder ? css(el("div", {}, mono(data.collection.folder, "The collection's folder: one link per repository to its worktree")), "display:flex;margin-top:2px") : null,
     );
 
-    const repoSection = el("div", {}, heading("Repositories"));
-    const list = css(el("div"), "display:grid;gap:8px");
-    if (repos.length === 0) list.append(muted("No repositories yet. Ask in the conversation, or add one below.", "font-size:13px"));
-    list.append(...repos.map((r) => repoCard(r, branch)));
-    list.append(adder);
-    repoSection.append(list);
+    const repoSection = css(el("div", {}, heading("Repositories")), "display:grid;gap:10px");
+    if (repos.length === 0) repoSection.append(muted("No repositories yet. Ask in the conversation, or add one below.", "font-size:13px"));
+    else repoSection.append(tables.repoTable(repos, narrow));
+    tables.checkAccount(repos);
+    const howTo = tables.notice();
+    if (howTo) repoSection.append(howTo);
+    repoSection.append(adder);
 
-    const serviceSection = el("div", {}, groups.length ? heading("Services", ...allButtons(groups, svc)) : heading("Services"));
+    const prSection = repos.some((r) => r.pullRequest) ? el("div", {}, heading("Pull requests"), tables.prTable(repos, narrow)) : null;
+
+    const serviceSection = el("div", {}, heading("Services"));
     if (groups.length === 0) serviceSection.append(muted(data.servicesNote ?? "None running. Start them in the collection folder with wtc svc.", "font-size:13px"));
-    else {
-      const box = card();
-      box.style.cssText += ";padding:0;gap:0";
-      groups.forEach((g, i) => {
-        const r = serviceRow(g);
-        if (i) r.style.borderTop = "1px solid var(--border, rgba(128,128,128,.2))";
-        box.append(r);
-      });
-      serviceSection.append(box);
-    }
+    else serviceSection.append(tables.serviceTable(groups, data, narrow));
 
     const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
-    body.replaceChildren(repoSection, serviceSection, ...warnings);
+    body.replaceChildren(...[repoSection, prSection, serviceSection, ...warnings].filter(Boolean));
     log.textContent = note;
   }
 
@@ -1074,6 +1146,7 @@ function mountCollection(container, context) {
     },
     dispose() {
       clearInterval(tick);
+      sized?.disconnect();
       watch?.dispose();
       root.remove();
     },

@@ -94,7 +94,11 @@ const collections = new Map();
 const calls = [];
 let svcResult = { ok: true, result: { message: "done" } };
 let portals = [];
+// The person's own GitHub connection, when a test gives them one.
+let personal = null;
 const hostRequest = async (method, params) => {
+  if (method === "sessions.github.options") return { personal, shared: { source: "system-detected", login: "octo-bot" } };
+  if (method === "sessions.github.status") return { confirmation: { generation: personal?.generation, account: personal?.account, requestDigest: "d1" } };
   if (method === "plugins.sessionAction" && params.actionId === "collection") {
     const data = collections.get(params.sessionKey);
     return data instanceof Error ? { ok: false, error: data.message } : { ok: true, result: data };
@@ -102,6 +106,8 @@ const hostRequest = async (method, params) => {
   if (method === "portal.list") return { portals };
   calls.push({ method, ...params });
   if (method === "plugins.sessionAction" && params.actionId === "svc") return svcResult;
+  if (method === "sessions.github.publish") return { status: "needs_confirmation", requestId: "req-1" };
+  if (method === "sessions.github.confirm") return { status: "published", url: "https://github.com/octo/api/pull/7" };
   return {};
 };
 
@@ -140,6 +146,20 @@ const busy = collection([
   { group: "api/worker", path: "api/worker", repo: "api", kind: "service", state: "exited", exit_code: 1 },
 ]);
 
+// The card's cells, row by row: a table is a grid of a header and rows of
+// as many cells, as in wtc status.
+const tables = (node) => [...node.all()].filter((n) => n.className === "wtc-table").map((t) => {
+  const cells = t.children;
+  const width = t.style.cssText.match(/grid-template-columns:([^;]*)/)[1].split(" ").filter((w) => w && !/^\d|^\)|^minmax\(0,$/.test(w)).length;
+  const rows = [];
+  for (let i = 0; i < cells.length; i += width) rows.push(cells.slice(i, i + width).map((c) => {
+    // A choice reads as its prompt, not its options.
+    const pick = [...c.all()].find((n) => n.tagName === "SELECT");
+    return pick ? pick.children[0].textContent : c.textContent;
+  }));
+  return rows;
+});
+
 test("panel: an empty collection", async () => {
   const { host, view } = await mount("panel", collection([]));
   const all = texts(host);
@@ -153,23 +173,18 @@ test("panel: an empty collection", async () => {
 test("panel: a busy collection", async () => {
   const { host, view } = await mount("panel", busy);
   const all = texts(host);
-  // The shared branch once, in the header, not on every repository.
-  assert.equal(all.filter((t) => t === "openclaw/test").length, 1);
+  // The shared branch once in the header, every repository's in its row.
   assert.ok(all.includes("3 repositories · 1/2 services running"));
-  assert.ok(all.includes("3 behind main"));
-  assert.ok(all.includes("2 commits to push"));
-  assert.ok(all.includes("conflict"));
-  assert.ok(all.includes("CI 1 failed"));
-  assert.deepEqual(buttons(host).filter((b) => b.length > 1 && !b.startsWith("■ ") && !b.startsWith("▶ ")), ["Catch up", "Resolve", "Push", "Push + PR", "Push + PR"]);
-  // Each service leads with a button that is its state and its action.
+  const [repos, prs, services] = tables(host);
+  assert.deepEqual(repos[1], ["api", "openclaw/test", "·", "↑ 2", "↓ 3", "#7", "✗", "✗", "○"]);
+  // wtc status's PRs: number, repository, state, C M R, title.
+  assert.deepEqual(prs, [["PR", "Repo", "State", "C", "M", "R", "Title"], ["#7", "api", "open", "✗", "✗", "○", "Add paging"]]);
+  assert.deepEqual(services[1].slice(1), ["preview", "api", "ready", ":42201", "calm-river✕", "+"]);
   assert.ok(titled(host, "preview is running. Stop it"));
   assert.ok(titled(host, "worker: exited (exit 1). Restart it"));
   assert.ok(titled(host, "Start all services"));
   assert.ok(titled(host, "Stop all services"));
   assert.ok(titled(host, "Close the cloudflare tunnel"));
-  // A service and its tunnel are one line.
-  assert.equal(all.filter((t) => t === "preview").length, 1);
-  assert.ok(all.includes("cloudflare"));
   view.dispose();
 });
 
@@ -177,9 +192,7 @@ test("panel: repositories on different branches", async () => {
   const { host, view } = await mount("panel", collection([
     repo("api"), repo("web"), repo("docs", { branch: "release" }),
   ]));
-  const all = texts(host);
-  assert.equal(all.filter((t) => t === "openclaw/test").length, 1);
-  assert.equal(all.filter((t) => t === "release").length, 1);
+  assert.deepEqual(tables(host)[0].slice(1).map((r) => r[1]), ["openclaw/test", "openclaw/test", "release"]);
   view.dispose();
 });
 
@@ -195,7 +208,7 @@ test("panel: a tunnel started as a service of its own", async () => {
     { group: "api/share", path: "api/share/main", repo: "api", kind: "service", state: "ready", url: "https://calm-river.trycloudflare.com" },
   ]));
   const all = texts(host);
-  assert.equal(all.filter((t) => t === "separate tunnel").length, 1);
+  assert.equal([...host.all()].filter((n) => n.title === "Started apart from the service it exposes").length, 1);
   assert.ok(buttons(host).includes("Consolidate"));
   view.dispose();
 });
@@ -204,20 +217,6 @@ test("composer: no card for a session without repositories", async () => {
   const { host, view } = await mount("composer", collection([]));
   assert.equal([...host.all()].some((n) => n.className === "wtc-collection-card"), false);
   view.dispose();
-});
-
-// The card's cells, row by row: a table is a grid of a header and rows of
-// as many cells, as in wtc status.
-const tables = (node) => [...node.all()].filter((n) => n.className === "wtc-table").map((t) => {
-  const cells = t.children;
-  const width = t.style.cssText.match(/grid-template-columns:([^;]*)/)[1].split(" ").filter((w) => w && !/^\d|^\)|^minmax\(0,$/.test(w)).length;
-  const rows = [];
-  for (let i = 0; i < cells.length; i += width) rows.push(cells.slice(i, i + width).map((c) => {
-    // A choice reads as its prompt, not its options.
-    const pick = [...c.all()].find((n) => n.tagName === "SELECT");
-    return pick ? pick.children[0].textContent : c.textContent;
-  }));
-  return rows;
 });
 
 test("composer: the card for a busy collection", async () => {
@@ -229,9 +228,9 @@ test("composer: the card for a busy collection", async () => {
   // A column per fact, in its place; "·" where there is none.
   assert.deepEqual(repos, [
     ["Repo", "Branch", "±", "↑", "↓", "PR", "C", "M", "R"],
-    ["api", "openclaw/test", "·", "2", "3", "#7", "✗", "✗", "○"],
+    ["api", "openclaw/test", "·", "↑ 2", "↓ 3", "#7", "✗", "✗", "○"],
     ["web", "openclaw/test", "1", "↑", "·", "·", "·", "·", "·"],
-    ["hooks", "openclaw/test", "·", "1", "·", "·", "·", "·", "·"],
+    ["hooks", "openclaw/test", "·", "↑ 1", "·", "·", "·", "·", "·"],
   ]);
   // A service and its tunnel are one row; the tunnel has its column.
   assert.deepEqual(services.map((r) => r.slice(1)), [
@@ -253,10 +252,40 @@ test("composer: the actions are on the facts they change", async () => {
   await named(/^3 new on main\. Catch up/).onclick();
   assert.deepEqual(calls.map((c) => c.actionId), ["catch-up"]);
   await named(/^#7 conflicts with main\. Resolve/).onclick();
-  assert.match(calls.at(-1).message, /Pull request #7 of api conflicts/);
-  // Bitbucket is pushed by the conversation.
-  await named(/^1 commit to push\./).onclick();
-  assert.equal(calls.at(-1).message, "Push hooks to its branch and open a draft pull request.");
+  assert.match(calls.at(-1).message, /Pull request #7 of api conflicts.*Don't push/);
+  // Bitbucket is not pushed from here: the gateway does not push it, and
+  // pushing is never handed to the agent.
+  assert.equal(named(/^1 commit to push/), undefined);
+  view.dispose();
+});
+
+test("composer: a push is the person's, with their own account, after they confirm", async () => {
+  const { host, view } = await mount("composer", busy);
+  const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
+  const push = () => [...card().all()].find((n) => n.tagName === "BUTTON" && /^2 commits to push/.test(n.title));
+  // Without their own connection, nothing is pushed: the shared account is
+  // never used.
+  calls.length = 0;
+  personal = null;
+  await push().onclick();
+  assert.equal(calls.some((c) => c.method === "sessions.github.publish"), false);
+  // The card says how to connect it, linking to the profile page.
+  const howTo = [...card().all()].find((n) => n.className === "wtc-connect");
+  assert.ok(howTo, "how to connect is shown");
+  assert.ok([...howTo.all()].some((n) => n.tagName === "A" && n.href === "/settings/profile"));
+  assert.match(howTo.textContent, /For me \(not For the system\)/);
+  // With it, publishing asks for a confirmation, which the ↑ turns into.
+  personal = { state: "connected", account: { id: 1, login: "octo" }, generation: "g1" };
+  await push().onclick();
+  await settle();
+  assert.deepEqual(calls.find((c) => c.method === "sessions.github.publish").selection, { source: "personal", account: { id: 1, login: "octo" }, generation: "g1" });
+  const confirm = [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "confirm ↑ 2");
+  assert.equal(confirm.title, "Push 2 commits of api as @octo");
+  await confirm.onclick();
+  await settle();
+  assert.deepEqual(calls.find((c) => c.method === "sessions.github.confirm"),
+    { method: "sessions.github.confirm", sessionKey: "agent:main:owner:api", agentId: "main", requestId: "req-1", generation: "g1", account: { id: 1, login: "octo" }, requestDigest: "d1" });
+  personal = null;
   view.dispose();
 });
 
@@ -291,7 +320,7 @@ test("panel: a new tunnel, and one whose client is missing", async () => {
   // The gateway's portal first; without tunnel clients, the others are
   // installed first, and Tailscale is not offered on a personal tailnet.
   assert.deepEqual(pick.children.map((o) => o.value), ["", "gateway", "cloudflare", "ngrok", "devtunnel"]);
-  assert.equal(pick.children[0].textContent, "+ Tunnel…");
+  assert.equal(pick.children[0].textContent, "+");
   assert.equal(pick.children[1].textContent, "gateway · OpenClaw portal");
   assert.equal(pick.children[2].textContent, "cloudflare · public link · install first");
   // Only reachable on the gateway: the port, not a link.
@@ -321,18 +350,18 @@ test("panel: the ways to a service", async () => {
   const team = await mount("panel", { ...collection([repo("api")], [web]), tunnelProviders: ["tailscale", "cloudflare"], teamTailnet: true });
   const pick = [...team.host.all()].find((n) => n.tagName === "SELECT");
   assert.deepEqual(pick.children.map((o) => o.textContent),
-    ["+ Tunnel…", "gateway · OpenClaw portal", "cloudflare · public link", "ngrok · public link · install first", "devtunnel · your account · install first", "tailscale · team tailnet"]);
+    ["+", "gateway · OpenClaw portal", "cloudflare · public link", "ngrok · public link · install first", "devtunnel · your account · install first", "tailscale · team tailnet"]);
   team.view.dispose();
   // Without portal ingress, the gateway's portal comes last, marked.
   const bare = await mount("panel", { ...collection([repo("api")], [web]), tunnelProviders: ["cloudflare"], portalIngress: false });
   const choice = [...bare.host.all()].find((n) => n.tagName === "SELECT");
   assert.deepEqual(choice.children.map((o) => o.textContent),
-    ["+ Tunnel…", "cloudflare · public link", "ngrok · public link · install first", "devtunnel · your account · install first", "gateway · OpenClaw portal · needs ingress"]);
+    ["+", "cloudflare · public link", "ngrok · public link · install first", "devtunnel · your account · install first", "gateway · OpenClaw portal · needs ingress"]);
   bare.view.dispose();
   // With every other way taken, the one left is named.
   const tunnels = ["cloudflare", "ngrok", "devtunnel"].map((p) => ({ group: "api/web", path: `api/web/${p}`, repo: "api", kind: "endpoint", provider: p, state: "idle" }));
   const last = await mount("panel", { ...collection([repo("api")], [web, ...tunnels]), tunnelProviders: [] });
-  assert.ok(buttons(last.host).includes("+ gateway"), "one way left: no choice to make");
+  assert.ok([...last.host.all()].some((n) => n.tagName === "BUTTON" && n.textContent === "+" && n.title.startsWith("Open gateway (OpenClaw portal)")), "one way left: no choice to make");
   last.view.dispose();
 });
 
@@ -341,8 +370,10 @@ test("panel: a portal of the gateway beside its service", async () => {
   portals = [{ id: "p42201", title: "preview", port: 42201, listenPort: 41553, url: "http://172.30.0.2:41553/?openclaw_portal=t", publicUrl: "http://172.30.0.2:41553/", createdAtMs: 0 }];
   const open = await mount("panel", collection([repo("api")], [web]));
   const links = [...open.host.all()].filter((n) => n.tagName === "A").map((n) => n.textContent);
-  // A container's address, which a browser elsewhere cannot reach: marked.
-  assert.ok(links.includes("gateway ⚠"));
+  // In the gateway column; a container's address, which a browser elsewhere
+  // cannot reach, is marked.
+  assert.ok(links.includes("open ⚠"));
+  assert.ok(tables(open.host).at(-1)[0].includes("gateway"));
   // Listed without its URL, it opens again on a click.
   portals = [{ ...portals[0], url: undefined, id: "p42202" }];
   const listed = await mount("panel", collection([repo("api")], [web]));
@@ -363,13 +394,31 @@ test("composer: collapsed, the same facts summed", async () => {
   const { host, view } = await mount("composer", busy);
   const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
   const summary = card.children.find((n) => n.tagName === "SUMMARY");
-  assert.equal(summary.children[1].textContent, "±1↑3↓3PR1 ✗svc▶1/2");
+  assert.equal(summary.children[1].textContent, "±1↑ 2↓ 3PR1 ✗svc▶1/2");
   // ↑ pushes every repository, ↓ catches every one up.
-  assert.ok(titled(summary, "Push api, web, hooks, each to its pull request or a new draft one"));
+  assert.ok(titled(summary, "Push api, web, each to its pull request or a new draft one"));
   assert.ok([...summary.all()].some((n) => n.tagName === "BUTTON" && /^Catch up api \(3\)/.test(n.title)));
   // Open, the tables have them and the summary does not repeat them.
   card.open = true;
   for (const fn of card.listeners.toggle) fn();
   assert.equal(summary.children[1].textContent, "");
   view.dispose();
+});
+
+test("narrow: one header, every fact in its column, the branch below the name", async () => {
+  // A ResizeObserver whose width the test sets.
+  const observers = [];
+  globalThis.ResizeObserver = class { constructor(fn) { this.fn = fn; observers.push(this); } observe() {} disconnect() {} };
+  try {
+    const { host, view } = await mount("panel", busy);
+    for (const o of observers) o.fn([{ contentRect: { width: 360 } }]);
+    const [repos, , services] = tables(host);
+    // The branch column folds under the repository; the rest stays as wide.
+    assert.deepEqual(repos[0], ["Repo", "±", "↑", "↓", "PR", "C", "M", "R"]);
+    assert.deepEqual(repos[1], ["apiopenclaw/test", "·", "↑ 2", "↓ 3", "#7", "✗", "✗", "○"]);
+    assert.deepEqual(services[1].slice(1), ["previewapi", "ready", ":42201", "calm-river✕", "+"]);
+    view.dispose();
+  } finally {
+    delete globalThis.ResizeObserver;
+  }
 });

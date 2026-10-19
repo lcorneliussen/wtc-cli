@@ -22,9 +22,12 @@
   card above the message box (each repository's branch, what is not pushed,
   pull requests with CI, conflict and review state, what is behind, services
   with their tunnels on one line, started, stopped and restarted one by one or
-  all at once, tunnels opened and closed with `wtc svc tunnel`), a panel with Push + PR and Catch up per
-  repository, and adding repositories from the
-  gateway, GitHub or the person's Bitbucket workspaces. `wtc checkouts` prints
+  all at once, tunnels opened and closed with `wtc svc tunnel`), laid out as
+  `wtc status`'s tables and wrapping each row into two lines when narrow, and
+  a panel with the same tables, the pull requests and adding repositories from
+  the gateway, GitHub or the person's Bitbucket workspaces. Pushing from them
+  goes through the gateway with the person's own GitHub connection, after they
+  confirm; the card says how to connect one. `wtc checkouts` prints
   the status of checkouts as JSON for it. A new tunnel can also be the
   gateway's own OpenClaw portal, offered last as "needs ingress" when the
   gateway has no portal ingress.
