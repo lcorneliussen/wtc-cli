@@ -126,3 +126,48 @@ func TestStatusAllDoesNotRunOtherCollectionBuildHook(t *testing.T) {
 		t.Fatalf("workspace sweep ran another collection hook: %v", err)
 	}
 }
+
+func TestStatusAllReadsOtherServicesWithItsOwnBinary(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	if _, err := c.NewCollection(NewOptions{Slug: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	other, err := OpenCollection(filepath.Join(c.Workspace, "other"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(other.Collection, "marker")
+	foreign := filepath.Join(other.Collection, "foreign-dekit")
+	if err := os.WriteFile(foreign, []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	m := &runtimeManifest{Schema: 1, Root: other.runtimeRoot(), Binary: foreign,
+		Tasks: []runtimeTask{{RuntimeItem: RuntimeItem{Collection: "other", Dir: "harness", Repo: "harness", Path: "harness/web/main", Kind: "service"},
+			Log: filepath.Join(other.runtimeRoot(), "logs", "harness", "web", "main.log")}},
+		Resources: []runtimeResource{{Dir: "harness", Repo: "harness", State: "provision-hook-completed"}}}
+	if err := os.MkdirAll(m.Root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtimeSaveManifest(m); err != nil {
+		t.Fatal(err)
+	}
+	// This collection has no dekit: the sweep reports that, with the
+	// manifest's services and resources, and never runs the foreign binary.
+	c.Config.Runtime.Binary = filepath.Join(t.TempDir(), "missing-dekit")
+	all, _, err := c.StatusLiveSnapshot(true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("workspace sweep ran another collection's dekit: %v", err)
+	}
+	kinds := map[string]bool{}
+	for _, item := range all.Runtime {
+		if item.Collection == "other" {
+			kinds[item.Kind] = item.State == "unknown" || item.Kind == "resources"
+		}
+	}
+	if !kinds["service"] || !kinds["resources"] {
+		t.Fatalf("sweep lost the other collection's services or resources: %+v", all.Runtime)
+	}
+}

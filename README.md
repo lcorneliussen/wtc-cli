@@ -70,7 +70,7 @@ Install a [published release](https://github.com/lcorneliussen/wtc-cli/releases)
 for macOS or Linux. With mise:
 
 ```sh
-mise use -g github:lcorneliussen/wtc-cli@0.1.39
+mise use -g github:lcorneliussen/wtc-cli@0.1.40
 ```
 
 For a quick task, no harness is needed. Run `wtc init` in an empty folder and

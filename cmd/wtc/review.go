@@ -56,8 +56,38 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 		return nil
 	}
 	review.AddCommand(bundle)
+	activity := &cobra.Command{Use: "activity <repo> [pr-number]", Short: "Inspect Copilot/Cursor reports, active reviews and open threads", Args: cobra.RangeArgs(1, 2)}
+	activity.RunE = func(cmd *cobra.Command, args []string) error {
+		c, err := context()
+		if err != nil {
+			return err
+		}
+		number := ""
+		if len(args) == 2 {
+			number = args[1]
+		}
+		result, err := c.GetReviewActivity(args[0], number)
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return emit(envelope{OK: true, Data: result, Summary: "hosted review activity"}, true)
+		}
+		fmt.Printf("Head %s; independent local review still required\n", result.Head[:7])
+		for _, report := range result.Reports {
+			fmt.Printf("%s: %s %s\n", report.Provider, report.State, report.URL)
+			if report.Body != "" {
+				fmt.Println(report.Body)
+			}
+		}
+		for _, finding := range result.Findings {
+			fmt.Printf("Open %s thread: %s (outdated: %t)\n%s\n%s\n", finding.Provider, finding.File, finding.Outdated, finding.URL, finding.Body)
+		}
+		return nil
+	}
+	review.AddCommand(activity)
 	var strong, standard, fast, lead, only string
-	var postRun bool
+	var postRun, hostedFirst bool
 	var parallel, timeout int
 	run := &cobra.Command{Use: "run <bundle-dir>", Short: "Run separate headless reviewers and aggregate their findings", Args: cobra.ExactArgs(1)}
 	run.Flags().StringVar(&strong, "strong", "", "Agent:model chain for strong concerns")
@@ -68,6 +98,7 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	run.Flags().IntVar(&parallel, "parallel", 0, "Maximum concurrent concern runs")
 	run.Flags().IntVar(&timeout, "timeout", 0, "Seconds allowed per agent run")
 	run.Flags().BoolVar(&postRun, "post", false, "Post one progress comment, then update it with the review result")
+	run.Flags().BoolVar(&hostedFirst, "hosted-first", true, "Defer GitHub PR runs while Copilot/Cursor are active or have open threads")
 	run.RunE = func(cmd *cobra.Command, args []string) error {
 		c, err := context()
 		if err != nil {
@@ -80,6 +111,11 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 		if only != "" {
 			for _, id := range strings.Split(only, ",") {
 				ids = append(ids, strings.TrimSpace(id))
+			}
+		}
+		if hostedFirst {
+			if err := c.PrepareHostedReviewBundle(args[0]); err != nil {
+				return err
 			}
 		}
 		if postRun {

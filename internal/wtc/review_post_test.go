@@ -29,6 +29,9 @@ func TestReviewPostReceiptsDedupAndResolve(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bundle, "summary.md"), []byte(summary), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(bundle, "diff.patch"), []byte("diff --git a/feature.go b/feature.go\n--- a/feature.go\n+++ b/feature.go\n@@ -1,5 +1,6 @@\n one\n two\n three\n four\n+five\n six\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	finding := `{"concern":"code","status":"issues","findings":[{"severity":"major","file":"feature.go","line":4,"title":"Broken edge","detail":"Fails on empty input"}]}`
 	if err := os.WriteFile(filepath.Join(bundle, "findings", "code.json"), []byte(finding), 0644); err != nil {
 		t.Fatal(err)
