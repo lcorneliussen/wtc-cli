@@ -27,7 +27,9 @@
   a panel with the same tables, the pull requests and adding repositories from
   the gateway, GitHub or the person's Bitbucket workspaces. Pushing from them
   goes through the gateway with the person's own GitHub connection, after they
-  confirm; the card says how to connect one. `wtc checkouts` prints
+  confirm; the card says how to connect one. Bitbucket repositories are
+  pushed the same way, with the person's Bitbucket login, by openclaw-bitbucket
+  0.3.0 or later. `wtc checkouts` prints
   the status of checkouts as JSON for it. A new tunnel can also be the
   gateway's own OpenClaw portal, offered last as "needs ingress" when the
   gateway has no portal ingress.

@@ -198,9 +198,15 @@ the task as a whole:
   gateway, which then waits, and ↑ becomes **confirm ↑** naming the account.
   The gateway's shared GitHub account, often the `gh` login its agents use
   too, is never used for it; without a personal connection ↑ says where to
-  connect one. The gateway does not push Bitbucket repositories yet, so their
-  ↑ shows what is waiting without a button; the card never asks the
-  conversation to push. **Resolve** asks it to merge and commit, not to push.
+  connect one. A Bitbucket repository is pushed the same way by the
+  [openclaw-bitbucket](https://github.com/lcorneliussen/openclaw-bitbucket)
+  plugin (0.3.0 or later), with the person's own Bitbucket login: it pushes
+  what is committed, so uncommitted files stay behind, and opens a draft pull
+  request into the repository's base. Its `execLogin: false` keeps the login
+  out of the agents' commands, so that this is the only way to push. Without
+  the plugin, ↑ shows what is waiting without a button; the card never asks
+  the conversation to push. **Resolve** asks it to merge and commit, not to
+  push.
 - a **Collection** panel beside the conversation (⤢ on the card) with the
   collection's name, branch and folder, the same repository and service
   tables with the same actions, wtc status's pull request table (**PR Repo

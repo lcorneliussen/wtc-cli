@@ -33,12 +33,17 @@ const isFailed = (s) => s.state === "failed" || (s.state === "exited" && s.exit_
 const serviceState = (s) => `${s.state ?? "?"}${s.exit_code > 0 ? ` (exit ${s.exit_code})` : ""}`;
 
 // Pushing is the person's, through the gateway, never the agent's: the
-// gateway publishes an owner's worktree (commits what is pending, pushes the
-// branch, opens or updates a draft pull request) with the person's own
-// GitHub connection, which only the gateway holds, and only after they
-// confirm it. The shared account the gateway may also have (often the
-// gh login its agents use too) is never used for it.
-const CONNECT_GITHUB = "connect your own GitHub account first";
+// gateway publishes an owner's worktree (pushes the branch, opens or updates
+// a draft pull request) with the person's own account, which only the
+// gateway holds, and only after they confirm it. GitHub's is OpenClaw's
+// personal connection (and OpenClaw commits what is pending first); the
+// shared account the gateway may also have (often the gh login its agents
+// use too) is never used for it. Bitbucket's is the person's login in the
+// Bitbucket plugin, which publishes what is committed.
+const CONNECT = { github: "connect your own GitHub account first", bitbucket: "connect your own Bitbucket login first" };
+const BITBUCKET = "bitbucket";
+const BITBUCKET_CONNECT = "/plugins/bitbucket/connect";
+const PUSHES = new Set(["github", "bitbucket"]);
 // The Control UI's own pages sit under its base path, before /chat and the like.
 const appHref = (path) => {
   const here = typeof location === "undefined" ? "" : location.pathname.replace(/\/(chat|dashboard|settings|sessions|share|skills|worktrees|agents)(\/.*)?$/, "");
@@ -54,7 +59,7 @@ async function publishRepo(host, agentId, r, say) {
   const target = { sessionKey: r.sessionKey, agentId };
   const mine = personalAccount(await host.request("sessions.github.options", target));
   if (!mine) {
-    say(`${name}: ${CONNECT_GITHUB}.`);
+    say(`${name}: ${CONNECT.github}.`);
     return { connect: true };
   }
   say(`Pushing ${name}…`);
@@ -82,6 +87,41 @@ async function settle(host, target, name, out, say) {
   }
   if (out?.status === "published") say(`${name}: pushed ${out.url ?? out.pullRequestUrl ?? ""}`.trim());
   else say(`${name}: ${out?.status ?? "done"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${out.message}` : ""}`);
+  return null;
+}
+
+// The Bitbucket plugin's own publish: ask, then confirm what it names.
+async function bitbucketAction(host, agentId, r, actionId, payload) {
+  let res;
+  try {
+    res = await host.request("plugins.sessionAction", { pluginId: BITBUCKET, actionId, sessionKey: r.sessionKey, ...(agentId ? { agentId } : {}), payload });
+  } catch (err) {
+    if (/unknown plugin session action/.test(String(err?.message ?? err))) throw new Error("the gateway has no Bitbucket publish: install openclaw-bitbucket 0.3.0 or later");
+    throw err;
+  }
+  if (res?.ok === false) throw new Error(res.error ?? "refused");
+  return res?.result ?? res;
+}
+const bitbucketAccount = (c) => c?.name ? `${c.name} (${c.account})` : c?.account ?? "you";
+async function publishBitbucket(host, agentId, r, say, dest) {
+  const name = r.repo ?? r.project;
+  say(`Asking to push ${name}…`);
+  const out = await bitbucketAction(host, agentId, r, "publish", { draft: true, ...(dest ? { dest } : {}) });
+  if (out?.status === "not_connected") {
+    say(`${name}: ${CONNECT.bitbucket}.`);
+    return { connect: true };
+  }
+  const c = out?.confirmation;
+  if (out?.status !== "needs_confirmation" || !c) { say(`${name}: ${out?.status ?? "no answer"}`); return null; }
+  const left = c.uncommitted ? `; ${plural(c.uncommitted, "uncommitted file")} stay behind` : "";
+  say(`${name}: confirm to push ${c.branch} (${String(c.head).slice(0, 7)}) to ${c.dest} as ${bitbucketAccount(c)}${left}.`);
+  return { forge: BITBUCKET, requestId: out.requestId, confirmation: c };
+}
+async function confirmBitbucket(host, agentId, r, pending, say) {
+  const name = r.repo ?? r.project;
+  say(`Pushing ${name}…`);
+  const out = await bitbucketAction(host, agentId, r, "publish-confirm", { requestId: pending.requestId, requestDigest: pending.confirmation.requestDigest });
+  say(`${name}: ${out?.created ? "pushed, draft pull request opened" : "pushed"} ${out?.url ?? ""}`.trim());
   return null;
 }
 
@@ -424,53 +464,69 @@ function collectionTables(v) {
   const baseOf = (r) => (r.base ? r.base.replace(/^origin\//, "") : "base");
   // Pushes waiting for the person's confirmation, by owner session.
   const confirming = new Map();
-  // Whether the person has their own GitHub connection: unknown until asked,
-  // asked again at most every 30 seconds while something waits to be pushed.
-  let mine = undefined;
-  let askedAt = 0;
-  let showConnect = false;
+  // Whether the person has their own account on each forge: unknown until
+  // asked, asked again at most every 30 seconds while something waits to be
+  // pushed there. false for Bitbucket: the gateway has no publish for it.
+  const mine = { github: undefined, bitbucket: undefined };
+  const askedAt = { github: 0, bitbucket: 0 };
+  let showConnect = null;
+  const accountOf = {
+    github: (r) => v.host.request("sessions.github.options", { sessionKey: r.sessionKey, agentId: v.agent() }).then(personalAccount),
+    bitbucket: (r) => bitbucketAction(v.host, v.agent(), r, "publish-options", {}).then((o) => o?.account ?? null,
+      (err) => (/no Bitbucket publish/.test(err.message) ? false : Promise.reject(err))),
+  };
   function checkAccount(repos) {
-    const r = repos.find((x) => x.forge === "github" && pushable(x));
-    if (!r || Date.now() - askedAt < 30000) return;
-    askedAt = Date.now();
-    v.host.request("sessions.github.options", { sessionKey: r.sessionKey, agentId: v.agent() })
-      .then((o) => {
-        const now = personalAccount(o);
-        if (now) showConnect = false;
-        if (!!now !== !!mine || mine === undefined) { mine = now; v.rerender(); }
+    for (const forge of PUSHES) {
+      const r = repos.find((x) => x.forge === forge && pushable(x));
+      if (!r || mine[forge] === false || Date.now() - askedAt[forge] < 30000) continue;
+      askedAt[forge] = Date.now();
+      accountOf[forge](r).then((now) => {
+        if (now && showConnect === forge) showConnect = null;
+        if (!!now !== !!mine[forge] || mine[forge] === undefined || now === false) { mine[forge] = now; v.rerender(); }
       }, () => {});
+    }
   }
   // How to connect it: shown once a push needed it, until it is there.
   function notice() {
-    if (!showConnect || mine) return null;
-    const open = el("a", { textContent: "Open Settings → Profile", href: appHref("/settings/profile") });
+    if (!showConnect || mine[showConnect]) return null;
+    const bitbucket = showConnect === BITBUCKET;
+    const open = el("a", bitbucket
+      ? { textContent: "Open the Bitbucket page", href: BITBUCKET_CONNECT, target: "_blank", rel: "noopener" }
+      : { textContent: "Open Settings → Profile", href: appHref("/settings/profile") });
     open.style.cssText = "color:var(--accent, inherit);font-weight:600";
-    const close = smallButton("✕", "Hide", () => { showConnect = false; v.rerender(); });
-    return css(el("div", { className: "wtc-connect" },
-      css(el("div", {}, css(el("strong", { textContent: "Pushing needs your own GitHub account" }), ""), close), "display:flex;justify-content:space-between;align-items:center;gap:8px"),
-      el("div", { textContent: "The gateway pushes for you with it, after you confirm each push; the agent never gets it." }),
-      css(el("ol", {},
-        el("li", {}, open, ", then GitHub connections → Connect."),
+    const close = smallButton("✕", "Hide", () => { showConnect = null; v.rerender(); });
+    const steps = bitbucket
+      ? [el("li", {}, open, " in its own tab (the Bitbucket tab in the sidebar shows it, but cannot take the form)."),
+        el("li", { textContent: "Enter your Atlassian account e-mail and a Bitbucket API token with repositories and pull requests read and write." }),
+        el("li", { textContent: "Connect. Then press ↑ again." })]
+      : [el("li", {}, open, ", then GitHub connections → Connect."),
         el("li", { textContent: "Choose For me (not For the system), open github.com/login/device and enter the code shown." }),
-        el("li", { textContent: "Approve, including workflow. Then press ↑ again." })), "margin:0;padding-left:18px;display:grid;gap:2px"),
-      css(el("div", { textContent: "A GitHub identity under Agents → Tools is the agent's own; it is not used for pushing." }), "color:var(--muted, #888)")),
+        el("li", { textContent: "Approve, including workflow. Then press ↑ again." })];
+    return css(el("div", { className: "wtc-connect" },
+      css(el("div", {}, css(el("strong", { textContent: bitbucket ? "Pushing needs your own Bitbucket login" : "Pushing needs your own GitHub account" }), ""), close), "display:flex;justify-content:space-between;align-items:center;gap:8px"),
+      el("div", { textContent: "The gateway pushes for you with it, after you confirm each push." }),
+      css(el("ol", {}, ...steps), "margin:0;padding-left:18px;display:grid;gap:2px"),
+      bitbucket ? null : css(el("div", { textContent: "A GitHub identity under Agents → Tools is the agent's own; it is not used for pushing." }), "color:var(--muted, #888)")),
     "font-size:12px;line-height:1.45;display:grid;gap:4px;padding:8px 10px;border:1px solid var(--border-strong, rgba(128,128,128,.4));border-radius:12px");
   }
   async function publish(r) {
-    if (r.forge !== "github") return;
+    if (!PUSHES.has(r.forge) || mine[r.forge] === false) return;
     busy.add(r.sessionKey);
     v.pause(true);
     v.rerender();
     try {
       const pending = confirming.get(r.sessionKey);
       confirming.delete(r.sessionKey);
+      const bitbucket = r.forge === BITBUCKET;
       const next = pending
-        ? await confirmRepo(v.host, v.agent(), r, pending, v.say)
-        : await publishRepo(v.host, v.agent(), r, v.say);
-      if (next?.connect) { mine = null; showConnect = true; v.reveal?.(); }
+        ? await (bitbucket ? confirmBitbucket : confirmRepo)(v.host, v.agent(), r, pending, v.say)
+        : bitbucket
+          ? await publishBitbucket(v.host, v.agent(), r, v.say, r.base ? baseOf(r) : undefined)
+          : await publishRepo(v.host, v.agent(), r, v.say);
+      if (next?.connect) { mine[r.forge] = null; showConnect = r.forge; v.reveal?.(); }
       else {
         // It is connected: look again rather than keep "not connected".
-        if (mine === null) { mine = undefined; askedAt = 0; showConnect = false; }
+        if (mine[r.forge] === null) { mine[r.forge] = undefined; askedAt[r.forge] = 0; if (showConnect === r.forge) showConnect = null; }
         if (next) confirming.set(r.sessionKey, next);
       }
     } catch (err) {
@@ -560,18 +616,28 @@ function collectionTables(v) {
     if (href) Object.assign(label, { href, target: "_blank", rel: "noopener noreferrer" });
     return css(el("span", {}, forgeIcon(r.forge, 13), label), "display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%");
   };
-  // ↑: the push, as a button only where the gateway pushes it (GitHub, with
-  // the person's own account); a confirmation waiting is "confirm ↑".
+  // ↑: the push, as a button only where the gateway pushes it (GitHub and,
+  // with its plugin, Bitbucket, each with the person's own account); a
+  // confirmation waiting is "confirm ↑".
   function pushCell(r, n) {
     if (!pushable(r)) return null;
     const label = n ? `↑ ${n}` : "↑";
     const what = [r.dirty ? plural(r.dirty, "file") : "", n ? plural(n, "commit") : ""].filter(Boolean).join(" and ");
-    if (r.forge !== "github") return toned(label, TONE.pending, `${what} to push. The gateway does not push ${r.forge ?? "this forge"}'s repositories yet, and the card does not hand pushing to the agent.`);
+    const account = r.forge === BITBUCKET ? "Bitbucket login" : "GitHub account";
+    if (!PUSHES.has(r.forge) || mine[r.forge] === false) {
+      const why = r.forge === BITBUCKET ? "The gateway has no Bitbucket publish (the openclaw-bitbucket plugin, 0.3.0 or later)" : `The gateway does not push ${r.forge ?? "this forge"}'s repositories`;
+      return toned(label, TONE.pending, `${what} to push. ${why}, and the card does not hand pushing to the agent.`);
+    }
     const pending = confirming.get(r.sessionKey);
-    if (pending) return count(`confirm ${label}`, `Push ${what} of ${nameOf(r)} as @${pending.confirmation.account?.login ?? "you"}`, TONE.success, () => publish(r));
+    if (pending) {
+      const as = pending.forge === BITBUCKET ? bitbucketAccount(pending.confirmation) : `@${pending.confirmation.account?.login ?? "you"}`;
+      return count(`confirm ${label}`, `Push ${what} of ${nameOf(r)} as ${as}`, TONE.success, () => publish(r));
+    }
+    // Bitbucket publishes commits only; files not committed stay behind.
+    const left = r.forge === BITBUCKET && r.dirty ? ` Uncommitted files stay behind: ask the conversation to commit them first.` : "";
     // Asked again on the click, so a connection just made is used at once.
-    if (mine === null) return count(label, `${what} to push. Pushing needs your own GitHub account: click to push, or for how to connect it`, TONE.none, () => publish(r));
-    return count(label, `${what} to push. ${pushTitle(r.pullRequest)}, with your own GitHub account, after you confirm`, TONE.pending, () => publish(r));
+    if (mine[r.forge] === null) return count(label, `${what} to push. Pushing needs your own ${account}: click to push, or for how to connect it`, TONE.none, () => publish(r));
+    return count(label, `${what} to push. ${pushTitle(r.pullRequest)}, with your own ${account}, after you confirm.${left}`, TONE.pending, () => publish(r));
   }
   function repoRow(r) {
     const pr = r.pullRequest;
@@ -650,7 +716,7 @@ function collectionTables(v) {
     const slot = (head, value, title) => css(el("span", { title: title ?? "" }, value?.tagName === "BUTTON" ? null : muted(head), value ?? DOT()),
       "display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums");
     const files = repos.reduce((n, r) => n + (r.dirty ?? 0), 0);
-    const ready = repos.filter((r) => pushable(r) && r.forge === "github");
+    const ready = repos.filter((r) => pushable(r) && PUSHES.has(r.forge) && mine[r.forge] !== false);
     const commits = ready.reduce((n, r) => n + toPush(r), 0);
     const behind = repos.filter((r) => r.behind > 0);
     const prs = repos.filter((r) => r.pullRequest?.state === "open");

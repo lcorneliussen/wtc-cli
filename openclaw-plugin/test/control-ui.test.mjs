@@ -96,7 +96,18 @@ let svcResult = { ok: true, result: { message: "done" } };
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
 let personal = null;
+// The Bitbucket plugin: absent unless a test installs it with a login (or null).
+let bitbucket;
 const hostRequest = async (method, params) => {
+  if (method === "plugins.sessionAction" && params.pluginId === "bitbucket") {
+    if (bitbucket === undefined) throw new Error(`unknown plugin session action: bitbucket/${params.actionId}`);
+    if (params.actionId === "publish-options") return { ok: true, result: { account: bitbucket } };
+    calls.push({ method, ...params });
+    if (params.actionId === "publish") {
+      return { ok: true, result: bitbucket ? { status: "needs_confirmation", requestId: "bb-1", confirmation: { account: bitbucket.user, name: bitbucket.name, requestDigest: "bd1", branch: "openclaw/test", head: "abcdef0123", dest: "main", uncommitted: 0 } } : { status: "not_connected" } };
+    }
+    if (params.actionId === "publish-confirm") return { ok: true, result: { status: "published", created: true, url: "https://bitbucket.org/ws/hooks/pull-requests/3" } };
+  }
   if (method === "sessions.github.options") return { personal, shared: { source: "system-detected", login: "octo-bot" } };
   if (method === "sessions.github.status") return { confirmation: { generation: personal?.generation, account: personal?.account, requestDigest: "d1" } };
   if (method === "plugins.sessionAction" && params.actionId === "collection") {
@@ -253,9 +264,37 @@ test("composer: the actions are on the facts they change", async () => {
   assert.deepEqual(calls.map((c) => c.actionId), ["catch-up"]);
   await named(/^#7 conflicts with main\. Resolve/).onclick();
   assert.match(calls.at(-1).message, /Pull request #7 of api conflicts.*Don't push/);
-  // Bitbucket is not pushed from here: the gateway does not push it, and
-  // pushing is never handed to the agent.
+  // Without the Bitbucket plugin's publish, Bitbucket is not pushed from
+  // here: pushing is never handed to the agent.
   assert.equal(named(/^1 commit to push/), undefined);
+  view.dispose();
+});
+
+test("composer: Bitbucket is pushed by the Bitbucket plugin, with the person's own login, after they confirm", async () => {
+  bitbucket = null;
+  const { host, view } = await mount("composer", busy);
+  await settle();
+  const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
+  const push = () => [...card().all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push/.test(n.title));
+  calls.length = 0;
+  await push().onclick();
+  await settle();
+  // Not connected: the card says where to connect, and nothing is pushed.
+  const howTo = [...card().all()].find((n) => n.className === "wtc-connect");
+  assert.match(howTo.textContent, /Pushing needs your own Bitbucket login/);
+  assert.ok([...howTo.all()].some((n) => n.tagName === "A" && n.href === "/plugins/bitbucket/connect"));
+  assert.equal(calls.some((c) => c.actionId === "publish-confirm"), false);
+  // Connected: asking names the commit and account, and confirming pushes.
+  bitbucket = { user: "ada@example.com", name: "Ada" };
+  await push().onclick();
+  await settle();
+  assert.deepEqual(calls.at(-1).payload, { draft: true, dest: "main" });
+  const confirm = [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "confirm ↑ 1");
+  assert.equal(confirm.title, "Push 1 commit of hooks as Ada (ada@example.com)");
+  await confirm.onclick();
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "plugins.sessionAction", pluginId: "bitbucket", actionId: "publish-confirm", sessionKey: "agent:main:owner:hooks", agentId: "main", payload: { requestId: "bb-1", requestDigest: "bd1" } });
+  bitbucket = undefined;
   view.dispose();
 });
 
