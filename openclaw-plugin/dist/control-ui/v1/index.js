@@ -24,7 +24,8 @@ async function call(host, actionId, sessionKey, agentId) {
 }
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-const link = (text, href) => (/^https:\/\//.test(href ?? "") ? el("a", { textContent: text, href, target: "_blank", rel: "noopener noreferrer" }) : text);
+// http too: a gateway's direct portal is plain HTTP.
+const link = (text, href) => (/^https?:\/\//.test(href ?? "") ? el("a", { textContent: text, href, target: "_blank", rel: "noopener noreferrer" }) : text);
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
 const prLabel = (pr) => `#${pr.number} ${pr.draft && pr.state === "open" ? "draft" : pr.state}`;
@@ -67,8 +68,9 @@ function watchCollection(host, sessionKey, agentId, onChange) {
   const load = (force) => {
     if (entry.inflight) return entry.inflight;
     if (!force && entry.data && Date.now() - entry.at < REFRESH_MS / 2) return Promise.resolve(entry);
-    entry.inflight = call(host, "collection", sessionKey, agentId)
-      .then((data) => { entry.data = data; entry.error = null; },
+    // The gateway's portals, to show beside the services they expose.
+    entry.inflight = Promise.all([call(host, "collection", sessionKey, agentId), host.request("portal.list", {}).catch(() => null)])
+      .then(([data, portals]) => { entry.data = { ...data, portals: portals?.portals ?? [] }; entry.error = null; },
         (err) => { entry.error = String(err?.message ?? err); })
       .then(() => { entry.at = Date.now(); entry.inflight = null; notify(); return entry; });
     return entry.inflight;
@@ -192,6 +194,12 @@ function serviceGroups(services) {
     };
   });
 }
+// A service listens on the gateway, often in a container: its loopback address
+// opens nowhere else, so it shows as its port, and a tunnel makes it reachable.
+const LOOPBACK = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/;
+const address = (url) => LOOPBACK.test(url)
+  ? css(el("span", { textContent: `:${new URL(url).port || "80"}`, title: `${url} on the gateway: open a tunnel to reach it from here` }), "font-family:var(--mono, ui-monospace, monospace);color:var(--muted, #888)")
+  : link(url.replace(/^https?:\/\//, ""), url);
 const TUNNEL_URL = /^https:\/\/[^/]*(trycloudflare\.com|\.ts\.net|ngrok[-a-z]*\.(app|io|dev)|devtunnels\.ms)(:\d+)?(\/|$)/;
 const consolidate = (g) => `The tunnel ${g.group} runs as a service of its own. Consolidate it as the wtc-svc skill says: remove it and open it again with wtc svc tunnel on the service it exposes.`;
 const tunnelName = (t) => t.provider || (/trycloudflare\.com/.test(t.url ?? "") ? "cloudflare" : /\.ts\.net/.test(t.url ?? "") ? "tailscale" : "tunnel");
@@ -202,9 +210,153 @@ const askConversation = (host, sessionKey, message) => host.request("sessions.se
 // draft pull request for it.
 const pushTitle = (pr) => pr ? `Commit what is pending and push it to #${pr.number}` : "Commit what is pending, push the branch and open a draft pull request";
 const pushRequest = (name, pr) => pr ? `Push ${name} to its pull request #${pr.number}.` : `Push ${name} to its branch and open a draft pull request.`;
-async function restartService(host, sessionKey, agentId, s) {
-  const res = await host.request("plugins.sessionAction", { pluginId: PLUGIN_ID, actionId: "svc-restart", sessionKey, agentId, payload: { group: s.group } });
-  if (res?.ok === false) throw new Error(res.error ?? "restart failed");
+
+// Services. wtc svc starts, stops and restarts them (one, or all without a
+// group) and opens or closes their tunnels; the gateway runs it in the
+// collection's folder.
+async function svcRequest(host, sessionKey, agentId, payload) {
+  // A gateway portal is OpenClaw's own: the Control UI opens and closes it.
+  if (payload.op === "portal") {
+    if (payload.stop) return host.request("portal.close", { id: payload.id });
+    const opened = await host.request("portal.open", { port: payload.port, title: payload.title });
+    if (opened?.id && opened.url) portalUrls.set(opened.id, opened.url);
+    return opened;
+  }
+  const res = await host.request("plugins.sessionAction", { pluginId: PLUGIN_ID, actionId: "svc", sessionKey, agentId, payload });
+  if (res?.ok === false) throw new Error(res.error ?? "wtc svc failed");
+  return res?.result ?? res;
+}
+// What a new tunnel can go through, first what to try first: the gateway's
+// own portal, then a public link for when a portal does not work, a dev
+// tunnel for the person's account, and the tailnet when it is the team's.
+const TUNNEL_PROVIDERS = [
+  { name: "gateway", reach: "OpenClaw portal", portal: true },
+  { name: "cloudflare", reach: "public link", public: true },
+  { name: "ngrok", reach: "public link", public: true },
+  { name: "devtunnel", reach: "your account" },
+  { name: "tailscale", reach: "team tailnet", team: true },
+];
+// portal.list leaves out a portal's URL with its access token; opening the
+// same port again returns it. Kept for the portals this page opened.
+const portalUrls = new Map();
+const portOf = (url) => { try { return Number(new URL(url).port) || null; } catch { return null; } };
+// A portal at a loopback or private address the browser is not on (a
+// container's, say) needs portal ingress on the gateway to be reached.
+const PRIVATE_HOST = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|localhost$|\[::1\]$)/;
+const unreachable = (url) => {
+  try {
+    const host = new URL(url).hostname;
+    const here = typeof location === "undefined" ? "" : location.hostname;
+    return host !== here && PRIVATE_HOST.test(host) && !PRIVATE_HOST.test(here);
+  } catch { return false; }
+};
+const installTunnel = (g, provider, program) => `Open a ${provider} tunnel to ${g.group}. ${program} is not on the gateway's PATH: install it for this collection, then open the tunnel as the wtc-svc skill says.`;
+// A button in front of a service, where a repository has its forge icon and
+// as small, that is also its state: ■ stops a running one, ▶ starts a
+// stopped one, ↻ restarts a failed one.
+function stateGlyph(glyph, title, tone, run) {
+  const b = css(el("button", { type: "button", textContent: glyph, title, ariaLabel: title }),
+    `flex:none;box-sizing:border-box;width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:${tone};cursor:pointer;font-size:${glyph === "↻" ? 13 : 10}px;line-height:1;padding:0`);
+  b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); void run(); };
+  return b;
+}
+// A pill like Push + PR, for the actions on the right.
+function pill(text, title, run) {
+  const b = css(el("button", { type: "button", textContent: text, title, ariaLabel: title }),
+    "border:1px solid var(--border-strong, rgba(128,128,128,.4));background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:12px;line-height:18px;padding:0 9px;border-radius:999px;white-space:nowrap");
+  b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); void run(); };
+  return b;
+}
+const busyMark = () => css(el("span", { textContent: "…", title: "Working" }),
+  "flex:none;width:14px;text-align:center;color:var(--muted, #888)");
+// svc: { run(payload, doing), busy(key), ask(text) } from the view.
+function stateButton(g, svc) {
+  if (svc.busy(g.group) || svc.busy("*")) return busyMark();
+  if (g.failed) return stateGlyph("↻", `${g.label}: ${g.state}. Restart it`, TONE.failure, () => svc.run({ op: "restart", group: g.group }, `Restarting ${g.label}…`));
+  if (g.running) return stateGlyph("■", `${g.label} is running. Stop it`, TONE.success, () => svc.run({ op: "down", group: g.group }, `Stopping ${g.label}…`));
+  return stateGlyph("▶", `${g.label}: ${g.state}. Start it`, TONE.none, () => svc.run({ op: "up", group: g.group }, `Starting ${g.label}…`));
+}
+// Start all and stop all, for a collection with services.
+function allButtons(groups, svc) {
+  if (svc.busy("*")) return [busyMark()];
+  return [
+    groups.some((g) => !g.running) ? pill(groups.length > 1 ? "▶ Start all" : "▶ Start", "Start all services", () => svc.run({ op: "up" }, "Starting all services…")) : null,
+    groups.some((g) => g.running) ? pill(groups.length > 1 ? "■ Stop all" : "■ Stop", "Stop all services", () => svc.run({ op: "down" }, "Stopping all services…")) : null,
+  ];
+}
+// A service's tunnels: a running one links to its address and closes with ✕,
+// a closed one is a ▶ button to open it again. A new one opens through the
+// one provider the gateway has ("+ cloudflare"), or a choice of them
+// ("+ Tunnel…"); with none, any of them, installed by the conversation first.
+function tunnelControls(g, svc, data = {}) {
+  const small = (text, title, run) => {
+    const b = css(el("button", { type: "button", textContent: text, title, ariaLabel: title }),
+      "border:0;background:transparent;color:var(--muted, #888);cursor:pointer;font:inherit;font-size:11px;padding:0 2px");
+    b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); void run(); };
+    return b;
+  };
+  const port = portOf(g.url);
+  const portals = (data.portals ?? []).filter((p) => port && p.port === port);
+  const out = portals.map((p) => {
+    const far = unreachable(p.publicUrl);
+    const name = far ? "gateway ⚠" : "gateway";
+    const url = p.url ?? portalUrls.get(p.id);
+    // Without its URL, the portal is opened again for it, in a tab opened
+    // on the click so that no popup blocker stops it.
+    const go = url ? link(name, url) : small(name, "Open the portal", async () => {
+      const tab = typeof window === "undefined" ? null : window.open("about:blank", "_blank");
+      const r = await svc.run({ op: "portal", port: p.port, title: p.title }, "Opening the portal…", `${g.group}:gateway`);
+      if (tab && r?.url) { tab.opener = null; tab.location.href = r.url; } else tab?.close();
+    });
+    if (!url) go.style.color = "inherit";
+    return css(el("span", { title: far ? `The portal listens on ${new URL(p.publicUrl).host}, which this browser cannot reach: the gateway needs portal ingress (managed Tailscale or a wildcard domain). Use a tunnel instead.` : `OpenClaw portal ${p.publicUrl}` },
+      go,
+      small("✕", "Close the portal", () => svc.run({ op: "portal", stop: true, id: p.id }, "Closing the portal…", `${g.group}:gateway`))),
+    `display:inline-flex;align-items:center;gap:2px;white-space:nowrap;${far ? `color:${TONE.pending}` : ""}`);
+  });
+  out.push(...g.tunnels.map((t) => {
+    const name = tunnelName(t);
+    const pub = TUNNEL_PROVIDERS.some((p) => p.name === name && p.public);
+    if (svc.busy(`${g.group}:${name}`)) return css(el("span", { textContent: `${name} …` }), "color:var(--muted, #888)");
+    // A closed tunnel is an action: open it again.
+    if (!isRunning(t)) return pill(`▶ ${name}`, `Open the ${name} tunnel again${pub ? ": anyone with the link can use it" : ""} (${serviceState(t)})`,
+      () => svc.run({ op: "tunnel", group: g.group, provider: name, public: pub }, `Opening the ${name} tunnel…`, `${g.group}:${name}`));
+    return css(el("span", {},
+      t.url ? link(name, t.url) : name,
+      small("✕", `Close the ${name} tunnel`, () => svc.run({ op: "tunnel", group: g.group, provider: name, stop: true }, `Closing the ${name} tunnel…`, `${g.group}:${name}`))),
+    "display:inline-flex;align-items:center;gap:2px;white-space:nowrap");
+  }));
+  const taken = (p) => p.portal ? portals.length > 0 || !port : g.tunnels.some((t) => tunnelName(t) === p.name);
+  // Without portal ingress a portal comes back at the gateway's own address,
+  // which a remote browser rarely reaches: it is offered last, as such.
+  const ingress = data.portalIngress !== false;
+  const free = TUNNEL_PROVIDERS.filter((p) => !taken(p) && (!p.team || data.teamTailnet))
+    .sort((a, b) => Number(!ingress && !!a.portal) - Number(!ingress && !!b.portal));
+  const ready = (p) => p.portal || data.tunnelProviders?.includes(p.name);
+  const note = (p) => p.portal ? (ingress ? "" : " · needs ingress") : ready(p) ? "" : " · install first";
+  const open = async (p) => {
+    if (p.portal) return svc.run({ op: "portal", port, title: g.label }, `Opening a portal to ${g.label}…`, `${g.group}:gateway`);
+    const r = await svc.run({ op: "tunnel", group: g.group, provider: p.name, public: !!p.public, add: true }, `Opening a ${p.name} tunnel to ${g.label}…`, `${g.group}:${p.name}`);
+    if (r?.missing) await svc.ask(installTunnel(g, p.name, r.missing));
+  };
+  // One way left is a button that names it; more are a choice.
+  if (g.main && !g.loose && free.length === 1) {
+    const p = free[0];
+    out.push(pill(`+ ${p.name}`, `Open ${p.name} (${p.reach}) to this service${p.public ? ": anyone with the link can use it" : ""}${!ready(p) ? "; the conversation installs it first" : p.portal && !ingress ? "; the gateway has no portal ingress, so it may not be reachable from here: a tunnel is" : ""}`, () => open(p)));
+  } else if (g.main && !g.loose && free.length) {
+    const pick = css(el("select", { title: "Open a way to this service from your browser: choose how" },
+      el("option", { value: "", textContent: "+ Tunnel…" }),
+      ...free.map((p) => el("option", { value: p.name, textContent: `${p.name} · ${p.reach}${note(p)}` }))),
+    "appearance:none;-webkit-appearance:none;font:inherit;font-size:12px;line-height:18px;color:inherit;background:transparent;border:1px solid var(--border-strong, rgba(128,128,128,.4));border-radius:999px;padding:0 9px;cursor:pointer;field-sizing:content;max-width:8em");
+    pick.onclick = (e) => e.stopPropagation();
+    pick.onchange = async () => {
+      const p = free.find((x) => x.name === pick.value);
+      pick.value = "";
+      if (p) await open(p);
+    };
+    out.push(pick);
+  }
+  return out;
 }
 
 // "wtc Collection", wtc linking to the project.
@@ -213,7 +365,8 @@ const brand = (size) => css(el("span", {},
     "color:var(--accent, inherit);text-decoration:none;font-weight:700"),
   el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
 const dot = (tone) => css(el("span"), `flex:none;width:7px;height:7px;border-radius:50%;background:${tone}`);
-const chip = (text, tone, title) => css(el("span", { title: title ?? "" }, dot(tone), text),
+// mark replaces the dot: services show ▶ or ■, so they read apart from commits.
+const chip = (text, tone, title, mark) => css(el("span", { title: title ?? "" }, mark ? css(el("span", { textContent: mark }), `flex:none;color:${tone};font-size:9px`) : dot(tone), text),
   "display:inline-flex;align-items:center;gap:5px;padding:0 8px;border-radius:10px;border:1px solid var(--border, rgba(0,0,0,.12));font-size:12px;line-height:20px;white-space:nowrap");
 
 function mountComposer(container, context) {
@@ -243,33 +396,80 @@ function mountComposer(container, context) {
   };
   const action = (text, title, run) => {
     const b = css(el("button", { type: "button", textContent: text, title }),
-      "border:1px solid var(--border, rgba(0,0,0,.15));background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:12px;padding:1px 10px;border-radius:10px");
-    b.onclick = async () => {
+      "border:1px solid var(--border-strong, rgba(128,128,128,.4));background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:12px;line-height:18px;padding:0 9px;border-radius:999px;white-space:nowrap");
+    // In the summary, a click acts without opening or closing the card.
+    b.onclick = async (e) => {
+      e?.preventDefault();
+      e?.stopPropagation();
       b.disabled = true;
       try { await run(); } catch (err) { say(String(err?.message ?? err)); } finally { b.disabled = false; }
     };
     return b;
   };
   const say = (text) => { note = text; if (entry) render(entry); };
+  const svcBusy = new Set();
+  const svc = {
+    busy: (k) => svcBusy.has(k),
+    ask: (text) => askConversation(ctx.host, key, text),
+    async run(payload, doing, k = payload.group ?? "*") {
+      svcBusy.add(k);
+      say(doing);
+      try {
+        const r = await svcRequest(ctx.host, key, agentOf(ctx), payload);
+        note = "";
+        return r;
+      } catch (err) {
+        note = String(err?.message ?? err);
+      } finally {
+        svcBusy.delete(k);
+        await watch?.refresh();
+        if (entry) render(entry);
+      }
+    },
+  };
   const pending = (r) => [r.dirty ? plural(r.dirty, "file") : "", r.unpublished ? plural(r.unpublished, "commit") : ""].filter(Boolean).join(", ");
   const openPRs = (repos) => repos.filter((r) => r.pullRequest?.state === "open");
 
+  // What a repository's Push button would push.
+  const pushable = (r) => !r.error && (r.dirty || r.unpublished || (!r.pullRequest && r.ahead > 0));
+  // The collection's actions, for the summary of a collapsed card: every
+  // repository's Push or Catch up at once, and every service started or stopped.
+  async function pushAll(repos) {
+    const github = repos.filter((r) => r.forge === "github");
+    const others = repos.filter((r) => r.forge !== "github");
+    for (const r of github) await publish(r);
+    if (others.length) await askConversation(ctx.host, key, others.map((r) => pushRequest(r.repo ?? r.project, r.pullRequest)).join(" "));
+  }
+  async function catchUpAll(repos) {
+    for (const r of repos) await catchUpRepo(ctx.host, agentOf(ctx), r, say);
+    await watch?.refresh();
+  }
+
   function chips(repos, services) {
     const out = [];
+    const collapsed = !card.open;
     const dirty = repos.filter((r) => r.dirty || r.unpublished);
+    const toPush = repos.filter(pushable);
     if (dirty.length) {
       const files = dirty.reduce((n, r) => n + (r.dirty ?? 0), 0);
       const commits = dirty.reduce((n, r) => n + (r.unpublished ?? 0), 0);
       const what = [files ? plural(files, "file") : "", commits ? plural(commits, "commit") : ""].filter(Boolean).join(", ");
       const where = dirty.length === 1 ? `${dirty[0].repo ?? dirty[0].project}: ` : `${dirty.length} repos: `;
       out.push(chip(`${where}${what} to push`, TONE.pending, dirty.map((r) => `${r.repo ?? r.project}: ${pending(r)}`).join("\n")));
-    } else {
+    } else if (!toPush.length) {
       out.push(chip("all pushed", TONE.none));
+    }
+    if (collapsed && toPush.length && !toPush.some((r) => busy.has(r.sessionKey))) {
+      const one = toPush.length === 1 ? toPush[0] : null;
+      out.push(action(one ? (one.pullRequest ? "Push" : "Push + PR") : `Push ${toPush.length}`,
+        one ? pushTitle(one.pullRequest) : `Push ${toPush.map((r) => r.repo ?? r.project).join(", ")}, each to its pull request or a new draft one`,
+        () => pushAll(toPush)));
     }
     const behind = repos.filter((r) => r.behind > 0);
     if (behind.length) {
       out.push(chip(behind.length === 1 ? `${behind[0].repo ?? behind[0].project}: ${behind[0].behind} behind` : `${behind.length} repos behind`,
-        TONE.pending, behind.map((r) => `${r.repo ?? r.project}: ${r.behind} behind ${r.base ?? "its base"}`).join("\n") + "\nExpand to catch up."));
+        TONE.pending, behind.map((r) => `${r.repo ?? r.project}: ${r.behind} behind ${r.base ?? "its base"}`).join("\n")));
+      if (collapsed) out.push(action("Catch up", "Merge the base branch into each repository behind it. Never rebases, never pushes.", () => catchUpAll(behind)));
     }
     for (const r of openPRs(repos)) {
       const pr = r.pullRequest;
@@ -281,7 +481,8 @@ function mountComposer(container, context) {
     if (groups.length) {
       const up = groups.filter((g) => g.running).length;
       const failed = groups.some((g) => g.failed);
-      out.push(chip(`${up}/${plural(groups.length, "service")} running`, failed ? TONE.failure : up ? TONE.success : TONE.none));
+      out.push(chip(`${up}/${plural(groups.length, "service")} running`, failed ? TONE.failure : up ? TONE.success : TONE.none, "", up ? "■" : "▶"));
+      if (collapsed) out.push(...allButtons(groups, svc).filter(Boolean));
     }
     return out;
   }
@@ -338,26 +539,30 @@ function mountComposer(container, context) {
     summary.replaceChildren(
       brand("14px"),
       css(el("span", {}, ...chips(repos, services)), "flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px"),
-      css(el("span", {}, small(`Updated ${ago(entry.at)}`),
+      // Collapsed, what an action is doing or why it failed shows here.
+      css(el("span", {}, !card.open && note ? css(el("span", { textContent: note, title: note }), "color:var(--muted, #888);font-size:12px;max-width:22em;overflow:hidden;text-overflow:ellipsis") : small(`Updated ${ago(entry.at)}`),
         iconButton("↻", "Refresh", () => void watch?.refresh()),
         iconButton("⤢", "Open the wtc Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
         css(el("span", { textContent: card.open ? "⌃" : "⌄" }), "color:var(--muted, #888);padding:0 6px")),
       "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
     );
     const lines = repos.map(repoLine);
-    for (const g of serviceGroups(services)) {
+    const groups = serviceGroups(services);
+    if (groups.length > 1) {
+      lines.push(css(el("div", {}, small("Services"), ...allButtons(groups, svc)), "display:flex;align-items:center;gap:6px;margin-top:2px"));
+    }
+    for (const g of groups) {
       lines.push(css(el("div", {},
-        dot(g.running ? TONE.success : g.failed ? TONE.failure : TONE.none),
+        stateButton(g, svc),
         css(el("span", { textContent: g.label }), "font-weight:600"),
         small(`${g.repo ?? ""} ${g.state}`.trim()),
         g.loose ? chip("separate tunnel", TONE.pending, "Started apart from the service it exposes") : null,
         css(el("span", {},
           g.loose ? action("Consolidate", "Ask the conversation to open it with wtc svc tunnel instead", () => askConversation(ctx.host, key, consolidate(g))) : null,
-          ...g.tunnels.filter((t) => t.url).map((t) => css(el("span", {}, link(tunnelName(t), t.url)), "font-size:12px")),
-          g.url ? css(el("span", {}, link(g.url, g.url)), "font-size:12px") : null,
-          g.failed || g.exited ? action("Restart", "wtc svc restart", async () => { await restartService(ctx.host, key, agentOf(ctx), g); await watch?.refresh(); }) : null),
-        "margin-left:auto;display:flex;align-items:center;gap:10px")),
-      "display:flex;align-items:center;gap:8px"));
+          g.url ? css(el("span", {}, address(g.url)), "font-size:12px") : null,
+          ...tunnelControls(g, svc, entry.data).map((c) => css(el("span", {}, c), "font-size:12px"))),
+        "margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap")),
+      "display:flex;align-items:center;gap:8px;flex-wrap:wrap"));
     }
     if (note) lines.push(small(note));
     detail.replaceChildren(...lines);
@@ -454,6 +659,27 @@ function mountCollection(container, context) {
   }
 
   const sessionKeyOf = () => entry?.data?.collection?.sessionKey ?? ctx.props.sessionKey;
+  const svcBusy = new Set();
+  const svc = {
+    busy: (k) => svcBusy.has(k),
+    ask: (text) => askConversation(ctx.host, sessionKeyOf(), text),
+    async run(payload, doing, k = payload.group ?? "*") {
+      svcBusy.add(k);
+      say(doing);
+      render();
+      try {
+        const r = await svcRequest(ctx.host, sessionKeyOf(), ctx.props.agentId, payload);
+        say("");
+        return r;
+      } catch (err) {
+        say(String(err?.message ?? err));
+      } finally {
+        svcBusy.delete(k);
+        await watch?.refresh();
+        render();
+      }
+    },
+  };
 
   async function catchUp(r) {
     await catchUpRepo(ctx.host, ctx.props.agentId, r, say);
@@ -693,17 +919,15 @@ function mountCollection(container, context) {
 
   // A service with its tunnels: the local address, then one link per tunnel.
   function serviceRow(g) {
-    const tone = g.running ? TONE.success : g.failed ? TONE.failure : TONE.none;
-    return css(el("div", {}, dot(tone),
+    return css(el("div", {}, stateButton(g, svc),
       css(el("span", { textContent: g.label }), "font-weight:600"),
       muted([g.repo, g.state].filter(Boolean).join(" · ")),
       g.loose ? chip("separate tunnel", TONE.pending, "Started apart from the service it exposes") : null,
       css(el("span", {},
         g.loose ? button("Consolidate", "Ask the conversation to open it with wtc svc tunnel instead", () => askConversation(ctx.host, sessionKeyOf(), consolidate(g))) : null,
-        g.url ? link(g.url.replace(/^https?:\/\//, ""), g.url) : null,
-        ...g.tunnels.filter((t) => t.url).map((t) => el("span", { title: t.url }, link(tunnelName(t), t.url))),
-        g.failed || g.exited ? button("Restart", "wtc svc restart", async () => { await restartService(ctx.host, sessionKeyOf(), ctx.props.agentId, g); await watch?.refresh(); }) : null),
-      "margin-left:auto;font-size:12px;display:flex;align-items:center;gap:10px")),
+        g.url ? address(g.url) : null,
+        ...tunnelControls(g, svc, entry.data)),
+      "margin-left:auto;font-size:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap")),
     "display:flex;align-items:center;gap:8px;padding:8px 12px;flex-wrap:wrap");
   }
 
@@ -734,7 +958,7 @@ function mountCollection(container, context) {
     list.append(adder);
     repoSection.append(list);
 
-    const serviceSection = el("div", {}, heading("Services"));
+    const serviceSection = el("div", {}, groups.length ? heading("Services", ...allButtons(groups, svc)) : heading("Services"));
     if (groups.length === 0) serviceSection.append(muted(data.servicesNote ?? "None running. Start them in the collection folder with wtc svc.", "font-size:13px"));
     else {
       const box = card();

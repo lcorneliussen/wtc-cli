@@ -3,8 +3,26 @@
   "name": "Worktree Collection",
   "description": "Shows a conversation's worktree collection: its repositories with pending changes, pull requests with CI, and running services, in a panel and a card above the message box.",
   "version": "0.1.0",
-  "uiCapabilities": ["panel", "action", "replacement"],
-  "activation": { "onStartup": true },
-  "configSchema": { "type": "object", "properties": {}, "additionalProperties": false },
-  "controlUi": { "entry": "dist/control-ui/v1/index.js" }
+  "uiCapabilities": [
+    "panel",
+    "action",
+    "replacement"
+  ],
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "teamTailnet": {
+        "type": "boolean",
+        "default": false,
+        "description": "The gateway's tailnet is the team's, not a person's: offer Tailscale tunnels to services, which everyone on it can reach."
+      }
+    },
+    "additionalProperties": false
+  },
+  "controlUi": {
+    "entry": "dist/control-ui/v1/index.js"
+  }
 }

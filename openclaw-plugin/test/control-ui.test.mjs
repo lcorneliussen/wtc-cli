@@ -86,14 +86,22 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const container = () => Object.assign(new Node("div"), { root: true });
 const texts = (node) => [...node.all()].map((n) => n.textContent);
 const buttons = (node) => [...node.all()].filter((n) => n.tagName === "BUTTON").map((n) => n.textContent);
+const titled = (node, title) => [...node.all()].find((n) => n.tagName === "BUTTON" && n.title === title);
 
-// Every collection request is answered from `collections`, by session.
+// Every collection request is answered from `collections`, by session;
+// wtc svc requests are recorded in `calls` and answered with `svcResult`.
 const collections = new Map();
+const calls = [];
+let svcResult = { ok: true, result: { message: "done" } };
+let portals = [];
 const hostRequest = async (method, params) => {
   if (method === "plugins.sessionAction" && params.actionId === "collection") {
     const data = collections.get(params.sessionKey);
     return data instanceof Error ? { ok: false, error: data.message } : { ok: true, result: data };
   }
+  if (method === "portal.list") return { portals };
+  calls.push({ method, ...params });
+  if (method === "plugins.sessionAction" && params.actionId === "svc") return svcResult;
   return {};
 };
 
@@ -152,7 +160,13 @@ test("panel: a busy collection", async () => {
   assert.ok(all.includes("2 commits to push"));
   assert.ok(all.includes("conflict"));
   assert.ok(all.includes("CI 1 failed"));
-  assert.deepEqual(buttons(host).filter((b) => b !== "↻"), ["Catch up", "Resolve", "Push", "Push + PR", "Push + PR", "Restart"]);
+  assert.deepEqual(buttons(host).filter((b) => b.length > 1 && !b.startsWith("■ ") && !b.startsWith("▶ ")), ["Catch up", "Resolve", "Push", "Push + PR", "Push + PR"]);
+  // Each service leads with a button that is its state and its action.
+  assert.ok(titled(host, "preview is running. Stop it"));
+  assert.ok(titled(host, "worker: exited (exit 1). Restart it"));
+  assert.ok(titled(host, "Start all services"));
+  assert.ok(titled(host, "Stop all services"));
+  assert.ok(titled(host, "Close the cloudflare tunnel"));
   // A service and its tunnel are one line.
   assert.equal(all.filter((t) => t === "preview").length, 1);
   assert.ok(all.includes("cloudflare"));
@@ -201,7 +215,8 @@ test("composer: the card for a busy collection", async () => {
   assert.ok(all.includes("3 repos: 1 file, 3 commits to push"));
   assert.ok(all.includes("api: 3 behind"));
   assert.ok(all.includes("api #7 · conflict"));
-  assert.ok(all.includes("1/2 services running"));
+  // Services are marked ■ (some running) or ▶ (none), not with a dot.
+  assert.ok(all.includes("■1/2 services running"));
   assert.ok(buttons(card).includes("Resolve"));
   // The branch of every repository.
   assert.equal(all.filter((t) => t === "openclaw/test").length, 3);
@@ -213,5 +228,115 @@ test("composer: a repository without a branch yet", async () => {
   const { host, view } = await mount("composer", collection([repo("api", { branch: null })]));
   assert.ok(texts(host).includes("at main"));
   assert.ok(texts(host).includes("all pushed"));
+  view.dispose();
+});
+
+test("panel: play, stop and start all run wtc svc", async () => {
+  const { host, view } = await mount("panel", collection([repo("api")], [
+    { group: "api/web", path: "api/web/main", repo: "api", kind: "service", label: "preview", state: "absent" },
+    { group: "api/docs", path: "api/docs/main", repo: "api", kind: "service", label: "docs", state: "ready", url: "http://127.0.0.1:42202" },
+  ]));
+  calls.length = 0;
+  titled(host, "preview: absent. Start it").onclick({ preventDefault() {}, stopPropagation() {} });
+  await settle();
+  titled(host, "docs is running. Stop it").onclick({ preventDefault() {}, stopPropagation() {} });
+  await settle();
+  titled(host, "Start all services").onclick({ preventDefault() {}, stopPropagation() {} });
+  await settle();
+  assert.deepEqual(calls.filter((c) => c.actionId === "svc").map((c) => c.payload),
+    [{ op: "up", group: "api/web" }, { op: "down", group: "api/docs" }, { op: "up" }]);
+  view.dispose();
+});
+
+test("panel: a new tunnel, and one whose client is missing", async () => {
+  const { host, view } = await mount("panel", collection([repo("api")], [
+    { group: "api/web", path: "api/web/main", repo: "api", kind: "service", label: "preview", state: "ready", url: "http://127.0.0.1:42201" },
+  ]));
+  const pick = [...host.all()].find((n) => n.tagName === "SELECT");
+  // The gateway's portal first; without tunnel clients, the others are
+  // installed first, and Tailscale is not offered on a personal tailnet.
+  assert.deepEqual(pick.children.map((o) => o.value), ["", "gateway", "cloudflare", "ngrok", "devtunnel"]);
+  assert.equal(pick.children[0].textContent, "+ Tunnel…");
+  assert.equal(pick.children[1].textContent, "gateway · OpenClaw portal");
+  assert.equal(pick.children[2].textContent, "cloudflare · public link · install first");
+  // Only reachable on the gateway: the port, not a link.
+  assert.ok(texts(host).includes(":42201"));
+  calls.length = 0;
+  svcResult = { ok: true, result: { missing: "cloudflared" } };
+  pick.value = "cloudflare";
+  await pick.onchange();
+  svcResult = { ok: true, result: { message: "done" } };
+  assert.deepEqual(calls[0].payload, { op: "tunnel", group: "api/web", provider: "cloudflare", public: true, add: true });
+  const asked = calls.find((c) => c.method === "sessions.send");
+  assert.match(asked.message, /cloudflare tunnel to api\/web\. cloudflared is not on the gateway's PATH/);
+  view.dispose();
+});
+
+test("composer: start and stop all in the rows only with more than one service", async () => {
+  const one = await mount("composer", collection([repo("api")], [
+    { group: "api/web", path: "api/web/main", repo: "api", kind: "service", label: "preview", state: "absent" },
+  ]));
+  assert.ok(titled(one.host, "preview: absent. Start it"));
+  const detail = [...one.host.all()].find((n) => n.className === "wtc-collection-card").children.find((n) => n.tagName === "DIV");
+  assert.equal(titled(detail, "Start all services"), undefined);
+  one.view.dispose();
+  const { host, view } = await mount("composer", busy);
+  assert.ok(titled(host, "Start all services"));
+  assert.ok(titled(host, "Stop all services"));
+  view.dispose();
+});
+
+test("panel: the ways to a service", async () => {
+  const web = { group: "api/web", path: "api/web/main", repo: "api", kind: "service", label: "preview", state: "ready", url: "http://127.0.0.1:42201" };
+  const team = await mount("panel", { ...collection([repo("api")], [web]), tunnelProviders: ["tailscale", "cloudflare"], teamTailnet: true });
+  const pick = [...team.host.all()].find((n) => n.tagName === "SELECT");
+  assert.deepEqual(pick.children.map((o) => o.textContent),
+    ["+ Tunnel…", "gateway · OpenClaw portal", "cloudflare · public link", "ngrok · public link · install first", "devtunnel · your account · install first", "tailscale · team tailnet"]);
+  team.view.dispose();
+  // Without portal ingress, the gateway's portal comes last, marked.
+  const bare = await mount("panel", { ...collection([repo("api")], [web]), tunnelProviders: ["cloudflare"], portalIngress: false });
+  const choice = [...bare.host.all()].find((n) => n.tagName === "SELECT");
+  assert.deepEqual(choice.children.map((o) => o.textContent),
+    ["+ Tunnel…", "cloudflare · public link", "ngrok · public link · install first", "devtunnel · your account · install first", "gateway · OpenClaw portal · needs ingress"]);
+  bare.view.dispose();
+  // With every other way taken, the one left is named.
+  const tunnels = ["cloudflare", "ngrok", "devtunnel"].map((p) => ({ group: "api/web", path: `api/web/${p}`, repo: "api", kind: "endpoint", provider: p, state: "idle" }));
+  const last = await mount("panel", { ...collection([repo("api")], [web, ...tunnels]), tunnelProviders: [] });
+  assert.ok(buttons(last.host).includes("+ gateway"), "one way left: no choice to make");
+  last.view.dispose();
+});
+
+test("panel: a portal of the gateway beside its service", async () => {
+  const web = { group: "api/web", path: "api/web/main", repo: "api", kind: "service", label: "preview", state: "ready", url: "http://127.0.0.1:42201" };
+  portals = [{ id: "p42201", title: "preview", port: 42201, listenPort: 41553, url: "http://172.30.0.2:41553/?openclaw_portal=t", publicUrl: "http://172.30.0.2:41553/", createdAtMs: 0 }];
+  const open = await mount("panel", collection([repo("api")], [web]));
+  const links = [...open.host.all()].filter((n) => n.tagName === "A").map((n) => n.textContent);
+  // A container's address, which a browser elsewhere cannot reach: marked.
+  assert.ok(links.includes("gateway ⚠"));
+  // Listed without its URL, it opens again on a click.
+  portals = [{ ...portals[0], url: undefined, id: "p42202" }];
+  const listed = await mount("panel", collection([repo("api")], [web]));
+  assert.ok(titled(listed.host, "Open the portal"));
+  listed.view.dispose();
+  portals = [{ ...portals[0], id: "p42201", url: "http://172.30.0.2:41553/?openclaw_portal=t" }];
+  // Open already: not offered again.
+  assert.equal([...open.host.all()].find((n) => n.tagName === "SELECT").children.some((o) => o.value === "gateway"), false);
+  calls.length = 0;
+  titled(open.host, "Close the portal").onclick({ preventDefault() {}, stopPropagation() {} });
+  await settle();
+  assert.deepEqual(calls.find((c) => c.method === "portal.close"), { method: "portal.close", id: "p42201" });
+  portals = [];
+  open.view.dispose();
+});
+
+test("composer: the collection's actions on the summary while collapsed", async () => {
+  const { host, view } = await mount("composer", busy);
+  const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
+  const summary = card.children.find((n) => n.tagName === "SUMMARY");
+  assert.deepEqual(buttons(summary).filter((b) => b.length > 1), ["Push 3", "Catch up", "▶ Start all", "■ Stop all"]);
+  // Open, the rows have them and the summary does not repeat them.
+  card.open = true;
+  for (const fn of card.listeners.toggle) fn();
+  assert.deepEqual(buttons(summary).filter((b) => b.length > 1), []);
   view.dispose();
 });

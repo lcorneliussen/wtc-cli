@@ -13,6 +13,12 @@ import path from "node:path";
 
 const PLUGIN_ID = "wtc";
 
+// The client each tunnel provider of wtc svc tunnel runs, and the providers
+// whose tunnel anyone with the link can open.
+const TUNNEL_PROGRAMS = { tailscale: "tailscale", devtunnel: "devtunnel", cloudflare: "cloudflared", ngrok: "ngrok" };
+const PUBLIC_TUNNELS = new Set(["cloudflare", "ngrok"]);
+const onPath = (program) => String(process.env.PATH ?? "").split(path.delimiter).some((dir) => dir && existsSync(path.join(dir, program)));
+
 // A Bitbucket repository as a person types it: a bitbucket.org URL in https
 // or scp form, or bitbucket.org/<workspace>/<repo>.
 export function parseBitbucketRepo(spec) {
@@ -222,6 +228,14 @@ export default {
           repos: [],
           warnings: [],
         };
+        // The tunnel providers whose client the gateway has, and whether its
+        // tailnet is the team's, so that a Tailscale tunnel is worth offering.
+        result.tunnelProviders = Object.keys(TUNNEL_PROGRAMS).filter((p) => onPath(TUNNEL_PROGRAMS[p]));
+        result.teamTailnet = api.pluginConfig?.teamTailnet === true;
+        // Whether a portal gets an address beyond the gateway's own: a
+        // wildcard domain or Tailscale run by the gateway.
+        const gateway = (api.runtime?.config?.current?.() ?? api.config)?.gateway;
+        result.portalIngress = !!gateway?.portals?.ingress?.domain || ["serve", "funnel"].includes(gateway?.tailscale?.mode);
         if (children.length === 0) return { ok: true, result };
         // The collection's name is its worktrees' name. wtc status reads
         // them, keeps the collection's folder and reports its services.
@@ -255,21 +269,45 @@ export default {
       },
     });
 
-    // Restarts one of the collection's services, from its folder.
+    // Starts, stops or restarts the collection's services (one, or all without
+    // a group) and opens or closes a service's tunnel, from its folder.
+    const svcAction = async (action, op) => {
+      const payload = action.payload ?? {};
+      const group = String(payload.group ?? "");
+      const provider = String(payload.provider ?? "");
+      if (!["up", "down", "restart", "tunnel"].includes(op)) return { ok: false, error: "op is up, down, restart or tunnel" };
+      if (group && !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(group)) return { ok: false, error: "name a service as <repo>/<service>" };
+      if (op === "tunnel" && !group) return { ok: false, error: "name the service to tunnel to" };
+      if (op === "tunnel" && !TUNNEL_PROGRAMS[provider]) return { ok: false, error: `the provider is one of ${Object.keys(TUNNEL_PROGRAMS).join(", ")}` };
+      if (!action.sessionKey || !action.agentId) return { ok: false, error: "sessionKey and agentId are required" };
+      const { children } = collectionOf(action.agentId, action.sessionKey);
+      const name = children.map((c) => String(c.entry.worktree?.branch ?? "").replace(/^openclaw\//, "")).find(Boolean);
+      if (!name) return { ok: false, error: "this session has no collection" };
+      const argv = ["wtc", "svc", op, ...(group ? [group] : [])];
+      if (op === "tunnel") {
+        argv.push(provider);
+        if (payload.stop) argv.push("--stop");
+        // Only a person's click opens a tunnel anyone with the link can use.
+        else if (payload.public && PUBLIC_TUNNELS.has(provider)) argv.push("--public");
+        // A new tunnel runs the provider's client from the PATH; without it
+        // the conversation can install one first.
+        if (payload.add && !payload.stop && !onPath(TUNNEL_PROGRAMS[provider])) return { ok: true, result: { missing: TUNNEL_PROGRAMS[provider] } };
+      }
+      const r = await run(argv, { cwd: path.join(stateDir, "wtc-collections", name), timeoutMs: 180000, env: { OPENCLAW_SHELL: "exec" } });
+      return r.code === 0 ? { ok: true, result: { message: `${argv.slice(2).join(" ")}: done` } } : { ok: false, error: (r.stderr || r.stdout).trim().slice(-400) || `exit ${r.code}` };
+    };
+    api.session.controls.registerSessionAction({
+      id: "svc",
+      description: "Start, stop or restart this session's collection's services, all or one, or open or close a service's tunnel (wtc svc up|down|restart|tunnel).",
+      requiredScopes: ["operator.write"],
+      handler: (action) => svcAction(action, String(action.payload?.op ?? "")),
+    });
+    // The earlier name, for a Control UI still loaded from before.
     api.session.controls.registerSessionAction({
       id: "svc-restart",
       description: "Restart one service of this session's collection (wtc svc restart).",
       requiredScopes: ["operator.write"],
-      async handler(action) {
-        const group = String(action.payload?.group ?? "");
-        if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(group)) return { ok: false, error: "name a service as <repo>/<service>" };
-        if (!action.sessionKey || !action.agentId) return { ok: false, error: "sessionKey and agentId are required" };
-        const { children } = collectionOf(action.agentId, action.sessionKey);
-        const name = children.map((c) => String(c.entry.worktree?.branch ?? "").replace(/^openclaw\//, "")).find(Boolean);
-        if (!name) return { ok: false, error: "this session has no collection" };
-        const r = await run(["wtc", "svc", "restart", group], { cwd: path.join(stateDir, "wtc-collections", name), timeoutMs: 120000, env: { OPENCLAW_SHELL: "exec" } });
-        return r.code === 0 ? { ok: true, result: { message: `${group} restarted` } } : { ok: false, error: (r.stderr || r.stdout).trim().slice(-400) || `exit ${r.code}` };
-      },
+      handler: (action) => svcAction(action, "restart"),
     });
 
     api.session.controls.registerSessionAction({
