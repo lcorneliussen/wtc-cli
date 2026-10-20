@@ -26,7 +26,10 @@ var trustedArgs = []string{
 	"-c", "gpg.ssh.program=false",
 	"-c", "gpg.x509.program=false",
 	// A submodule is a repository of its own, whose config is not checked:
-	// git must not run in it on wtc's behalf.
+	// git must not run in it on wtc's behalf. These are only defaults, which
+	// a committed .gitmodules can override per submodule, so the commands
+	// that would recurse also say --no-recurse-submodules or
+	// --ignore-submodules.
 	"-c", "submodule.recurse=false",
 	"-c", "fetch.recurseSubmodules=false",
 	"-c", "status.submoduleSummary=false",
@@ -82,13 +85,57 @@ func untrustedConfig(dir string) error {
 	return result
 }
 
+// submoduleArgs pins every submodule .gitmodules names, in the worktree,
+// the index or HEAD: never fetched into, and its working tree never looked
+// at. A tracked .gitmodules can override the general defaults above for its
+// submodules, and git's own subcommands (merge runs stash create) would then
+// run git inside them; config for the submodule's name beats .gitmodules.
+// Reading .gitmodules runs nothing, given the overrides: the index read
+// for :.gitmodules would otherwise ask fsmonitor.
+func submoduleArgs(dir string) ([]string, error) {
+	top, err := exec.Command("git", append(append([]string{"-C", dir}, trustedArgs...), "rev-parse", "--show-toplevel")...).Output()
+	if err != nil {
+		return nil, nil
+	}
+	names := map[string]bool{}
+	for _, source := range [][]string{
+		{"--file", strings.TrimSpace(string(top)) + "/.gitmodules"},
+		{"--blob", ":.gitmodules"},
+		{"--blob", "HEAD:.gitmodules"},
+	} {
+		args := append(append(append(append([]string{"-C", dir}, trustedArgs...), "config"), source...), "--name-only", "--get-regexp", `^submodule\..*\.(path|url)$`)
+		out, err := exec.Command("git", args...).Output()
+		if err != nil {
+			continue
+		}
+		for _, key := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if name, ok := strings.CutPrefix(key, "submodule."); ok && key != "" {
+				names[name[:strings.LastIndex(name, ".")]] = true
+			}
+		}
+	}
+	var pins []string
+	for name := range names {
+		// -c splits at the first =, so such a name could not be pinned.
+		if strings.ContainsAny(name, "=\n") {
+			return nil, &UntrustedConfigError{fmt.Sprintf("%s: .gitmodules names a submodule %q, which wtc cannot keep git out of, so wtc runs no git there", dir, name)}
+		}
+		pins = append(pins, "-c", "submodule."+name+".ignore=dirty", "-c", "submodule."+name+".fetchRecurseSubmodules=false")
+	}
+	return pins, nil
+}
+
 // gitCommand is the git command wtc runs in dir: refused when dir's config
 // is not one to trust, and with the overrides otherwise.
 func gitCommand(ctx context.Context, dir string, args ...string) (*exec.Cmd, error) {
 	if err := untrustedConfig(dir); err != nil {
 		return nil, err
 	}
-	full := append(append([]string{"-C", dir}, trustedArgs...), args...)
+	pins, err := submoduleArgs(dir)
+	if err != nil {
+		return nil, err
+	}
+	full := append(append(append([]string{"-C", dir}, trustedArgs...), pins...), args...)
 	if ctx == nil {
 		return exec.Command("git", full...), nil
 	}

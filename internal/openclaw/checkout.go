@@ -312,7 +312,7 @@ func (c *Checkout) CatchUp() (CatchUp, error) {
 			return result, fmt.Errorf("%s has uncommitted changes (%s): commit them before catching up, so a conflict cannot take them along", c.Dir, ch.path)
 		}
 	}
-	fetch := append(fetchCredentials(c.Origin), "fetch", "--quiet", "origin", "+refs/heads/"+c.Dest+":refs/remotes/origin/"+c.Dest)
+	fetch := append(fetchCredentials(c.Origin), "fetch", "--quiet", "--no-recurse-submodules", "origin", "+refs/heads/"+c.Dest+":refs/remotes/origin/"+c.Dest)
 	if _, err := git(c.Dir, fetch...); err != nil {
 		return result, fmt.Errorf("cannot fetch %s from origin: %w", c.Dest, err)
 	}
@@ -323,7 +323,7 @@ func (c *Checkout) CatchUp() (CatchUp, error) {
 		return result, nil
 	}
 	if _, mergeErr := git(c.Dir, "merge", "--no-edit", "--quiet", dest); mergeErr != nil {
-		conflicts, _ := git(c.Dir, "diff", "--name-only", "--diff-filter=U")
+		conflicts, _ := git(c.Dir, "diff", "--name-only", "--diff-filter=U", "--ignore-submodules=dirty")
 		if c.inProgress() != "" {
 			_, _ = git(c.Dir, "merge", "--abort")
 		}

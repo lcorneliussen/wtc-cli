@@ -147,13 +147,23 @@ func TestGitDoesNotRunInSubmodules(t *testing.T) {
 	gitIn(t, "-C", sub, "add", ".")
 	gitIn(t, "-C", sub, "commit", "-qm", "sub")
 	git("-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "sub")
+	// The tracked .gitmodules, which the agent writes, asks for recursion.
+	git("config", "-f", ".gitmodules", "submodule.sub.fetchRecurseSubmodules", "true")
+	git("config", "-f", ".gitmodules", "submodule.sub.ignore", "none")
+	git("add", ".gitmodules")
 	git("commit", "-qm", "submodule")
 	c, err := OpenCheckout(c.Dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Committed before anything is planted: the test's own git looks into
+	// the submodule as .gitmodules asks.
+	write(t, c, "README.md", "ours\n")
+	git("commit", "-qam", "ours")
 	filter, mark := plant(t, "filter")
 	gitIn(t, "-C", filepath.Join(c.Dir, "sub"), "config", "filter.evil.clean", filter)
+	uploadPack, uploadMark := plant(t, "upload-pack")
+	gitIn(t, "-C", filepath.Join(c.Dir, "sub"), "config", "remote.origin.uploadpack", uploadPack)
 	// Touched, so that a status in the submodule would have to clean it.
 	if err := os.WriteFile(filepath.Join(c.Dir, "sub", "a"), []byte("a\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -167,8 +177,28 @@ func TestGitDoesNotRunInSubmodules(t *testing.T) {
 	if _, err := c.CatchUp(); err != nil {
 		t.Fatalf("catch-up: %v", err)
 	}
+	// A conflicting catch-up lists the conflicts, and fetches first.
+	other := t.TempDir()
+	for _, args := range [][]string{{"clone", "-q", bare, other}} {
+		gitIn(t, args...)
+	}
+	if err := os.WriteFile(filepath.Join(other, "README.md"), []byte("theirs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, "-C", other, "commit", "-qam", "theirs")
+	gitIn(t, "-C", other, "push", "-q", "origin", "main")
+	if err := os.WriteFile(filepath.Join(c.Dir, "sub", "a"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CatchUp(); err == nil || !strings.Contains(err.Error(), "README.md") {
+		t.Fatalf("conflicting catch-up: %v", err)
+	}
+	FetchBases([]string{c.Dir}, 0)
 	if ran(mark) {
-		t.Fatal("a filter planted in a submodule ran")
+		t.Error("a filter planted in a submodule ran")
+	}
+	if ran(uploadMark) {
+		t.Error("an upload-pack planted in a submodule ran")
 	}
 }
 

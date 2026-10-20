@@ -73,7 +73,7 @@ func FetchBases(paths []string, maxAge time.Duration) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			args := append(fetchCredentials(c.origin), "fetch", "--quiet", "--no-tags", "origin")
+			args := append(fetchCredentials(c.origin), "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "origin")
 			for _, b := range c.branches {
 				args = append(args, "+refs/heads/"+b+":refs/remotes/origin/"+b)
 			}
