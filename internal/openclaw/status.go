@@ -3,6 +3,7 @@ package openclaw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -151,6 +152,9 @@ func checkoutStatus(path string, pullRequests bool) CheckoutStatus {
 	top, err := git(path, "rev-parse", "--show-toplevel")
 	if err != nil {
 		s.Error = "not a git checkout"
+		if untrusted := (*UntrustedConfigError)(nil); errors.As(err, &untrusted) {
+			s.Error = err.Error()
+		}
 		return s
 	}
 	s.Branch, _ = git(top, "branch", "--show-current")

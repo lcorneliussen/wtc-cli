@@ -188,11 +188,14 @@ export default {
           } catch { /* no clones yet */ }
           cwd = dirs.find((d) => existsSync(path.join(d, ".git")));
           if (!cwd) return { ok: false, error: `${project} is not on the gateway` };
-          url = "origin";
-        } else if (!/^https:\/\/(github\.com|bitbucket\.org)\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?(\.git)?$/.test(url)) {
-          return { ok: false, error: "give a GitHub or Bitbucket https URL" };
+          // Only the URL is read from the clone, whose config an agent can
+          // write to; git then runs outside it, with the gateway's config.
+          url = (await run(["git", "config", "--file", path.join(cwd, ".git", "config"), "--get", "remote.origin.url"])).stdout.trim();
         }
-        const origin = cwd ? (await run(["git", "-C", cwd, "remote", "get-url", "origin"])).stdout.trim() : url;
+        if (!/^https:\/\/(github\.com|bitbucket\.org)\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?(\.git)?$/.test(url)) {
+          return { ok: false, error: cwd ? `${project}'s origin is not a GitHub or Bitbucket https URL` : "give a GitHub or Bitbucket https URL" };
+        }
+        const origin = url;
         const env = { GIT_TERMINAL_PROMPT: "0" };
         let auth = [];
         if (/github\.com/.test(origin)) {
@@ -204,7 +207,7 @@ export default {
             env.WTC_BITBUCKET_TOKEN = login.token;
           }
         }
-        const r = await run(["git", ...(cwd ? ["-C", cwd] : []), ...auth, "ls-remote", "--symref", url, "HEAD", "refs/heads/*"], { timeoutMs: 30000, env });
+        const r = await run(["git", ...auth, "ls-remote", "--symref", url, "HEAD", "refs/heads/*"], { timeoutMs: 30000, env });
         if (r.code !== 0) return { ok: false, error: `cannot read the branches: ${r.stderr.trim().split("\n").pop()}` };
         const lines = r.stdout.split("\n");
         const head = lines.map((l) => l.match(/^ref: refs\/heads\/(\S+)\s+HEAD$/)).find(Boolean)?.[1] ?? null;

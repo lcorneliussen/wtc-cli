@@ -25,7 +25,10 @@ type Checkout struct {
 }
 
 func git(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd, err := gitCommand(nil, dir, args...)
+	if err != nil {
+		return "", err
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		var exit *exec.ExitError
@@ -47,6 +50,9 @@ func gitOK(dir string, args ...string) bool {
 // worktree, else origin's default branch.
 func OpenCheckout(dir, dest string) (*Checkout, error) {
 	top, err := git(dir, "rev-parse", "--show-toplevel")
+	if untrusted := (*UntrustedConfigError)(nil); errors.As(err, &untrusted) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, errors.New("not in a git checkout: publishing and catching up work in the session that owns a repository")
 	}
@@ -152,7 +158,7 @@ func (c *Checkout) publishedHead() string {
 type change struct{ status, path string }
 
 func (c *Checkout) pending() ([]change, error) {
-	out, err := git(c.Dir, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	out, err := git(c.Dir, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=dirty")
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +312,7 @@ func (c *Checkout) CatchUp() (CatchUp, error) {
 			return result, fmt.Errorf("%s has uncommitted changes (%s): commit them before catching up, so a conflict cannot take them along", c.Dir, ch.path)
 		}
 	}
-	fetch := append(fetchCredentials(c.Origin), "fetch", "--quiet", "origin", "+refs/heads/"+c.Dest+":refs/remotes/origin/"+c.Dest)
+	fetch := append(fetchCredentials(c.Origin), "fetch", "--quiet", "--no-recurse-submodules", "origin", "+refs/heads/"+c.Dest+":refs/remotes/origin/"+c.Dest)
 	if _, err := git(c.Dir, fetch...); err != nil {
 		return result, fmt.Errorf("cannot fetch %s from origin: %w", c.Dest, err)
 	}
@@ -317,7 +323,7 @@ func (c *Checkout) CatchUp() (CatchUp, error) {
 		return result, nil
 	}
 	if _, mergeErr := git(c.Dir, "merge", "--no-edit", "--quiet", dest); mergeErr != nil {
-		conflicts, _ := git(c.Dir, "diff", "--name-only", "--diff-filter=U")
+		conflicts, _ := git(c.Dir, "diff", "--name-only", "--diff-filter=U", "--ignore-submodules=dirty")
 		if c.inProgress() != "" {
 			_, _ = git(c.Dir, "merge", "--abort")
 		}
