@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"regexp"
@@ -128,8 +130,10 @@ func openClawChecks(env openClawEnv) []doctorCheck {
 		switch {
 		case a.Workspace == "":
 			c.Detail = "the agent has no workspace"
+		case errors.Is(err, fs.ErrNotExist):
+			c.Detail = fmt.Sprintf("%s does not exist; create it with: wtc docs openclaw-AGENTS.md >> %s", file, file)
 		case err != nil:
-			c.Detail = fmt.Sprintf("%s does not exist; create it with: wtc docs openclaw-AGENTS.md > %s", file, file)
+			c.Detail = fmt.Sprintf("%s could not be read: %v", file, err)
 		case !mentionsWtc.Match(data):
 			c.Detail = fmt.Sprintf("%s does not mention wtc, so its agent only finds it through the skill; add: wtc docs openclaw-AGENTS.md >> %s", file, file)
 		default:
@@ -146,10 +150,14 @@ func releaseVersion(v string) bool {
 	return err == nil && !strings.Contains(v, "-")
 }
 
-// openclaw prints a banner before its JSON on some versions.
+// openclaw prints a banner before its JSON on some versions: the JSON is
+// from the first line that starts it.
 func jsonPart(out string) string {
-	if i := strings.IndexAny(out, "{["); i >= 0 {
-		return out[i:]
+	lines := strings.SplitAfter(out, "\n")
+	for i, line := range lines {
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[") {
+			return strings.Join(lines[i:], "")
+		}
 	}
 	return out
 }

@@ -325,8 +325,8 @@ the section from `wtc docs openclaw-AGENTS.md`.
 To upgrade, bump `WTC_VERSION` (and the Bitbucket tag when its release notes
 call for it) and let the pipeline build and roll out the image. People's
 connected accounts live in the gateway's state, not in the image, and stay.
-As a smoke test after the rollout, run `wtc doctor --openclaw --json` in the gateway's
-container: it exits non-zero when a required check fails.
+As a smoke test after the rollout, run `wtc doctor --openclaw --json` in the
+gateway's container: it exits non-zero when a required check fails.
 
 ## Upgrade
 
