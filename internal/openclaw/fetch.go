@@ -73,12 +73,14 @@ func FetchBases(paths []string, maxAge time.Duration) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			args := append([]string{"-C", c.dir}, fetchCredentials(c.origin)...)
-			args = append(args, "fetch", "--quiet", "--no-tags", "origin")
+			args := append(fetchCredentials(c.origin), "fetch", "--quiet", "--no-tags", "origin")
 			for _, b := range c.branches {
 				args = append(args, "+refs/heads/"+b+":refs/remotes/origin/"+b)
 			}
-			cmd := exec.CommandContext(ctx, "git", args...)
+			cmd, err := gitCommand(ctx, c.dir, args...)
+			if err != nil {
+				return
+			}
 			cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 			if cmd.Run() == nil {
 				_ = os.WriteFile(marker, nil, 0o644)

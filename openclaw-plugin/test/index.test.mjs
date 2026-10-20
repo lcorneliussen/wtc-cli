@@ -42,3 +42,44 @@ test("overlapping collection requests share one wtc --version", async () => {
   assert.equal(asked, 1);
   for (const r of results) assert.match(r.result.warnings[0], /runs wtc 99\.0\.0/);
 });
+
+test("the branches of a gateway project are read outside its clone", async () => {
+  const { mkdtempSync, mkdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const state = mkdtempSync(path.join(tmpdir(), "wtc-plugin-"));
+  mkdirSync(path.join(state, "repos", "docs", ".git"), { recursive: true });
+  const actions = new Map();
+  const calls = [];
+  let origin = "https://github.com/example-org/docs.git";
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      state: { resolveStateDir: () => state },
+      agent: { session: { listSessionEntries: () => [], getSessionEntry: async () => undefined } },
+      system: {
+        runCommandWithTimeout: async (argv) => {
+          calls.push(argv);
+          if (argv.includes("--get")) return { code: 0, stdout: origin + "\n", stderr: "" };
+          return { code: 0, stdout: "ref: refs/heads/main\tHEAD\n" + "a".repeat(40) + "\trefs/heads/main\n", stderr: "" };
+        },
+      },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const branches = (payload) => actions.get("repo-branches").handler({ sessionKey: "s", agentId: "main", payload });
+  const r = await branches({ project: "docs" });
+  assert.deepEqual(r.result, { defaultBranch: "main", branches: ["main"] });
+  const lsRemote = calls.find((argv) => argv.includes("ls-remote"));
+  assert.ok(!lsRemote.includes("-C"), "ls-remote runs in no repository");
+  assert.ok(lsRemote.includes(origin), "with the URL read from the clone");
+  // A clone whose origin was pointed elsewhere is not read.
+  origin = "ext::sh -c touch% /tmp/pwned";
+  calls.length = 0;
+  const refused = await branches({ project: "docs" });
+  assert.equal(refused.ok, false);
+  assert.ok(!calls.some((argv) => argv.includes("ls-remote")));
+});

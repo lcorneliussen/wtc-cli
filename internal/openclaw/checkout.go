@@ -25,7 +25,10 @@ type Checkout struct {
 }
 
 func git(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd, err := gitCommand(nil, dir, args...)
+	if err != nil {
+		return "", err
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		var exit *exec.ExitError
@@ -47,6 +50,9 @@ func gitOK(dir string, args ...string) bool {
 // worktree, else origin's default branch.
 func OpenCheckout(dir, dest string) (*Checkout, error) {
 	top, err := git(dir, "rev-parse", "--show-toplevel")
+	if untrusted := (*UntrustedConfigError)(nil); errors.As(err, &untrusted) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, errors.New("not in a git checkout: publishing and catching up work in the session that owns a repository")
 	}

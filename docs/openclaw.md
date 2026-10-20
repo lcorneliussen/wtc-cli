@@ -133,6 +133,32 @@ GitHub token. There:
   the sandbox.
 - A repository on another forge cannot be published from a sandbox.
 
+For a gateway that people with different rights share, sandbox the agents
+that do development work. Each repository then gets its own conversation
+(`wtc add-repo --separate`), working in its sandbox's private copy, which the
+gateway reconciles into the managed worktree and publishes. The collection
+folder, one conversation driving several repositories, needs the agent's
+commands on the gateway itself, with the trust that implies. Do not bind the
+managed worktrees or the gateway's clones into a sandbox to get it: that goes
+around the private copy and its reconciliation
+([#105](https://github.com/lcorneliussen/wtc-cli/issues/105)).
+
+## Git the gateway runs
+
+The card's status, catch-up and publish make the gateway run `wtc` and git in
+agents' worktrees, as the gateway's user. A repository's own config can make
+git run programs, so wtc does not let it:
+
+- every git command runs with fsmonitor, hooks, signature checking and
+  signing turned off;
+- a checkout whose repository or worktree config sets anything else that can
+  run a program (a filter or merge driver, `core.sshCommand`, an
+  upload-pack, an include) is refused, with the key and how to remove it;
+- the gateway's global and system config, the admin's, stay in effect, so a
+  Git LFS filter configured there still works;
+- the branch list for **Add repository** reads only a project's origin URL
+  and runs `git ls-remote` outside the clone.
+
 ## Credit for the people who asked
 
 The gateway commits as its own GitHub identity and adds a `Co-authored-by`
