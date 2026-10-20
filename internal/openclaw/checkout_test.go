@@ -298,6 +298,34 @@ func TestStatus(t *testing.T) {
 	}
 }
 
+// Once the pull request merged and a catch-up fast-forwarded the branch to
+// the base, the merge commit is not something to publish.
+func TestStatusAfterThePullRequestMerged(t *testing.T) {
+	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
+	write(t, c, "notes.md", "one\n")
+	git("add", ".")
+	git("commit", "-qm", "Publish openclaw/72-add-thing\n\nOpenClaw-Publication: 53a47a99")
+	merge := git("commit-tree", "-p", "origin/main", "-p", "HEAD", "-m", "Merge pull request #1", "HEAD^{tree}")
+	git("update-ref", "refs/remotes/origin/main", merge)
+	git("merge", "-q", "--ff-only", "origin/main")
+	if s := CheckoutsStatus([]string{c.Dir}, false).Repos[0]; s.Ahead != 0 || s.Behind != 0 || !s.Published || s.Unpublished != 0 {
+		t.Errorf("at the merged base: %+v", s)
+	}
+	write(t, c, "notes.md", "two\n")
+	git("commit", "-qam", "Follow-up")
+	if s := CheckoutsStatus([]string{c.Dir}, false).Repos[0]; s.Ahead != 1 || s.Unpublished != 1 {
+		t.Errorf("a follow-up commit: %+v", s)
+	}
+	// A catch-up that merges the base into the branch makes a commit that
+	// does need publishing.
+	git("commit", "-qm", "Publish openclaw/72-add-thing\n\nOpenClaw-Publication: 7d0c2e11", "--allow-empty")
+	git("update-ref", "refs/remotes/origin/main", git("commit-tree", "-p", "origin/main", "-m", "Upstream", "origin/main^{tree}"))
+	git("merge", "-q", "--no-ff", "--no-edit", "origin/main")
+	if s := CheckoutsStatus([]string{c.Dir}, false).Repos[0]; s.Behind != 0 || s.Unpublished != 1 {
+		t.Errorf("after a catch-up's merge: %+v", s)
+	}
+}
+
 func TestPlanPublishInASandboxCopy(t *testing.T) {
 	// What a sandbox gets: the session's branch, no origin, the skills mirror.
 	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")

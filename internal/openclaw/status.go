@@ -201,7 +201,13 @@ func checkoutStatus(path string, pullRequests bool) CheckoutStatus {
 	if name, managed := strings.CutPrefix(s.Branch, BranchPrefix); managed {
 		if published := (&Checkout{Dir: top, Worktree: name}).publishedHead(); published != "" {
 			s.Published = true
-			if n, err := git(top, "rev-list", "--count", published+"..HEAD"); err == nil {
+			// Commits that came from the base, such as the pull request's
+			// merge after a fast-forward catch-up, are not new work.
+			args := []string{"rev-list", "--count", "HEAD", "^" + published}
+			if s.Base != "" {
+				args = append(args, "^"+s.Base)
+			}
+			if n, err := git(top, args...); err == nil {
 				s.Unpublished, _ = strconv.Atoi(n)
 			}
 		}
