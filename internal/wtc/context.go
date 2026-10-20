@@ -94,7 +94,7 @@ func Discover(start string) (*Context, error) {
 	}
 	dir := abs
 	for {
-		for _, marker := range []string{filepath.Join("harness", ".harness-repos.yml"), filepath.Join(AdHocConfigDir, adHocRegistryFile)} {
+		for _, marker := range []string{filepath.Join(AdHocConfigDir, adHocRegistryFile), filepath.Join("harness", ".harness-repos.yml")} {
 			candidate := filepath.Join(dir, marker)
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 				return OpenCollection(dir)
@@ -115,14 +115,13 @@ func OpenCollection(dir string) (*Context, error) {
 		return nil, err
 	}
 	c := &Context{Collection: abs, Harness: filepath.Join(abs, "harness"), Workspace: filepath.Dir(abs)}
-	info, err := os.Stat(filepath.Join(c.Harness, ".harness-repos.yml"))
-	if err != nil {
-		adHoc, adHocErr := os.Stat(filepath.Join(abs, AdHocConfigDir, adHocRegistryFile))
-		if adHocErr != nil || adHoc.IsDir() {
-			return nil, fmt.Errorf("not a collection: %s", abs)
-		}
+	// A collection's own config decides what it is, not the name of one of
+	// its repositories: a gateway's folder may link a repository called
+	// harness and stays ad hoc. wtc init never makes that config inside a
+	// harness collection.
+	if adHoc, err := os.Stat(filepath.Join(abs, AdHocConfigDir, adHocRegistryFile)); err == nil && !adHoc.IsDir() {
 		c.Harness, c.AdHoc = filepath.Join(abs, AdHocConfigDir), true
-	} else if info.IsDir() {
+	} else if info, err := os.Stat(filepath.Join(c.Harness, ".harness-repos.yml")); err != nil || info.IsDir() {
 		return nil, fmt.Errorf("not a collection: %s", abs)
 	}
 	if err := c.load(); err != nil {

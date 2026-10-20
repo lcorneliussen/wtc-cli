@@ -48,3 +48,34 @@ func TestLinkGatewayCollection(t *testing.T) {
 		t.Fatal("replaced a directory")
 	}
 }
+
+// A harness repository called harness is a link like any other: the folder
+// stays the gateway's collection and keeps its recorded harness.
+func TestGatewayFolderWithAHarnessCalledHarness(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	wt := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wt, ".harness-repos.yml"), []byte("repos:\n  - name: api\n    remote: https://github.com/example-org/api.git\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "wtc-collections", "demo")
+	if err := RecordGatewayHarness(dir, "platform", "https://github.com/example-org/harness.git"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LinkGatewayCollection(dir, []LinkedRepo{{Name: "harness", Remote: "https://github.com/example-org/harness.git", DefaultRef: "origin/main", Path: wt}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target, _ := os.Readlink(filepath.Join(dir, "harness")); target != wt {
+		t.Errorf("harness links to %q", target)
+	}
+	if !c.AdHoc || c.Config.Runtime.Backend != "dekit" {
+		t.Errorf("no longer the gateway's folder: ad hoc %v, runtime %q", c.AdHoc, c.Config.Runtime.Backend)
+	}
+	if name, _, err := GatewayHarness(dir); err != nil || name != "platform" {
+		t.Errorf("recorded harness %q %v", name, err)
+	}
+	if err := RecordGatewayHarness(dir, "ops", "https://github.com/example-org/ops.git"); err == nil {
+		t.Error("a second harness was recorded")
+	}
+}

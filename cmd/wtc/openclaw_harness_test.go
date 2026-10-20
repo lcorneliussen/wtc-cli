@@ -233,3 +233,44 @@ func TestAddRepoWithoutHarnesses(t *testing.T) {
 		t.Errorf("a bad config: %v", err)
 	}
 }
+
+// A URL resolves through the registry too, the harness is added once even
+// when named, and an add-repo that fails binds the collection to nothing.
+func TestAddRepoHarnessEdgeCases(t *testing.T) {
+	state, _ := harnessGateway(t)
+	withGatewayConfig(t, `{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}]}`)
+	intents, err := addRepoPlan(t, "git@github.com:example-org/api.git", "example-org/platform-harness", "--worktree", "3-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := summary(intents), "platform-harness@platform-harness:origin/main api@api:origin/develop"; got != want {
+		t.Errorf("intents %s, want %s", got, want)
+	}
+
+	// A repository that is not on the gateway: the plan fails, nothing is
+	// recorded, and the collection can still choose.
+	if _, err := addRepoPlan(t, "example-org/elsewhere", "--worktree", "4-x"); err == nil || !strings.Contains(err.Error(), "not on the gateway yet") {
+		t.Fatalf("not on the gateway: %v", err)
+	}
+	if name, _, err := wtc.GatewayHarness(filepath.Join(state, "wtc-collections", "4-x")); err != nil || name != "" {
+		t.Errorf("a failed add-repo recorded %q %v", name, err)
+	}
+	if _, err := addRepoPlan(t, "api", "--worktree", "4-x", "--harness", "none"); err != nil {
+		t.Errorf("choosing after a failed add-repo: %v", err)
+	}
+
+	// A harness that is not on the gateway, or has no registry.
+	withGatewayConfig(t, `{"harnesses": [{"name": "gone", "remote": "https://github.com/example-org/gone-harness"}]}`)
+	if _, err := addRepoPlan(t, "api", "--worktree", "5-x"); err == nil || !strings.Contains(err.Error(), "harness gone is not on the gateway yet") {
+		t.Errorf("harness not on the gateway: %v", err)
+	}
+	withGatewayConfig(t, `{"harnesses": [{"name": "web", "remote": "https://github.com/example-org/web"}]}`)
+	if _, err := addRepoPlan(t, "api", "--worktree", "6-x"); err == nil || !strings.Contains(err.Error(), "has no .harness-repos.yml") {
+		t.Errorf("harness without a registry: %v", err)
+	}
+	for _, w := range []string{"5-x", "6-x"} {
+		if _, err := os.Stat(filepath.Join(state, "wtc-collections", w)); !os.IsNotExist(err) {
+			t.Errorf("%s: a folder was made: %v", w, err)
+		}
+	}
+}

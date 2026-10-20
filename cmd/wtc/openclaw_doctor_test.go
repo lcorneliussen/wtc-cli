@@ -15,10 +15,10 @@ import (
 type fakeGateway struct {
 	git, plugins, customPlugins, agents string
 	// config is the wtc plugin's config; projects the gateway's clones.
-	config   string
-	projects map[string]string
-	files                               map[string]string
-	noOpenClaw                          bool
+	config     string
+	projects   map[string]string
+	files      map[string]string
+	noOpenClaw bool
 }
 
 func (g fakeGateway) env(version string) openClawEnv {
