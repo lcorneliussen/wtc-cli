@@ -5,6 +5,10 @@ workspace is optional: an ad-hoc collection works from any empty folder. Mise
 manages tool versions and environment; it is optional. Herdr, Neovim, and an
 agent CLI are optional interfaces.
 
+An agent setting wtc up should start with
+[`wtc docs setup.md`](../internal/wtc/defaults/setup.md) instead: it decides
+between this guide, the harness bootstrap and an OpenClaw gateway.
+
 ## Install WTC
 
 Install a [published release](https://github.com/lcorneliussen/wtc-cli/releases).

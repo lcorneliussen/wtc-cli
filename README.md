@@ -73,6 +73,11 @@ for macOS or Linux. With mise:
 mise use -g github:lcorneliussen/wtc-cli@0.1.43
 ```
 
+To have an agent set wtc up, point it at the
+[setup guide](internal/wtc/defaults/setup.md) (`wtc docs setup.md` once wtc is
+installed). It works out the runtime (terminal, herdr or an OpenClaw gateway)
+and the harness, then follows the matching guide.
+
 For a quick task, no harness is needed. Run `wtc init` in an empty folder and
 add repositories by clone URL or existing checkout:
 
@@ -142,7 +147,8 @@ migration boundary and the role of the boilerplate.
 | [Environment and ports](internal/wtc/defaults/instructions/hooks-and-env.md) | Collection environment, mise, and port assignments |
 | [Secrets](internal/wtc/defaults/instructions/secrets.md) | Shared credential files and worktree links |
 | [Agent instructions and skills](internal/wtc/defaults/instructions/skills.md) | Project guidance and collection procedures |
-| [wtc under OpenClaw](docs/openclaw.md) | A team gateway: collections in conversations, the collection card, `wtc openclaw install` |
+| [Setup for agents](internal/wtc/defaults/setup.md) | One entry point: runtime, harness, who maintains the environment |
+| [wtc under OpenClaw](docs/openclaw.md) | A team gateway: collections in conversations, the collection card, `wtc openclaw install`, images built by CI/CD |
 | [Development and validation](docs/development.md) | Build, test, and contribute to WTC |
 
 The installed customization guide is available with `wtc customize`.

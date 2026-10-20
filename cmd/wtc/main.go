@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -187,8 +188,13 @@ func run() error {
 		return nil
 	}
 	root.AddCommand(commands)
-	doctor := &cobra.Command{Use: "doctor", Short: "Check this collection's configuration and dependencies", Args: cobra.NoArgs}
+	doctor := &cobra.Command{Use: "doctor", Short: "Check this collection's configuration and dependencies, or under OpenClaw the gateway's", Args: cobra.NoArgs}
+	var doctorOpenClaw bool
+	doctor.Flags().BoolVar(&doctorOpenClaw, "openclaw", false, "Check the OpenClaw gateway on this host, also from outside an agent's command")
 	doctor.RunE = func(cmd *cobra.Command, args []string) error {
+		if doctorOpenClaw || currentHost() == openclaw.HostOpenClaw {
+			return printDoctor(openClawChecks(realOpenClawEnv()), "OpenClaw gateway diagnostics", asJSON)
+		}
 		c, err := cwd()
 		if err != nil {
 			return err

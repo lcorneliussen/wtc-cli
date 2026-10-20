@@ -224,8 +224,9 @@ renders them against a minimal DOM.
 
 ## Install
 
-On the gateway's host, as the user the gateway runs as. In a container, the
-first two steps belong in its image.
+On the gateway's host, as the user the gateway runs as. For a gateway built
+from an image by CI/CD, see [Gateway image and CI/CD](#gateway-image-and-cicd)
+instead. An agent asked to set wtc up starts with `wtc docs setup.md`.
 
 1. **`wtc`** on the `PATH` of the gateway and of the agents' shells: a
    [release](https://github.com/lcorneliussen/wtc-cli/releases)'s
@@ -264,16 +265,74 @@ first two steps belong in its image.
    says so the first time it needs one.
 6. **Repositories** the gateway clones itself: **Add repository** in the
    Collection panel, or the gateway's own project settings.
+7. **Each agent's `AGENTS.md`** says that the gateway works in collections.
+   The plugin's `wtc` skill only comes up when an agent already thinks of
+   wtc; `AGENTS.md` is what it reads in every conversation. Append the
+   section this `wtc` ships, to the `AGENTS.md` in each agent's workspace
+   (`openclaw agents list` shows where):
 
-To check: `openclaw plugins list` shows **Worktree Collection** with the `wtc`
-version, `openclaw skills list` shows `wtc` as ready, and a conversation asked
-to "start the collection 1-try-wtc with <owner/repo>" gets a card above its
-message box.
+   ```sh
+   wtc docs openclaw-AGENTS.md >> <workspace>/AGENTS.md
+   ```
+
+To check: `wtc doctor` on the gateway host checks Git, `gh`, the plugin and
+its version, the Control UI setting and each agent's `AGENTS.md`. From an
+agent's command it does the same; elsewhere, add `--openclaw`. A
+conversation asked to "start the collection 1-try-wtc with <owner/repo>" then
+gets a card above its message box.
+
+## Gateway image and CI/CD
+
+A gateway that a pipeline builds keeps wtc in its image and its setup in
+configuration, so that nothing is installed by hand and an upgrade is a
+version bump.
+
+In the image, with the versions pinned as build arguments:
+
+```dockerfile
+ARG WTC_VERSION=<version>
+ARG OPENCLAW_BITBUCKET_TAG=<tag>
+RUN curl -fsSLO "https://github.com/lcorneliussen/wtc-cli/releases/download/v${WTC_VERSION}/wtc_${WTC_VERSION}_linux_$(dpkg --print-architecture).tar.gz" \
+ && curl -fsSL "https://github.com/lcorneliussen/wtc-cli/releases/download/v${WTC_VERSION}/checksums.txt" | grep "linux_$(dpkg --print-architecture)" | sha256sum -c - \
+ && tar -xzf wtc_*.tar.gz -C /usr/local/bin wtc && rm wtc_*.tar.gz \
+ && wtc openclaw install --dir /opt/wtc-plugin
+# Only with Bitbucket repositories:
+RUN git clone --depth 1 --branch "${OPENCLAW_BITBUCKET_TAG}" https://github.com/lcorneliussen/openclaw-bitbucket.git /opt/bitbucket-plugin
+```
+
+The image also needs Git 2.42 or newer and `gh` (step 2 above). `wtc
+openclaw install --dir` writes the plugin embedded in that `wtc`, so plugin
+and binary cannot drift apart.
+
+In the gateway's configuration, applied by the pipeline (or by
+`openclaw config set` in a configure step):
+
+```json
+{
+  "gateway": { "controlUi": { "experimental": { "customPlugins": true } } },
+  "plugins": {
+    "load": { "paths": ["/opt/wtc-plugin", "/opt/bitbucket-plugin"] },
+    "entries": { "bitbucket": { "config": { "execLogin": false } } }
+  }
+}
+```
+
+Plugins on a load path are loaded from the image as they are, so there is no
+install step and nothing stale survives a new image. Keep the agents'
+`AGENTS.md` in the same repository as the rest of the gateway's setup, with
+the section from `wtc docs openclaw-AGENTS.md`.
+
+To upgrade, bump `WTC_VERSION` (and the Bitbucket tag when its release notes
+call for it) and let the pipeline build and roll out the image. People's
+connected accounts live in the gateway's state, not in the image, and stay.
+As a smoke test after the rollout, run `wtc doctor --openclaw --json` in the gateway's
+container: it exits non-zero when a required check fails.
 
 ## Upgrade
 
 In place, on the gateway's host: no new gateway, no restart, and the
-configuration and people's connected accounts stay as they are.
+configuration and people's connected accounts stay as they are. A gateway
+built by CI/CD upgrades with a new image instead (above).
 
 1. **`wtc`**: replace the binary the way it was installed, with the new
    release.
