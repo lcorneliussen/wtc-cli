@@ -70,7 +70,7 @@ Install a [published release](https://github.com/lcorneliussen/wtc-cli/releases)
 for macOS or Linux. With mise:
 
 ```sh
-mise use -g github:lcorneliussen/wtc-cli@0.1.43
+mise use -g github:lcorneliussen/wtc-cli@0.1.44
 ```
 
 To have an agent set wtc up, point it at the
