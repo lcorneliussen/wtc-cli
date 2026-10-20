@@ -55,8 +55,9 @@ harness without the person's go.
 - **OpenClaw**: follow the
   [install](https://github.com/lcorneliussen/wtc-cli/blob/main/docs/openclaw.md#install).
   Then run `wtc doctor --openclaw` on the gateway host (from an agent's
-  command, plain `wtc doctor` does the same). It checks Git, `gh`, the plugin and its version, the Control UI setting, and
-  whether each agent's `AGENTS.md` mentions wtc.
+  command, plain `wtc doctor` does the same). It checks Git, `gh`, the
+  plugin and its version, the Control UI setting, and whether each agent's
+  `AGENTS.md` mentions wtc.
 - Report what you set up, which versions you pinned, and what is left for
   the person: their own forge logins, a harness remote they still have to
   create, a pipeline run.
