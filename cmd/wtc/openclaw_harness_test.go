@@ -164,8 +164,11 @@ func TestAddRepoResolvesThroughTheHarness(t *testing.T) {
 	if got, want := summary(intents), "web@web:origin/develop"; got != want {
 		t.Errorf("from the harness worktree: %s, want %s", got, want)
 	}
-	if h := gatewayHarness(folder, []string{wt}); h == nil || h.Name != "platform" || h.Path != wt {
+	if h := gatewayHarness(folder, []string{wt}); h == nil || h.Name != "platform" || h.Path != wt || h.String() != "harness platform at "+wt+": read its AGENTS.md" {
 		t.Errorf("status shows the harness: %+v", h)
+	}
+	if h := gatewayHarness(folder, nil); h == nil || h.String() != "harness platform, no worktree yet" {
+		t.Errorf("status before the harness worktree: %+v", h)
 	}
 	// --base still wins over the registry's default branch.
 	if intents, err = addRepoPlan(t, "api", "--worktree", "12-paging", "--base", "main"); err != nil || summary(intents) != "api@api:origin/main" {

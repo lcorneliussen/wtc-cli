@@ -442,6 +442,9 @@ func gatewayStatus(names []string, asJSON bool) error {
 		if folder := result[name].Folder; folder != "" {
 			fmt.Fprintf(w, "  folder %s\n", folder)
 		}
+		if h := result[name].Harness; h != nil {
+			fmt.Fprintf(w, "  %s\n", h)
+		}
 		if len(repos) == 0 {
 			fmt.Fprintln(w, "  (no repositories)")
 			continue
@@ -494,6 +497,13 @@ type gatewayHarnessStatus struct {
 	Remote string `json:"remote"`
 	// Path is the collection's worktree of the harness, once it has one.
 	Path string `json:"path,omitempty"`
+}
+
+func (h *gatewayHarnessStatus) String() string {
+	if h.Path == "" {
+		return "harness " + h.Name + ", no worktree yet"
+	}
+	return "harness " + h.Name + " at " + h.Path + ": read its AGENTS.md"
 }
 
 // gatewayHarness is the harness recorded for the collection folder, with its
