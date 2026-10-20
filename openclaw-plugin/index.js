@@ -28,10 +28,11 @@ const PLUGIN_VERSION = (() => {
 
 // What to say when the wtc on the gateway's PATH is a release other than the
 // one this plugin came from, as after upgrading wtc without reinstalling the
-// plugin. A dev build of wtc says nothing.
+// plugin. A dev build on either side says nothing: a dev wtc stamps the
+// plugin 0.0.0-dev.
 export function versionWarning(pluginVersion, wtcVersionOutput) {
   const m = /^wtc version v?(\d+\.\d+\.\d+)$/.exec(String(wtcVersionOutput ?? "").trim());
-  if (!m || !pluginVersion || m[1] === pluginVersion) return null;
+  if (!m || !/^\d+\.\d+\.\d+$/.test(String(pluginVersion ?? "")) || m[1] === pluginVersion) return null;
   return `This card is the wtc ${pluginVersion} plugin, but the gateway runs wtc ${m[1]}: run "wtc openclaw install" on the gateway host.`;
 }
 
@@ -134,12 +135,15 @@ export default {
       return { parentKey, parent: entryOf.get(parentKey), children };
     };
 
-    // wtc --version, asked at most once a minute.
-    let wtcVersion = { at: 0, output: "" };
-    const wtcVersionOutput = async () => {
+    // wtc --version, asked at most once a minute: requests that overlap
+    // share the one that is running.
+    let wtcVersion = { at: 0, output: null };
+    const wtcVersionOutput = () => {
       if (Date.now() - wtcVersion.at > 60000) {
-        const r = await run(["wtc", "--version"], { timeoutMs: 10000 }).catch(() => ({ stdout: "" }));
-        wtcVersion = { at: Date.now(), output: r.stdout };
+        wtcVersion = {
+          at: Date.now(),
+          output: run(["wtc", "--version"], { timeoutMs: 10000 }).then((r) => r.stdout, () => ""),
+        };
       }
       return wtcVersion.output;
     };

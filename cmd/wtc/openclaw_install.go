@@ -91,9 +91,13 @@ a gateway on another host or in an image build.`,
 var manifestVersion = regexp.MustCompile(`("version":\s*)"[^"]*"`)
 
 // writeOpenClawPlugin writes the embedded plugin into dir, stamped with this
-// binary's version so that the gateway lists which wtc it came from.
+// binary's version so that the gateway lists which wtc it came from. A dev
+// build stamps 0.0.0-dev, which the plugin does not compare with anything.
 func writeOpenClawPlugin(dir, version string) error {
 	stamp := strings.TrimPrefix(version, "v")
+	if stamp == "dev" || stamp == "" {
+		stamp = "0.0.0-dev"
+	}
 	return fs.WalkDir(openclawplugin.Files, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -106,7 +110,7 @@ func writeOpenClawPlugin(dir, version string) error {
 		if err != nil {
 			return err
 		}
-		if (path == "package.json" || path == "openclaw.plugin.json") && stamp != "dev" && stamp != "" {
+		if path == "package.json" || path == "openclaw.plugin.json" {
 			if at := manifestVersion.FindSubmatchIndex(data); at != nil {
 				data = append(append(append([]byte{}, data[:at[3]]...), `"`+stamp+`"`...), data[at[1]:]...)
 			}

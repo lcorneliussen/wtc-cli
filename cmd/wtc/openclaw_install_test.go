@@ -27,6 +27,14 @@ func TestWriteOpenClawPluginStampsTheVersion(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "embed.go")); err == nil {
 		t.Error("the Go file that embeds the plugin is not part of it")
 	}
+	// A dev build stamps a version the plugin compares with nothing.
+	devDir := t.TempDir()
+	if err := writeOpenClawPlugin(devDir, "dev"); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(devDir, "package.json")); !strings.Contains(string(data), `"version": "0.0.0-dev"`) {
+		t.Errorf("a dev build is not stamped 0.0.0-dev:\n%s", data)
+	}
 	skill, _ := os.ReadFile(filepath.Join(dir, "skills/wtc/SKILL.md"))
 	if !strings.Contains(string(skill), "wtc docs instructions/openclaw.md") {
 		t.Error("the skill does not point the agent at the embedded instructions")
@@ -47,14 +55,18 @@ func TestOpenClawInstallRunsOpenClaw(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The fake records its arguments and that the plugin it is given exists.
-	fake := "#!/bin/sh\necho \"$*\" >> " + log + "\nif [ \"$1\" = plugins ]; then test -f \"$3/openclaw.plugin.json\" && echo manifest >> " + log + "; fi\n"
+	fake := "#!/bin/sh\necho \"$*\" >> " + log + "\nif [ \"$2\" = install ]; then test -f \"$3/openclaw.plugin.json\" && echo manifest >> " + log + "; fi\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "openclaw"), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(binary, "openclaw", "install")
 	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("install: %s: %v", out, err)
+	}
+	if !strings.Contains(string(out), "installed and reloaded") {
+		t.Fatalf("the reload did not succeed: %s", out)
 	}
 	calls, _ := os.ReadFile(log)
 	lines := strings.Split(strings.TrimSpace(string(calls)), "\n")
