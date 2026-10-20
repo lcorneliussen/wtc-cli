@@ -26,6 +26,28 @@ add it with **Add repository** in the Collection panel, then add it again. A
 separate conversation per repository is for swarming, and only when the person
 asks for one (`--separate`, or a spawn of your own with `visible: true`).
 
+## The collection's harness
+
+A gateway can be configured with harnesses: repositories with a registry of
+the repositories that belong together, their default branches, and the
+instructions for working in them. A collection works in at most one. Its
+first `wtc add-repo` adds a worktree of the harness too, and a name like
+`api` resolves through the harness's `.harness-repos.yml`: that entry's
+remote, based on its `default_ref` unless `--base` says otherwise.
+
+`wtc add-repo` takes the collection's harness when it has one, else the
+gateway's default, the only one configured, or the only one whose registry
+lists every name given. When none of that settles it, it says so: ask the
+person which harness the task belongs to, then pass `--harness <name>`, or
+`--harness none` for a collection without one. One collection never mixes
+harnesses; work in another one is another collection.
+
+`wtc status <name>` shows the harness and its worktree. Read its `AGENTS.md`
+and the instructions it points to before working in the collection: they are
+the environment's rules, and they win over general habits. Changes to the
+harness itself are work like any other: commit in its worktree, and the
+person publishes them.
+
 Never `wtc init` or `wtc new` under OpenClaw (wtc refuses): the gateway can
 neither see nor publish a folder collection of its own.
 

@@ -122,8 +122,10 @@ committed, and outside a gateway-managed worktree.`,
 
 // addRepoIntents is add-repo under OpenClaw: one sessions_spawn intent per
 // repository, for the collection's session to carry out. The gateway creates
-// the worktrees, so that it owns them and can publish them.
-func addRepoIntents(repos []string, worktree, base string, separate bool) error {
+// the worktrees, so that it owns them and can publish them. A collection with
+// a harness resolves names through the harness's registry, and gets a
+// worktree of the harness itself first.
+func addRepoIntents(repos []string, worktree, base, harnessFlag string, separate bool) error {
 	if worktree == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			worktree = openclaw.CurrentWorktree(cwd)
@@ -135,14 +137,23 @@ func addRepoIntents(repos []string, worktree, base string, separate bool) error 
 	if worktree == "" {
 		return errors.New("which worktree name? Pass --worktree <issue-id>-<slug>: every repository of the collection gets a worktree of that name, on branch " + openclaw.BranchPrefix + "<name>")
 	}
-	var intents []openclaw.Intent
-	var projects []string
+	if !openclaw.ValidWorktreeName(worktree) {
+		return fmt.Errorf("%q is not a valid OpenClaw worktree name (lowercase letters, digits and hyphens, at most 64)", worktree)
+	}
 	// A base is a branch of origin; the gateway takes it as a ref.
 	branch := strings.TrimPrefix(base, "origin/")
-	if branch != "" {
-		base = "origin/" + branch
+	adds, harness, err := harnessRepos(repos, worktree, branch, harnessFlag)
+	if err != nil {
+		return err
 	}
-	for _, arg := range repos {
+	var intents []openclaw.Intent
+	var projects []string
+	for _, add := range adds {
+		arg, branch := add.arg, add.branch
+		base := ""
+		if branch != "" {
+			base = "origin/" + branch
+		}
 		repo, project, gitURL, err := openclaw.ProjectSource(arg)
 		if err != nil {
 			return err
@@ -180,8 +191,14 @@ func addRepoIntents(repos []string, worktree, base string, separate bool) error 
 			return err
 		}
 		intents = append(intents, in)
-		if project != "" {
+		if project != "" && !add.resolved {
 			projects = append(projects, project)
+		}
+	}
+	if harness != nil {
+		// Only a plan that can be carried out binds the collection.
+		if err := wtc.RecordGatewayHarness(filepath.Join(gatewayStateDir(), "wtc-collections", worktree), harness.Name, harness.Remote); err != nil {
+			return err
 		}
 	}
 	plan := openclaw.NewPlan(intents...)
@@ -189,6 +206,177 @@ func addRepoIntents(repos []string, worktree, base string, separate bool) error 
 		plan.Warnings = append(plan.Warnings, "Each of "+strings.Join(projects, ", ")+" must be a project on the gateway under that name. For a GitHub repository that is not, pass owner/name instead: the gateway clones it.")
 	}
 	return printPlan(plan)
+}
+
+// repoToAdd is one repository add-repo spawns a worktree of: arg as
+// ProjectSource reads it, and the branch it is based on, or "" for the
+// gateway's default. resolved marks a remote from a harness.
+type repoToAdd struct {
+	arg, branch string
+	resolved    bool
+}
+
+// harnessRepos chooses the collection's harness and resolves the
+// repositories through it: a name in its registry becomes that entry's
+// remote, based on its default_ref unless --base says otherwise. When the
+// collection has no worktree of the harness yet, it comes first.
+func harnessRepos(repos []string, worktree, branch, flag string) ([]repoToAdd, *openclaw.Harness, error) {
+	plain := func() []repoToAdd {
+		var adds []repoToAdd
+		for _, r := range repos {
+			adds = append(adds, repoToAdd{arg: r, branch: branch})
+		}
+		return adds
+	}
+	cfg, err := gatewayConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+	folder := filepath.Join(gatewayStateDir(), "wtc-collections", worktree)
+	recorded, _, err := wtc.GatewayHarness(folder)
+	if err != nil {
+		return nil, nil, err
+	}
+	var names []string
+	for _, r := range repos {
+		if _, _, gitURL, err := openclaw.ProjectSource(r); err == nil && gitURL == "" {
+			names = append(names, r)
+		}
+	}
+	registries := map[string]harnessRegistry{}
+	registryOf := func(h openclaw.Harness) harnessRegistry {
+		if r, ok := registries[h.Name]; ok {
+			return r
+		}
+		r := readHarnessRegistry(h, worktree)
+		registries[h.Name] = r
+		return r
+	}
+	h, err := openclaw.ChooseHarness(cfg, flag, recorded, names, func(h openclaw.Harness, name string) bool {
+		_, ok := registryOf(h).find(name)
+		return ok
+	})
+	if err != nil || h == nil {
+		return plain(), nil, err
+	}
+	reg := registryOf(*h)
+	if reg.err != nil {
+		return nil, nil, reg.err
+	}
+	var adds []repoToAdd
+	if reg.worktree == "" {
+		adds = append(adds, repoToAdd{arg: h.Remote, branch: h.Ref, resolved: true})
+	}
+	for _, r := range repos {
+		add := repoToAdd{arg: r, branch: branch}
+		entry, ok := reg.find(r)
+		if !ok {
+			if _, _, gitURL, err := openclaw.ProjectSource(r); err == nil && gitURL != "" {
+				entry, ok = reg.findRemote(gitURL)
+			}
+		}
+		if ok {
+			add.arg, add.resolved = entry.Remote, true
+			if add.branch == "" {
+				add.branch = strings.TrimPrefix(entry.DefaultRef, "origin/")
+			}
+		}
+		url := add.arg
+		if _, _, gitURL, err := openclaw.ProjectSource(add.arg); err == nil && gitURL != "" {
+			url = gitURL
+		}
+		if openclaw.SameRepository(url, h.Remote) {
+			// The harness is added once, above, or is there already.
+			continue
+		}
+		adds = append(adds, add)
+	}
+	return adds, h, nil
+}
+
+// harnessRegistry is a harness's registry as a collection sees it: from its
+// worktree of the harness when it has one, else from the gateway's clone of
+// the harness at its configured ref.
+type harnessRegistry struct {
+	repos    []wtc.Repo
+	worktree string
+	err      error
+}
+
+func (r harnessRegistry) find(name string) (wtc.Repo, bool) {
+	for _, repo := range r.repos {
+		if repo.Name == name {
+			return repo, true
+		}
+	}
+	return wtc.Repo{}, false
+}
+
+func (r harnessRegistry) findRemote(url string) (wtc.Repo, bool) {
+	for _, repo := range r.repos {
+		if openclaw.SameRepository(repo.Remote, url) {
+			return repo, true
+		}
+	}
+	return wtc.Repo{}, false
+}
+
+func readHarnessRegistry(h openclaw.Harness, worktree string) harnessRegistry {
+	var r harnessRegistry
+	var data []byte
+	all, _ := openclaw.ManagedCollections(gatewayStateDir())
+	for _, dir := range all[worktree] {
+		if openclaw.CheckoutOf(dir, h.Remote) {
+			r.worktree = dir
+			data, r.err = os.ReadFile(filepath.Join(dir, ".harness-repos.yml"))
+			break
+		}
+	}
+	if r.worktree == "" {
+		dir := openclaw.GatewayProjectDir(gatewayStateDir(), openclaw.ParseOrigin(h.Remote))
+		if dir == "" {
+			r.err = fmt.Errorf("harness %s is not on the gateway yet. Ask the person to add %s with Add repository in the Collection panel, then run this again", h.Name, h.Remote)
+			return r
+		}
+		if data, r.err = openclaw.FileAt(dir, "origin/"+h.Ref, ".harness-repos.yml"); r.err != nil {
+			data, r.err = openclaw.FileAt(dir, h.Ref, ".harness-repos.yml")
+		}
+	}
+	if r.err != nil {
+		r.err = fmt.Errorf("harness %s has no .harness-repos.yml to read at %s, so it is not a harness wtc can use; check %s.harnesses: %w", h.Name, h.Ref, openclaw.PluginConfigKey, r.err)
+		return r
+	}
+	reg, err := wtc.ParseRegistry(data)
+	if err != nil {
+		r.err = fmt.Errorf("harness %s: %w", h.Name, err)
+		return r
+	}
+	r.repos = reg.Repos
+	return r
+}
+
+// runOpenClaw runs the openclaw CLI; tests replace it.
+var runOpenClaw = func(args ...string) (string, error) {
+	if _, err := exec.LookPath("openclaw"); err != nil {
+		return "", errNoOpenClaw
+	}
+	out, err := exec.Command("openclaw", args...).CombinedOutput()
+	return string(out), err
+}
+
+var errNoOpenClaw = errors.New("openclaw not found")
+
+// gatewayConfig is the wtc plugin's config on this gateway. Without the
+// openclaw CLI, or with nothing set, there are no harnesses.
+func gatewayConfig() (openclaw.GatewayConfig, error) {
+	out, err := runOpenClaw("config", "get", openclaw.PluginConfigKey, "--json")
+	if errors.Is(err, errNoOpenClaw) || (err != nil && strings.Contains(out, "unset")) {
+		return openclaw.GatewayConfig{}, nil
+	}
+	if err != nil {
+		return openclaw.GatewayConfig{}, fmt.Errorf("reading %s: %v: %s", openclaw.PluginConfigKey, err, strings.TrimSpace(out))
+	}
+	return openclaw.ParseGatewayConfig(out)
 }
 
 // catchUpCheckout is catch-up under OpenClaw: merge the destination branch
@@ -232,6 +420,7 @@ func gatewayStatus(names []string, asJSON bool) error {
 		openclaw.FetchBases(all[name], openclaw.FetchBaseInterval)
 		col := gatewayCollection{Collection: openclaw.CheckoutsStatus(all[name], true), Services: []wtc.RuntimeItem{}}
 		col.Folder, col.Services, col.Error = linkGatewayFolder(name, col.Repos)
+		col.Harness = gatewayHarness(col.Folder, all[name])
 		result[name] = col
 	}
 	if asJSON {
@@ -252,6 +441,9 @@ func gatewayStatus(names []string, asJSON bool) error {
 		repos := result[name].Repos
 		if folder := result[name].Folder; folder != "" {
 			fmt.Fprintf(w, "  folder %s\n", folder)
+		}
+		if h := result[name].Harness; h != nil {
+			fmt.Fprintf(w, "  %s\n", h)
 		}
 		if len(repos) == 0 {
 			fmt.Fprintln(w, "  (no repositories)")
@@ -292,9 +484,43 @@ type gatewayCollection struct {
 	openclaw.Collection
 	// Folder holds the collection as one folder: a link per repository to its
 	// managed worktree. Services run there.
-	Folder   string            `json:"folder,omitempty"`
-	Services []wtc.RuntimeItem `json:"services"`
-	Error    string            `json:"error,omitempty"`
+	Folder string `json:"folder,omitempty"`
+	// Harness is the collection's harness, whose AGENTS.md and
+	// instructions apply to the work in it.
+	Harness  *gatewayHarnessStatus `json:"harness,omitempty"`
+	Services []wtc.RuntimeItem     `json:"services"`
+	Error    string                `json:"error,omitempty"`
+}
+
+type gatewayHarnessStatus struct {
+	Name   string `json:"name"`
+	Remote string `json:"remote"`
+	// Path is the collection's worktree of the harness, once it has one.
+	Path string `json:"path,omitempty"`
+}
+
+func (h *gatewayHarnessStatus) String() string {
+	if h.Path == "" {
+		return "harness " + h.Name + ", no worktree yet"
+	}
+	return "harness " + h.Name + " at " + h.Path + ": read its AGENTS.md"
+}
+
+// gatewayHarness is the harness recorded for the collection folder, with its
+// worktree among the collection's, or nil.
+func gatewayHarness(folder string, worktrees []string) *gatewayHarnessStatus {
+	name, remote, err := wtc.GatewayHarness(folder)
+	if err != nil || name == "" {
+		return nil
+	}
+	h := &gatewayHarnessStatus{Name: name, Remote: remote}
+	for _, dir := range worktrees {
+		if openclaw.CheckoutOf(dir, remote) {
+			h.Path = dir
+			break
+		}
+	}
+	return h
 }
 
 // linkGatewayFolder keeps the collection's folder in step with its worktrees

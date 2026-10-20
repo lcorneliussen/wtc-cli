@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 )
 
 // doctorCheck is one line of wtc doctor. A required check that fails makes
@@ -29,7 +30,9 @@ type openClawEnv struct {
 	lookPath func(string) (string, error)
 	run      func(name string, args ...string) (string, error)
 	readFile func(string) ([]byte, error)
-	version  string
+	// project is the gateway's clone of a repository, or "".
+	project func(remote string) string
+	version string
 }
 
 func realOpenClawEnv() openClawEnv {
@@ -42,7 +45,10 @@ func realOpenClawEnv() openClawEnv {
 			return string(out), err
 		},
 		readFile: os.ReadFile,
-		version:  version,
+		project: func(remote string) string {
+			return openclaw.GatewayProjectDir(gatewayStateDir(), openclaw.ParseOrigin(remote))
+		},
+		version: version,
 	}
 }
 
@@ -114,6 +120,7 @@ func openClawChecks(env openClawEnv) []doctorCheck {
 		ui.OK, ui.Detail = true, customPluginsKey
 	}
 	checks = append(checks, ui)
+	checks = append(checks, harnessChecks(env)...)
 
 	out, err := env.run("openclaw", "agents", "list", "--json")
 	var agents []struct {
@@ -203,4 +210,38 @@ func printDoctor(checks []doctorCheck, summary string, asJSON bool) error {
 		return fmt.Errorf("required checks failed")
 	}
 	return nil
+}
+
+// harnessChecks checks the configured harnesses: the config parses, and the
+// gateway has a clone of each, which the first add-repo of a collection
+// needs.
+func harnessChecks(env openClawEnv) []doctorCheck {
+	out, err := env.run("openclaw", "config", "get", openclaw.PluginConfigKey, "--json")
+	if err != nil && strings.Contains(out, "unset") {
+		out, err = "", nil
+	}
+	if err != nil {
+		return []doctorCheck{{Name: "harnesses", Detail: fmt.Sprintf("could not read %s: %v", openclaw.PluginConfigKey, err)}}
+	}
+	cfg, err := openclaw.ParseGatewayConfig(out)
+	if err != nil {
+		return []doctorCheck{{Name: "harnesses", Required: true, Detail: err.Error() + ": wtc add-repo fails until it is fixed"}}
+	}
+	if len(cfg.Harnesses) == 0 {
+		return []doctorCheck{{Name: "harnesses", OK: true, Detail: "none configured: collections are ad hoc"}}
+	}
+	var checks []doctorCheck
+	for _, h := range cfg.Harnesses {
+		c := doctorCheck{Name: "harness:" + h.Name, Detail: h.Remote + " is not a project on the gateway yet: add it with Add repository in the Collection panel"}
+		if env.project != nil {
+			if dir := env.project(h.Remote); dir != "" {
+				c.OK, c.Detail = true, fmt.Sprintf("%s at %s", h.Remote, h.Ref)
+				if h.Name == cfg.DefaultHarness {
+					c.Detail += ", the default"
+				}
+			}
+		}
+		checks = append(checks, c)
+	}
+	return checks
 }

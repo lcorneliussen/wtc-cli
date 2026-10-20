@@ -175,6 +175,49 @@ Repository sessions created with `sessions_spawn`, which is what
 people need only talk to the collection's session. This comes from OpenClaw's
 documentation; no test here signs in with a verified GitHub account yet.
 
+## Harnesses
+
+A gateway can work in one or more harnesses, the repositories that hold a
+workspace's registry, instructions and skills. They are configuration, set
+by whoever maintains the gateway:
+
+```json
+"plugins": { "entries": { "wtc": { "config": {
+  "harnesses": [
+    { "name": "platform", "remote": "https://github.com/example-org/platform-harness.git", "ref": "main" }
+  ],
+  "defaultHarness": "platform"
+} } } }
+```
+
+Each harness must also be a project on the gateway, like the repositories
+its registry names: **Add repository** in the Collection panel, or the
+gateway's own project settings. `ref` defaults to `main`.
+
+A collection works in at most one harness:
+
+- **Which one.** The collection keeps the harness it started with. A new
+  collection takes `--harness <name>` if given, else `defaultHarness`, else
+  the only configured harness, else the only one whose registry lists every
+  repository named. Otherwise `wtc add-repo` asks the agent to ask the
+  person; `--harness none` starts a collection without one. Without
+  harnesses configured, every collection is ad hoc, as before.
+- **A worktree like the others.** The first `wtc add-repo` of a collection
+  adds a managed worktree of the harness, on the collection's branch, so a
+  task can change the harness and publish that like any repository.
+- **Names resolve through it.** `wtc add-repo api` takes `api`'s remote and
+  `default_ref` from the harness's `.harness-repos.yml`: from the
+  collection's worktree of the harness once there is one, before that from
+  the gateway's clone at `ref`. `--base` still wins. A URL or `owner/name`
+  that is not in the registry is added ad hoc.
+- **Instructions.** `wtc status` shows the harness and its worktree; the
+  agent reads its `AGENTS.md` from there.
+
+Not yet: hooks, secret links and mise pins from a harness do not run on a
+gateway, and herdr layouts do not apply. Several harnesses in one collection,
+stacked rather than merged, are tracked in
+[#100](https://github.com/lcorneliussen/wtc-cli/issues/100).
+
 ## The collection in the Control UI
 
 OpenClaw shows a session's changes and pull request for its own checkout only,
@@ -290,7 +333,8 @@ instead. An agent asked to set wtc up starts with `wtc docs setup.md`.
    Bitbucket on `/plugins/bitbucket/connect` opened in its own tab. The card
    says so the first time it needs one.
 6. **Repositories** the gateway clones itself: **Add repository** in the
-   Collection panel, or the gateway's own project settings.
+   Collection panel, or the gateway's own project settings. With a harness,
+   add it the same way and configure it (see [Harnesses](#harnesses)).
 7. **Each agent's `AGENTS.md`** says that the gateway works in collections.
    The plugin's `wtc` skill only comes up when an agent already thinks of
    wtc; `AGENTS.md` is what it reads in every conversation. Append the
@@ -338,7 +382,10 @@ In the gateway's configuration, applied by the pipeline (or by
   "gateway": { "controlUi": { "experimental": { "customPlugins": true } } },
   "plugins": {
     "load": { "paths": ["/opt/wtc-plugin", "/opt/bitbucket-plugin"] },
-    "entries": { "bitbucket": { "config": { "execLogin": false } } }
+    "entries": {
+      "bitbucket": { "config": { "execLogin": false } },
+      "wtc": { "config": { "harnesses": [{ "name": "platform", "remote": "https://github.com/example-org/platform-harness.git" }] } }
+    }
   }
 }
 ```

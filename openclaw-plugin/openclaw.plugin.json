@@ -21,6 +21,38 @@
         "type": "boolean",
         "default": false,
         "description": "The gateway's tailnet is the team's, not a person's: offer Tailscale tunnels to services, which everyone on it can reach."
+      },
+      "harnesses": {
+        "type": "array",
+        "description": "Harness repositories this gateway's collections work in. A collection uses one: its first wtc add-repo adds a worktree of the harness, and repository names resolve through the harness's .harness-repos.yml. None configured: every collection is ad hoc.",
+        "items": {
+          "type": "object",
+          "required": [
+            "name",
+            "remote"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "description": "Short name, as wtc add-repo --harness takes it."
+            },
+            "remote": {
+              "type": "string",
+              "description": "The harness repository on GitHub or Bitbucket, as an HTTPS or git@ URL. The gateway must have it as a project."
+            },
+            "ref": {
+              "type": "string",
+              "default": "main",
+              "description": "Branch new worktrees of the harness start from."
+            }
+          }
+        }
+      },
+      "defaultHarness": {
+        "type": "string",
+        "description": "The harness a collection uses when it does not name one. Without it, a collection uses the only configured harness, or the one whose registry lists the repositories it adds; otherwise the agent asks."
       }
     },
     "additionalProperties": false

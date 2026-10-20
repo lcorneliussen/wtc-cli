@@ -58,6 +58,13 @@ type Config struct {
 		Backend string `toml:"backend"`
 		Binary  string `toml:"binary"`
 	} `toml:"runtime"`
+	// OpenClaw is set in a gateway's collection folder only.
+	OpenClaw struct {
+		// Harness names the gateway-configured harness of the collection,
+		// HarnessRemote its repository.
+		Harness       string `toml:"harness"`
+		HarnessRemote string `toml:"harness_remote"`
+	} `toml:"openclaw"`
 }
 type Context struct {
 	Collection string   `json:"collection"`
@@ -87,7 +94,7 @@ func Discover(start string) (*Context, error) {
 	}
 	dir := abs
 	for {
-		for _, marker := range []string{filepath.Join("harness", ".harness-repos.yml"), filepath.Join(AdHocConfigDir, adHocRegistryFile)} {
+		for _, marker := range []string{filepath.Join(AdHocConfigDir, adHocRegistryFile), filepath.Join("harness", ".harness-repos.yml")} {
 			candidate := filepath.Join(dir, marker)
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 				return OpenCollection(dir)
@@ -108,14 +115,13 @@ func OpenCollection(dir string) (*Context, error) {
 		return nil, err
 	}
 	c := &Context{Collection: abs, Harness: filepath.Join(abs, "harness"), Workspace: filepath.Dir(abs)}
-	info, err := os.Stat(filepath.Join(c.Harness, ".harness-repos.yml"))
-	if err != nil {
-		adHoc, adHocErr := os.Stat(filepath.Join(abs, AdHocConfigDir, adHocRegistryFile))
-		if adHocErr != nil || adHoc.IsDir() {
-			return nil, fmt.Errorf("not a collection: %s", abs)
-		}
+	// A collection's own config decides what it is, not the name of one of
+	// its repositories: a gateway's folder may link a repository called
+	// harness and stays ad hoc. wtc init never makes that config inside a
+	// harness collection.
+	if adHoc, err := os.Stat(filepath.Join(abs, AdHocConfigDir, adHocRegistryFile)); err == nil && !adHoc.IsDir() {
 		c.Harness, c.AdHoc = filepath.Join(abs, AdHocConfigDir), true
-	} else if info.IsDir() {
+	} else if info, err := os.Stat(filepath.Join(c.Harness, ".harness-repos.yml")); err != nil || info.IsDir() {
 		return nil, fmt.Errorf("not a collection: %s", abs)
 	}
 	if err := c.load(); err != nil {
@@ -133,27 +139,37 @@ func (c *Context) registryPath() string {
 	return filepath.Join(c.Harness, ".harness-repos.yml")
 }
 
+// ParseRegistry reads a .harness-repos.yml, in any of its layouts, into one
+// list of repositories. It does not validate the entries.
+func ParseRegistry(b []byte) (Registry, error) {
+	var r Registry
+	if err := yaml.Unmarshal(b, &r); err != nil {
+		return r, fmt.Errorf("registry: %w", err)
+	}
+	if len(r.Repos) == 0 {
+		r.Repos = r.Repositories
+	}
+	if len(r.Repos) == 0 {
+		r.Repos = append(r.Repos, r.Selected...)
+		categories := make([]string, 0, len(r.NonDefault))
+		for name := range r.NonDefault {
+			categories = append(categories, name)
+		}
+		sort.Strings(categories)
+		for _, name := range categories {
+			r.Repos = append(r.Repos, r.NonDefault[name]...)
+		}
+	}
+	return r, nil
+}
+
 func (c *Context) load() error {
 	b, err := os.ReadFile(c.registryPath())
 	if err != nil {
 		return err
 	}
-	if err := yaml.Unmarshal(b, &c.Registry); err != nil {
-		return fmt.Errorf("registry: %w", err)
-	}
-	if len(c.Registry.Repos) == 0 {
-		c.Registry.Repos = c.Registry.Repositories
-	}
-	if len(c.Registry.Repos) == 0 {
-		c.Registry.Repos = append(c.Registry.Repos, c.Registry.Selected...)
-		categories := make([]string, 0, len(c.Registry.NonDefault))
-		for name := range c.Registry.NonDefault {
-			categories = append(categories, name)
-		}
-		sort.Strings(categories)
-		for _, name := range categories {
-			c.Registry.Repos = append(c.Registry.Repos, c.Registry.NonDefault[name]...)
-		}
+	if c.Registry, err = ParseRegistry(b); err != nil {
+		return err
 	}
 	if !c.AdHoc {
 		// Only a local registry may point at an owner; elsewhere the key stays

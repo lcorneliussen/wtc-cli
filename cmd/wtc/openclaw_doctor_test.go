@@ -14,8 +14,11 @@ import (
 // fakeGateway answers the commands openClawChecks runs.
 type fakeGateway struct {
 	git, plugins, customPlugins, agents string
-	files                               map[string]string
-	noOpenClaw                          bool
+	// config is the wtc plugin's config; projects the gateway's clones.
+	config     string
+	projects   map[string]string
+	files      map[string]string
+	noOpenClaw bool
 }
 
 func (g fakeGateway) env(version string) openClawEnv {
@@ -36,6 +39,11 @@ func (g fakeGateway) env(version string) openClawEnv {
 				return g.customPlugins, nil
 			case "openclaw agents list --json":
 				return g.agents, nil
+			case "openclaw config get plugins.entries.wtc.config --json":
+				if g.config == "" {
+					return `{"ok": false, "error": {"message": "Config path is valid but unset"}}`, errors.New("exit status 1")
+				}
+				return g.config, nil
 			}
 			return "", errors.New("unexpected command")
 		},
@@ -48,6 +56,7 @@ func (g fakeGateway) env(version string) openClawEnv {
 			}
 			return nil, os.ErrNotExist
 		},
+		project: func(remote string) string { return g.projects[remote] },
 		version: version,
 	}
 }
@@ -228,5 +237,27 @@ esac
 		if c.Name == "control-ui" && (c.OK || !c.Required) {
 			t.Errorf("control-ui: %+v", c)
 		}
+	}
+}
+
+// Configured harnesses must parse, and each must be a project on the
+// gateway; none configured is fine.
+func TestOpenClawDoctorChecksTheHarnesses(t *testing.T) {
+	g := healthyGateway()
+	if c := checksByName(openClawChecks(g.env("0.1.43")))["harnesses"]; !c.OK || !strings.Contains(c.Detail, "none configured") {
+		t.Errorf("no harnesses: %+v", c)
+	}
+	g.config = `{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}, {"name": "ops", "remote": "https://github.com/example-org/ops-harness", "ref": "develop"}], "defaultHarness": "ops"}`
+	g.projects = map[string]string{"https://github.com/example-org/ops-harness": "/state/repos/ops-harness"}
+	checks := checksByName(openClawChecks(g.env("0.1.43")))
+	if c := checks["harness:ops"]; !c.OK || c.Detail != "https://github.com/example-org/ops-harness at develop, the default" {
+		t.Errorf("ops: %+v", c)
+	}
+	if c := checks["harness:platform"]; c.OK || c.Required || !strings.Contains(c.Detail, "Add repository") {
+		t.Errorf("platform, not on the gateway: %+v", c)
+	}
+	g.config = `{"harnesses": [{"name": "Platform", "remote": "https://github.com/example-org/platform-harness"}]}`
+	if c := checksByName(openClawChecks(g.env("0.1.43")))["harnesses"]; c.OK || !c.Required {
+		t.Errorf("a bad config: %+v", c)
 	}
 }
