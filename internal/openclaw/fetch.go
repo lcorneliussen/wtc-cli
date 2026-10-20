@@ -102,6 +102,13 @@ func RecordBase(dir, name, branch string) error {
 	return err
 }
 
+// RecordedBase is the base recorded for managed worktree name in the
+// repository at dir, or "".
+func RecordedBase(dir, name string) string {
+	base, _ := git(dir, "config", "--get", "branch."+Branch(name)+"."+baseKey)
+	return base
+}
+
 // recordedBase is the base recorded for the branch checked out at dir, or "".
 func recordedBase(dir string) string {
 	branch, _ := git(dir, "branch", "--show-current")

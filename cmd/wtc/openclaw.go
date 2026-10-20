@@ -173,8 +173,7 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 		if err != nil {
 			return err
 		}
-		worktree := target
-		instructions := "You own the " + repo + " worktree of collection " + worktree + ". The collection's session works in it; do nothing until it asks you to. When asked to publish, run wtc publish in your worktree and carry out its plan."
+		instructions := "You own the " + repo + " worktree of collection " + target + ". The collection's session works in it; do nothing until it asks you to. When asked to publish, run wtc publish in your worktree and carry out its plan."
 		if worker != "" {
 			instructions = workerTask(target, repo, work)
 		}
@@ -185,7 +184,7 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 				if branch != "" {
 					// What the worktree is compared with, caught up from and
 					// published to, not only where it starts.
-					if err := openclaw.RecordBase(dir, worktree, branch); err != nil {
+					if err := openclaw.RecordBase(dir, target, branch); err != nil {
 						return fmt.Errorf("recording %s as the base of %s: %w", branch, repo, err)
 					}
 				}
@@ -195,27 +194,35 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 			} else if worker != "" {
 				return fmt.Errorf("%s is not on the gateway yet, and a worker needs it there. Ask the person to add %s with Add repository in the Collection panel, then run this again", repo, arg)
 			} else if separate {
-				instructions = "Work on " + repo + " for " + worktree + ". Wait for instructions from the collection's session."
+				instructions = "Work on " + repo + " for " + target + ". Wait for instructions from the collection's session."
 			} else {
 				return fmt.Errorf("%s is not on the gateway yet. Ask the person to add %s with Add repository in the Collection panel, then run this again. Only if they want %s as a conversation of its own: --separate", repo, arg, repo)
 			}
 		}
 		if gitURL == "" && branch != "" {
 			if dir := openclaw.GatewayProjectDirByName(gatewayStateDir(), project); dir != "" {
-				if err := openclaw.RecordBase(dir, worktree, branch); err != nil {
+				if err := openclaw.RecordBase(dir, target, branch); err != nil {
 					return fmt.Errorf("recording %s as the base of %s: %w", branch, repo, err)
 				}
 			}
 		}
 		if worker != "" && baseFlag == "" {
 			// A worker builds on the task's work so far, when the task has a
-			// branch in this repository; the base it is measured and caught
-			// up against stays the repository's.
-			if dir := openclaw.GatewayProjectDirByName(gatewayStateDir(), project); dir != "" && openclaw.HasBranch(dir, openclaw.Branch(task)) {
-				base = openclaw.Branch(task)
+			// branch in this repository, and is measured and caught up
+			// against the task's base.
+			if dir := openclaw.GatewayProjectDirByName(gatewayStateDir(), project); dir != "" {
+				if taskBase := openclaw.RecordedBase(dir, task); taskBase != "" {
+					if err := openclaw.RecordBase(dir, target, taskBase); err != nil {
+						return fmt.Errorf("recording %s as the base of %s: %w", taskBase, repo, err)
+					}
+					base = "origin/" + taskBase
+				}
+				if openclaw.HasBranch(dir, openclaw.Branch(task)) {
+					base = openclaw.Branch(task)
+				}
 			}
 		}
-		in, err := openclaw.AddRepo(repo, project, gitURL, worktree, base, instructions)
+		in, err := openclaw.AddRepo(repo, project, gitURL, target, base, instructions)
 		if err != nil {
 			return err
 		}

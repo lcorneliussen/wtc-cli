@@ -331,19 +331,82 @@ func TestAddRepoSpawnsAWorker(t *testing.T) {
 	if name, _, _ := wtc.GatewayHarness(filepath.Join(state, "wtc-collections", "12-x--a")); name != "" {
 		t.Errorf("the worker's collection recorded harness %q", name)
 	}
-	// The harness itself can be a worker's repository.
-	if intents, err := addRepoPlan(t, "example-org/platform-harness", "--worktree", "12-x", "--worker", "h", "--work", "Document paging."); err != nil || summary(intents) != "platform-harness@platform-harness:" {
+	// The harness itself can be a worker's repository, measured against the
+	// task's base there.
+	if intents, err := addRepoPlan(t, "example-org/platform-harness", "--worktree", "12-x", "--worker", "h", "--work", "Document paging."); err != nil || summary(intents) != "platform-harness@platform-harness:origin/main" {
 		t.Errorf("a worker on the harness: %s %v", summary(intents), err)
+	}
+	// A worker is measured against the task's base, not the registry's.
+	git(filepath.Join(state, "repos", "web"), "config", "branch.openclaw/12-x.wtcbase", "develop")
+	if intents, err := addRepoPlan(t, "web", "--worktree", "12-x", "--worker", "b", "--work", "x"); err != nil || summary(intents) != "web@web:origin/develop" {
+		t.Errorf("the task's base: %s %v", summary(intents), err)
+	}
+	if got := git(filepath.Join(state, "repos", "web"), "config", "branch.openclaw/12-x--b.wtcbase"); got != "develop" {
+		t.Errorf("the worker's recorded base: %q", got)
 	}
 
 	for args, want := range map[string]string{
 		"api --worktree 12-x --worker a":                            "what should the worker do",
 		"api --worktree 12-x --worker a --work x --separate":        "do not go together",
 		"api --worktree 12-x --worker Bad --work x":                 "not a worker of 12-x",
+		"api --worktree 12-x --worker a--b --work x":                "not a worker of 12-x",
 		"example-org/elsewhere --worktree 12-x --worker a --work x": "a worker needs it there",
 	} {
 		if _, err := addRepoPlan(t, strings.Fields(args)...); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", args, err, want)
 		}
+	}
+}
+
+// The task's status lists its direct workers with what is left to merge, and
+// catch-up --from merges one in.
+func TestWorkersInStatusAndCatchUp(t *testing.T) {
+	state, git := harnessGateway(t)
+	api := filepath.Join(state, "repos", "api")
+	dirs := map[string]string{}
+	for _, w := range []string{"12-x", "12-x--a", "12-x--a--b"} {
+		dirs[w] = filepath.Join(state, "worktrees", "t1", w)
+		from := "HEAD"
+		if w != "12-x" {
+			from = "openclaw/12-x"
+		}
+		git(api, "worktree", "add", "-q", "-b", "openclaw/"+w, dirs[w], from)
+		if w == "12-x" {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dirs[w], w+".md"), []byte(w+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git(dirs[w], "add", ".")
+		git(dirs[w], "commit", "-qm", w)
+	}
+	all := map[string][]string{}
+	for w, d := range dirs {
+		all[w] = []string{d}
+	}
+	workers := gatewayWorkers("12-x", all)
+	if len(workers) != 1 || workers[0].String() != "worker a: api 1 to merge (wtc catch-up --from a)" {
+		t.Fatalf("workers: %+v", workers)
+	}
+	if out, _ := json.Marshal(workers); !strings.Contains(string(out), `"collection":"12-x--a"`) || !strings.Contains(string(out), `"toMerge":1`) {
+		t.Errorf("json: %s", out)
+	}
+
+	t.Chdir(dirs["12-x"])
+	var asJSON bool
+	root := &cobra.Command{Use: "wtc", SilenceUsage: true, SilenceErrors: true}
+	addCatchUpCommand(root, &asJSON)
+	root.SetArgs([]string{"catch-up", "--from", "a"})
+	root.SetOut(io.Discard)
+	stdout := os.Stdout
+	devnull, _ := os.Open(os.DevNull)
+	os.Stdout = devnull
+	err := root.Execute()
+	os.Stdout = stdout
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workers := gatewayWorkers("12-x", all); workers[0].String() != "worker a: api merged" {
+		t.Errorf("after catch-up --from: %+v", workers)
 	}
 }

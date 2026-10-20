@@ -331,7 +331,8 @@ func WorkerWorktree(task, worker string) (string, error) {
 	if !strings.HasPrefix(worker, task+WorkerSeparator) {
 		name = task + WorkerSeparator + worker
 	}
-	if name == task+WorkerSeparator || !ValidWorktreeName(name) {
+	short := strings.TrimPrefix(name, task+WorkerSeparator)
+	if short == "" || strings.Contains(short, WorkerSeparator) || !ValidWorktreeName(name) {
 		return "", fmt.Errorf("%q is not a worker of %s: a worker's collection is named %s%s<worker>, in lowercase letters, digits and hyphens, at most 64", worker, task, task, WorkerSeparator)
 	}
 	return name, nil

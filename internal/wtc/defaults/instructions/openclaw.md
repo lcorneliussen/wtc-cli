@@ -24,7 +24,8 @@ digits and hyphens. You work in all the worktrees yourself, from the
 gateway has cloned. If it has not, `wtc add-repo` says so: ask the person to
 add it with **Add repository** in the Collection panel, then add it again. A
 separate conversation per repository is only for when the person asks for one
-(`--separate`).
+(`--separate`, or a spawn of your own with `visible: true`). Parallel parts of
+the task go to workers (below).
 
 ## Workers: parts of a task in parallel
 
