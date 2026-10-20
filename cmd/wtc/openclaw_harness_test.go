@@ -226,6 +226,13 @@ func TestAddRepoWithoutHarnesses(t *testing.T) {
 			t.Errorf("%s %v", summary(intents), err)
 		}
 	}
+	runOpenClaw = func(...string) (string, error) { return "boom", &exec.ExitError{} }
+	if _, err := addRepoPlan(t, "api", "--worktree", "5-x"); err == nil || !strings.Contains(err.Error(), "reading plugins.entries.wtc.config") {
+		t.Errorf("an unreadable config: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("OPENCLAW_STATE_DIR"), "wtc-collections", "5-x")); !os.IsNotExist(err) {
+		t.Errorf("an unreadable config made a folder: %v", err)
+	}
 	runOpenClaw = func(...string) (string, error) {
 		return `{"harnesses": [{"name": "x", "remote": "https://example.org/x.git"}]}`, nil
 	}
