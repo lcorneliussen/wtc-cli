@@ -275,9 +275,9 @@ instead. An agent asked to set wtc up starts with `wtc docs setup.md`.
    wtc docs openclaw-AGENTS.md >> <workspace>/AGENTS.md
    ```
 
-To check: `wtc doctor` on the gateway host checks Git, `gh`, the plugin and
-its version, the Control UI setting and each agent's `AGENTS.md`. From an
-agent's command it does the same; elsewhere, add `--openclaw`. A
+To check: `wtc doctor --openclaw` on the gateway host checks Git, `gh`, the
+plugin and its version, the Control UI setting and each agent's `AGENTS.md`.
+From an agent's command, plain `wtc doctor` does the same. A
 conversation asked to "start the collection 1-try-wtc with <owner/repo>" then
 gets a card above its message box.
 
