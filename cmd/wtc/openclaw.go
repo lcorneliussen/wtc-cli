@@ -125,7 +125,7 @@ committed, and outside a gateway-managed worktree.`,
 // the worktrees, so that it owns them and can publish them. A collection with
 // a harness resolves names through the harness's registry, and gets a
 // worktree of the harness itself first.
-func addRepoIntents(repos []string, worktree, base, harnessFlag string, separate bool) error {
+func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separate bool, worker, work string) error {
 	if worktree == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			worktree = openclaw.CurrentWorktree(cwd)
@@ -141,8 +141,23 @@ func addRepoIntents(repos []string, worktree, base, harnessFlag string, separate
 		return fmt.Errorf("%q is not a valid OpenClaw worktree name (lowercase letters, digits and hyphens, at most 64)", worktree)
 	}
 	// A base is a branch of origin; the gateway takes it as a ref.
-	branch := strings.TrimPrefix(base, "origin/")
-	adds, harness, err := harnessRepos(repos, worktree, branch, harnessFlag)
+	baseFlag := strings.TrimPrefix(baseRef, "origin/")
+	// A worker works in a collection of its own, task--worker, through the
+	// task's harness but without a worktree of it.
+	task, target := worktree, worktree
+	if worker != "" {
+		if separate {
+			return errors.New("a worker is a session the task's session spawns; --separate and --worker do not go together")
+		}
+		if strings.TrimSpace(work) == "" {
+			return errors.New("what should the worker do? Pass --work \"<the part of the task it takes>\"")
+		}
+		var err error
+		if target, err = openclaw.WorkerWorktree(task, worker); err != nil {
+			return err
+		}
+	}
+	adds, harness, err := harnessRepos(repos, task, baseFlag, harnessFlag, worker != "")
 	if err != nil {
 		return err
 	}
@@ -158,7 +173,11 @@ func addRepoIntents(repos []string, worktree, base, harnessFlag string, separate
 		if err != nil {
 			return err
 		}
-		task := "You own the " + repo + " worktree of collection " + worktree + ". The collection's session works in it; do nothing until it asks you to. When asked to publish, run wtc publish in your worktree and carry out its plan."
+		worktree := target
+		instructions := "You own the " + repo + " worktree of collection " + worktree + ". The collection's session works in it; do nothing until it asks you to. When asked to publish, run wtc publish in your worktree and carry out its plan."
+		if worker != "" {
+			instructions = workerTask(target, repo, work)
+		}
 		if gitURL != "" {
 			origin := openclaw.ParseOrigin(gitURL)
 			if dir := openclaw.GatewayProjectDir(gatewayStateDir(), origin); dir != "" {
@@ -173,8 +192,10 @@ func addRepoIntents(repos []string, worktree, base, harnessFlag string, separate
 			} else if origin.Forge != openclaw.ForgeGitHub {
 				// The gateway clones GitHub repositories only.
 				return fmt.Errorf("%s is not on the gateway yet. Ask the person to add %s with Add repository in the Collection panel, then run this again", repo, arg)
+			} else if worker != "" {
+				return fmt.Errorf("%s is not on the gateway yet, and a worker needs it there. Ask the person to add %s with Add repository in the Collection panel, then run this again", repo, arg)
 			} else if separate {
-				task = "Work on " + repo + " for " + worktree + ". Wait for instructions from the collection's session."
+				instructions = "Work on " + repo + " for " + worktree + ". Wait for instructions from the collection's session."
 			} else {
 				return fmt.Errorf("%s is not on the gateway yet. Ask the person to add %s with Add repository in the Collection panel, then run this again. Only if they want %s as a conversation of its own: --separate", repo, arg, repo)
 			}
@@ -186,7 +207,15 @@ func addRepoIntents(repos []string, worktree, base, harnessFlag string, separate
 				}
 			}
 		}
-		in, err := openclaw.AddRepo(repo, project, gitURL, worktree, base, task)
+		if worker != "" && baseFlag == "" {
+			// A worker builds on the task's work so far, when the task has a
+			// branch in this repository; the base it is measured and caught
+			// up against stays the repository's.
+			if dir := openclaw.GatewayProjectDirByName(gatewayStateDir(), project); dir != "" && openclaw.HasBranch(dir, openclaw.Branch(task)) {
+				base = openclaw.Branch(task)
+			}
+		}
+		in, err := openclaw.AddRepo(repo, project, gitURL, worktree, base, instructions)
 		if err != nil {
 			return err
 		}
@@ -195,7 +224,7 @@ func addRepoIntents(repos []string, worktree, base, harnessFlag string, separate
 			projects = append(projects, project)
 		}
 	}
-	if harness != nil {
+	if harness != nil && worker == "" {
 		// Only a plan that can be carried out binds the collection.
 		if err := wtc.RecordGatewayHarness(filepath.Join(gatewayStateDir(), "wtc-collections", worktree), harness.Name, harness.Remote); err != nil {
 			return err
@@ -206,6 +235,13 @@ func addRepoIntents(repos []string, worktree, base, harnessFlag string, separate
 		plan.Warnings = append(plan.Warnings, "Each of "+strings.Join(projects, ", ")+" must be a project on the gateway under that name. For a GitHub repository that is not, pass owner/name instead: the gateway clones it.")
 	}
 	return printPlan(plan)
+}
+
+// workerTask is what a worker's session is told: the part of the task it
+// takes, and how it hands its work back.
+func workerTask(worktree, repo, work string) string {
+	return "You are a worker on " + repo + ", in collection " + worktree + ", on branch " + openclaw.Branch(worktree) + ". Your part of the task: " + strings.TrimSpace(work) +
+		"\n\nWork, build, test and commit only in your own worktree. Never publish, push or rebase, and do not edit other checkouts. When you are done, or stuck, end with what you did, the commits, and what is left: the task's session merges your branch with wtc catch-up --from, and publishes."
 }
 
 // repoToAdd is one repository add-repo spawns a worktree of: arg as
@@ -220,7 +256,7 @@ type repoToAdd struct {
 // repositories through it: a name in its registry becomes that entry's
 // remote, based on its default_ref unless --base says otherwise. When the
 // collection has no worktree of the harness yet, it comes first.
-func harnessRepos(repos []string, worktree, branch, flag string) ([]repoToAdd, *openclaw.Harness, error) {
+func harnessRepos(repos []string, worktree, branch, flag string, worker bool) ([]repoToAdd, *openclaw.Harness, error) {
 	plain := func() []repoToAdd {
 		var adds []repoToAdd
 		for _, r := range repos {
@@ -264,7 +300,7 @@ func harnessRepos(repos []string, worktree, branch, flag string) ([]repoToAdd, *
 		return nil, nil, reg.err
 	}
 	var adds []repoToAdd
-	if reg.worktree == "" {
+	if reg.worktree == "" && !worker {
 		adds = append(adds, repoToAdd{arg: h.Remote, branch: h.Ref, resolved: true})
 	}
 	for _, r := range repos {
@@ -285,7 +321,7 @@ func harnessRepos(repos []string, worktree, branch, flag string) ([]repoToAdd, *
 		if _, _, gitURL, err := openclaw.ProjectSource(add.arg); err == nil && gitURL != "" {
 			url = gitURL
 		}
-		if openclaw.SameRepository(url, h.Remote) {
+		if openclaw.SameRepository(url, h.Remote) && !worker {
 			// The harness is added once, above, or is there already.
 			continue
 		}
@@ -379,9 +415,10 @@ func gatewayConfig() (openclaw.GatewayConfig, error) {
 	return openclaw.ParseGatewayConfig(out)
 }
 
-// catchUpCheckout is catch-up under OpenClaw: merge the destination branch
-// into this session's worktree. No rebase and no push.
-func catchUpCheckout(dest string, asJSON bool) error {
+// catchUpCheckout is catch-up under OpenClaw: merge the destination branch,
+// or a worker's branch with from, into this session's worktree. No rebase
+// and no push.
+func catchUpCheckout(dest, from string, asJSON bool) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -390,12 +427,20 @@ func catchUpCheckout(dest string, asJSON bool) error {
 	if err != nil {
 		return err
 	}
-	result, err := checkout.CatchUp()
+	var result openclaw.CatchUp
+	if from != "" {
+		result, err = checkout.MergeWorker(from)
+	} else {
+		result, err = checkout.CatchUp()
+	}
 	if err != nil {
 		return err
 	}
 	summary := fmt.Sprintf("%s %s", result.Branch, result.Note)
-	if result.Merged {
+	switch {
+	case result.Merged && result.From != "":
+		summary = fmt.Sprintf("merged %s into %s; the person publishes it with ↑ when the task is ready", result.From, result.Branch)
+	case result.Merged:
 		summary = fmt.Sprintf("merged origin/%s into %s; publish to send the merge (wtc publish)", result.Dest, result.Branch)
 	}
 	return emit(envelope{OK: true, Data: result, Summary: summary}, asJSON)
@@ -421,6 +466,7 @@ func gatewayStatus(names []string, asJSON bool) error {
 		col := gatewayCollection{Collection: openclaw.CheckoutsStatus(all[name], true), Services: []wtc.RuntimeItem{}}
 		col.Folder, col.Services, col.Error = linkGatewayFolder(name, col.Repos)
 		col.Harness = gatewayHarness(col.Folder, all[name])
+		col.Workers = gatewayWorkers(name, all)
 		result[name] = col
 	}
 	if asJSON {
@@ -444,6 +490,9 @@ func gatewayStatus(names []string, asJSON bool) error {
 		}
 		if h := result[name].Harness; h != nil {
 			fmt.Fprintf(w, "  %s\n", h)
+		}
+		for _, wk := range result[name].Workers {
+			fmt.Fprintf(w, "  %s\n", wk)
 		}
 		if len(repos) == 0 {
 			fmt.Fprintln(w, "  (no repositories)")
@@ -487,9 +536,11 @@ type gatewayCollection struct {
 	Folder string `json:"folder,omitempty"`
 	// Harness is the collection's harness, whose AGENTS.md and
 	// instructions apply to the work in it.
-	Harness  *gatewayHarnessStatus `json:"harness,omitempty"`
-	Services []wtc.RuntimeItem     `json:"services"`
-	Error    string                `json:"error,omitempty"`
+	Harness *gatewayHarnessStatus `json:"harness,omitempty"`
+	// Workers are the collections task--worker of this one's workers.
+	Workers  []gatewayWorker   `json:"workers,omitempty"`
+	Services []wtc.RuntimeItem `json:"services"`
+	Error    string            `json:"error,omitempty"`
 }
 
 type gatewayHarnessStatus struct {
@@ -497,6 +548,43 @@ type gatewayHarnessStatus struct {
 	Remote string `json:"remote"`
 	// Path is the collection's worktree of the harness, once it has one.
 	Path string `json:"path,omitempty"`
+}
+
+// gatewayWorker is one worker of a task: its collection and, per
+// repository, what the task's branch has not merged from it yet.
+type gatewayWorker struct {
+	Name       string                `json:"name"`
+	Collection string                `json:"collection"`
+	Repos      []openclaw.WorkerRepo `json:"repos"`
+}
+
+func (w gatewayWorker) String() string {
+	var parts []string
+	for _, r := range w.Repos {
+		switch {
+		case r.Error != "":
+			parts = append(parts, r.Repo+": "+r.Error)
+		case r.ToMerge == 0:
+			parts = append(parts, r.Repo+" merged")
+		default:
+			parts = append(parts, fmt.Sprintf("%s %d to merge (wtc catch-up --from %s)", r.Repo, r.ToMerge, w.Name))
+		}
+	}
+	return "worker " + w.Name + ": " + strings.Join(parts, ", ")
+}
+
+// gatewayWorkers are the direct workers of task among the collections.
+func gatewayWorkers(task string, all map[string][]string) []gatewayWorker {
+	var workers []gatewayWorker
+	for name, dirs := range all {
+		short, ok := strings.CutPrefix(name, task+openclaw.WorkerSeparator)
+		if !ok || short == "" || strings.Contains(short, openclaw.WorkerSeparator) {
+			continue
+		}
+		workers = append(workers, gatewayWorker{Name: short, Collection: name, Repos: openclaw.WorkerRepos(task, all[task], dirs)})
+	}
+	sort.Slice(workers, func(i, j int) bool { return workers[i].Name < workers[j].Name })
+	return workers
 }
 
 func (h *gatewayHarnessStatus) String() string {

@@ -82,6 +82,7 @@ func withGatewayConfig(t *testing.T, config string) {
 type spawned struct {
 	Repo string `json:"repo"`
 	Args struct {
+		Task            string `json:"task"`
 		ProjectID       string `json:"projectId"`
 		ProjectGitURL   string `json:"projectGitUrl"`
 		WorktreeName    string `json:"worktreeName"`
@@ -299,6 +300,50 @@ func TestAddRepoRefusesABadWorktreeNameFirst(t *testing.T) {
 		}
 		if entries, _ := os.ReadDir(filepath.Join(state, "wtc-collections")); len(entries) != 0 {
 			t.Errorf("%s: a folder was made", config)
+		}
+	}
+}
+
+// A worker gets a collection task--worker of its own, based on the task's
+// branch where there is one, through the task's harness but without a
+// worktree of it, and is told to commit and hand back.
+func TestAddRepoSpawnsAWorker(t *testing.T) {
+	state, git := harnessGateway(t)
+	withGatewayConfig(t, `{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}]}`)
+	if _, err := addRepoPlan(t, "api", "--worktree", "12-x"); err != nil {
+		t.Fatal(err)
+	}
+	git(filepath.Join(state, "repos", "api"), "branch", "openclaw/12-x")
+
+	intents, err := addRepoPlan(t, "api", "web", "--worktree", "12-x", "--worker", "a", "--work", "Add paging to the list endpoint.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// api has the task's branch, web does not yet: its registry default.
+	if got, want := summary(intents), "api@api:openclaw/12-x web@web:origin/main"; got != want {
+		t.Errorf("intents %s, want %s", got, want)
+	}
+	for _, in := range intents {
+		if in.Args.WorktreeName != "12-x--a" || !strings.Contains(in.Args.Task, "Add paging to the list endpoint.") || !strings.Contains(in.Args.Task, "wtc catch-up --from") || !strings.Contains(in.Args.Task, "Never publish") {
+			t.Errorf("worker intent: %+v", in.Args)
+		}
+	}
+	if name, _, _ := wtc.GatewayHarness(filepath.Join(state, "wtc-collections", "12-x--a")); name != "" {
+		t.Errorf("the worker's collection recorded harness %q", name)
+	}
+	// The harness itself can be a worker's repository.
+	if intents, err := addRepoPlan(t, "example-org/platform-harness", "--worktree", "12-x", "--worker", "h", "--work", "Document paging."); err != nil || summary(intents) != "platform-harness@platform-harness:" {
+		t.Errorf("a worker on the harness: %s %v", summary(intents), err)
+	}
+
+	for args, want := range map[string]string{
+		"api --worktree 12-x --worker a":                            "what should the worker do",
+		"api --worktree 12-x --worker a --work x --separate":        "do not go together",
+		"api --worktree 12-x --worker Bad --work x":                 "not a worker of 12-x",
+		"example-org/elsewhere --worktree 12-x --worker a --work x": "a worker needs it there",
+	} {
+		if _, err := addRepoPlan(t, strings.Fields(args)...); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", args, err, want)
 		}
 	}
 }

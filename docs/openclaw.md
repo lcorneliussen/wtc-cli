@@ -175,6 +175,30 @@ Repository sessions created with `sessions_spawn`, which is what
 people need only talk to the collection's session. This comes from OpenClaw's
 documentation; no test here signs in with a verified GitHub account yet.
 
+## Workers
+
+A task whose parts can go on in parallel gets **workers**: one writer per
+checkout, exchanging work through git (#106).
+
+- `wtc add-repo <repo> ... --worker <w> --work "<part>"` spawns hidden
+  sessions with managed worktrees of collection `<task>--<w>`, on branch
+  `openclaw/<task>--<w>`. Each worktree starts from the task's branch in
+  that repository when there is one, otherwise from the repository's base;
+  `--base` overrides. The worker is told to commit only in its own
+  worktrees and never to publish, and reports to the task's session when it
+  ends.
+- `wtc catch-up --from <w>`, in the task's worktree of a repository, merges
+  the worker's branch: the worktrees are in the same clone, so nothing is
+  fetched. Like catch-up, it never rebases and aborts a conflicted merge.
+- `wtc status <task>` lists the workers and, per repository, how many of
+  each worker's commits the task's branch has not merged yet. `--json` has
+  them under `workers`.
+- A worker uses the task's harness for names and default branches, but gets
+  no worktree of the harness unless its part is the harness.
+
+The Collection panel does not group workers under their task yet; it shows
+each worker's collection as its own.
+
 ## Harnesses
 
 A gateway can work in one or more harnesses, the repositories that hold a
