@@ -33,7 +33,8 @@ func TestWriteOpenClawPluginStampsTheVersion(t *testing.T) {
 	}
 }
 
-// install runs openclaw from the PATH: config first, then the plugin.
+// install runs openclaw from the PATH: config first, then the plugin, then
+// the reload that makes the running gateway use it.
 func TestOpenClawInstallRunsOpenClaw(t *testing.T) {
 	root := t.TempDir()
 	binary := filepath.Join(root, "wtc")
@@ -57,7 +58,7 @@ func TestOpenClawInstallRunsOpenClaw(t *testing.T) {
 	}
 	calls, _ := os.ReadFile(log)
 	lines := strings.Split(strings.TrimSpace(string(calls)), "\n")
-	if len(lines) != 3 || lines[0] != "config set "+customPluginsKey+" true" || !strings.HasPrefix(lines[1], "plugins install ") || !strings.HasSuffix(lines[1], " --force") || lines[2] != "manifest" {
+	if len(lines) != 4 || lines[0] != "config set "+customPluginsKey+" true" || !strings.HasPrefix(lines[1], "plugins install ") || !strings.HasSuffix(lines[1], " --force") || lines[2] != "manifest" || lines[3] != "plugins reload wtc" {
 		t.Fatalf("openclaw was called with:\n%s", calls)
 	}
 }
@@ -95,8 +96,9 @@ func TestOpenClawInstallFlagsAndErrors(t *testing.T) {
 	}
 
 	// --no-config installs without touching the setting; a failing
-	// openclaw is an error.
-	fake := "#!/bin/sh\necho \"$*\" >> " + log + "\n[ -z \"$FAIL\" ]\n"
+	// openclaw is an error, except a failing reload, which only asks for a
+	// restart.
+	fake := "#!/bin/sh\necho \"$*\" >> " + log + "\n[ -n \"$FAIL\" ] && [ \"$2\" = \"$FAIL\" ] && exit 1\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "openclaw"), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -104,12 +106,19 @@ func TestOpenClawInstallFlagsAndErrors(t *testing.T) {
 		t.Fatalf("--no-config: %s %v", out, err)
 	}
 	calls, _ := os.ReadFile(log)
-	if lines := strings.Split(strings.TrimSpace(string(calls)), "\n"); len(lines) != 1 || !strings.HasPrefix(lines[0], "plugins install ") {
+	if lines := strings.Split(strings.TrimSpace(string(calls)), "\n"); len(lines) != 2 || !strings.HasPrefix(lines[0], "plugins install ") || lines[1] != "plugins reload wtc" {
 		t.Fatalf("--no-config called openclaw with:\n%s", calls)
 	}
-	cmd := exec.Command(binary, "openclaw", "install")
-	cmd.Env = append(os.Environ(), "PATH="+bin, "FAIL=1")
-	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "openclaw config set") {
+	fail := func(sub string) (string, error) {
+		cmd := exec.Command(binary, "openclaw", "install")
+		cmd.Env = append(os.Environ(), "PATH="+bin, "FAIL="+sub)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	if out, err := fail("set"); err == nil || !strings.Contains(out, "openclaw config set") {
 		t.Fatalf("a failing openclaw was not reported: %s %v", out, err)
+	}
+	if out, err := fail("reload"); err != nil || !strings.Contains(out, "restart the gateway") {
+		t.Fatalf("a failing reload should install and ask for a restart: %s %v", out, err)
 	}
 }

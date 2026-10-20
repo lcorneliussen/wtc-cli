@@ -29,9 +29,10 @@ embedded in this binary, so it is always the one that matches this wtc.
 
 install turns on custom Control UI plugins (` + customPluginsKey + `,
 skip with --no-config) and runs "openclaw plugins install <plugin> --force",
-which also replaces an older wtc plugin. Restart the gateway, or reload the
-Control UI, afterwards. With --dir it only writes the plugin there, for a
-gateway on another host or in an image build.`,
+which also replaces an older wtc plugin, then "openclaw plugins reload wtc"
+so that the running gateway uses it. That is also how to upgrade: install the
+new wtc, then run this again. With --dir it only writes the plugin there, for
+a gateway on another host or in an image build.`,
 		Args: cobra.NoArgs,
 	}
 	install.Flags().StringVar(&dir, "dir", "", "Write the plugin into this directory and install nothing")
@@ -73,7 +74,14 @@ gateway on another host or in an image build.`,
 		if err := run("plugins", "install", target, "--force"); err != nil {
 			return err
 		}
-		fmt.Println("installed the wtc OpenClaw plugin. Restart the gateway if it does not show up, then see https://github.com/lcorneliussen/wtc-cli/blob/main/docs/openclaw.md#install for what each person connects")
+		// The running gateway keeps the old plugin until it reloads it. A
+		// gateway that is not running loads the new one when it starts.
+		if err := run("plugins", "reload", "wtc"); err != nil {
+			fmt.Printf("installed the wtc %s OpenClaw plugin, but the gateway did not reload it (%v): restart the gateway\n", versionLabel(), err)
+		} else {
+			fmt.Printf("installed and reloaded the wtc %s OpenClaw plugin. Reload open Control UI tabs to get the new card\n", versionLabel())
+		}
+		fmt.Println("see https://github.com/lcorneliussen/wtc-cli/blob/main/docs/openclaw.md#install for what each person connects")
 		return nil
 	}
 	oc.AddCommand(install)

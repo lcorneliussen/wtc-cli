@@ -17,6 +17,24 @@ const PLUGIN_ID = "wtc";
 // whose tunnel anyone with the link can open.
 const TUNNEL_PROGRAMS = { tailscale: "tailscale", devtunnel: "devtunnel", cloudflare: "cloudflared", ngrok: "ngrok" };
 const PUBLIC_TUNNELS = new Set(["cloudflare", "ngrok"]);
+// The wtc this plugin came from: wtc openclaw install stamps its version.
+const PLUGIN_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version ?? null;
+  } catch {
+    return null;
+  }
+})();
+
+// What to say when the wtc on the gateway's PATH is a release other than the
+// one this plugin came from, as after upgrading wtc without reinstalling the
+// plugin. A dev build of wtc says nothing.
+export function versionWarning(pluginVersion, wtcVersionOutput) {
+  const m = /^wtc version v?(\d+\.\d+\.\d+)$/.exec(String(wtcVersionOutput ?? "").trim());
+  if (!m || !pluginVersion || m[1] === pluginVersion) return null;
+  return `This card is the wtc ${pluginVersion} plugin, but the gateway runs wtc ${m[1]}: run "wtc openclaw install" on the gateway host.`;
+}
+
 const onPath = (program) => String(process.env.PATH ?? "").split(path.delimiter).some((dir) => dir && existsSync(path.join(dir, program)));
 
 // A Bitbucket repository as a person types it: a bitbucket.org URL in https
@@ -114,6 +132,16 @@ export default {
         children = childrenOf(parentKey);
       }
       return { parentKey, parent: entryOf.get(parentKey), children };
+    };
+
+    // wtc --version, asked at most once a minute.
+    let wtcVersion = { at: 0, output: "" };
+    const wtcVersionOutput = async () => {
+      if (Date.now() - wtcVersion.at > 60000) {
+        const r = await run(["wtc", "--version"], { timeoutMs: 10000 }).catch(() => ({ stdout: "" }));
+        wtcVersion = { at: Date.now(), output: r.stdout };
+      }
+      return wtcVersion.output;
     };
 
     const stateDir = api.runtime.state.resolveStateDir(process.env);
@@ -236,6 +264,8 @@ export default {
         // wildcard domain or Tailscale run by the gateway.
         const gateway = (api.runtime?.config?.current?.() ?? api.config)?.gateway;
         result.portalIngress = !!gateway?.portals?.ingress?.domain || ["serve", "funnel"].includes(gateway?.tailscale?.mode);
+        const stale = versionWarning(PLUGIN_VERSION, await wtcVersionOutput());
+        if (stale) result.warnings.push(stale);
         if (children.length === 0) return { ok: true, result };
         // The collection's name is its worktrees' name. wtc status reads
         // them, keeps the collection's folder and reports its services.
