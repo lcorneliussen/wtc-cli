@@ -73,3 +73,44 @@ func LinkGatewayCollection(dir string, repos []LinkedRepo) (*Context, error) {
 	}
 	return OpenCollection(dir)
 }
+
+// GatewayHarness is the harness recorded for the gateway collection at dir
+// and its remote, or "" when it has none or the folder does not exist yet.
+func GatewayHarness(dir string) (name, remote string, err error) {
+	c, err := OpenCollection(dir)
+	if err != nil {
+		if _, statErr := os.Stat(filepath.Join(dir, AdHocConfigDir, adHocRegistryFile)); os.IsNotExist(statErr) {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	return c.Config.OpenClaw.Harness, c.Config.OpenClaw.HarnessRemote, nil
+}
+
+// RecordGatewayHarness records name as the harness of the gateway collection
+// at dir, creating the folder when needed. A collection has one harness: a
+// different one already recorded is an error.
+func RecordGatewayHarness(dir, name, remote string) error {
+	if _, err := LinkGatewayCollection(dir, nil); err != nil {
+		return err
+	}
+	current, _, err := GatewayHarness(dir)
+	if err != nil {
+		return err
+	}
+	if current == name {
+		return nil
+	}
+	if current != "" {
+		return fmt.Errorf("collection %s already uses harness %s", filepath.Base(dir), current)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, AdHocConfigDir, "wtc.toml"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(f, "\n[openclaw]\nharness = %q\nharness_remote = %q\n", name, remote); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}

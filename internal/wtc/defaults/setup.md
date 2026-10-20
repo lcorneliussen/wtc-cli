@@ -33,8 +33,8 @@ repository the person's organisation names as its harness.
 | Answer | Terminal or herdr | OpenClaw |
 | --- | --- | --- |
 | **None**: a task across a few repositories | `docs/getting-started.md`, "Ad-hoc collection, no harness" | The default. Collections are ad hoc; repositories are named as `owner/name`, URLs or gateway projects. |
-| **An existing harness** | `wtc docs bootstrap.md`, from step 2 with its remote | Not supported yet ([#100](https://github.com/lcorneliussen/wtc-cli/issues/100)). Set the gateway up without one, and put what the agents need to know in their `AGENTS.md` (step 7 of the OpenClaw install). |
-| **A new harness** | `wtc docs bootstrap.md`, from step 1. The person creates the remote. | As for an existing one. |
+| **An existing harness** | `wtc docs bootstrap.md`, from step 2 with its remote | Add the harness as a gateway project and configure it under `plugins.entries.wtc.config.harnesses` ([Harnesses](https://github.com/lcorneliussen/wtc-cli/blob/main/docs/openclaw.md#harnesses)). Collections then resolve repositories through it. |
+| **A new harness** | `wtc docs bootstrap.md`, from step 1. The person creates the remote. | As for an existing one, once the remote exists. |
 
 With several harnesses, ask which one this environment belongs to. Never
 create a harness remote, publish a repository, or change another team's

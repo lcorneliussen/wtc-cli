@@ -19,6 +19,11 @@ Read that before the first `wtc` command of a task and follow it. In short:
 - `wtc add-repo <repo> --worktree <issue-id>-<slug>` creates nothing: it
   prints `sessions_spawn` intents. Call `sessions_spawn` once per intent,
   with its `args` unchanged.
+- A gateway with harnesses resolves repository names through the
+  collection's harness, and adds a worktree of the harness first. When
+  `wtc add-repo` asks which harness, ask the person, then pass
+  `--harness <name>`. Read the harness's `AGENTS.md` (`wtc status` shows
+  where it is) before working in the collection.
 - `wtc status <name>` shows the collection folder; edit, build, test and
   commit in `<folder>/<repo>`.
 - **Pushing is the person's.** When work is committed, run
