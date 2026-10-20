@@ -11,7 +11,9 @@
   ask, and takes `--harness <name>` or `--harness none`. `wtc status` shows
   the collection's harness and its worktree, and `wtc doctor` checks the
   config and that each harness is a project on the gateway
-  ([#100](https://github.com/lcorneliussen/wtc-cli/issues/100)).
+  ([#100](https://github.com/lcorneliussen/wtc-cli/issues/100)). When
+  the gateway's config cannot be read, `add-repo` stops with the error
+  rather than going on without a harness.
 - A folder's own `.wtc/config` now decides that it is an ad-hoc collection,
   whatever its repositories are called, so a gateway's collection folder
   that links a repository called `harness` stays what it is. `add-repo`

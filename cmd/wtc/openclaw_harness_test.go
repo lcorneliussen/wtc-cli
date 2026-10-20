@@ -274,3 +274,21 @@ func TestAddRepoHarnessEdgeCases(t *testing.T) {
 		}
 	}
 }
+
+// An invalid worktree name is refused before anything is recorded, with or
+// without harnesses.
+func TestAddRepoRefusesABadWorktreeNameFirst(t *testing.T) {
+	state, _ := harnessGateway(t)
+	for _, config := range []string{`{}`, `{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}]}`} {
+		withGatewayConfig(t, config)
+		if _, err := addRepoPlan(t, "api", "--worktree", "Bad/Name", "--base", "develop"); err == nil || !strings.Contains(err.Error(), "not a valid OpenClaw worktree name") {
+			t.Errorf("%s: %v", config, err)
+		}
+		if out, _ := exec.Command("git", "-C", filepath.Join(state, "repos", "api"), "config", "--get-regexp", "wtcbase").Output(); len(out) != 0 {
+			t.Errorf("%s: a base was recorded: %s", config, out)
+		}
+		if entries, _ := os.ReadDir(filepath.Join(state, "wtc-collections")); len(entries) != 0 {
+			t.Errorf("%s: a folder was made", config)
+		}
+	}
+}
