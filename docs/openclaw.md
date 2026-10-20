@@ -245,8 +245,8 @@ first two steps belong in its image.
    It is embedded in `wtc`, so it is always the plugin of that version. It
    turns on custom Control UI plugins
    (`gateway.controlUi.experimental.customPlugins`) and runs
-   `openclaw plugins install … --force`. Restart the gateway if the card does
-   not appear. Run it again after every `wtc` upgrade. For a gateway on
+   `openclaw plugins install … --force`, then `openclaw plugins reload wtc`
+   so that a running gateway uses it without a restart. For a gateway on
    another host, `wtc openclaw install --dir ./wtc-plugin` writes the plugin
    for `openclaw plugins install ./wtc-plugin --force` there.
 4. **Bitbucket**, if repositories live there:
@@ -269,3 +269,25 @@ To check: `openclaw plugins list` shows **Worktree Collection** with the `wtc`
 version, `openclaw skills list` shows `wtc` as ready, and a conversation asked
 to "start the collection 1-try-wtc with <owner/repo>" gets a card above its
 message box.
+
+## Upgrade
+
+In place, on the gateway's host: no new gateway, no restart, and the
+configuration and people's connected accounts stay as they are.
+
+1. **`wtc`**: replace the binary the way it was installed, with the new
+   release.
+2. **Its plugin**: `wtc openclaw install` again. It replaces the plugin with
+   the one embedded in the new `wtc` and reloads it in the running gateway.
+   Reload open Control UI tabs to get the new card. Until this step, the
+   Collection panel says that the plugin and the gateway's `wtc` differ.
+3. **openclaw-bitbucket**, when its release notes call for it: install the new
+   tag over the old one and reload it.
+
+   ```sh
+   openclaw plugins install git:github.com/lcorneliussen/openclaw-bitbucket@<tag> --force --accept-capabilities
+   openclaw plugins reload bitbucket
+   ```
+
+`openclaw plugins update` does not upgrade the wtc plugin: it skips plugins
+installed from a path, which is how `wtc openclaw install` installs.
