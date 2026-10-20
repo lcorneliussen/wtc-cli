@@ -158,7 +158,7 @@ func (c *Checkout) publishedHead() string {
 type change struct{ status, path string }
 
 func (c *Checkout) pending() ([]change, error) {
-	out, err := git(c.Dir, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	out, err := git(c.Dir, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=dirty")
 	if err != nil {
 		return nil, err
 	}

@@ -25,6 +25,12 @@ var trustedArgs = []string{
 	"-c", "gpg.program=false",
 	"-c", "gpg.ssh.program=false",
 	"-c", "gpg.x509.program=false",
+	// A submodule is a repository of its own, whose config is not checked:
+	// git must not run in it on wtc's behalf.
+	"-c", "submodule.recurse=false",
+	"-c", "fetch.recurseSubmodules=false",
+	"-c", "status.submoduleSummary=false",
+	"-c", "diff.ignoreSubmodules=dirty",
 }
 
 // The repository and worktree config keys wtc runs git with. The ones the
