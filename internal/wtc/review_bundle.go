@@ -98,8 +98,11 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 	if reviewOnly {
 		// The merge with the tip would be a write to the author's branch.
 		opt.NoCatchUp = true
-		if mode, _ := ReadReviewMode(c.Collection); opt.PR == "" && mode.Repo == opt.Repo {
+		mode, _ := ReadReviewMode(c.Collection)
+		if opt.PR == "" && mode.Repo == opt.Repo {
 			opt.PR = mode.PR
+		} else if opt.PR != "" && mode.PR != "" && opt.PR != mode.PR {
+			return ReviewBundle{}, fmt.Errorf("this collection reviews %s#%s, not PR #%s", mode.Repo, mode.PR, opt.PR)
 		}
 	}
 	if opt.PR != "" && !prNumber.MatchString(opt.PR) {

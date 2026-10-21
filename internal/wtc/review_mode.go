@@ -61,7 +61,8 @@ func writeReviewMode(collection string, mode ReviewMode) error {
 }
 
 // reviewOnlyWorktree reports whether path is the PR worktree of a
-// review-only collection.
+// review-only collection. A marker that cannot be parsed names no worktree,
+// so every sibling counts as review-only: the mode fails closed.
 func reviewOnlyWorktree(path string) bool {
 	mode, ok := ReadReviewMode(filepath.Dir(path))
 	return ok && (mode.Dir == "" || mode.Dir == filepath.Base(path))

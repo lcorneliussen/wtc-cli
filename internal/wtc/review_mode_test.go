@@ -97,6 +97,10 @@ func TestReviewModeCollectionCannotPushAndFollowsPRHead(t *testing.T) {
 		t.Fatalf("catch-up moved the review worktree to %s", got)
 	}
 
+	if _, err := target.BuildReviewBundle(ReviewBundleOptions{Repo: "widget", PR: "99"}); err == nil || !strings.Contains(err.Error(), "not PR #99") {
+		t.Fatalf("bundle accepted another PR in a review-only collection: %v", err)
+	}
+
 	bundle := func() (ReviewBundle, error) {
 		return target.BuildReviewBundle(ReviewBundleOptions{Repo: "widget"})
 	}
