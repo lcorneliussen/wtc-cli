@@ -70,7 +70,7 @@ func TestOpenClawInstallRunsOpenClaw(t *testing.T) {
 	}
 	calls, _ := os.ReadFile(log)
 	lines := strings.Split(strings.TrimSpace(string(calls)), "\n")
-	if len(lines) != 4 || lines[0] != "config set "+customPluginsKey+" true" || !strings.HasPrefix(lines[1], "plugins install ") || !strings.HasSuffix(lines[1], " --force") || lines[2] != "manifest" || lines[3] != "plugins reload wtc" {
+	if len(lines) != 4 || lines[0] != "config set "+customPluginsKey+" true" || !strings.HasPrefix(lines[1], "plugins install ") || !strings.HasSuffix(lines[1], " --force --accept-capabilities") || lines[2] != "manifest" || lines[3] != "plugins reload wtc" {
 		t.Fatalf("openclaw was called with:\n%s", calls)
 	}
 }
@@ -95,7 +95,7 @@ func TestOpenClawInstallFlagsAndErrors(t *testing.T) {
 
 	// --dir writes the plugin and calls nothing.
 	dir := filepath.Join(root, "plugin")
-	if out, err := run(bin, "--dir", dir); err != nil || !strings.Contains(out, "openclaw plugins install "+dir) {
+	if out, err := run(bin, "--dir", dir); err != nil || !strings.Contains(out, "openclaw plugins install "+dir+" --force --accept-capabilities") {
 		t.Fatalf("--dir: %s %v", out, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "openclaw.plugin.json")); err != nil {

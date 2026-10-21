@@ -339,10 +339,12 @@ instead. An agent asked to set wtc up starts with `wtc docs setup.md`.
    It is embedded in `wtc`, so it is always the plugin of that version. It
    turns on custom Control UI plugins
    (`gateway.controlUi.experimental.customPlugins`) and runs
-   `openclaw plugins install … --force`, then `openclaw plugins reload wtc`
-   so that a running gateway uses it without a restart. For a gateway on
-   another host, `wtc openclaw install --dir ./wtc-plugin` writes the plugin
-   for `openclaw plugins install ./wtc-plugin --force` there.
+   `openclaw plugins install … --force --accept-capabilities`, then
+   `openclaw plugins reload wtc` so that a running gateway uses it without a
+   restart. Running it consents to the capabilities the plugin declares: the
+   Collection panel and its session actions. For a gateway on another host,
+   `wtc openclaw install --dir ./wtc-plugin` writes the plugin for
+   `openclaw plugins install ./wtc-plugin --force --accept-capabilities` there.
 4. **Bitbucket**, if repositories live there:
 
    ```sh
