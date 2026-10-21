@@ -99,6 +99,11 @@ func TestParseReleaseFragment(t *testing.T) {
 	if len(fragment.Sections) != 2 || fragment.Sections[1].Heading != "Next" || !strings.Contains(fragment.Sections[0].Body, "  ## not a heading\n") || !strings.Contains(fragment.Sections[0].Body, "## still code\n~~~~") {
 		t.Fatalf("headings inside fences must stay code: %#v", fragment.Sections)
 	}
+	listed := "## Upgrade\n\n- ~~~sh\n  wtc env setup\n  ~~~\n- 1. ```\n     # comment\n     ```\n"
+	fragment, err = ParseReleaseFragment("9-list-fence.md", listed)
+	if err != nil || len(fragment.Sections) != 1 || !strings.Contains(fragment.Sections[0].Body, "     # comment") {
+		t.Fatalf("a fence opened on a list marker must parse: %#v, %v", fragment, err)
+	}
 	for name, content := range map[string]string{
 		"unclosed fence":  "## Upgrade\n\n```\n## inside\n",
 		"fence first":     "```\n## inside\n```\n",
@@ -167,15 +172,15 @@ func TestReleaseFragmentsSkipFilesEmbedSkips(t *testing.T) {
 	}
 }
 
-// The embed pattern must take every file in unreleased/, or a misnamed
-// fragment would vanish from reads instead of failing them.
+// The unreleased directory must be embedded as a directory: that takes every
+// non-.md fragment (so it fails reads) and leaves out dot and underscore files.
 func TestEmbedPatternIncludesEveryFragmentFile(t *testing.T) {
 	source, err := os.ReadFile("releases.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(source), "//go:embed release-notes/*.md release-notes/unreleased/*\n") {
-		t.Fatal("go:embed must include release-notes/unreleased/*, not only *.md")
+	if !strings.Contains(string(source), "//go:embed release-notes/*.md release-notes/unreleased\n") {
+		t.Fatal("go:embed must take release-notes/unreleased as a directory")
 	}
 }
 

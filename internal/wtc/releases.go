@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -13,11 +14,12 @@ import (
 )
 
 // The unreleased directory always holds README.md, so the pattern matches
-// even when no change is pending. The pattern takes any file name, so a
-// fragment without the .md suffix fails reads the same way it fails cut and
-// check instead of being left out of the binary.
+// even when no change is pending. Embedding the directory takes every file
+// name except dot and underscore files, so a fragment without the .md suffix
+// fails reads the same way it fails cut and check, and drafts or OS files
+// never reach the binary.
 //
-//go:embed release-notes/*.md release-notes/unreleased/*
+//go:embed release-notes/*.md release-notes/unreleased
 var releaseNotes embed.FS
 
 // UnreleasedDir holds one fragment per pending change, relative to the
@@ -105,8 +107,8 @@ func ReadReleaseFragments(root fs.FS) ([]ReleaseFragment, error) {
 	var fragments []ReleaseFragment
 	for _, entry := range entries {
 		name := entry.Name()
-		// Dot and underscore files (.DS_Store, editor swap files) are not
-		// fragments; skipping them here keeps reads, cut and check in step.
+		// Dot and underscore files (.DS_Store, editor swap files, drafts) are
+		// not embedded; skipping them on disk keeps cut and check in step.
 		if entry.IsDir() || name == unreleasedReadme || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 			continue
 		}
@@ -229,10 +231,11 @@ func sectionJoin(previous, next string) string {
 }
 
 // codeFence returns the opening delimiter of a fenced code block (three or
-// more backticks or tildes, indented at most three spaces), or "".
+// more backticks or tildes), or "". The fence may follow indentation or a
+// list marker, as in "- ~~~sh".
 func codeFence(line string) string {
-	trimmed := strings.TrimLeft(line, " ")
-	if len(line)-len(trimmed) > 3 || len(trimmed) < 3 {
+	trimmed := listMarker.ReplaceAllString(strings.TrimLeft(line, " "), "")
+	if len(trimmed) < 3 {
 		return ""
 	}
 	marker := trimmed[0]
@@ -249,14 +252,13 @@ func codeFence(line string) string {
 	return trimmed[:n]
 }
 
+var listMarker = regexp.MustCompile(`^(?:(?:[-*+]|[0-9]+[.)])[ ]+)+`)
+
 // closesFence reports whether line ends the block opened by fence: the same
-// character, at least as many times, and nothing else.
+// character, at least as many times, and nothing else. A fence inside a list
+// item closes at the item's indentation, so any indentation is accepted.
 func closesFence(line, fence string) bool {
-	trimmed := strings.TrimLeft(line, " ")
-	if len(line)-len(trimmed) > 3 {
-		return false
-	}
-	trimmed = strings.TrimRight(trimmed, " \t")
+	trimmed := strings.Trim(line, " \t")
 	return len(trimmed) >= len(fence) && strings.Trim(trimmed, fence[:1]) == ""
 }
 
