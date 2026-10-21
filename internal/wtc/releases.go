@@ -13,8 +13,9 @@ import (
 )
 
 // The unreleased directory always holds README.md, so the pattern matches
-// even when no change is pending. Every file in it is embedded, so a
-// misnamed fragment fails reads the same way it fails cut and check.
+// even when no change is pending. The pattern takes any file name, so a
+// fragment without the .md suffix fails reads the same way it fails cut and
+// check instead of being left out of the binary.
 //
 //go:embed release-notes/*.md release-notes/unreleased/*
 var releaseNotes embed.FS
@@ -104,8 +105,8 @@ func ReadReleaseFragments(root fs.FS) ([]ReleaseFragment, error) {
 	var fragments []ReleaseFragment
 	for _, entry := range entries {
 		name := entry.Name()
-		// go:embed skips dot and underscore files; so does cut, so a stray
-		// editor or OS file never breaks a local cut.
+		// Dot and underscore files (.DS_Store, editor swap files) are not
+		// fragments; skipping them here keeps reads, cut and check in step.
 		if entry.IsDir() || name == unreleasedReadme || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 			continue
 		}
