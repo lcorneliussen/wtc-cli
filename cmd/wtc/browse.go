@@ -28,7 +28,8 @@ func addBrowseCommand(root *cobra.Command, asJSON *bool) {
 	var here bool
 	cmd := &cobra.Command{Use: "browse [collection]", Short: "Open the collection's Neovim browser in this terminal", Args: cobra.MaximumNArgs(1)}
 	cmd.Flags().BoolVar(&here, "here", false, "Open Neovim in this terminal, including an agent pane")
-	cmd.Flags().Bool("no-focus", false, "Compatibility flag; browse keeps the current herdr focus")
+	cmd.Flags().Bool("no-focus", false, "Compatibility flag; browse no longer routes to a herdr pane")
+	_ = cmd.Flags().MarkHidden("no-focus")
 	cmd.Flags().String("session", "", "Compatibility flag; browse no longer routes to a herdr pane")
 	_ = cmd.Flags().MarkHidden("session")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {

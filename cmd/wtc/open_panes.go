@@ -121,9 +121,19 @@ func openTrimKeep(session string, pane openPaneInfo, socket string) (string, err
 	if pane.Label != "browse" || !openBrowseCommand(argv) {
 		return "running " + state, nil
 	}
-	modified, err := openNvimModified(socket)
+	pid, parent, modified, err := openNvimModified(socket)
 	if err != nil {
 		return "Neovim did not answer", nil
+	}
+	// A second wtc browse starts a Neovim without the socket, so the one that
+	// answers may belong to another terminal. The socket is served by the
+	// --embed child of the Neovim the pane runs.
+	pids, err := openPaneProcessIDs(session, pane.ID)
+	if err != nil {
+		return "", err
+	}
+	if !pids[pid] && !pids[parent] {
+		return "Neovim on the socket runs elsewhere", nil
 	}
 	if modified > 0 {
 		return "unsaved buffers", nil
@@ -143,18 +153,34 @@ func openBrowseCommand(argv []string) bool {
 	return filepath.Base(argv[0]) == "wtc" && len(argv) > 1 && argv[1] == "browse"
 }
 
-// openNvimModified counts the unsaved buffers that can be written: files, and
-// acwrite buffers such as an Octo PR edit. A modified scratch buffer, like the
+func openPaneProcessIDs(session, pane string) (map[int]bool, error) {
+	result, err := openHerdr(session, "pane", "process-info", "--pane", pane)
+	if err != nil {
+		return nil, err
+	}
+	pids := map[int]bool{}
+	for _, process := range result.Result.ProcessInfo.Processes {
+		pids[process.PID] = true
+	}
+	return pids, nil
+}
+
+// openNvimModified reports the PID of the Neovim on socket and its parent,
+// and counts its unsaved buffers that can be written: files, and acwrite
+// buffers such as an Octo PR edit. A modified scratch buffer, like the
 // dashboard, holds nothing to lose.
-func openNvimModified(socket string) (int, error) {
+func openNvimModified(socket string) (pid, parent, modified int, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	expr := "len(filter(getbufinfo({'bufmodified': 1}), {_, b -> index(['', 'acwrite'], getbufvar(b.bufnr, '&buftype')) >= 0}))"
+	expr := "getpid() .. ' ' .. luaeval('(vim.uv or vim.loop).os_getppid()') .. ' ' .. len(filter(getbufinfo({'bufmodified': 1}), {_, b -> index(['', 'acwrite'], getbufvar(b.bufnr, '&buftype')) >= 0}))"
 	out, err := exec.CommandContext(ctx, "nvim", "--server", socket, "--remote-expr", expr).Output()
 	if err != nil {
-		return 0, err
+		return 0, 0, 0, err
 	}
-	return strconv.Atoi(strings.TrimSpace(string(out)))
+	if _, err := fmt.Sscan(string(out), &pid, &parent, &modified); err != nil {
+		return 0, 0, 0, fmt.Errorf("unexpected Neovim answer %q", strings.TrimSpace(string(out)))
+	}
+	return pid, parent, modified, nil
 }
 
 // openPtyCounts reports the pseudo-terminals in use and the machine's cap.

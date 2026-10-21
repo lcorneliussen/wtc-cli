@@ -107,7 +107,7 @@ func openCollection(source *wtc.Context, name string, opt openOptions, desired s
 				}
 			}
 		} else {
-			item.Layout = current // Auto does not flip a complete workspace.
+			item.Layout = current // Auto does not flip a narrow or wide workspace.
 		}
 	}
 	if opt.DryRun {

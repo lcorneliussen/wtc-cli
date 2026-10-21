@@ -170,7 +170,7 @@ func TestOpenWideMinimalAddsToolPanesAndSwitchesLayouts(t *testing.T) {
 
 func TestOpenTrimClosesOnlyIdleToolPanes(t *testing.T) {
 	c, _, bin, log, _ := openTestFixture(t)
-	nvim := "#!/bin/sh\ncase \"$*\" in *--remote-expr*) [ -n \"$OPEN_TEST_MODIFIED\" ] || exit 1; echo \"$OPEN_TEST_MODIFIED\" ;; esac\n"
+	nvim := "#!/bin/sh\ncase \"$*\" in *--remote-expr*) [ -n \"$OPEN_TEST_MODIFIED\" ] || exit 1; echo \"${OPEN_TEST_NVIM_PID:-7} ${OPEN_TEST_NVIM_PARENT:-1} $OPEN_TEST_MODIFIED\" ;; esac\n"
 	if err := os.WriteFile(filepath.Join(bin, "nvim"), []byte(nvim), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -199,6 +199,9 @@ func TestOpenTrimClosesOnlyIdleToolPanes(t *testing.T) {
 	openTestEditPanes(t, func(label string, pane map[string]any) { pane["focused"] = false }, map[string][]string{"shell": {"make", "test"}})
 	keep("browse kept (Neovim did not answer)", "shell kept (running make)")
 	t.Setenv("OPEN_TEST_MODIFIED", "0")
+	t.Setenv("OPEN_TEST_NVIM_PARENT", "4242")
+	keep("browse kept (Neovim on the socket runs elsewhere)")
+	t.Setenv("OPEN_TEST_NVIM_PARENT", "")
 	openTestEditPanes(t, func(string, map[string]any) {}, map[string][]string{"shell": {"-zsh"}, "browse": {"wtc", "browse", "--here"}})
 	dry := trim
 	dry.DryRun = true
