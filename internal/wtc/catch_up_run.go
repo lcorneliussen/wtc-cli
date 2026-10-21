@@ -384,7 +384,7 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, pr catch
 				reason += "; local branch retained because safe pruning refused"
 			}
 		}
-	} else if branch == strings.TrimPrefix(ref, "origin/") {
+	} else if branch == catchUpBranchName(ref) {
 		if catchUpGitOK(t.path, "merge", "--ff-only", target) {
 			reason = "fast-forwarded default branch"
 		} else {
@@ -486,7 +486,7 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		pr := catchUpPR{state: "NONE"}
 		branch, _ := catchUpGit(t.path, "symbolic-ref", "-q", "--short", "HEAD")
 		// An owner without a remote has no forge, so no PR to consult.
-		if branch != "" && branch != strings.TrimPrefix(ref, "origin/") && !t.noRemote && catchUpOperation(t) == "" {
+		if branch != "" && branch != catchUpBranchName(ref) && !t.noRemote && catchUpOperation(t) == "" {
 			pr = c.catchUpPRState(t, branch)
 		}
 		ref, refErr = catchUpRefForPR(t.path, ref, pr)

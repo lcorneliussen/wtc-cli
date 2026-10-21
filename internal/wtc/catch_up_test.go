@@ -581,6 +581,8 @@ func TestCatchUpReconcilesRemotelessOwnerAgainstLocalBranches(t *testing.T) {
 	fixtureGit(t, "-C", owner, "worktree", "add", "-q", "--detach", detached, "main")
 	fixtureGit(t, "-C", owner, "worktree", "add", "-q", "-b", "spike", spike, "main")
 	tip := commit("two")
+	// A same-named tag on another commit must not stand in for the branch.
+	fixtureGit(t, "-C", owner, "tag", "main", "HEAD~1")
 	// A remote under another name is not a local-only owner.
 	other := filepath.Join(c.Collection, "ext.renamed")
 	renamed := filepath.Join(c.Workspace, "renamed")
@@ -604,7 +606,7 @@ func TestCatchUpReconcilesRemotelessOwnerAgainstLocalBranches(t *testing.T) {
 				t.Fatalf("remote-less fetch row: %+v", row)
 			}
 		case row.Kind == "repo":
-			if row.Outcome != "updated" || row.TargetRef != "main" {
+			if row.Outcome != "updated" || row.TargetRef != "refs/heads/main" {
 				t.Fatalf("remote-less repo row: %+v", row)
 			}
 		}

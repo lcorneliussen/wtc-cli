@@ -71,12 +71,19 @@ type catchUpTarget struct {
 }
 
 // catchUpLocalRef maps a remote-tracking development ref onto the owner's own
-// branch when the owner has no remote at all.
+// branch when the owner has no remote at all. It is fully qualified, so a tag
+// of the same name cannot stand in for the branch.
 func catchUpLocalRef(t catchUpTarget, ref string) string {
 	if t.noRemote {
-		return strings.TrimPrefix(ref, "origin/")
+		return "refs/heads/" + strings.TrimPrefix(ref, "origin/")
 	}
 	return ref
+}
+
+// catchUpBranchName is the branch a development ref names, for display and
+// for comparison with a worktree's current branch.
+func catchUpBranchName(ref string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "origin/")
 }
 
 var catchUpSelector = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
