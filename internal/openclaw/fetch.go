@@ -115,16 +115,19 @@ func RecordBase(dir, name, branch string) error {
 // RecordedBase is the base recorded for managed worktree name in the
 // repository at dir, or "".
 func RecordedBase(dir, name string) string {
-	base, _ := git(dir, "config", "--get", "branch."+Branch(name)+"."+baseKey)
-	return base
+	return baseOfBranch(dir, Branch(name))
 }
 
-// recordedBase is the base recorded for the branch checked out at dir, or "".
-func recordedBase(dir string) string {
+// checkedOutBase is the base recorded for the branch checked out at dir, or "".
+func checkedOutBase(dir string) string {
 	branch, _ := git(dir, "branch", "--show-current")
 	if branch == "" {
 		return ""
 	}
+	return baseOfBranch(dir, branch)
+}
+
+func baseOfBranch(dir, branch string) string {
 	base, _ := git(dir, "config", "--get", "branch."+branch+"."+baseKey)
 	return base
 }
@@ -133,7 +136,7 @@ func recordedBase(dir string) string {
 // otherwise origin's HEAD, else the first of main, master and develop that
 // origin has.
 func baseBranch(dir string) string {
-	if b := recordedBase(dir); b != "" {
+	if b := checkedOutBase(dir); b != "" {
 		return b
 	}
 	if head, err := git(dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil && head != "" {

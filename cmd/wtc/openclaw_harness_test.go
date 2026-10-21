@@ -360,6 +360,16 @@ func TestAddRepoSpawnsAWorker(t *testing.T) {
 	if got := git(filepath.Join(state, "repos", "web"), "config", "branch.openclaw/12-x--c.wtcbase"); got != "develop" {
 		t.Errorf("the recorded base with a local --base: %q", got)
 	}
+	// Without a recorded base for the task, the local branch is not recorded
+	// as the worker's either: the repository's default applies.
+	api := filepath.Join(state, "repos", "api")
+	git(api, "branch", "openclaw/14-z--a")
+	if intents, err := addRepoPlan(t, "api", "--worktree", "14-z", "--worker", "b", "--work", "x", "--base", "openclaw/14-z--a"); err != nil || summary(intents) != "api@api:openclaw/14-z--a" {
+		t.Errorf("a local --base without a task base: %s %v", summary(intents), err)
+	}
+	if out, err := exec.Command("git", "-C", api, "config", "--get", "branch.openclaw/14-z--b.wtcbase").Output(); err == nil {
+		t.Errorf("a local --base was recorded as the worker's base: %q", out)
+	}
 
 	for args, want := range map[string]string{
 		"api --worktree 12-x --worker a":                            "what should the worker do",

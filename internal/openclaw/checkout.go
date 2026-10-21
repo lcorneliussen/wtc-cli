@@ -82,7 +82,7 @@ func OpenCheckout(dir, dest string) (*Checkout, error) {
 		}
 	}
 	if c.Dest == "" {
-		c.Dest = recordedBase(top)
+		c.Dest = checkedOutBase(top)
 	}
 	if c.Dest == "" {
 		head, _ := git(top, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")

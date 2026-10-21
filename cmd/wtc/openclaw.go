@@ -124,7 +124,7 @@ committed, and outside a gateway-managed worktree.`,
 // repository, for the collection's session to carry out. The gateway creates
 // the worktrees, so that it owns them and can publish them. A collection with
 // a harness resolves names through the harness's registry, and gets a
-// worktree of the harness itself first.
+// worktree of the harness itself first; a worker never does.
 func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separate bool, worker, work string) error {
 	if worktree == "" {
 		if cwd, err := os.Getwd(); err == nil {
@@ -140,7 +140,8 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 	if !openclaw.ValidWorktreeName(worktree) {
 		return fmt.Errorf("%q is not a valid OpenClaw worktree name (lowercase letters, digits and hyphens, at most 64)", worktree)
 	}
-	// A base is a branch of origin; the gateway takes it as a ref.
+	// A base names a branch: of origin, or for a worker also one that exists
+	// only in the gateway's clone, such as another worker's.
 	baseFlag := strings.TrimPrefix(baseRef, "origin/")
 	// A worker works in a collection of its own, task--worker, through the
 	// task's harness but without a worktree of it.
@@ -273,7 +274,8 @@ type repoToAdd struct {
 // harnessRepos chooses the collection's harness and resolves the
 // repositories through it: a name in its registry becomes that entry's
 // remote, based on its default_ref unless --base says otherwise. When the
-// collection has no worktree of the harness yet, it comes first.
+// collection has no worktree of the harness yet, it comes first, except for
+// a worker.
 func harnessRepos(repos []string, worktree, branch, flag string, worker bool) ([]repoToAdd, *openclaw.Harness, error) {
 	plain := func() []repoToAdd {
 		var adds []repoToAdd
