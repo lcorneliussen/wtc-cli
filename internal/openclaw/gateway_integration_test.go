@@ -263,6 +263,8 @@ type gateway struct {
 	tailnetName string
 	// sandboxPrefix names the sandbox containers of a sandboxed gateway.
 	sandboxPrefix string
+	// network is the Docker network the gateway shares with its sandboxes.
+	network string
 }
 
 type gatewayOptions struct {
@@ -287,6 +289,10 @@ type gatewayOptions struct {
 	// host instead of memory; that also leaves room for OpenClaw's worktree
 	// reserve.
 	sandbox bool
+	// sandboxNetwork puts the gateway and its sandbox containers on a Docker
+	// network of their own, so a sandbox can reach the gateway. Without it a
+	// sandbox has no network at all, OpenClaw's default.
+	sandboxNetwork bool
 	// tailnetKey joins the gateway to the tailnet this auth key belongs to
 	// and serves it there, so people can sign in as their Tailscale identity.
 	tailnetKey string
@@ -303,6 +309,20 @@ func startGateway(t *testing.T, opt gatewayOptions) *gateway {
 		id := make([]byte, 6)
 		_, _ = rand.Read(id)
 		g.sandboxPrefix = "wtc-sbx-" + hex.EncodeToString(id) + "-"
+		network := ""
+		if opt.sandboxNetwork {
+			g.network = g.sandboxPrefix + "net"
+			if out, err := exec.Command("docker", "network", "create", g.network).CombinedOutput(); err != nil {
+				t.Fatalf("docker network create: %v\n%s", err, out)
+			}
+			// Registered first, so it runs after the containers are gone.
+			t.Cleanup(func() {
+				if !keep {
+					_ = exec.Command("docker", "network", "rm", g.network).Run()
+				}
+			})
+			network = `, "network": "` + g.network + `"`
+		}
 		dir := sandboxRoot + "/" + hex.EncodeToString(id)
 		seen := "/host-var-lib/" + strings.TrimPrefix(dir, "/var/lib/")
 		// The gateway's user needs the group that owns the socket.
@@ -325,8 +345,11 @@ func startGateway(t *testing.T, opt gatewayOptions) *gateway {
 			}
 		})
 		home = []string{"-v", dir + ":/home/node", "-v", "/var/run/docker.sock:/var/run/docker.sock", "--group-add", group}
+		if g.network != "" {
+			home = append(home, "--network", g.network)
+		}
 		sandbox = `{ "mode": "all", "backend": "docker", "scope": "session",
-                "docker": { "image": "` + image + `", "containerPrefix": "` + g.sandboxPrefix + `" } }`
+                "docker": { "image": "` + image + `", "containerPrefix": "` + g.sandboxPrefix + `"` + network + ` } }`
 	}
 	image := testImage(t)
 	if opt.tailnetKey != "" {
