@@ -31,5 +31,8 @@ Read that before the first `wtc` command of a task and follow it. In short:
   person it is ready: they push it with ↑ for that repository in the card,
   as themselves, after confirming. Carry out the publish plan yourself only
   when they explicitly ask you to. Never `git push`.
+- Parallel parts of a task go to workers, never to two writers in one
+  checkout: `wtc add-repo <repo> --worker <name> --work "<part>"`, then
+  `wtc catch-up --from <name>` in `<folder>/<repo>` to merge one in.
 - `wtc catch-up` in `<folder>/<repo>` merges the base in; it never rebases
   and never pushes.

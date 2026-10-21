@@ -180,7 +180,7 @@ func checkoutStatus(path string, pullRequests bool) CheckoutStatus {
 	}
 
 	head, _ := git(top, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-	if b := recordedBase(top); b != "" {
+	if b := checkedOutBase(top); b != "" {
 		head = "origin/" + b
 	}
 	for _, candidate := range []string{head, "origin/main", "origin/master", "origin/develop"} {

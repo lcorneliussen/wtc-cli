@@ -383,3 +383,62 @@ func TestRecordedBase(t *testing.T) {
 		t.Errorf("fetches %q, want develop", b)
 	}
 }
+
+// A worker's branch lives in the same clone: the task merges it without a
+// fetch, never rebasing, and status counts what is left to merge.
+func TestMergeWorker(t *testing.T) {
+	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
+	write(t, c, "notes.md", "task\n")
+	git("add", ".")
+	git("commit", "-qm", "task groundwork")
+	worker := filepath.Join(t.TempDir(), "72-add-thing--a")
+	git("worktree", "add", "-q", "-b", "openclaw/72-add-thing--a", worker, "openclaw/72-add-thing")
+	if err := os.WriteFile(filepath.Join(worker, "a.md"), []byte("from a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, "-C", worker, "add", ".")
+	gitIn(t, "-C", worker, "commit", "-qm", "worker a")
+
+	if got := WorkerRepos("72-add-thing", []string{c.Dir}, []string{worker}); len(got) != 1 || got[0].ToMerge != 1 || got[0].Repo != "docs" || got[0].Error != "" {
+		t.Fatalf("before: %+v", got)
+	}
+	for _, bad := range []string{"", "A", "72-add-thing--"} {
+		if _, err := c.MergeWorker(bad); err == nil || !strings.Contains(err.Error(), "not a worker") {
+			t.Errorf("worker %q: %v", bad, err)
+		}
+	}
+	if _, err := c.MergeWorker("b"); err == nil || !strings.Contains(err.Error(), "has no branch openclaw/72-add-thing--b") {
+		t.Errorf("a worker without a branch: %v", err)
+	}
+	result, err := c.MergeWorker("a")
+	if err != nil || !result.Merged || result.From != "openclaw/72-add-thing--a" {
+		t.Fatalf("merge: %+v %v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Dir, "a.md")); err != nil {
+		t.Errorf("the worker's file is not merged: %v", err)
+	}
+	if again, err := c.MergeWorker("72-add-thing--a"); err != nil || again.Merged || !strings.Contains(again.Note, "already contains") {
+		t.Errorf("again, by its whole name: %+v %v", again, err)
+	}
+	if got := WorkerRepos("72-add-thing", []string{c.Dir}, []string{worker}); got[0].ToMerge != 0 {
+		t.Errorf("after: %+v", got)
+	}
+
+	// Both change the same file: the merge is aborted and nothing changes.
+	write(t, c, "notes.md", "task two\n")
+	git("commit", "-qam", "task")
+	if err := os.WriteFile(filepath.Join(worker, "notes.md"), []byte("worker two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, "-C", worker, "commit", "-qam", "worker")
+	before := git("rev-parse", "HEAD")
+	if _, err := c.MergeWorker("a"); err == nil || !strings.Contains(err.Error(), "conflicts in: notes.md") {
+		t.Errorf("conflict: %v", err)
+	}
+	if git("rev-parse", "HEAD") != before || git("status", "--porcelain") != "" {
+		t.Error("a conflicted merge left the checkout changed")
+	}
+	if got := WorkerRepos("72-add-thing", nil, []string{worker}); got[0].Error == "" {
+		t.Errorf("without the task's worktree: %+v", got)
+	}
+}

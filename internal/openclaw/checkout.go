@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -81,7 +82,7 @@ func OpenCheckout(dir, dest string) (*Checkout, error) {
 		}
 	}
 	if c.Dest == "" {
-		c.Dest = recordedBase(top)
+		c.Dest = checkedOutBase(top)
 	}
 	if c.Dest == "" {
 		head, _ := git(top, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
@@ -286,10 +287,13 @@ func (c *Checkout) PlanPublish(opt PublishOptions) (Plan, error) {
 	return plan, nil
 }
 
-// CatchUp is the result of merging the destination branch into the checkout.
+// CatchUp is the result of merging the destination branch, or a worker's
+// branch, into the checkout.
 type CatchUp struct {
 	Branch string `json:"branch"`
 	Dest   string `json:"dest"`
+	// From is the worker branch merged in, instead of Dest.
+	From   string `json:"from,omitempty"`
 	Merged bool   `json:"merged"`
 	Head   string `json:"head"`
 	Note   string `json:"note,omitempty"`
@@ -300,39 +304,149 @@ type CatchUp struct {
 // the merge with the next publication. A conflicted merge is aborted.
 func (c *Checkout) CatchUp() (CatchUp, error) {
 	result := CatchUp{Branch: c.Branch(), Dest: c.Dest}
-	if what := c.inProgress(); what != "" {
-		return result, fmt.Errorf("%s is in progress in %s: finish or abort it first", what, c.Dir)
-	}
-	changes, err := c.pending()
-	if err != nil {
+	if err := c.readyToMerge(); err != nil {
 		return result, err
-	}
-	for _, ch := range changes {
-		if ch.status != "??" {
-			return result, fmt.Errorf("%s has uncommitted changes (%s): commit them before catching up, so a conflict cannot take them along", c.Dir, ch.path)
-		}
 	}
 	fetch := append(fetchCredentials(c.Origin), "fetch", "--quiet", "--no-recurse-submodules", "origin", "+refs/heads/"+c.Dest+":refs/remotes/origin/"+c.Dest)
 	if _, err := git(c.Dir, fetch...); err != nil {
 		return result, fmt.Errorf("cannot fetch %s from origin: %w", c.Dest, err)
 	}
-	dest := "refs/remotes/origin/" + c.Dest
-	if gitOK(c.Dir, "merge-base", "--is-ancestor", dest, "HEAD") {
+	return c.merge(result, "refs/remotes/origin/"+c.Dest, "origin/"+c.Dest)
+}
+
+// HasBranch reports whether the repository at dir has the local branch.
+func HasBranch(dir, branch string) bool {
+	return gitOK(dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch+"^{commit}")
+}
+
+// HasRemoteBranch reports whether the repository at dir has fetched branch
+// from origin.
+func HasRemoteBranch(dir, branch string) bool {
+	return gitOK(dir, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch+"^{commit}")
+}
+
+// WorkerSeparator joins a task's worktree name and a worker's: worker a of
+// task 12-paging works in collection 12-paging--a, on branch
+// openclaw/12-paging--a.
+const WorkerSeparator = "--"
+
+// WorkerWorktree is the worktree name of a worker of task: worker is its
+// short name or the whole one.
+func WorkerWorktree(task, worker string) (string, error) {
+	name := worker
+	if !strings.HasPrefix(worker, task+WorkerSeparator) {
+		name = task + WorkerSeparator + worker
+	}
+	short := strings.TrimPrefix(name, task+WorkerSeparator)
+	if short == "" || strings.Contains(short, WorkerSeparator) || !ValidWorktreeName(name) {
+		return "", fmt.Errorf("%q is not a worker of %s: a worker's collection is named %s%s<worker>, in lowercase letters, digits and hyphens, at most 64", worker, task, task, WorkerSeparator)
+	}
+	return name, nil
+}
+
+// MergeWorker merges the branch of a worker of this checkout's task. The
+// worker's collection has its worktree in the same clone of the repository,
+// so its branch is a local ref and nothing is fetched. Like CatchUp it never
+// rebases and never pushes, and a conflicted merge is aborted.
+func (c *Checkout) MergeWorker(worker string) (CatchUp, error) {
+	result := CatchUp{Branch: c.Branch(), Dest: c.Dest}
+	name, err := WorkerWorktree(c.Worktree, worker)
+	if err != nil {
+		return result, err
+	}
+	result.From = Branch(name)
+	if !gitOK(c.Dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+result.From+"^{commit}") {
+		return result, fmt.Errorf("%s has no branch %s: the worker has no worktree of this repository, or has not committed yet", c.Repo, result.From)
+	}
+	if err := c.readyToMerge(); err != nil {
+		return result, err
+	}
+	return c.merge(result, "refs/heads/"+result.From, result.From)
+}
+
+func (c *Checkout) readyToMerge() error {
+	if what := c.inProgress(); what != "" {
+		return fmt.Errorf("%s is in progress in %s: finish or abort it first", what, c.Dir)
+	}
+	changes, err := c.pending()
+	if err != nil {
+		return err
+	}
+	for _, ch := range changes {
+		if ch.status != "??" {
+			return fmt.Errorf("%s has uncommitted changes (%s): commit them before catching up, so a conflict cannot take them along", c.Dir, ch.path)
+		}
+	}
+	return nil
+}
+
+// merge merges ref, shown as label, into the checkout.
+func (c *Checkout) merge(result CatchUp, ref, label string) (CatchUp, error) {
+	if gitOK(c.Dir, "merge-base", "--is-ancestor", ref, "HEAD") {
 		result.Head, _ = git(c.Dir, "rev-parse", "HEAD")
-		result.Note = "already contains origin/" + c.Dest
+		result.Note = "already contains " + label
 		return result, nil
 	}
-	if _, mergeErr := git(c.Dir, "merge", "--no-edit", "--quiet", dest); mergeErr != nil {
+	if _, mergeErr := git(c.Dir, "merge", "--no-edit", "--quiet", ref); mergeErr != nil {
 		conflicts, _ := git(c.Dir, "diff", "--name-only", "--diff-filter=U", "--ignore-submodules=dirty")
 		if c.inProgress() != "" {
 			_, _ = git(c.Dir, "merge", "--abort")
 		}
 		if strings.TrimSpace(conflicts) == "" {
-			return result, fmt.Errorf("merging origin/%s into %s failed, and the checkout is as before: %w", c.Dest, c.Branch(), mergeErr)
+			return result, fmt.Errorf("merging %s into %s failed, and the checkout is as before: %w", label, c.Branch(), mergeErr)
 		}
-		return result, fmt.Errorf("merging origin/%s into %s conflicts in: %s. The merge was aborted and the checkout is as before. Merge by hand with `git merge origin/%s`, resolve, commit — do not rebase", c.Dest, c.Branch(), strings.Join(strings.Fields(conflicts), ", "), c.Dest)
+		return result, fmt.Errorf("merging %s into %s conflicts in: %s. The merge was aborted and the checkout is as before. Merge by hand with `git merge %s`, resolve, commit — do not rebase", label, c.Branch(), strings.Join(strings.Fields(conflicts), ", "), label)
 	}
 	result.Merged = true
 	result.Head, _ = git(c.Dir, "rev-parse", "HEAD")
 	return result, nil
+}
+
+// WorkerRepo is a worker's branch in one repository, measured against the
+// task's branch there.
+type WorkerRepo struct {
+	Repo   string `json:"repo"`
+	Branch string `json:"branch"`
+	// ToMerge counts the worker's commits the task's branch does not have
+	// yet: 0 once wtc catch-up --from merged them.
+	ToMerge int    `json:"toMerge"`
+	Error   string `json:"error,omitempty"`
+}
+
+// WorkerRepos describes the worker's checkouts against the task's: each
+// worker worktree is compared in the task's worktree of the same clone.
+func WorkerRepos(task string, taskDirs, workerDirs []string) []WorkerRepo {
+	clones := map[string]string{}
+	for _, dir := range taskDirs {
+		if common, err := git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir"); err == nil {
+			clones[common] = dir
+		}
+	}
+	var repos []WorkerRepo
+	for _, dir := range workerDirs {
+		w := WorkerRepo{Repo: filepath.Base(filepath.Dir(dir))}
+		if url, err := git(dir, "remote", "get-url", "origin"); err == nil && ParseOrigin(url).Repo != "" {
+			w.Repo = ParseOrigin(url).Repo
+		}
+		w.Branch, _ = git(dir, "branch", "--show-current")
+		common, err := git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		taskDir, ok := clones[common]
+		switch {
+		case err != nil:
+			w.Error = err.Error()
+		case !ok:
+			w.Error = "the task has no worktree of this repository"
+		case !HasBranch(taskDir, Branch(task)) || w.Branch == "":
+			w.Error = "no branch to compare"
+		default:
+			n, err := git(taskDir, "rev-list", "--count", "refs/heads/"+Branch(task)+"..refs/heads/"+w.Branch)
+			if err != nil {
+				w.Error = err.Error()
+			} else {
+				w.ToMerge, _ = strconv.Atoi(n)
+			}
+		}
+		repos = append(repos, w)
+	}
+	return repos
 }

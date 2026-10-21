@@ -23,8 +23,33 @@ digits and hyphens. You work in all the worktrees yourself, from the
 `<repo>` is a project on the gateway, or a GitHub `owner/name` or URL that the
 gateway has cloned. If it has not, `wtc add-repo` says so: ask the person to
 add it with **Add repository** in the Collection panel, then add it again. A
-separate conversation per repository is for swarming, and only when the person
-asks for one (`--separate`, or a spawn of your own with `visible: true`).
+separate conversation per repository is only for when the person asks for one
+(`--separate`, or a spawn of your own with `visible: true`). Parallel parts of
+the task go to workers (below).
+
+## Workers: parts of a task in parallel
+
+When parts of a task can go on in parallel, give each part a **worker**: a
+session with checkouts of its own, never yours. Two writers in one checkout
+fight over the index and build each other's half-made state. A worker gets
+the collection `<name>--<worker>`, on branch `openclaw/<name>--<worker>`,
+based on your branch where you have one, so it builds on your groundwork.
+
+    wtc add-repo api --worker paging --work "Add paging to the list endpoint, with tests."
+    # call sessions_spawn once per intent; each worker reports back when it ends
+    wtc status <name>                      # workers, and what is left to merge
+    cd <folder>/api && wtc catch-up --from paging   # merge its branch into yours
+
+- One `--worker` per part, with every repository that part needs. Its
+  sessions work, build, test and commit in their own worktrees, and are told
+  never to publish.
+- `wtc catch-up --from <worker>` merges the worker's branch into yours with
+  no fetch: the worktrees share the gateway's clone. It never rebases; a
+  conflict is aborted for you to merge by hand.
+- Publishing stays the task's: the person pushes your branch with ↑, with
+  the workers' work merged in. Workers' branches are not published.
+- Readers (review, research, a test run) need no worker: they can read your
+  checkouts.
 
 ## The collection's harness
 
