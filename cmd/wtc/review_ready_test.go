@@ -54,3 +54,27 @@ func TestReviewReadyRefusesInReviewModeEvenWhenAuthorized(t *testing.T) {
 		t.Fatalf("review ready ran in review mode: %v", err)
 	}
 }
+
+func TestFirstAgentPromptSaysReviewOnly(t *testing.T) {
+	collection := t.TempDir()
+	if got := firstAgentPrompt(collection, "claude"); got != "/wtc-start" {
+		t.Fatalf("ordinary prompt = %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(collection, wtc.ReviewModeFile), []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"claude", "codex"} {
+		if got := firstAgentPrompt(collection, kind); !strings.Contains(got, "review-only") || !strings.Contains(got, "No commits, pushes") {
+			t.Fatalf("%s prompt does not say review-only: %q", kind, got)
+		}
+	}
+}
+
+func TestReviewStartRefusesOpenAndNoOpenTogether(t *testing.T) {
+	oldArgs := os.Args
+	t.Cleanup(func() { os.Args = oldArgs })
+	os.Args = []string{"wtc", "review", "start", "app#7", "--open", "--no-open"}
+	if err := run(); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("review start accepted --open with --no-open: %v", err)
+	}
+}

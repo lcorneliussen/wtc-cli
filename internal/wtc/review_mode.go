@@ -11,8 +11,9 @@ import (
 )
 
 // ReviewModeFile marks a collection created to review someone else's PR. In
-// that mode wtc writes nothing to the PR's branch and leaves the author's
-// steps (resolving threads, undrafting) to the author.
+// that mode wtc makes no commits and pushes nothing; it only moves the
+// worktree to the author's latest head, and leaves the author's steps
+// (resolving threads, undrafting) to the author.
 const ReviewModeFile = ".wtc-review-mode"
 
 // reviewPushPrefix is prepended to every push URL of a review-only worktree.

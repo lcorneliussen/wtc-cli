@@ -380,13 +380,7 @@ func openStartAgent(target *wtc.Context, opt openOptions, pane string) error {
 	if _, err := os.Stat(filepath.Join(target.Collection, "HANDOFF.md")); err != nil {
 		return nil
 	}
-	prompt := "Run the wtc-start skill (harness/skills/wtc-start/SKILL.md): read HANDOFF.md at the collection root, then start."
-	if kind == "claude" {
-		prompt = "/wtc-start"
-	}
-	if _, ok := wtc.ReadReviewMode(target.Collection); ok {
-		prompt += " This collection is review-only: produce and post the review, nothing else. No commits, pushes, thread resolution or `wtc review ready`."
-	}
+	prompt := firstAgentPrompt(target.Collection, kind)
 	if _, err := openHerdr(opt.Session, "agent", "prompt", pane, prompt, "--wait", "--until", "working", "--timeout", "20000"); err == nil {
 		return nil
 	} else if !strings.Contains(err.Error(), "agent_prompt_stalled") {
@@ -399,4 +393,17 @@ func openStartAgent(target *wtc.Context, opt openOptions, pane string) error {
 		return fmt.Errorf("first prompt was not taken: %w", err)
 	}
 	return nil
+}
+
+// firstAgentPrompt starts the agent of a new collection on its launch note,
+// and says so up front when the collection only reviews someone else's PR.
+func firstAgentPrompt(collection, kind string) string {
+	prompt := "Run the wtc-start skill (harness/skills/wtc-start/SKILL.md): read HANDOFF.md at the collection root, then start."
+	if kind == "claude" {
+		prompt = "/wtc-start"
+	}
+	if _, ok := wtc.ReadReviewMode(collection); ok {
+		prompt += " This collection is review-only: produce and post the review, nothing else. No commits, pushes, thread resolution or `wtc review ready`."
+	}
+	return prompt
 }
