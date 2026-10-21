@@ -174,12 +174,15 @@ func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
 		fragment.Sections = append(fragment.Sections, *current)
 		return nil
 	}
-	fence := ""
+	fence, item := "", -1
 	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
-		if fence != "" || codeFence(line) != "" {
+		if fence == "" {
+			item = listItemIndent(line, item)
+		}
+		if fence != "" || codeFence(line, item) != "" {
 			// Headings inside a fenced code block are example text.
 			if fence == "" {
-				fence = codeFence(line)
+				fence = codeFence(line, item)
 			} else if closesFence(line, fence) {
 				fence = ""
 			}
@@ -235,11 +238,37 @@ func sectionJoin(previous, next string) string {
 	return "\n\n"
 }
 
+// listItemIndent tracks the content indentation of the list item a line
+// belongs to: a list marker line starts an item, a blank line keeps it, and a
+// line indented less than the item's content leaves it (-1: no item).
+func listItemIndent(line string, item int) int {
+	if strings.TrimSpace(line) == "" {
+		return item
+	}
+	indent := len(line) - len(strings.TrimLeft(line, " "))
+	if marker := listMarker.FindString(line[indent:]); marker != "" && indent-max(item, 0) <= 3 {
+		return indent + len(marker)
+	}
+	if item >= 0 && indent < item {
+		return -1
+	}
+	return item
+}
+
 // codeFence returns the opening delimiter of a fenced code block (three or
-// more backticks or tildes), or "". The fence may follow indentation or a
-// list marker, as in "- ~~~sh".
-func codeFence(line string) string {
-	trimmed := listMarker.ReplaceAllString(strings.TrimLeft(line, " "), "")
+// more backticks or tildes), or "". The fence may follow list markers, as in
+// "- ~~~sh", and is indented at most three spaces relative to the list item
+// it is in (item, -1 for none); deeper indentation is an indented code block.
+func codeFence(line string, item int) string {
+	trimmed := strings.TrimLeft(line, " ")
+	indent := len(line) - len(trimmed)
+	if item >= 0 && indent >= item {
+		indent -= item
+	}
+	if indent > 3 {
+		return ""
+	}
+	trimmed = listMarker.ReplaceAllString(trimmed, "")
 	if len(trimmed) < 3 {
 		return ""
 	}
