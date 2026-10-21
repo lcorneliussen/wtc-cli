@@ -49,6 +49,9 @@ func addSkillsCommands(root *cobra.Command, asJSON *bool) {
 					continue
 				}
 				candidate := filepath.Join(c.Workspace, entry.Name())
+				if wtc.RetiredFolder(candidate) {
+					continue
+				}
 				if _, err := os.Stat(filepath.Join(candidate, "harness", ".harness-repos.yml")); err != nil {
 					continue
 				}

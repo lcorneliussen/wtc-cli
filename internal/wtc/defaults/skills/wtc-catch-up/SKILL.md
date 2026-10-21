@@ -68,8 +68,15 @@ to make a rollout proceed.
 
 Collection-root skills, MCP and environment actions run through the installed
 CLI only when the selected harness updates successfully or is already current.
-Secret linking is scoped to each successful managed repo. Target-specific
-extension hooks still run when present; an absent MCP registry is skipped.
+Secret linking is scoped to each successful managed repo, and still runs for
+a repo whose owner fetch failed. Target-specific extension hooks still run
+when present; an absent MCP registry is skipped.
+
+An owner with no remote at all (a local-only `ext.` sibling) gets a
+`no-remote` fetch row and is reconciled against its own branches: `main`
+instead of `origin/main`. That row alone does not make the exit nonzero. An
+`origin` that is configured but cannot be reached is a `failed` fetch whose
+reason is git's own error line; that repo is not reconciled from stale refs.
 
 `--reload-status` is explicit authorization to interrupt and restart eligible
 status panes. It finds the configured herdr session and workspace, verifies

@@ -111,7 +111,7 @@ func TestCatchUpReportsUnopenableTargetActions(t *testing.T) {
 	c := newWorkspaceFixture(t)
 	target := catchUpTarget{collection: "missing", path: filepath.Join(c.Workspace, "missing", "harness"), repo: "agent-harness", harness: true, managed: true}
 	report := CatchUpReport{Initiator: c.Collection}
-	c.catchUpHooks(&report, target, CatchUpOptions{})
+	c.catchUpHooks(&report, target, CatchUpOptions{}, false)
 	if report.ExitStatus == 0 {
 		t.Fatalf("unopenable target did not fail catch-up: %+v", report.Outcomes)
 	}
@@ -463,7 +463,7 @@ func TestCatchUpRefreshesCollectionWithoutShellEntryPoints(t *testing.T) {
 	}
 	target := catchUpTarget{collection: filepath.Base(c.Collection), path: c.Harness, repo: "agent-harness", harness: true, managed: true}
 	report := CatchUpReport{Initiator: c.Collection}
-	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true})
+	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true}, false)
 	for _, name := range []string{".env.collection", "mise.toml", "AGENTS.md"} {
 		if _, err := os.Lstat(filepath.Join(c.Collection, name)); err != nil {
 			t.Fatalf("native catch-up did not regenerate %s: %v; %+v", name, err, report.Outcomes)
@@ -493,7 +493,7 @@ func TestCatchUpRendersMCPWithoutShellEntryPoint(t *testing.T) {
 	fixtureFile(t, filepath.Join(c.Harness, "tools", "link-mcp.sh"), "#!/bin/sh\ntouch '"+legacy+"'\n", 0755)
 	target := catchUpTarget{collection: filepath.Base(c.Collection), path: c.Harness, repo: "agent-harness", harness: true, managed: true}
 	report := CatchUpReport{Initiator: c.Collection}
-	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true, NoEnv: true, NoSkills: true})
+	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true, NoEnv: true, NoSkills: true}, false)
 	if _, err := os.Stat(filepath.Join(c.Collection, ".mcp.json")); err != nil {
 		t.Fatalf("native MCP output missing: %v; %+v", err, report.Outcomes)
 	}
@@ -518,7 +518,7 @@ func TestCatchUpRejectsInvalidPinBeforeWritingEnv(t *testing.T) {
 	fixtureFile(t, filepath.Join(c.Harness, ".wtc-cli-version"), "invalid pin\n", 0644)
 	target := catchUpTarget{collection: filepath.Base(c.Collection), path: c.Harness, repo: "agent-harness", harness: true, managed: true}
 	report := CatchUpReport{Initiator: c.Collection}
-	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true, NoSkills: true, NoMCP: true})
+	c.catchUpHooks(&report, target, CatchUpOptions{NoSecrets: true, NoSkills: true, NoMCP: true}, false)
 	if data, err := os.ReadFile(path); err != nil || string(data) != "existing environment\n" {
 		t.Fatalf("failed environment validation replaced the old file: %q, %v", data, err)
 	}
@@ -563,6 +563,166 @@ func TestCatchUpRunsSecretsHookForSiblingRegisteredByHarnessUpdate(t *testing.T)
 		if row.Kind == "hook" && row.Repo == "secrets:gadget" && row.Outcome != "ok" {
 			t.Fatalf("stale membership decided the hook: %+v", row)
 		}
+	}
+}
+
+func TestCatchUpReconcilesRemotelessOwnerAgainstLocalBranches(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	owner := filepath.Join(c.Workspace, "local-only")
+	fixtureGit(t, "init", "-q", "-b", "main", owner)
+	commit := func(name string) string {
+		fixtureFile(t, filepath.Join(owner, name), name+"\n", 0644)
+		fixtureGit(t, "-C", owner, "add", name)
+		fixtureGit(t, "-C", owner, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", name)
+		return fixtureGit(t, "-C", owner, "rev-parse", "HEAD")
+	}
+	commit("one")
+	detached := filepath.Join(c.Collection, "ext.local-only")
+	spike := filepath.Join(c.Collection, "ext.spike")
+	fixtureGit(t, "-C", owner, "worktree", "add", "-q", "--detach", detached, "main")
+	fixtureGit(t, "-C", owner, "worktree", "add", "-q", "-b", "spike", spike, "main")
+	tip := commit("two")
+	// A same-named tag on another commit must not stand in for the branch.
+	fixtureGit(t, "-C", owner, "tag", "main", "HEAD~1")
+	// A remote under another name is not a local-only owner.
+	other := filepath.Join(c.Collection, "ext.renamed")
+	renamed := filepath.Join(c.Workspace, "renamed")
+	fixtureGit(t, "clone", "-q", owner, renamed)
+	fixtureGit(t, "-C", renamed, "remote", "rename", "origin", "upstream")
+	fixtureGit(t, "-C", renamed, "worktree", "add", "-q", "--detach", other, "upstream/main")
+	if _, targets, _ := c.CatchUpInventory(CatchUpOptions{Repos: []string{"ext.renamed"}, DryRun: true}); len(targets) != 1 || targets[0].noRemote {
+		t.Fatalf("owner with a renamed remote counted as remote-less: %+v", targets)
+	}
+	fixtureGit(t, "-C", renamed, "worktree", "remove", other)
+	report, err := c.CatchUp(CatchUpOptions{Repos: []string{"ext.local-only", "ext.spike"}, NoSkills: true, NoMCP: true, NoEnv: true})
+	if err != nil || report.ExitStatus != 0 {
+		t.Fatalf("remote-less owner failed the sweep: %+v %v", report, err)
+	}
+	fetches := 0
+	for _, row := range report.Outcomes {
+		switch {
+		case row.Kind == "fetch":
+			fetches++
+			if row.Outcome != "no-remote" || !strings.Contains(row.Reason, "no remote;") {
+				t.Fatalf("remote-less fetch row: %+v", row)
+			}
+		case row.Kind == "repo":
+			if row.Outcome != "updated" || row.TargetRef != "refs/heads/main" {
+				t.Fatalf("remote-less repo row: %+v", row)
+			}
+		}
+	}
+	if fetches != 1 {
+		t.Fatalf("want one fetch row for the shared owner: %+v", report.Outcomes)
+	}
+	if got := fixtureGit(t, "-C", detached, "rev-parse", "HEAD"); got != tip {
+		t.Fatalf("detached worktree at %s, want local main %s", got, tip)
+	}
+	if fixtureGit(t, "-C", spike, "symbolic-ref", "--short", "HEAD") != "spike" || !catchUpGitOK(spike, "merge-base", "--is-ancestor", tip, "HEAD") {
+		t.Fatal("live branch did not receive local main")
+	}
+	snapshot, err := c.StatusLocalSnapshot(false)
+	if err != nil {
+		t.Fatalf("status cannot read a remote-less sibling: %v", err)
+	}
+	seen := false
+	for _, row := range snapshot.Repos {
+		if row.Dir == "ext.local-only" {
+			seen = true
+			if row.Behind != 0 || row.Branch != "main" {
+				t.Fatalf("status measured the wrong tip: %+v", row)
+			}
+		}
+	}
+	if !seen {
+		t.Fatalf("status omitted the remote-less sibling: %+v", snapshot.Repos)
+	}
+	fetchReport, err := c.StatusRefreshRefsWithAge(false, 0)
+	if err != nil || fetchReport.Failed != 0 {
+		t.Fatalf("status fetched a remote-less owner: %+v %v", fetchReport, err)
+	}
+}
+
+func TestCatchUpNamesUnreachableRemoteAndStillLinksSecrets(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	owner := filepath.Join(c.Workspace, ".bare", "widget.git")
+	fixtureGit(t, "--git-dir="+owner, "worktree", "add", "--detach", filepath.Join(c.Collection, "widget"), "origin/main")
+	fixtureGit(t, "--git-dir="+owner, "remote", "set-url", "origin", filepath.Join(c.Workspace, "gone"))
+	report, err := c.CatchUp(CatchUpOptions{Repos: []string{"widget"}, NoSkills: true, NoMCP: true, NoEnv: true})
+	if err == nil || report.ExitStatus != 1 {
+		t.Fatalf("unreachable remote was not loud: %+v %v", report, err)
+	}
+	fetch, repo, secrets := false, false, false
+	for _, row := range report.Outcomes {
+		switch {
+		case row.Kind == "fetch":
+			fetch = row.Outcome == "failed" && strings.HasPrefix(row.Reason, "fatal:") && row.Reason != owner
+		case row.Kind == "repo":
+			repo = row.Outcome == "failed" && strings.Contains(row.Reason, "stale refs not used")
+		case row.Kind == "hook" && row.Repo == "secrets:widget":
+			secrets = row.Outcome == "ok"
+		}
+	}
+	if !fetch || !repo || !secrets {
+		t.Fatalf("unreachable remote rows: %+v", report.Outcomes)
+	}
+}
+
+func TestCatchUpRepoOnlyHooksSkipCollectionRenders(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	target := catchUpTarget{collection: filepath.Base(c.Collection), path: c.Harness, repo: "agent-harness", harness: true, managed: true}
+	report := CatchUpReport{Initiator: c.Collection}
+	c.catchUpHooks(&report, target, CatchUpOptions{DryRun: true}, true)
+	if len(report.Outcomes) != 1 || report.Outcomes[0].Repo != "secrets:agent-harness" {
+		t.Fatalf("repo-only hooks ran collection renders: %+v", report.Outcomes)
+	}
+}
+
+func TestCatchUpLinksSecretsWhenFetchFailsBeforePRPreflight(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	owner := filepath.Join(c.Workspace, ".bare", "widget.git")
+	worktree := filepath.Join(c.Collection, "widget")
+	fixtureGit(t, "--git-dir="+owner, "worktree", "add", "-q", "-b", "topic", worktree, "origin/main")
+	// A forge remote whose fetch fails offline, with an open PR whose merge
+	// target is missing: the preflight that used to exit before the hooks.
+	fixtureGit(t, "--git-dir="+owner, "remote", "set-url", "origin", "git@github.com:example/widget.git")
+	t.Setenv("GIT_SSH_COMMAND", "false")
+	bin := filepath.Join(c.Workspace, "bin")
+	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' '[{\"state\":\"OPEN\",\"isDraft\":false,\"baseRefName\":\"\"}]'\n", 0755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	report, err := c.CatchUp(CatchUpOptions{Repos: []string{"widget"}, NoSkills: true, NoMCP: true, NoEnv: true})
+	if err == nil || report.ExitStatus != 1 {
+		t.Fatalf("failed fetch was not loud: %+v %v", report, err)
+	}
+	repo, secrets := 0, 0
+	for _, row := range report.Outcomes {
+		if row.Kind == "repo" {
+			repo++
+			if row.Outcome != "failed" || !strings.Contains(row.Reason, "stale refs not used") {
+				t.Fatalf("repo row: %+v", row)
+			}
+		}
+		if row.Kind == "hook" && row.Repo == "secrets:widget" && row.Outcome == "ok" {
+			secrets++
+		}
+	}
+	if repo != 1 || secrets != 1 {
+		t.Fatalf("want one repo row and one secrets run: %+v", report.Outcomes)
+	}
+}
+
+func TestCatchUpLocalRefAcceptsEveryDevelopmentRefForm(t *testing.T) {
+	local := catchUpTarget{noRemote: true}
+	for _, ref := range []string{"origin/main", "main", "refs/heads/main", "refs/remotes/origin/main"} {
+		if got := catchUpLocalRef(local, ref); got != "refs/heads/main" {
+			t.Errorf("%s resolved to %s", ref, got)
+		}
+		if got := catchUpBranchName(ref); got != "main" {
+			t.Errorf("%s names branch %s", ref, got)
+		}
+	}
+	if got := catchUpLocalRef(catchUpTarget{}, "origin/main"); got != "origin/main" {
+		t.Errorf("owner with a remote rewrote its ref: %s", got)
 	}
 }
 
