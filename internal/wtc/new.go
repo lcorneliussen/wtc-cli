@@ -18,6 +18,9 @@ type NewOptions struct {
 	Tracker string
 	PR      string
 	Branch  string
+	// Review makes a PR collection review-only: pushing from the PR worktree
+	// is disabled and the author's review steps refuse to run.
+	Review bool
 }
 
 type NewResult struct {
@@ -27,6 +30,7 @@ type NewResult struct {
 	PushRemote     string   `json:"push_remote,omitempty"`
 	Repositories   []string `json:"repositories"`
 	Source         string   `json:"source"`
+	Review         bool     `json:"review,omitempty"`
 }
 
 var collectionNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
@@ -35,10 +39,16 @@ var githubSlugPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9
 func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	result := NewResult{}
 	if c.AdHoc {
+		if opt.Review {
+			return result, fmt.Errorf("review mode needs a harness collection")
+		}
 		return c.newAdHoc(opt)
 	}
 	if (opt.Issue != "" && opt.Tracker != "") || (opt.PR != "" && (opt.Issue != "" || opt.Tracker != "")) {
 		return result, fmt.Errorf("choose one source: issue, tracker, or PR")
+	}
+	if opt.Review && opt.PR == "" {
+		return result, fmt.Errorf("review mode needs a PR: --pr <repo>#<number>")
 	}
 	if opt.PR != "" && opt.Branch != "" {
 		return result, fmt.Errorf("--branch cannot override a PR head branch")
@@ -81,6 +91,9 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 		result.Collection = parts[0] + "-pr" + parts[1]
 		result.IntendedBranch = details.HeadRefName
 		result.Source = fmt.Sprintf("Review wtc for %s#%s.", slug, parts[1])
+		if opt.Review {
+			result.Source = fmt.Sprintf("Review-only wtc for %s#%s: review someone else's PR without writing to it.", slug, parts[1])
+		}
 		primary, primaryBranch, prID, prHead = parts[0], details.HeadRefName, parts[1], details.HeadRefOID
 		prTitle, prWebURL = details.Title, url
 		if details.IsCrossRepository {
@@ -154,6 +167,20 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	} else if !os.IsNotExist(err) {
 		return result, err
 	}
+	if opt.Review {
+		// Refused here, before any folder or checkout exists.
+		repo, err := c.Repository(primary)
+		if err != nil {
+			return result, err
+		}
+		bare, err := c.ensureBare(repo)
+		if err != nil {
+			return result, err
+		}
+		if err := refuseReviewPushURL(bare); err != nil {
+			return result, err
+		}
+	}
 	values := map[string]string{"collection": result.Collection, "source": result.Source, "branch": result.IntendedBranch}
 	if err := c.RunHook("new.pre", values); err != nil {
 		return result, err
@@ -176,6 +203,14 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 			checkout, err = c.AddPRWorktree(name, directory, result.Collection, branch, prID, prHead, prRemote)
 			if err == nil {
 				result.LocalBranch, result.PushRemote = checkout.LocalBranch, checkout.PushRemote
+			}
+			if err == nil && opt.Review {
+				// The marker comes first: should the lock fail, the partial
+				// collection is still review-only, and catch-up leaves it alone.
+				if err = writeReviewMode(result.Collection, ReviewMode{Repo: primary, Dir: directory, Branch: checkout.LocalBranch, PR: prID, URL: prWebURL, Heads: []string{prHead}}); err == nil {
+					err = lockReviewPush(result.Collection, filepath.Join(result.Collection, directory))
+				}
+				result.Review = err == nil
 			}
 		} else {
 			err = c.AddWorktree(name, directory, result.Collection, branch)
@@ -251,12 +286,10 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	_, _ = target.AgentToolchainPath(true) // A bare agent shell can fill this later.
 	var branchNote string
 	switch {
+	case opt.Review:
+		branchNote = fmt.Sprintf("**Review-only collection.** You review someone else's PR; the result is a verdict and nothing else.\nProduce and post the review only: `wtc review bundle`, `wtc review run`, `wtc review post`.\nNo commits, no pushes, no thread resolution, no `wtc review ready`; those belong to the author.\nPushing from `%s` is disabled. When the author pushes again, `wtc review bundle` moves to the new head for the next round.\n\nOther siblings start detached at the tip.", primaryDir(primary, harnessRepo))
 	case opt.PR != "":
-		primaryDir := primary
-		if primary == harnessRepo {
-			primaryDir = "harness"
-		}
-		branchNote = fmt.Sprintf("The primary sibling is on a local branch at the exact PR head. Push review work with:\n\n    git -C %s push %s %s\n\nOther siblings start detached at the tip.", shellQuote(primaryDir), shellQuote(result.PushRemote), shellQuote("HEAD:refs/heads/"+result.IntendedBranch))
+		branchNote = fmt.Sprintf("The primary sibling is on a local branch at the exact PR head. Push review work with:\n\n    git -C %s push %s %s\n\nOther siblings start detached at the tip.", shellQuote(primaryDir(primary, harnessRepo)), shellQuote(result.PushRemote), shellQuote("HEAD:refs/heads/"+result.IntendedBranch))
 	case opt.Branch != "":
 		branchNote = "All siblings are already on the explicitly requested branch. Commit on that branch; do not create it again."
 	default:
@@ -275,6 +308,13 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 		return result, err
 	}
 	return result, nil
+}
+
+func primaryDir(primary, harnessRepo string) string {
+	if primary == harnessRepo {
+		return "harness"
+	}
+	return primary
 }
 
 func defaultSource(source string) string {

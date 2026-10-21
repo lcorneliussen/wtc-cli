@@ -46,6 +46,7 @@ type StatusRepo struct {
 	Tip           *StatusBuild   `json:"tip"`
 	Prod          *StatusBuild   `json:"prod"`
 	Runtime       string         `json:"runtime,omitempty"`
+	ReviewOnly    bool           `json:"review_only,omitempty"`
 }
 
 type StatusPRFacts struct {
@@ -170,6 +171,10 @@ func statusLocalRepo(t catchUpTarget) (StatusRepo, error) {
 		row.BranchKind = "detached"
 		row.Branch = catchUpBranchName(t.ref)
 		row.BranchDisplay = "⌂ " + row.Branch
+	}
+	if reviewOnlyWorktree(t.path) {
+		row.ReviewOnly = true
+		row.BranchDisplay += " (review-only)"
 	}
 	upstream := t.ref
 	if row.BranchKind == "branch" {
