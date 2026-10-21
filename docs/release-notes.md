@@ -44,17 +44,30 @@ PR. Keep private adoption relationships in private records.
 The source of truth is `internal/wtc/release-notes/<version>.md`. These files are
 embedded directly; they are also passed to GoReleaser as the release body.
 
-1. Keep upcoming changes in `internal/wtc/release-notes/unreleased.md`.
-2. Before tagging, turn the relevant changes into `<version>.md`, headed
-   `# wtc <version>` (without `v`). Include features, compatibility changes,
-   harness adoption steps, and relevant limitations. Use generic public examples.
-3. Clear the released items from `unreleased.md`, retaining its heading and an
-   explicit statement about any remaining upcoming changes.
+1. **Every change adds its own fragment.** A pull request that changes behaviour
+   adds `internal/wtc/release-notes/unreleased/<issue>-<slug>.md` and never edits
+   another change's fragment, so branches in flight do not conflict over
+   release notes. A fragment holds `## <topic>` sections, each with at least
+   one entry; the format is in that directory's `README.md`. `wtc release-notes
+   unreleased` shows them assembled: sections with the same heading are merged,
+   in issue order.
+2. Before tagging, cut the release from the repository root:
+
+   ```sh
+   go run ./tools/release-notes cut <version>
+   ```
+
+   This writes `<version>.md`, headed `# wtc <version>` (without `v`), from the
+   fragments and deletes them. Commit both in one change.
+3. Edit `<version>.md` into the release notes: order and merge the topics,
+   add a summary, compatibility changes, harness adoption steps, and relevant
+   limitations. Use generic public examples.
 4. Run the Go suite and vet. Inspect the exact notes, diff, and release payload
    for public safety. Commit the numbered notes **before** creating the tag.
 5. Follow the repository's normal review and release authorization procedure.
 
-The tag workflow rejects missing or mismatched notes before publishing binaries.
+The tag workflow rejects missing or mismatched notes, and fragments left in
+`unreleased/`, before publishing binaries.
 It publishes the same file that is embedded in the tagged binary. Fix future
 guidance in source rather than editing only the GitHub body: already downloaded
 binaries keep their original notes. Historical files here were imported from

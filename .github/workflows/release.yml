@@ -24,6 +24,7 @@ jobs:
           notes="internal/wtc/release-notes/$version.md"
           test -s "$notes" || { echo "Commit $notes before tagging"; exit 1; }
           test "$(head -n 1 "$notes")" = "# wtc $version" || { echo "Release notes heading does not match tag"; exit 1; }
+          go run ./tools/release-notes check
           go test ./internal/wtc -run '^TestEmbeddedReleaseNotes$'
           echo "path=$notes" >> "$GITHUB_OUTPUT"
       - uses: goreleaser/goreleaser-action@v7
