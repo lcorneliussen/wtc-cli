@@ -2,7 +2,7 @@
 
 ## Catch-up
 
-- An owner without an `origin` remote no longer drops out of catch-up.
+- An owner without any remote no longer drops out of catch-up.
   Its fetch row reads `no-remote`, which does not fail the run, and its
   worktrees are reconciled against the owner's own branches (`main` rather
   than `origin/main`). Status measures them against the same local branch and

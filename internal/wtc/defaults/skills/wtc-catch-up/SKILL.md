@@ -72,7 +72,7 @@ Secret linking is scoped to each successful managed repo, and still runs for
 a repo whose owner fetch failed. Target-specific extension hooks still run
 when present; an absent MCP registry is skipped.
 
-An owner with no `origin` remote (a local-only `ext.` sibling) gets a
+An owner with no remote at all (a local-only `ext.` sibling) gets a
 `no-remote` fetch row and is reconciled against its own branches: `main`
 instead of `origin/main`. That row alone does not make the exit nonzero. An
 `origin` that is configured but cannot be reached is a `failed` fetch whose
