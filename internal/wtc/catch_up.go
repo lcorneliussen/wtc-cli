@@ -268,15 +268,17 @@ func (c *Context) CatchUpInventory(opt CatchUpOptions) (CatchUpReport, []catchUp
 				continue
 			}
 			// Unmanaged ext. siblings are valid worktrees too. Their default
-			// development ref follows the shell contract's origin/main fallback.
+			// development ref follows the shell contract's origin/main fallback,
+			// which catchUpLocalRef maps to local main for an owner without any
+			// remote. An owner with only other remotes still fails its fetch.
 			repo, repoErr := target.Repository(repoName)
 			ref := repo.DefaultRef
 			if ref == "" {
 				ref = "origin/main"
 			}
-			_, remoteErr := gitOutput("--git-dir="+owner, "remote", "get-url", "origin")
+			remotes, remoteErr := gitOutput("--git-dir="+owner, "remote")
 			t := catchUpTarget{collection: name, path: path, repo: repoName, owner: owner,
-				harness: label == "harness", managed: repoErr == nil || label == "harness", noRemote: remoteErr != nil}
+				harness: label == "harness", managed: repoErr == nil || label == "harness", noRemote: remoteErr == nil && remotes == ""}
 			t.ref = catchUpLocalRef(t, ref)
 			targets = append(targets, t)
 		}

@@ -581,6 +581,16 @@ func TestCatchUpReconcilesRemotelessOwnerAgainstLocalBranches(t *testing.T) {
 	fixtureGit(t, "-C", owner, "worktree", "add", "-q", "--detach", detached, "main")
 	fixtureGit(t, "-C", owner, "worktree", "add", "-q", "-b", "spike", spike, "main")
 	tip := commit("two")
+	// A remote under another name is not a local-only owner.
+	other := filepath.Join(c.Collection, "ext.renamed")
+	renamed := filepath.Join(c.Workspace, "renamed")
+	fixtureGit(t, "clone", "-q", owner, renamed)
+	fixtureGit(t, "-C", renamed, "remote", "rename", "origin", "upstream")
+	fixtureGit(t, "-C", renamed, "worktree", "add", "-q", "--detach", other, "upstream/main")
+	if _, targets, _ := c.CatchUpInventory(CatchUpOptions{Repos: []string{"ext.renamed"}, DryRun: true}); len(targets) != 1 || targets[0].noRemote {
+		t.Fatalf("owner with a renamed remote counted as remote-less: %+v", targets)
+	}
+	fixtureGit(t, "-C", renamed, "worktree", "remove", other)
 	report, err := c.CatchUp(CatchUpOptions{Repos: []string{"ext.local-only", "ext.spike"}, NoSkills: true, NoMCP: true, NoEnv: true})
 	if err != nil || report.ExitStatus != 0 {
 		t.Fatalf("remote-less owner failed the sweep: %+v %v", report, err)
@@ -612,10 +622,17 @@ func TestCatchUpReconcilesRemotelessOwnerAgainstLocalBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status cannot read a remote-less sibling: %v", err)
 	}
+	seen := false
 	for _, row := range snapshot.Repos {
-		if row.Dir == "ext.local-only" && (row.Behind != 0 || row.Branch != "main") {
-			t.Fatalf("status measured the wrong tip: %+v", row)
+		if row.Dir == "ext.local-only" {
+			seen = true
+			if row.Behind != 0 || row.Branch != "main" {
+				t.Fatalf("status measured the wrong tip: %+v", row)
+			}
 		}
+	}
+	if !seen {
+		t.Fatalf("status omitted the remote-less sibling: %+v", snapshot.Repos)
 	}
 	fetchReport, err := c.StatusRefreshRefsWithAge(false, 0)
 	if err != nil || fetchReport.Failed != 0 {
