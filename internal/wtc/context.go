@@ -58,6 +58,11 @@ type Config struct {
 		Backend string `toml:"backend"`
 		Binary  string `toml:"binary"`
 	} `toml:"runtime"`
+	Status struct {
+		// ReturnMerged lets a status refresh return a clean worktree whose
+		// PR it sees merged to the development tip. Unset means on.
+		ReturnMerged *bool `toml:"return_merged"`
+	} `toml:"status"`
 	// OpenClaw is set in a gateway's collection folder only.
 	OpenClaw struct {
 		// Harness names the gateway-configured harness of the collection,
@@ -94,6 +99,9 @@ func Discover(start string) (*Context, error) {
 	}
 	dir := abs
 	for {
+		if RetiredFolder(dir) {
+			return nil, retiredFolderError(dir)
+		}
 		for _, marker := range []string{filepath.Join(AdHocConfigDir, adHocRegistryFile), filepath.Join("harness", ".harness-repos.yml")} {
 			candidate := filepath.Join(dir, marker)
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
@@ -113,6 +121,9 @@ func OpenCollection(dir string) (*Context, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
+	}
+	if RetiredFolder(abs) {
+		return nil, retiredFolderError(abs)
 	}
 	c := &Context{Collection: abs, Harness: filepath.Join(abs, "harness"), Workspace: filepath.Dir(abs)}
 	// A collection's own config decides what it is, not the name of one of

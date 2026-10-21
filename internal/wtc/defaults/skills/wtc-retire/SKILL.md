@@ -60,11 +60,16 @@ wtc retire .
 It runs teardown hooks for every repo, refuses on dirty or unpushed work,
 removes the worktrees, closes the collection's herdr workspace if one is open,
 and deletes the folder when it contains no other files. It leaves unexpected
-files visible for inspection. A self-retire waits for the initiating agent to
-finish its turn. After a final pane check, it closes the source workspace
-before running hooks or removing worktrees; another live agent pane blocks
-the handoff. Inspect the `--cleanup--` pane for the final result. Its post hook
-runs after product teardown and before the harness worktree is removed.
+files visible for inspection and writes a `.wtc-retired` marker (JSON: time,
+CLI version, the blocking paths). Status `--all` lists marked folders as
+retired leftovers; sweeps, renders and discovery skip them. Once the blockers
+are gone, `wtc retire <collection>` again removes the folder, along with any
+generated file a lingering process wrote there. A self-retire waits for the
+initiating agent to finish its turn. After a final pane check, it closes the
+source workspace before running hooks or removing worktrees; another live
+agent pane blocks the handoff. Inspect the `--cleanup--` pane for the final
+result. Its post hook runs after product teardown and before the harness
+worktree is removed.
 
 `--force` overrides the pre-flight refusal. Use it only when you have
 established the work is genuinely disposable — and say in your report that you

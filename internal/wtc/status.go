@@ -20,8 +20,10 @@ type StatusSnapshot struct {
 	Repos                []StatusRepo   `json:"repos"`
 	PRs                  []StatusPRRow  `json:"prs"`
 	Orphans              []StatusOrphan `json:"orphans"`
-	PRsEmptyHint         bool           `json:"prs_empty_hint,omitempty"`
-	Runtime              []RuntimeItem  `json:"runtime,omitempty"`
+	// Retired lists folders a retire could not delete, in a workspace sweep.
+	Retired      []StatusRetired `json:"retired,omitempty"`
+	PRsEmptyHint bool            `json:"prs_empty_hint,omitempty"`
+	Runtime      []RuntimeItem   `json:"runtime,omitempty"`
 }
 
 type StatusRepo struct {
@@ -44,6 +46,7 @@ type StatusRepo struct {
 	Tip           *StatusBuild   `json:"tip"`
 	Prod          *StatusBuild   `json:"prod"`
 	Runtime       string         `json:"runtime,omitempty"`
+	ReviewOnly    bool           `json:"review_only,omitempty"`
 }
 
 type StatusPRFacts struct {
@@ -100,6 +103,33 @@ type StatusPRRow struct {
 	OnBranch        bool          `json:"on_branch"`
 }
 
+type StatusRetired struct {
+	Folder        string   `json:"folder"`
+	RetiredAt     string   `json:"retired_at,omitempty"`
+	BlockingPaths []string `json:"blocking_paths"`
+}
+
+// statusRetired reads the retire markers of a workspace sweep. A marker that
+// cannot be parsed still lists its folder, with what it holds now.
+func (c *Context) statusRetired(snapshot *StatusSnapshot) {
+	folders, err := RetiredFolders(c.Workspace)
+	if err != nil {
+		return
+	}
+	for _, dir := range folders {
+		row := StatusRetired{Folder: filepath.Base(dir)}
+		if marker, err := ReadRetiredMarker(dir); err == nil {
+			row.RetiredAt, row.BlockingPaths = marker.RetiredAt, marker.BlockingPaths
+		} else {
+			row.BlockingPaths, _ = retireLeftovers(dir)
+		}
+		if row.BlockingPaths == nil {
+			row.BlockingPaths = []string{}
+		}
+		snapshot.Retired = append(snapshot.Retired, row)
+	}
+}
+
 type StatusOrphan struct {
 	Repo   string `json:"repo"`
 	Branch string `json:"branch"`
@@ -139,8 +169,12 @@ func statusLocalRepo(t catchUpTarget) (StatusRepo, error) {
 		row.BranchDisplay = branch
 	} else {
 		row.BranchKind = "detached"
-		row.Branch = strings.TrimPrefix(t.ref, "origin/")
+		row.Branch = catchUpBranchName(t.ref)
 		row.BranchDisplay = "⌂ " + row.Branch
+	}
+	if reviewOnlyWorktree(t.path) {
+		row.ReviewOnly = true
+		row.BranchDisplay += " (review-only)"
 	}
 	upstream := t.ref
 	if row.BranchKind == "branch" {
@@ -198,6 +232,9 @@ func (c *Context) StatusLocalSnapshot(all bool) (StatusSnapshot, error) {
 			snapshot.StaleCount++
 		}
 		snapshot.Repos = append(snapshot.Repos, row)
+	}
+	if all {
+		c.statusRetired(&snapshot)
 	}
 	c.statusRuntime(&snapshot, all)
 	return snapshot, nil

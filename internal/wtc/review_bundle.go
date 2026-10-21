@@ -94,6 +94,17 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 	if err != nil {
 		return ReviewBundle{}, err
 	}
+	reviewOnly := reviewOnlyWorktree(worktree)
+	if reviewOnly {
+		// The merge with the tip would be a write to the author's branch.
+		opt.NoCatchUp = true
+		mode, _ := ReadReviewMode(c.Collection)
+		if opt.PR == "" && mode.Repo == opt.Repo {
+			opt.PR = mode.PR
+		} else if opt.PR != "" && mode.PR != "" && opt.PR != mode.PR {
+			return ReviewBundle{}, fmt.Errorf("this collection reviews %s#%s, not PR #%s", mode.Repo, mode.PR, opt.PR)
+		}
+	}
 	if opt.PR != "" && !prNumber.MatchString(opt.PR) {
 		return ReviewBundle{}, fmt.Errorf("invalid PR number %q", opt.PR)
 	}
@@ -118,7 +129,7 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 		} else {
 			cmd := exec.Command("bb", "pr", "view", opt.PR, "--json")
 			cmd.Dir = worktree
-			raw, err = cmd.Output()
+			raw, err = forgeOutput(cmd)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "wtc: warning: PR #%s metadata unavailable; bundle will use local refs\n", opt.PR)
@@ -181,7 +192,11 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 			prBranch = branchFromEnlistment
 		}
 	}
-	if opt.PR != "" && opt.Head == "HEAD" {
+	if reviewOnly && opt.PR != "" && opt.Head == "HEAD" {
+		if err := followReviewHead(c.Collection, worktree, forge, opt.PR, prBranch, prBase, prHead); err != nil {
+			return ReviewBundle{}, fmt.Errorf("move review worktree to PR #%s head: %w", opt.PR, err)
+		}
+	} else if opt.PR != "" && opt.Head == "HEAD" {
 		if prBranch != "" && branch != prBranch {
 			if err := checkoutReviewBranch(worktree, prBranch); err != nil {
 				return ReviewBundle{}, fmt.Errorf("check out PR #%s branch %q: %w", opt.PR, prBranch, err)

@@ -39,6 +39,9 @@ func (c *Context) StatusRefreshRefsWithAge(all bool, maxAge time.Duration) (Stat
 	seen := map[string]bool{}
 	c.statusProgress("Checking remote refs")
 	for _, target := range targets {
+		if target.noRemote {
+			continue // No remote to fetch from; local branches are the only refs.
+		}
 		common, err := statusCommonDir(target.path)
 		if err != nil {
 			report.Failed++
@@ -54,7 +57,7 @@ func (c *Context) StatusRefreshRefsWithAge(all bool, maxAge time.Duration) (Stat
 		}
 		report.Attempted++
 		c.statusProgress(fmt.Sprintf("Fetching remote refs %d", report.Attempted))
-		if _, err := statusJSON("git", "--git-dir="+common, "fetch", "--prune", "origin"); err != nil {
+		if _, err := statusCommand(30*time.Second, "git", "--git-dir="+common, "fetch", "--prune", "origin"); err != nil {
 			report.Failed++
 		}
 	}
@@ -135,6 +138,7 @@ func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.
 		snapshot.Repos = append(snapshot.Repos, part.Repos...)
 		snapshot.StaleCount += part.StaleCount
 	}
+	c.statusRetired(&snapshot)
 	c.statusRuntime(&snapshot, true)
 	return snapshot, report, nil
 }

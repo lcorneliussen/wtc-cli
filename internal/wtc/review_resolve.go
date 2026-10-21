@@ -21,6 +21,9 @@ type ReviewResolveResult struct {
 }
 
 func (c *Context) ResolveReviewBundle(bundle string, opt ReviewResolveOptions) (ReviewResolveResult, error) {
+	if err := c.RefuseInReviewMode("resolving review threads"); err != nil {
+		return ReviewResolveResult{}, err
+	}
 	bundle, err := filepath.Abs(bundle)
 	if err != nil {
 		return ReviewResolveResult{}, err

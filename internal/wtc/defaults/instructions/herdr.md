@@ -15,32 +15,43 @@ session "<project>"                one server + socket per workspace root
 └─ workspace "<collection>"   one per wtc; cwd = collection root, .env.collection loaded
 ```
 
+A workspace starts with two panes, **agent** and **status**. The tool panes,
+**browse** and **shell**, come on demand: `wtc open --add browse` (or
+`shell`) adds one, `--full` or `WTC_PANES=full` opens both every time. Every
+pane holds a pseudo-terminal, and macOS caps those machine-wide
+(`kern.tty.ptmx_max`, default 511), so panes nobody uses are not free.
+
 **Wide** (default when the attached client is wide enough):
 
 ```text
-[ agent | browse ]     ← two stacked columns
+[ agent | browse ]     ← two stacked columns; browse and shell when added
 [ shell | status ]     shell 20% height, status 35%
 ```
+
+Without tool panes, status sits to the right of the agent.
 
 **Narrow** (`--narrow`, `WTC_LAYOUT=narrow`, or auto when session width <
 `WTC_LAYOUT_NARROW_AT`, default 140):
 
 ```text
 tab main:   agent / status     (stacked; status 35%)
-tab tools:  browse / shell     (stacked; shell 20%)
+tab tools:  browse / shell     (stacked; shell 20%; only once one is added)
 ```
 
 Layout is applied on create. Explicit `--narrow` / `--wide` **switches** an
 existing workspace (live panes are moved). A partial
 workspace — common when you start the agent first, then open — is built out
-toward the resolved layout. `auto` never flips a complete wide ↔ narrow.
+toward the resolved layout; `--list` names the agent or status pane it lacks.
+A missing browse or shell pane is not damage. `auto` never flips a complete
+wide ↔ narrow.
 A narrow workspace whose tabs hold the right panes side by side is reported
 by `--list` as `unstacked`; `--narrow` or a plain open **restacks** it without
 restarting the panes.
 `--wide` / `--narrow` override `WTC_LAYOUT` (and auto).
 
 `browse` is the slot for something a human should look at. An agent that
-wants to open neovim sends it there and keeps talking in `agent`. A command
+wants to open neovim runs `wtc open --add browse` and keeps talking in
+`agent`. A command
 typed at a prompt — herdr shell or a plain terminal — runs in that window;
 it does not bounce into `browse`.
 
@@ -68,8 +79,15 @@ default arguments entirely and so drops it too.
 Re-running `wtc open` inspects every pane and only (re)starts what is
 sitting at a bare prompt — that is how a session restored after a reboot gets
 its commands back. A workspace that already grew extra panes (a second agent,
-a one-off split) is left alone, and browse tools fall back to `shell` rather
-than inserting another column.
+a one-off split) is left alone.
+
+`wtc open --trim` closes the tool panes nobody is using: a shell at its
+prompt, and a browse Neovim with no unsaved buffers. It keeps a focused pane,
+a shell running a command, and a Neovim that does not answer, and it never
+touches agent or status panes. `--all` trims every collection in the
+session. When the machine is close to its pty cap, `wtc open` and
+`wtc doctor` warn and name the sessions holding the most panes; an open that
+fails with `openpty` says so.
 
 A session is a separate server with its own workspace list, so other work on
 the machine never shows up here. The name defaults to the workspace-root
@@ -80,6 +98,8 @@ folder minus a trailing `-wtc` or `-harness` — so `<project>-wtc/` → session
 wtc open [<collection> …]             # this collection, or the named ones
 wtc open --narrow                     # switch to (or create) stacked tabs
 wtc open --wide                       # switch to (or create) stacked columns
+wtc open --add browse                 # add the browse pane (or shell)
+wtc open --trim --all                 # close idle tool panes everywhere
 wtc open --all --list                 # report every collection's agent state
 herdr --session <project>                  # attach
 ```
@@ -136,12 +156,10 @@ file the agent just wrote. `<CR>` peeks, `o` opens in the repo tab.
 `<leader>gd` returns to the index; `]f`/`[f` walk files; `<leader>gD`
 is Diffview side-by-side. The multi-repo map stays in the `status` pane.
 
-Where it opens:
-
-| Launched from | Goes |
-|---|---|
-| a terminal, including a herdr `shell` pane | this window |
-| a coding agent inside herdr | the `browse` pane (or `shell`, if the workspace is off-template), plus a sibling herdr tab `pr` running `gh dash` if that extension is installed |
+`wtc browse` opens in the terminal it runs in, including a herdr `shell`
+pane. From a coding agent's pane it refuses rather than take the agent's
+terminal over; `wtc open --add browse` gives the collection a browse pane
+running it.
 
 The browse nvim listens on
 `/tmp/wtc-browse-<workspace-basename>-<collection>.nvim`. Long names are
@@ -155,7 +173,8 @@ clicks talk to it:
 | `PR` | `:Octo pr edit` in that tab, else the PR in the browser |
 
 ```bash
-wtc browse              # this collection
+wtc browse              # this collection, in this terminal
+wtc open --add browse   # the workspace's browse pane
 wtc browse --here       # this terminal, even from an agent pane
 ```
 
@@ -242,6 +261,8 @@ herdr --session <project> agent prompt api-1234-paging-clamp \
 Panes hold live work — an agent mid-task, a server, a test run — and an agent
 conversation that dies is not recoverable from git. So: **no closing panes or
 workspaces, no `session stop`, no restarting an agent, to apply a change.**
+`wtc open --trim` is the exception that proves it: it closes only idle tool
+panes, and it is run when someone asks for it.
 Add non-destructively and let re-running `wtc open` heal the workspace; it
 is written to repair in place for exactly this reason. If something genuinely
 cannot be fixed without killing a running pane, **ask the person first** —

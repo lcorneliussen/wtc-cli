@@ -2,16 +2,22 @@ package wtc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type catchUpPR struct {
 	state, mergeCommit, head, base string
+	// branch, when set, is the local branch these facts were read for.
+	// Reconciliation refuses a worktree that has moved to another branch.
+	branch string
 }
 
 func catchUpGit(path string, args ...string) (string, error) {
@@ -30,14 +36,49 @@ func (c *Context) catchUpDefaultRef(t catchUpTarget) (string, error) {
 	}
 	repo, err := target.Repository(t.repo)
 	if err != nil || repo.DefaultRef == "" {
-		return "origin/main", nil
+		return catchUpLocalRef(t, "origin/main"), nil
 	}
-	return repo.DefaultRef, nil
+	return catchUpLocalRef(t, repo.DefaultRef), nil
 }
 
+// catchUpFetch fetches origin into an owner and reduces a failure to git's
+// own cause line, which says why the configured remote cannot be reached.
+func catchUpFetch(owner string) error {
+	out, err := exec.Command("git", "--git-dir="+owner, "fetch", "--prune", "origin").CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	first := ""
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "fatal:") || strings.HasPrefix(line, "error:") {
+			return errors.New(line)
+		}
+		if first == "" {
+			first = line
+		}
+	}
+	if first != "" {
+		return errors.New(first)
+	}
+	return err
+}
+
+// catchUpForgeTimeout bounds one forge CLI call, as status bounds its own.
+var catchUpForgeTimeout = 30 * time.Second
+
+// catchUpJSON runs a forge CLI. A stalled gh or bb fails the lookup, which
+// leaves the branch untouched, instead of blocking a sweep or status refresh.
 func catchUpJSON(args ...string) ([]byte, error) {
-	cmd := exec.Command(args[0], args[1:]...)
-	return cmd.Output()
+	ctx, cancel := context.WithTimeout(context.Background(), catchUpForgeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.WaitDelay = 200 * time.Millisecond
+	out, err := forgeOutput(cmd)
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("%s timed out after %s", args[0], catchUpForgeTimeout)
+	}
+	return out, err
 }
 
 func catchUpForge(remote string) (string, string) {
@@ -237,9 +278,16 @@ func catchUpLanded(t catchUpTarget, target string, pr catchUpPR) bool {
 	if extra == "0" {
 		return true
 	}
-	if pr.mergeCommit != "" && pr.head != "" && catchUpGitOK(t.path, "merge-base", "--is-ancestor", pr.mergeCommit, target) {
-		prHead, err := catchUpGit(t.path, "rev-parse", "--verify", pr.head+"^{commit}")
-		if head, headErr := catchUpGit(t.path, "rev-parse", "HEAD"); err == nil && headErr == nil && head == prHead {
+	if pr.mergeCommit != "" && catchUpGitOK(t.path, "merge-base", "--is-ancestor", pr.mergeCommit, target) {
+		if pr.head != "" {
+			prHead, err := catchUpGit(t.path, "rev-parse", "--verify", pr.head+"^{commit}")
+			if head, headErr := catchUpGit(t.path, "rev-parse", "HEAD"); err == nil && headErr == nil && head == prHead {
+				return true
+			}
+		}
+		// A squash merge rewrites the branch's commits into one, so cherry
+		// finds no equivalents. It still carries the branch's content.
+		if catchUpSquashCarries(t.path, pr.mergeCommit) {
 			return true
 		}
 	}
@@ -253,6 +301,50 @@ func catchUpLanded(t catchUpTarget, target string, pr catchUpPR) bool {
 		}
 	}
 	return true
+}
+
+// catchUpSquashCarries reports whether a merge commit on the target carries
+// the branch at HEAD: either both have the same tree, or the merge commit's
+// own change has the same patch-id as the branch's cumulative change since it
+// forked (whitespace and line numbers aside).
+func catchUpSquashCarries(worktree, merge string) bool {
+	head, err := catchUpGit(worktree, "rev-parse", "--verify", "HEAD^{tree}")
+	if err != nil {
+		return false
+	}
+	if tree, err := catchUpGit(worktree, "rev-parse", "--verify", merge+"^{tree}"); err == nil && tree == head {
+		return true
+	}
+	parent, err := catchUpGit(worktree, "rev-parse", "--verify", merge+"^1")
+	if err != nil {
+		return false
+	}
+	base, err := catchUpGit(worktree, "merge-base", "HEAD", parent)
+	if err != nil {
+		return false
+	}
+	branch := catchUpPatchID(worktree, base, "HEAD")
+	return branch != "" && branch == catchUpPatchID(worktree, parent, merge)
+}
+
+// catchUpPatchID identifies the change between two commits independently of
+// how it was committed. An empty change has no identity.
+func catchUpPatchID(worktree, from, to string) string {
+	diff, err := exec.Command("git", "-C", worktree, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--binary", from, to).Output()
+	if err != nil || len(diff) == 0 {
+		return ""
+	}
+	cmd := exec.Command("git", "-C", worktree, "patch-id", "--stable")
+	cmd.Stdin = bytes.NewReader(diff)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 func catchUpOperation(t catchUpTarget) string {
@@ -308,8 +400,14 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, pr catch
 		return "needs-owner", "dirty worktree; clean-only leaves it untouched"
 	}
 	branch, _ := catchUpGit(t.path, "symbolic-ref", "-q", "--short", "HEAD")
+	if pr.branch != "" && branch != pr.branch {
+		return "needs-owner", "worktree left " + pr.branch + " while its PR was read; untouched"
+	}
 	if branch == "" && !catchUpGitOK(t.path, "merge-base", "--is-ancestor", "HEAD", target) {
 		return "needs-owner", "detached commits not contained in default tip; preserve them on an owner branch"
+	}
+	if branch != "" && pr.state != "MERGED" && reviewOnlyWorktree(t.path) {
+		return "current", "review-only PR worktree; `wtc review bundle` follows the PR head"
 	}
 	switch pr.state {
 	case "UNKNOWN":
@@ -360,7 +458,7 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, pr catch
 				reason += "; local branch retained because safe pruning refused"
 			}
 		}
-	} else if branch == strings.TrimPrefix(ref, "origin/") {
+	} else if branch == catchUpBranchName(ref) {
 		if catchUpGitOK(t.path, "merge", "--ff-only", target) {
 			reason = "fast-forwarded default branch"
 		} else {
@@ -421,19 +519,35 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		if _, ok := fetched[t.owner]; ok {
 			continue
 		}
-		state := "planned"
-		if !opt.DryRun {
-			if _, err := gitOutput("--git-dir="+t.owner, "fetch", "--prune", "origin"); err != nil {
-				state = "failed"
+		state, reason := "planned", t.owner
+		if t.noRemote {
+			// Reported on its own outcome, which callers may treat as they
+			// choose; it does not fail the sweep by itself.
+			state, reason = "no-remote", "no remote; reconciling against local branches"
+		} else if !opt.DryRun {
+			if err := catchUpFetch(t.owner); err != nil {
+				state, reason = "failed", err.Error()
 			} else {
 				state = "ok"
 			}
 		}
 		fetched[t.owner] = state
-		report.add("fetch", t.collection, t.repo, state, t.owner, "", "", "")
+		report.add("fetch", t.collection, t.repo, state, reason, "", "", "")
 	}
 	for _, t := range targets {
 		source, err := catchUpGit(t.path, "rev-parse", "--verify", "HEAD")
+		if fetched[t.owner] == "failed" {
+			// Nothing is reconciled from stale refs, so no PR or ref check can
+			// change the outcome. Repo-scoped hooks never needed the remote;
+			// collection-level renders wait for a harness known to be current.
+			report.add("repo", t.collection, t.repo, "failed", "owner fetch failed; stale refs not used", source, "", source)
+			report.Outcomes[len(report.Outcomes)-1].TargetRef = t.ref
+			c.catchUpHooks(&report, t, opt, true)
+			if t.harness && opt.ReloadStatus {
+				report.add("pane", t.collection, "status", "skipped", "harness update needs attention; pane left running", "", "", "")
+			}
+			continue
+		}
 		if err != nil {
 			report.add("repo", t.collection, t.repo, "failed", "worktree HEAD unreadable; target may have moved or disappeared", "", "", "")
 			continue
@@ -445,7 +559,8 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		}
 		pr := catchUpPR{state: "NONE"}
 		branch, _ := catchUpGit(t.path, "symbolic-ref", "-q", "--short", "HEAD")
-		if branch != "" && branch != strings.TrimPrefix(ref, "origin/") && catchUpOperation(t) == "" {
+		// An owner without a remote has no forge, so no PR to consult.
+		if branch != "" && branch != catchUpBranchName(ref) && !t.noRemote && catchUpOperation(t) == "" {
 			pr = c.catchUpPRState(t, branch)
 		}
 		ref, refErr = catchUpRefForPR(t.path, ref, pr)
@@ -455,9 +570,7 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		}
 		target, targetErr := catchUpGit(t.path, "rev-parse", "--verify", ref+"^{commit}")
 		outcome, reason := "failed", ref+" unavailable"
-		if fetched[t.owner] == "failed" {
-			reason = "owner fetch failed; stale refs not used"
-		} else if targetErr != nil && (pr.state == "OPEN" || pr.state == "DRAFT") {
+		if targetErr != nil && (pr.state == "OPEN" || pr.state == "DRAFT") {
 			outcome, reason = "needs-owner", "open PR merge target "+ref+" is unavailable; branch left untouched"
 		} else if targetErr == nil {
 			outcome, reason = c.catchUpReconcile(t, ref, target, pr, opt)
@@ -473,7 +586,7 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 			row.NextAction = strings.Replace(row.NextAction, "merge the target ref", "merge "+ref, 1)
 		}
 		if outcome == "updated" || outcome == "current" || outcome == "planned" {
-			c.catchUpHooks(&report, t, opt)
+			c.catchUpHooks(&report, t, opt, false)
 		} else if t.harness && opt.ReloadStatus {
 			report.add("pane", t.collection, "status", "skipped", "harness update needs attention; pane left running", "", "", "")
 		}
@@ -487,7 +600,9 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 	return report, nil
 }
 
-func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt CatchUpOptions) {
+// catchUpHooks runs the repo-scoped hooks, then, unless repoOnly, the
+// collection-level renders a harness target governs.
+func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt CatchUpOptions, repoOnly bool) {
 	targetDir := filepath.Join(c.Workspace, t.collection)
 	// The harness updates first and may have changed registry membership, so
 	// decide from the current target registry.
@@ -528,7 +643,7 @@ func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt Catch
 			report.add("hook", t.collection, "secrets:"+t.repo, "skipped", "unmanaged sibling; no registry secrets to link", "", "", "")
 		}
 	}
-	if !t.harness {
+	if !t.harness || repoOnly {
 		return
 	}
 	if !opt.NoEnv {

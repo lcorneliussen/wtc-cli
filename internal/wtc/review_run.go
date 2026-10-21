@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,20 +118,11 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 		}
 		opt.Timeout = time.Duration(seconds) * time.Second
 	}
-	var concernTemplate, leadTemplate []byte
-	if manifest.Public {
-		concernTemplate, err = ReadDefault("review/prompts/concern.md")
-		if err != nil {
-			return ReviewRunResult{}, err
-		}
-		leadTemplate, err = ReadDefault("review/prompts/lead.md")
-	} else {
-		prompts := filepath.Join(c.Harness, "review", "prompts")
-		concernTemplate, err = os.ReadFile(filepath.Join(prompts, "concern.md"))
-		if err == nil {
-			leadTemplate, err = os.ReadFile(filepath.Join(prompts, "lead.md"))
-		}
+	concernTemplate, err := c.reviewPromptTemplate(manifest, "concern.md")
+	if err != nil {
+		return ReviewRunResult{}, err
 	}
+	leadTemplate, err := c.reviewPromptTemplate(manifest, "lead.md")
 	if err != nil {
 		return ReviewRunResult{}, err
 	}
@@ -547,4 +540,16 @@ func launchReviewAgent(bundle, repoDir, prompt, agent, model string, timeout tim
 		return output, elapsed, fmt.Errorf("review agent timed out after %s", timeout)
 	}
 	return output, elapsed, err
+}
+
+// reviewPromptTemplate returns the harness override for a private bundle, or the
+// embedded default when the bundle is public or the harness has no override.
+func (c *Context) reviewPromptTemplate(manifest ReviewManifest, name string) ([]byte, error) {
+	if !manifest.Public {
+		body, err := os.ReadFile(filepath.Join(c.Harness, "review", "prompts", name))
+		if !errors.Is(err, fs.ErrNotExist) {
+			return body, err
+		}
+	}
+	return ReadDefault("review/prompts/" + name)
 }

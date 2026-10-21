@@ -104,6 +104,7 @@ wtc new fix-login-flow api                   # slug
 wtc new --issue api-foh7 paging-clamp       # issue (owning repo auto-included)
 wtc new --tracker PROJ-123 rate-limits api
 wtc new --pr api#41                          # review wtc on the PR's head branch
+wtc review start api#41                      # review-only: someone else's PR, no writes
 wtc add-repo api console                     # bring repos into this collection later
 ```
 
@@ -122,7 +123,10 @@ every collection sit on it at once, and the branch is created at the first
 commit, when its name is actually known
 (`development-workflows.md` → "The resting state is the tip"). `--pr` is the
 exception: review work pushes to the PR's head, so that one branch is checked
-out for real. `--tip` is accepted and ignored — it is the default now.
+out for real. Reviewing a PR you do not own is different: `wtc review start
+<repo>#<n>` (or `wtc new --pr … --review`) makes the collection review-only,
+with pushing disabled from the PR worktree and the author's review steps
+refused. `--tip` is accepted and ignored — it is the default now.
 
 Both tools clone missing bare owners on demand, write the collection env
 (ports), link the harness `wtc-*` skills into the collection root so the agent
@@ -137,8 +141,8 @@ CLIs discover them (`skills.md`), and run each repo's init hook — see
   multiple wtcs in flight without a pile of terminal windows; see
   `instructions/herdr.md`. Optional, like mise.
 - **Whole collection**: `wtc browse` opens one LazyVim with a vim
-  tab per sibling — in this window from a terminal, in the herdr `browse`
-  pane when an agent launches it. Or open the
+  tab per sibling in this window; `wtc open --add browse` puts it in the
+  herdr `browse` pane. Or open the
   collection root in VS Code (or Cursor —
   currently not part of this tooling, but works the same) as a multi-root
   folder, or run an agent CLI (e.g. `claude`) from the collection root so it

@@ -1,6 +1,7 @@
 package wtc
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,9 @@ func TestRetireCollectionRunsTeardownAndKeepsRemoteRefs(t *testing.T) {
 	// A dev build is generated and must not keep the folder alive.
 	fixtureFile(t, filepath.Join(target, ".wtc", "dev", "wtc"), "#!/bin/sh\n", 0755)
 	fixtureFile(t, filepath.Join(target, ".wtc", "dev", "version"), "0.1.40-dev.1+dev.gabc1234\n", 0644)
+	// So are a review-only collection's mode file and pre-push hook.
+	fixtureFile(t, filepath.Join(target, ReviewModeFile), "{}\n", 0644)
+	fixtureFile(t, filepath.Join(target, ".wtc", "review-hooks", "pre-push"), "#!/bin/sh\nexit 1\n", 0755)
 	widget := filepath.Join(target, "widget")
 	if err := os.Remove(filepath.Join(widget, "init-ran")); err != nil {
 		t.Fatal(err)
@@ -276,5 +280,157 @@ func TestRetireCollectionBlocksUnpushedCommitAndPreHookCanVeto(t *testing.T) {
 	}
 	if _, err := os.Stat(harness); err != nil {
 		t.Fatalf("pre-hook veto removed target: %v", err)
+	}
+}
+
+func TestRetireMarksLeftoverFolderAndOtherCommandsRespectIt(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	result, err := c.NewCollection(NewOptions{Slug: "leftover", Repos: []string{"widget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := result.Collection
+	if err := os.Remove(filepath.Join(target, "widget", "init-ran")); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(target, "design", "sketch.txt"), "hand-made\n", 0644)
+	CLIVersion = "9.9.9"
+	t.Cleanup(func() { CLIVersion = "dev" })
+	retired, err := c.RetireCollection(RetireOptions{Name: "leftover"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired.FolderRemoved || strings.Join(retired.Leftovers, ",") != "design" {
+		t.Fatalf("unexpected leftovers: %+v", retired)
+	}
+	marker, err := ReadRetiredMarker(target)
+	if err != nil || marker.SchemaVersion != 1 || marker.CLIVersion != "9.9.9" || marker.RetiredAt == "" || strings.Join(marker.BlockingPaths, ",") != "design" {
+		t.Fatalf("marker %+v, error %v", marker, err)
+	}
+
+	// Sweeps and discovery treat the folder as leftovers, never as a target.
+	// Even a stray harness directory does not revive it.
+	if err := os.Mkdir(filepath.Join(target, "harness"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	dirs, err := WorkspaceCollections(c.Workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range dirs {
+		if dir == target {
+			t.Fatalf("sweep listed a retired folder: %v", dirs)
+		}
+	}
+	if err := os.Remove(filepath.Join(target, "harness")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Discover(filepath.Join(target, "design")); err == nil || !strings.Contains(err.Error(), "retired collection") {
+		t.Fatalf("discovery inside leftovers: %v", err)
+	}
+	if _, err := OpenCollection(target); err == nil || !strings.Contains(err.Error(), "retired collection") {
+		t.Fatalf("open of leftovers: %v", err)
+	}
+	stale := &Context{Collection: target}
+	if err := stale.WriteStatusSnapshot(StatusSnapshot{Schema: 1, Collection: "leftover"}); err == nil {
+		t.Fatal("a lingering status loop repopulated the retired folder")
+	}
+	report := CatchUpReport{}
+	if err := os.Symlink(filepath.Join(target, "design"), filepath.Join(c.Collection, "reports")); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(target, ".wtc-catch-up.json"), filepath.Join(target, "design", "report.json"), filepath.Join(c.Collection, "reports", "report.json")} {
+		if err := SaveCatchUpReport(&report, path); err == nil {
+			t.Fatalf("a catch-up report was written into the retired folder: %s", path)
+		}
+	}
+	t.Chdir(filepath.Join(target, "design"))
+	if err := SaveCatchUpReport(&report, "report.json"); err == nil {
+		t.Fatal("a relative report path wrote into the retired folder")
+	}
+	snapshot, err := c.StatusLocalSnapshot(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Retired) != 1 || snapshot.Retired[0].Folder != "leftover" || !strings.Contains(snapshot.Markdown(), "## Retired leftovers") {
+		t.Fatalf("status did not show the leftovers: %+v", snapshot.Retired)
+	}
+
+	// Retire again: still blocked, then finished once the file is gone, even
+	// with a generated file that appeared in the meantime.
+	again, err := c.RetireCollection(RetireOptions{Name: "leftover"})
+	if err != nil || again.FolderRemoved || strings.Join(again.Leftovers, ",") != "design" {
+		t.Fatalf("re-retire with blockers: %+v %v", again, err)
+	}
+	if err := os.RemoveAll(filepath.Join(target, "design")); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(target, ".wtc-status.json"), "{}\n", 0644)
+	done, err := c.RetireCollection(RetireOptions{Name: "leftover"})
+	if err != nil || !done.FolderRemoved {
+		t.Fatalf("re-retire did not finish: %+v %v", done, err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("retired folder remains: %v", err)
+	}
+}
+
+func TestRetiredLeftoversWithUnreadableMarkerStillListAndBlockWorktrees(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	folder := filepath.Join(c.Workspace, "broken")
+	fixtureFile(t, filepath.Join(folder, RetiredMarkerFile), "not json\n", 0644)
+	fixtureFile(t, filepath.Join(folder, "notes.txt"), "kept\n", 0644)
+	snapshot, err := c.StatusLocalSnapshot(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(snapshot)
+	if err != nil || len(snapshot.Retired) != 1 || strings.Join(snapshot.Retired[0].BlockingPaths, ",") != "notes.txt" ||
+		!strings.Contains(string(data), `"retired":[{"folder":"broken"`) {
+		t.Fatalf("unreadable marker not listed with current contents: %s %v", data, err)
+	}
+	fixtureFile(t, filepath.Join(folder, ".git"), "gitdir: elsewhere\n", 0644)
+	fixtureFile(t, filepath.Join(folder, "mise.toml"), "restored\n", 0644)
+	if _, err := c.RetireCollection(RetireOptions{Name: "broken"}); err == nil || !strings.Contains(err.Error(), "Git checkout itself") {
+		t.Fatalf("re-retire cleaned a checkout at the folder root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(folder, "mise.toml")); err != nil {
+		t.Fatal("a restored checkout's file was removed")
+	}
+	for _, name := range []string{".git", "mise.toml"} {
+		if err := os.Remove(filepath.Join(folder, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixtureFile(t, filepath.Join(folder, "stray", ".git"), "gitdir: elsewhere\n", 0644)
+	if _, err := c.RetireCollection(RetireOptions{Name: "broken"}); err == nil || !strings.Contains(err.Error(), "holds stray again") {
+		t.Fatalf("re-retire removed files around a worktree: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(folder, "stray")); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(folder, "harness", "README.md"), "back again\n", 0644)
+	if _, err := c.RetireCollection(RetireOptions{Name: "broken"}); err == nil || !strings.Contains(err.Error(), "holds harness again") {
+		t.Fatalf("re-retire removed files around a harness: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(folder, "notes.txt")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFinishRetiredFolderKeepsMarkerWhenRemovalFails(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	parent := filepath.Join(c.Workspace, "locked")
+	folder := filepath.Join(parent, "leftover")
+	fixtureFile(t, filepath.Join(folder, RetiredMarkerFile), "{}\n", 0644)
+	if err := os.Chmod(parent, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0755) })
+	if _, err := c.finishRetiredFolder(folder); err == nil {
+		t.Fatal("removal under a read-only parent succeeded")
+	}
+	if !RetiredFolder(folder) {
+		t.Fatal("surviving folder lost its retire marker")
 	}
 }

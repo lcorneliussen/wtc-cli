@@ -15,12 +15,14 @@ import (
 )
 
 type openOptions struct {
-	All, List, DryRun, Focus                                    bool
+	All, List, DryRun, Focus, Full, Trim                        bool
 	NoAgent, NoBrowse, NoStatus, NoFirstPrompt, NoRemoteControl bool
 	Session, Agent, AgentArgs                                   string
 	AgentArgsSet                                                bool
 	Layout                                                      string
 	LayoutSet                                                   bool
+	Add                                                         []string
+	Tools                                                       []string // tool panes this open adds when missing
 }
 
 type openItem struct {
@@ -48,9 +50,28 @@ func addOpenCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&opt.Focus, "focus", false, "Focus the last opened workspace")
 	cmd.Flags().Bool("narrow", false, "Use two stacked tabs")
 	cmd.Flags().Bool("wide", false, "Use two stacked columns")
+	cmd.Flags().BoolVar(&opt.Full, "full", false, "Also open the browse and shell panes (default: WTC_PANES)")
+	cmd.Flags().StringSliceVar(&opt.Add, "add", nil, "Add a tool pane to the workspace: browse or shell (repeatable)")
+	cmd.Flags().BoolVar(&opt.Trim, "trim", false, "Close idle browse and shell panes; never agent or status")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if opt.All && len(args) != 0 {
 			return errors.New("--all cannot be combined with collection names")
+		}
+		for _, kind := range opt.Add {
+			switch kind {
+			case "browse", "shell":
+			case "review":
+				return errors.New("--add review is not supported yet; use browse or shell")
+			default:
+				return fmt.Errorf("--add %q: expected browse or shell", kind)
+			}
+		}
+		if opt.Trim {
+			for _, name := range []string{"add", "full", "list", "narrow", "wide", "focus"} {
+				if cmd.Flags().Changed(name) {
+					return fmt.Errorf("--trim cannot be combined with --%s", name)
+				}
+			}
 		}
 		narrow, _ := cmd.Flags().GetBool("narrow")
 		wide, _ := cmd.Flags().GetBool("wide")
@@ -64,6 +85,7 @@ func addOpenCommand(root *cobra.Command, asJSON *bool) {
 			opt.Layout, opt.LayoutSet = "wide", true
 		}
 		opt.AgentArgsSet = cmd.Flags().Changed("agent-args")
+		opt.Tools = openWantedTools(opt.Full, opt.Add)
 		cwd, err := os.Getwd()
 		if err != nil {
 			return err
@@ -71,6 +93,9 @@ func addOpenCommand(root *cobra.Command, asJSON *bool) {
 		c, err := wtc.Discover(cwd)
 		if err != nil {
 			return err
+		}
+		if !cmd.Flags().Changed("full") && statusSetting(c, "WTC_PANES") == "full" {
+			opt.Tools = openWantedTools(true, opt.Add)
 		}
 		if _, err := exec.LookPath("herdr"); err != nil {
 			return errors.New("herdr is not installed")
@@ -81,6 +106,13 @@ func addOpenCommand(root *cobra.Command, asJSON *bool) {
 		}
 		opt.Session = openSession(c, opt.Session)
 		running := openSessionRunning(opt.Session)
+		budget, low := openPtyReport()
+		if low && !*asJSON {
+			fmt.Fprintln(os.Stderr, "warning: "+budget)
+		}
+		if opt.Trim {
+			return openTrimCommand(c, names, opt, running, asJSON)
+		}
 		if !running && !opt.List && !opt.DryRun {
 			if err := openEnsureSession(opt.Session); err != nil {
 				return err
@@ -94,14 +126,24 @@ func addOpenCommand(root *cobra.Command, asJSON *bool) {
 			item := openCollection(c, name, opt, layout, running, i == len(names)-1)
 			if item.Error != "" {
 				failures++
+				if strings.Contains(item.Error, "openpty") {
+					item.Error += "; " + openPtyHint
+				}
 			}
 			items = append(items, item)
 		}
 		if *asJSON {
-			if err := emit(envelope{OK: failures == 0, Data: items, Summary: fmt.Sprintf("%d collection(s), %d failed", len(items), failures)}, true); err != nil {
+			summary := fmt.Sprintf("%d collection(s), %d failed", len(items), failures)
+			if low {
+				summary += "; " + budget
+			}
+			if err := emit(envelope{OK: failures == 0, Data: items, Summary: summary}, true); err != nil {
 				return err
 			}
 		} else {
+			if opt.List && budget != "" && !low {
+				fmt.Println("pty budget: " + budget)
+			}
 			if opt.List && !running {
 				fmt.Printf("herdr session %q: not running\n", opt.Session)
 			} else {
@@ -120,6 +162,22 @@ func addOpenCommand(root *cobra.Command, asJSON *bool) {
 		return nil
 	}
 	root.AddCommand(cmd)
+}
+
+// openWantedTools lists the tool panes an open adds: none by default, so a
+// workspace holds only agent and status until a pane is asked for.
+func openWantedTools(full bool, add []string) []string {
+	var tools []string
+	for _, kind := range []string{"browse", "shell"} {
+		wanted := full
+		for _, requested := range add {
+			wanted = wanted || requested == kind
+		}
+		if wanted {
+			tools = append(tools, kind)
+		}
+	}
+	return tools
 }
 
 func openSelectedCollections(c *wtc.Context, all bool, args []string) ([]string, error) {
@@ -148,7 +206,7 @@ func openSelectedCollections(c *wtc.Context, all bool, args []string) ([]string,
 		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(c.Workspace, entry.Name(), "harness")); err == nil {
+		if _, err := os.Stat(filepath.Join(c.Workspace, entry.Name(), "harness")); err == nil && !wtc.RetiredFolder(filepath.Join(c.Workspace, entry.Name())) {
 			names = append(names, entry.Name())
 		}
 	}
