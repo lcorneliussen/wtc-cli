@@ -3,6 +3,7 @@ package wtc
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,9 +31,32 @@ func (c *Context) catchUpDefaultRef(t catchUpTarget) (string, error) {
 	}
 	repo, err := target.Repository(t.repo)
 	if err != nil || repo.DefaultRef == "" {
-		return "origin/main", nil
+		return catchUpLocalRef(t, "origin/main"), nil
 	}
-	return repo.DefaultRef, nil
+	return catchUpLocalRef(t, repo.DefaultRef), nil
+}
+
+// catchUpFetch fetches origin into an owner and reduces a failure to git's
+// own cause line, which says why the configured remote cannot be reached.
+func catchUpFetch(owner string) error {
+	out, err := exec.Command("git", "--git-dir="+owner, "fetch", "--prune", "origin").CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	first := ""
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "fatal:") || strings.HasPrefix(line, "error:") {
+			return errors.New(line)
+		}
+		if first == "" {
+			first = line
+		}
+	}
+	if first != "" {
+		return errors.New(first)
+	}
+	return err
 }
 
 func catchUpJSON(args ...string) ([]byte, error) {
@@ -360,7 +384,7 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, pr catch
 				reason += "; local branch retained because safe pruning refused"
 			}
 		}
-	} else if branch == strings.TrimPrefix(ref, "origin/") {
+	} else if branch == catchUpBranchName(ref) {
 		if catchUpGitOK(t.path, "merge", "--ff-only", target) {
 			reason = "fast-forwarded default branch"
 		} else {
@@ -421,19 +445,35 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		if _, ok := fetched[t.owner]; ok {
 			continue
 		}
-		state := "planned"
-		if !opt.DryRun {
-			if _, err := gitOutput("--git-dir="+t.owner, "fetch", "--prune", "origin"); err != nil {
-				state = "failed"
+		state, reason := "planned", t.owner
+		if t.noRemote {
+			// Reported on its own outcome, which callers may treat as they
+			// choose; it does not fail the sweep by itself.
+			state, reason = "no-remote", "no remote; reconciling against local branches"
+		} else if !opt.DryRun {
+			if err := catchUpFetch(t.owner); err != nil {
+				state, reason = "failed", err.Error()
 			} else {
 				state = "ok"
 			}
 		}
 		fetched[t.owner] = state
-		report.add("fetch", t.collection, t.repo, state, t.owner, "", "", "")
+		report.add("fetch", t.collection, t.repo, state, reason, "", "", "")
 	}
 	for _, t := range targets {
 		source, err := catchUpGit(t.path, "rev-parse", "--verify", "HEAD")
+		if fetched[t.owner] == "failed" {
+			// Nothing is reconciled from stale refs, so no PR or ref check can
+			// change the outcome. Repo-scoped hooks never needed the remote;
+			// collection-level renders wait for a harness known to be current.
+			report.add("repo", t.collection, t.repo, "failed", "owner fetch failed; stale refs not used", source, "", source)
+			report.Outcomes[len(report.Outcomes)-1].TargetRef = t.ref
+			c.catchUpHooks(&report, t, opt, true)
+			if t.harness && opt.ReloadStatus {
+				report.add("pane", t.collection, "status", "skipped", "harness update needs attention; pane left running", "", "", "")
+			}
+			continue
+		}
 		if err != nil {
 			report.add("repo", t.collection, t.repo, "failed", "worktree HEAD unreadable; target may have moved or disappeared", "", "", "")
 			continue
@@ -445,7 +485,8 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		}
 		pr := catchUpPR{state: "NONE"}
 		branch, _ := catchUpGit(t.path, "symbolic-ref", "-q", "--short", "HEAD")
-		if branch != "" && branch != strings.TrimPrefix(ref, "origin/") && catchUpOperation(t) == "" {
+		// An owner without a remote has no forge, so no PR to consult.
+		if branch != "" && branch != catchUpBranchName(ref) && !t.noRemote && catchUpOperation(t) == "" {
 			pr = c.catchUpPRState(t, branch)
 		}
 		ref, refErr = catchUpRefForPR(t.path, ref, pr)
@@ -455,9 +496,7 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		}
 		target, targetErr := catchUpGit(t.path, "rev-parse", "--verify", ref+"^{commit}")
 		outcome, reason := "failed", ref+" unavailable"
-		if fetched[t.owner] == "failed" {
-			reason = "owner fetch failed; stale refs not used"
-		} else if targetErr != nil && (pr.state == "OPEN" || pr.state == "DRAFT") {
+		if targetErr != nil && (pr.state == "OPEN" || pr.state == "DRAFT") {
 			outcome, reason = "needs-owner", "open PR merge target "+ref+" is unavailable; branch left untouched"
 		} else if targetErr == nil {
 			outcome, reason = c.catchUpReconcile(t, ref, target, pr, opt)
@@ -473,7 +512,7 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 			row.NextAction = strings.Replace(row.NextAction, "merge the target ref", "merge "+ref, 1)
 		}
 		if outcome == "updated" || outcome == "current" || outcome == "planned" {
-			c.catchUpHooks(&report, t, opt)
+			c.catchUpHooks(&report, t, opt, false)
 		} else if t.harness && opt.ReloadStatus {
 			report.add("pane", t.collection, "status", "skipped", "harness update needs attention; pane left running", "", "", "")
 		}
@@ -487,7 +526,9 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 	return report, nil
 }
 
-func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt CatchUpOptions) {
+// catchUpHooks runs the repo-scoped hooks, then, unless repoOnly, the
+// collection-level renders a harness target governs.
+func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt CatchUpOptions, repoOnly bool) {
 	targetDir := filepath.Join(c.Workspace, t.collection)
 	// The harness updates first and may have changed registry membership, so
 	// decide from the current target registry.
@@ -528,7 +569,7 @@ func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt Catch
 			report.add("hook", t.collection, "secrets:"+t.repo, "skipped", "unmanaged sibling; no registry secrets to link", "", "", "")
 		}
 	}
-	if !t.harness {
+	if !t.harness || repoOnly {
 		return
 	}
 	if !opt.NoEnv {

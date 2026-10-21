@@ -168,7 +168,7 @@ func statusLocalRepo(t catchUpTarget) (StatusRepo, error) {
 		row.BranchDisplay = branch
 	} else {
 		row.BranchKind = "detached"
-		row.Branch = strings.TrimPrefix(t.ref, "origin/")
+		row.Branch = catchUpBranchName(t.ref)
 		row.BranchDisplay = "⌂ " + row.Branch
 	}
 	upstream := t.ref
