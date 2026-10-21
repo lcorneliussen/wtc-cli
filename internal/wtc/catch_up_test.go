@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCatchUpInventoryUsesTargetIdentityAndRejectsUnknownSelector(t *testing.T) {
@@ -701,5 +702,21 @@ func TestStatusReturnMergedTreatsHarnessAliasesAsOneWorktree(t *testing.T) {
 	c.statusReturnMerged(&snapshot, records[:1], details[:1])
 	if catchUpGitOK(c.Harness, "symbolic-ref", "-q", "HEAD") {
 		t.Fatal("a landed merged harness branch was not returned to the tip")
+	}
+}
+
+func TestCatchUpForgeLookupIsBounded(t *testing.T) {
+	bin := t.TempDir()
+	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nexec sleep 10\n", 0755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	old := catchUpForgeTimeout
+	catchUpForgeTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { catchUpForgeTimeout = old })
+	start := time.Now()
+	if _, err := catchUpJSON("gh", "pr", "view", "7"); err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("stalled forge lookup: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("lookup was not bounded: %s", elapsed)
 	}
 }

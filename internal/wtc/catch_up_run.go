@@ -2,12 +2,14 @@ package wtc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type catchUpPR struct {
@@ -38,9 +40,21 @@ func (c *Context) catchUpDefaultRef(t catchUpTarget) (string, error) {
 	return repo.DefaultRef, nil
 }
 
+// catchUpForgeTimeout bounds one forge CLI call, as status bounds its own.
+var catchUpForgeTimeout = 30 * time.Second
+
+// catchUpJSON runs a forge CLI. A stalled gh or bb fails the lookup, which
+// leaves the branch untouched, instead of blocking a sweep or status refresh.
 func catchUpJSON(args ...string) ([]byte, error) {
-	cmd := exec.Command(args[0], args[1:]...)
-	return cmd.Output()
+	ctx, cancel := context.WithTimeout(context.Background(), catchUpForgeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.WaitDelay = 200 * time.Millisecond
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("%s timed out after %s", args[0], catchUpForgeTimeout)
+	}
+	return out, err
 }
 
 func catchUpForge(remote string) (string, string) {
