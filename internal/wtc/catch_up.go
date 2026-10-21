@@ -2,6 +2,7 @@ package wtc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -140,6 +141,11 @@ func writeCatchUpFile(path string, data []byte) error {
 func SaveCatchUpReport(report *CatchUpReport, path string) error {
 	if path == "" {
 		return nil
+	}
+	if dir := filepath.Dir(path); RetiredFolder(dir) {
+		report.ExitStatus = 1
+		report.ReportError = retiredFolderError(dir).Error()
+		return errors.New(report.ReportError)
 	}
 	markdownErr := writeCatchUpFile(path+".md", []byte(report.Markdown()))
 	if markdownErr != nil {

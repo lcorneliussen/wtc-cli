@@ -45,6 +45,7 @@ func run() error {
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "Emit a JSON result")
 	root.Version = versionLabel()
+	wtc.CLIVersion = version
 	cwd := func() (*wtc.Context, error) {
 		dir, err := os.Getwd()
 		if err != nil {

@@ -278,3 +278,85 @@ func TestRetireCollectionBlocksUnpushedCommitAndPreHookCanVeto(t *testing.T) {
 		t.Fatalf("pre-hook veto removed target: %v", err)
 	}
 }
+
+func TestRetireMarksLeftoverFolderAndOtherCommandsRespectIt(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	result, err := c.NewCollection(NewOptions{Slug: "leftover", Repos: []string{"widget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := result.Collection
+	if err := os.Remove(filepath.Join(target, "widget", "init-ran")); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(target, "design", "sketch.txt"), "hand-made\n", 0644)
+	CLIVersion = "9.9.9"
+	t.Cleanup(func() { CLIVersion = "dev" })
+	retired, err := c.RetireCollection(RetireOptions{Name: "leftover"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired.FolderRemoved || strings.Join(retired.Leftovers, ",") != "design" {
+		t.Fatalf("unexpected leftovers: %+v", retired)
+	}
+	marker, err := ReadRetiredMarker(target)
+	if err != nil || marker.SchemaVersion != 1 || marker.CLIVersion != "9.9.9" || marker.RetiredAt == "" || strings.Join(marker.BlockingPaths, ",") != "design" {
+		t.Fatalf("marker %+v, error %v", marker, err)
+	}
+
+	// Sweeps and discovery treat the folder as leftovers, never as a target.
+	if err := os.Mkdir(filepath.Join(target, "harness"), 0755); err != nil {
+		t.Fatal(err) // Even a stray harness directory does not revive it.
+	}
+	dirs, err := WorkspaceCollections(c.Workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range dirs {
+		if dir == target {
+			t.Fatalf("sweep listed a retired folder: %v", dirs)
+		}
+	}
+	if err := os.Remove(filepath.Join(target, "harness")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Discover(filepath.Join(target, "design")); err == nil || !strings.Contains(err.Error(), "retired collection") {
+		t.Fatalf("discovery inside leftovers: %v", err)
+	}
+	if _, err := OpenCollection(target); err == nil || !strings.Contains(err.Error(), "retired collection") {
+		t.Fatalf("open of leftovers: %v", err)
+	}
+	stale := &Context{Collection: target}
+	if err := stale.WriteStatusSnapshot(StatusSnapshot{Schema: 1, Collection: "leftover"}); err == nil {
+		t.Fatal("a lingering status loop repopulated the retired folder")
+	}
+	report := CatchUpReport{}
+	if err := SaveCatchUpReport(&report, filepath.Join(target, ".wtc-catch-up.json")); err == nil {
+		t.Fatal("a catch-up report was written into the retired folder")
+	}
+	snapshot, err := c.StatusLocalSnapshot(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Retired) != 1 || snapshot.Retired[0].Folder != "leftover" || !strings.Contains(snapshot.Markdown(), "## Retired leftovers") {
+		t.Fatalf("status did not show the leftovers: %+v", snapshot.Retired)
+	}
+
+	// Retire again: still blocked, then finished once the file is gone, even
+	// with a generated file that appeared in the meantime.
+	again, err := c.RetireCollection(RetireOptions{Name: "leftover"})
+	if err != nil || again.FolderRemoved || strings.Join(again.Leftovers, ",") != "design" {
+		t.Fatalf("re-retire with blockers: %+v %v", again, err)
+	}
+	if err := os.RemoveAll(filepath.Join(target, "design")); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(target, ".wtc-status.json"), "{}\n", 0644)
+	done, err := c.RetireCollection(RetireOptions{Name: "leftover"})
+	if err != nil || !done.FolderRemoved {
+		t.Fatalf("re-retire did not finish: %+v %v", done, err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("retired folder remains: %v", err)
+	}
+}

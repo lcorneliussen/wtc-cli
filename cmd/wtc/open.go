@@ -148,7 +148,7 @@ func openSelectedCollections(c *wtc.Context, all bool, args []string) ([]string,
 		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(c.Workspace, entry.Name(), "harness")); err == nil {
+		if _, err := os.Stat(filepath.Join(c.Workspace, entry.Name(), "harness")); err == nil && !wtc.RetiredFolder(filepath.Join(c.Workspace, entry.Name())) {
 			names = append(names, entry.Name())
 		}
 	}

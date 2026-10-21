@@ -1079,6 +1079,15 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 		}
 		lines = append(lines, warning)
 	}
+	for _, retired := range snapshot.Retired {
+		note := fmt.Sprintf("retired %s: leftovers %s", retired.Folder, strings.Join(retired.BlockingPaths, ", "))
+		if styled {
+			note = statusTUIStyle(statusTUIFit(note, width), statusToneDim)
+		} else {
+			note = statusTUIFit(note, width)
+		}
+		lines = append(lines, note)
+	}
 	return lines
 }
 
