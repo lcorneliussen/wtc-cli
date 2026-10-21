@@ -10,5 +10,5 @@
   branch of a PR it sees merged, to the development tip once landing is
   established, and says so in the refresh log. Opt out with
   `WTC_STATUS_RETURN_MERGED=off` or `[status] return_merged = false` in
-  `wtc.toml`. Workspace sweeps (`--all`) never move worktrees
+  `harness/wtc.toml`. Workspace sweeps (`--all`) never move worktrees
   ([#59](https://github.com/lcorneliussen/wtc-cli/issues/59)).

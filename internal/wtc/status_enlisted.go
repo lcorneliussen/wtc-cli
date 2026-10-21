@@ -201,6 +201,7 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 // StatusForgePreview adds enlisted PRs and discovers open PRs on active
 // branches. Build facts, snapshot persistence, and the live renderer are
 // supplied by later stages. A forge failure never becomes a merged claim.
+// It records final merges and returns clean merged worktrees to the tip.
 func (c *Context) StatusForgePreview() (StatusSnapshot, error) {
 	return c.statusForgePreview(true, true)
 }
@@ -346,7 +347,8 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 	}
 	harnessName, _ := c.HarnessRepoName()
 	// A branch name may be reused: any other record on it that is not merged
-	// leaves the branch to its owner, as catch-up would.
+	// leaves the branch to its owner. This is stricter than catch-up, which
+	// settles on one state per branch.
 	live := map[string]bool{}
 	for i, record := range records {
 		if details[i].State != "MERGED" {

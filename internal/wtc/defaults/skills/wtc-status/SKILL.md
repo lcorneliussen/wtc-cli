@@ -5,7 +5,9 @@ description: Report where every worktree collection stands — branches, open PR
 
 # Where does everything stand
 
-Use the pinned `wtc status` command to inspect this collection. Status does not change worktree branches or files.
+Use the pinned `wtc status` command to inspect this collection. Status does not change worktree branches or files, with one exception: a
+collection refresh returns a clean worktree whose PR merged to the tip (see
+below).
 
 ```bash
 wtc status                         # live TUI in a terminal; one pass when captured

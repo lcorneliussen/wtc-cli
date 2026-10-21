@@ -660,7 +660,7 @@ func TestStatusReturnsCleanMergedWorktreeToTip(t *testing.T) {
 	if got := fixtureGit(t, "-C", target.path, "rev-parse", "HEAD"); got != tip || catchUpGitOK(target.path, "symbolic-ref", "-q", "HEAD") {
 		t.Fatalf("merged worktree not detached at the tip: %s", got)
 	}
-	// Safe pruning refuses a squash-merged branch; the remote keeps the record.
+	// Safe pruning refuses a squash-merged branch, so the local ref survives.
 	if log := strings.Join(progress, "\n"); !strings.Contains(log, "Returned widget to origin/main after its PR merged") || !strings.Contains(log, "local branch retained") {
 		t.Fatalf("refresh log: %v", progress)
 	}
