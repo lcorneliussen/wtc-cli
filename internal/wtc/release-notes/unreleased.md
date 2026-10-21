@@ -35,3 +35,6 @@
   `WTC_STATUS_RETURN_MERGED=off` or `[status] return_merged = false` in
   `harness/wtc.toml`. Workspace sweeps (`--all`) never move worktrees
   ([#59](https://github.com/lcorneliussen/wtc-cli/issues/59)).
+- Catch-up's PR-state lookups through `gh` or `bb` now give up after 30
+  seconds, as status lookups do, and leave the branch untouched instead of
+  waiting on a stalled forge CLI.
