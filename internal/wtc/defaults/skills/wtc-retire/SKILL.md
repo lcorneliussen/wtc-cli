@@ -64,8 +64,8 @@ files visible for inspection and writes a `.wtc-retired` marker (JSON: time,
 CLI version, the blocking paths). Status `--all` lists marked folders as
 retired leftovers; sweeps, renders and discovery skip them. Once the blockers
 are gone, `wtc retire <collection>` again removes the folder, along with any
-generated file a lingering process wrote there. A self-retire waits for the initiating agent to
-finish its turn. After a final pane check, it closes the source workspace
+generated file a lingering process wrote there. A self-retire waits for the
+initiating agent to finish its turn. After a final pane check, it closes the source workspace
 before running hooks or removing worktrees; another live agent pane blocks
 the handoff. Inspect the `--cleanup--` pane for the final result. Its post hook
 runs after product teardown and before the harness worktree is removed.

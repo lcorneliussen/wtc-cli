@@ -1,6 +1,7 @@
 package wtc
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -358,5 +359,28 @@ func TestRetireMarksLeftoverFolderAndOtherCommandsRespectIt(t *testing.T) {
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Fatalf("retired folder remains: %v", err)
+	}
+}
+
+func TestRetiredLeftoversWithUnreadableMarkerStillListAndBlockWorktrees(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	folder := filepath.Join(c.Workspace, "broken")
+	fixtureFile(t, filepath.Join(folder, RetiredMarkerFile), "not json\n", 0644)
+	fixtureFile(t, filepath.Join(folder, "notes.txt"), "kept\n", 0644)
+	snapshot, err := c.StatusLocalSnapshot(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(snapshot)
+	if err != nil || len(snapshot.Retired) != 1 || strings.Join(snapshot.Retired[0].BlockingPaths, ",") != "notes.txt" ||
+		!strings.Contains(string(data), `"retired":[{"folder":"broken"`) {
+		t.Fatalf("unreadable marker not listed with current contents: %s %v", data, err)
+	}
+	fixtureFile(t, filepath.Join(folder, "harness", "README.md"), "back again\n", 0644)
+	if _, err := c.RetireCollection(RetireOptions{Name: "broken"}); err == nil || !strings.Contains(err.Error(), "holds harness again") {
+		t.Fatalf("re-retire removed files around a harness: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(folder, "notes.txt")); err != nil {
+		t.Fatal(err)
 	}
 }

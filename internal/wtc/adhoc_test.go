@@ -417,6 +417,10 @@ func TestAdHocServicesEnlistRunAndRetireWithTheCollection(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(c.Collection, ".wtc", "svc")); !os.IsNotExist(err) || len(result.Leftovers) != 1 {
 		t.Fatalf("services outlived the collection: %+v %v", result, err)
 	}
+	// The user's own folder is not marked, so it can be initialized again.
+	if RetiredFolder(c.Collection) {
+		t.Fatal("ad-hoc leftovers were marked as retired")
+	}
 }
 
 func TestAdHocNewCreatesSiblingWithSameRegistrations(t *testing.T) {

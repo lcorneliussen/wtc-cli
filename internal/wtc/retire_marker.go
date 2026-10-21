@@ -75,11 +75,21 @@ func retireLeftovers(dir string) ([]string, error) {
 }
 
 // finishRetiredFolder completes a retire that stopped on unexpected files.
-// No worktrees or harness remain, so no hooks run: it removes the generated
-// files a lingering process may have written since, and the folder once
-// nothing else is left. Otherwise the marker is refreshed with what blocks.
+// It refuses a folder that holds a harness or worktree again, since only a
+// full retire may remove those. Otherwise no hooks run: it removes the
+// generated files a lingering process may have written since, and the folder
+// once nothing else is left. If anything remains, the marker is refreshed.
 func (c *Context) finishRetiredFolder(target string) (RetireResult, error) {
 	result := RetireResult{Collection: target, Removed: []string{}}
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		return result, err
+	}
+	for _, entry := range entries {
+		if _, err := os.Lstat(filepath.Join(target, entry.Name(), ".git")); entry.Name() == "harness" || err == nil {
+			return result, fmt.Errorf("%s carries %s but holds %s again; inspect it before retiring", target, RetiredMarkerFile, entry.Name())
+		}
+	}
 	stopRetiredStatusWatchers(target)
 	if err := removeRetiredGeneratedFiles(target, false); err != nil {
 		return result, err

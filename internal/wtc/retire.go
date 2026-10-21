@@ -146,9 +146,13 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 			}
 			result.Leftovers = leftovers
 			// Without a marker the folder reads as a damaged collection, and
-			// sweeps would render files back into it.
-			if err := writeRetiredMarker(target, leftovers); err != nil {
-				result.Warnings = append(result.Warnings, "could not write "+RetiredMarkerFile+": "+err.Error())
+			// sweeps would render files back into it. An ad-hoc folder is the
+			// user's own directory, outside any sweep, and may be initialized
+			// again.
+			if !runtimeTarget.AdHoc {
+				if err := writeRetiredMarker(target, leftovers); err != nil {
+					result.Warnings = append(result.Warnings, "could not write "+RetiredMarkerFile+": "+err.Error())
+				}
 			}
 		}
 		if !opt.Self {
