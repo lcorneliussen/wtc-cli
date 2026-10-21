@@ -618,36 +618,54 @@ func TestStatusReturnsCleanMergedWorktreeToTip(t *testing.T) {
 	details := []statusPRDetail{{Number: "7", State: "MERGED", MergeCommit: squash}}
 	tip := fixtureGit(t, "-C", target.path, "rev-parse", "origin/main")
 
-	t.Setenv("WTC_STATUS_RETURN_MERGED", "off")
-	snapshot, err := c.StatusLocalSnapshot(false)
-	if err != nil {
-		t.Fatal(err)
+	onTopic := func(why string) {
+		t.Helper()
+		snapshot, err := c.StatusLocalSnapshot(false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.statusReturnMerged(&snapshot, records, details)
+		if fixtureGit(t, "-C", target.path, "symbolic-ref", "--short", "HEAD") != "topic" {
+			t.Fatalf("%s: worktree left its branch", why)
+		}
 	}
-	c.statusReturnMerged(&snapshot, records, details)
-	if fixtureGit(t, "-C", target.path, "symbolic-ref", "--short", "HEAD") != "topic" {
-		t.Fatal("opt-out did not keep the worktree on its branch")
+	for _, value := range []string{"off", "0", "false", "no"} {
+		t.Setenv("WTC_STATUS_RETURN_MERGED", value)
+		onTopic("env opt-out " + value)
 	}
-
 	t.Setenv("WTC_STATUS_RETURN_MERGED", "")
+	off := false
+	c.Config.Status.ReturnMerged = &off
+	onTopic("wtc.toml opt-out")
+	c.Config.Status.ReturnMerged = nil
+	parent := fixtureGit(t, "-C", target.path, "rev-parse", squash+"^")
+	details[0].MergeCommit = parent
+	onTopic("unlanded branch")
+	details[0].MergeCommit = squash
+	records = append(records, PRRecord{Repo: "widget", Number: "8", Branch: "topic"})
+	details = append(details, statusPRDetail{Number: "8", State: "OPEN"})
+	onTopic("reused branch with an open PR")
+	records, details = records[:1], details[:1]
+
 	fixtureFile(t, filepath.Join(target.path, "scratch.txt"), "local\n", 0644)
-	snapshot, _ = c.StatusLocalSnapshot(false)
-	c.statusReturnMerged(&snapshot, records, details)
-	if fixtureGit(t, "-C", target.path, "symbolic-ref", "--short", "HEAD") != "topic" {
-		t.Fatal("a dirty worktree was moved")
-	}
+	onTopic("dirty worktree")
 	if err := os.Remove(filepath.Join(target.path, "scratch.txt")); err != nil {
 		t.Fatal(err)
 	}
 
 	var progress []string
 	c.StatusProgress = func(message string) { progress = append(progress, message) }
-	snapshot, _ = c.StatusLocalSnapshot(false)
+	snapshot, _ := c.StatusLocalSnapshot(false)
 	c.statusReturnMerged(&snapshot, records, details)
 	if got := fixtureGit(t, "-C", target.path, "rev-parse", "HEAD"); got != tip || catchUpGitOK(target.path, "symbolic-ref", "-q", "HEAD") {
 		t.Fatalf("merged worktree not detached at the tip: %s", got)
 	}
-	if !strings.Contains(strings.Join(progress, "\n"), "Returned widget to origin/main after its PR merged") {
+	// Safe pruning refuses a squash-merged branch; the remote keeps the record.
+	if log := strings.Join(progress, "\n"); !strings.Contains(log, "Returned widget to origin/main after its PR merged") || !strings.Contains(log, "local branch retained") {
 		t.Fatalf("refresh log: %v", progress)
+	}
+	if !catchUpGitOK(target.path, "rev-parse", "--verify", "refs/heads/topic") {
+		t.Fatal("unmerged local branch was force-deleted")
 	}
 	for _, row := range snapshot.Repos {
 		if row.Dir == "widget" && (row.BranchKind != "detached" || row.Behind != 0) {

@@ -263,8 +263,9 @@ func catchUpLanded(t catchUpTarget, target string, pr catchUpPR) bool {
 }
 
 // catchUpSquashCarries reports whether a merge commit on the target carries
-// exactly the branch at HEAD: either both have the same tree, or the merge
-// commit's own change equals the branch's cumulative change since it forked.
+// the branch at HEAD: either both have the same tree, or the merge commit's
+// own change has the same patch-id as the branch's cumulative change since it
+// forked (whitespace and line numbers aside).
 func catchUpSquashCarries(worktree, merge string) bool {
 	head, err := catchUpGit(worktree, "rev-parse", "--verify", "HEAD^{tree}")
 	if err != nil {
@@ -288,7 +289,7 @@ func catchUpSquashCarries(worktree, merge string) bool {
 // catchUpPatchID identifies the change between two commits independently of
 // how it was committed. An empty change has no identity.
 func catchUpPatchID(worktree, from, to string) string {
-	diff, err := exec.Command("git", "-C", worktree, "diff", "--binary", from, to).Output()
+	diff, err := exec.Command("git", "-C", worktree, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--binary", from, to).Output()
 	if err != nil || len(diff) == 0 {
 		return ""
 	}

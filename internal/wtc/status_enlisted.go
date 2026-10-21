@@ -325,9 +325,9 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 	return snapshot, nil
 }
 
-// statusReturnMergedEnabled reads the opt-out: WTC_STATUS_RETURN_MERGED=off
-// (or 0, false) for one shell, or return_merged = false under [status] in
-// the harness's wtc.toml.
+// statusReturnMergedEnabled reads the opt-out: WTC_STATUS_RETURN_MERGED set
+// to off, 0, false or no in the environment of the status process, or
+// return_merged = false under [status] in the harness's wtc.toml.
 func (c *Context) statusReturnMergedEnabled() bool {
 	switch strings.ToLower(os.Getenv("WTC_STATUS_RETURN_MERGED")) {
 	case "off", "0", "false", "no":
@@ -344,8 +344,16 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 		return
 	}
 	harnessName, _ := c.HarnessRepoName()
+	// A branch name may be reused: any other record on it that is not merged
+	// leaves the branch to its owner, as catch-up would.
+	live := map[string]bool{}
 	for i, record := range records {
-		if details[i].State != "MERGED" || record.Branch == "" {
+		if details[i].State != "MERGED" {
+			live[record.Repo+"\x00"+record.Branch] = true
+		}
+	}
+	for i, record := range records {
+		if details[i].State != "MERGED" || record.Branch == "" || live[record.Repo+"\x00"+record.Branch] {
 			continue
 		}
 		dir := record.Repo
