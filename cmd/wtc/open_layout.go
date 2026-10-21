@@ -83,6 +83,11 @@ func openLayoutState(session, workspace string) (string, []openPaneInfo, error) 
 		}
 		return "partial", panes, nil
 	}
+	// Wide keeps status out of the agent's column; status above the agent is
+	// a reversed stack.
+	if openSameColumn(session, agent.ID, status.ID) {
+		return "partial", panes, nil
+	}
 	if shell.ID == "" || openSameColumn(session, agent.ID, shell.ID) {
 		return "wide", panes, nil
 	}

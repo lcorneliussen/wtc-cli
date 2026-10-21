@@ -67,7 +67,11 @@ func addBrowseCommand(root *cobra.Command, asJSON *bool) {
 			}
 			if callerAgent {
 				// Neovim here would take over the agent's terminal.
-				return fmt.Errorf("this is an agent pane; run wtc open %s --add browse for a browse pane, or pass --here", filepath.Base(c.Collection))
+				open := "wtc open " + filepath.Base(c.Collection)
+				if session := os.Getenv("HERDR_SESSION"); session != "" {
+					open += " --session " + session
+				}
+				return fmt.Errorf("this is an agent pane; run %s --add browse for a browse pane, or pass --here", open)
 			}
 		}
 		return browseHere(c)

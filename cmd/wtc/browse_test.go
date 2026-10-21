@@ -117,7 +117,7 @@ esac
 	cli.SetOut(io.Discard)
 	cli.SetErr(io.Discard)
 	err := cli.Execute()
-	if err == nil || !strings.Contains(err.Error(), "wtc open target --add browse") {
+	if err == nil || !strings.Contains(err.Error(), "wtc open target --session caller-session --add browse") {
 		t.Fatalf("agent pane was not pointed at wtc open --add browse: %v", err)
 	}
 	body, _ := os.ReadFile(log)

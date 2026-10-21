@@ -227,6 +227,24 @@ func TestOpenTrimClosesOnlyIdleToolPanes(t *testing.T) {
 	}
 }
 
+func TestOpenStatusAboveAgentIsPartial(t *testing.T) {
+	c, _, _, _, _ := openTestFixture(t)
+	if created := openCollection(c, "sample", openOptions{Session: "test", NoAgent: true, NoStatus: true}, "wide", true, true); created.Error != "" {
+		t.Fatalf("wide minimal open failed: %+v", created)
+	}
+	openTestEditPanes(t, func(label string, pane map[string]any) {
+		switch label {
+		case "agent":
+			pane["x"], pane["y"] = 0, 1
+		case "status":
+			pane["x"], pane["y"] = 0, 0
+		}
+	}, nil)
+	if listed := openCollection(c, "sample", openOptions{Session: "test", List: true}, "wide", true, true); listed.Layout != "partial" {
+		t.Fatalf("status above agent is not reported as partial: %+v", listed)
+	}
+}
+
 func TestOpenPartialLayoutNamesMissingPanes(t *testing.T) {
 	panes := []openPaneInfo{{Label: "agent", ID: "p1"}}
 	if got := openLayoutDescription("partial", panes); got != "partial (1 panes; missing status)" {
