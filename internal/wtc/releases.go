@@ -16,8 +16,9 @@ import (
 // The unreleased directory always holds README.md, so the pattern matches
 // even when no change is pending. Embedding the directory takes every file
 // name except dot and underscore files, so a fragment without the .md suffix
-// fails reads the same way it fails cut and check, and drafts or OS files
-// never reach the binary.
+// fails reads the same way it fails cut and check, and dot or underscore
+// drafts and OS files never reach the binary. A subdirectory would be
+// embedded too, so reads reject one.
 //
 //go:embed release-notes/*.md release-notes/unreleased
 var releaseNotes embed.FS
@@ -109,10 +110,14 @@ func ReadReleaseFragments(root fs.FS) ([]ReleaseFragment, error) {
 		name := entry.Name()
 		// Dot and underscore files (.DS_Store, editor swap files, drafts) are
 		// not embedded; skipping them on disk keeps cut and check in step.
-		if entry.IsDir() || name == unreleasedReadme || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+		if name == unreleasedReadme || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 			continue
 		}
 		path := UnreleasedDir + "/" + name
+		if entry.IsDir() {
+			// Its files would be embedded but never assembled, cut or checked.
+			return nil, fmt.Errorf("%s: fragments live directly in %s/, not in subdirectories", path, UnreleasedDir)
+		}
 		if !strings.HasSuffix(name, ".md") {
 			return nil, fmt.Errorf("%s: release note fragments are Markdown files", path)
 		}
@@ -218,13 +223,13 @@ func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
 	return fragment, nil
 }
 
-// sectionJoin separates two bodies merged under one heading. Consecutive
-// lists stay one tight list; anything else gets a blank line, so prose is not
-// read as a continuation of the previous list item.
+// sectionJoin separates two bodies merged under one heading. A list that
+// follows a list (any marker) stays tight; anything else gets a blank line, so
+// prose is not read as a continuation of the previous list item.
 func sectionJoin(previous, next string) string {
 	lines := strings.Split(previous, "\n")
 	last := lines[len(lines)-1]
-	if strings.HasPrefix(next, "- ") && (strings.HasPrefix(last, "- ") || strings.HasPrefix(last, "  ")) {
+	if listMarker.MatchString(next) && (listMarker.MatchString(last) || strings.HasPrefix(last, " ")) {
 		return "\n"
 	}
 	return "\n\n"
@@ -343,8 +348,8 @@ func SelectReleaseNotes(version, since string) ([]ReleaseNote, error) {
 }
 
 // CutReleaseNotes writes <version>.md in dir from the unreleased fragments and
-// deletes them, so one commit carries both. It refuses an existing release
-// file and an empty fragment set.
+// deletes them in one working-tree change, for the caller to commit. It
+// refuses an existing release file and an empty fragment set.
 func CutReleaseNotes(dir, version string) (string, error) {
 	v, err := releaseVersion(version)
 	if err != nil {

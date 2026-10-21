@@ -159,6 +159,12 @@ func TestAssembleReleaseNotesSeparatesProseFromLists(t *testing.T) {
 		{Name: "3-c.md", Sections: []ReleaseSection{{Heading: "Upgrade", Body: "- two"}}},
 	}
 	want := "# wtc 1.0.0\n\n## Upgrade\n\n- one\n  continued\n\nProse paragraph.\n\n- two\n"
+	if got := AssembleReleaseNotes("1.0.0", []ReleaseFragment{
+		{Name: "1.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "1. first"}}},
+		{Name: "2.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "* second"}}},
+	}); got != "# wtc 1.0.0\n\n## Steps\n\n1. first\n* second\n" {
+		t.Fatalf("lists with other markers must stay tight: %q", got)
+	}
 	if got := AssembleReleaseNotes("1.0.0", fragments); got != want {
 		t.Fatalf("got:\n%q\nwant:\n%q", got, want)
 	}
@@ -188,6 +194,16 @@ func TestReadReleaseFragmentsNamesTheBrokenFile(t *testing.T) {
 	dir := writeFragments(t, map[string]string{"9-bad.md": "- no heading\n"})
 	if _, err := ReadReleaseFragments(os.DirFS(dir)); err == nil || !strings.Contains(err.Error(), "unreleased/9-bad.md") {
 		t.Fatalf("expected an error naming the fragment, got %v", err)
+	}
+	dir = writeFragments(t, map[string]string{"README.md": "# Unreleased\n"})
+	if err := os.MkdirAll(filepath.Join(dir, UnreleasedDir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, UnreleasedDir, "nested", "123-change.md"), []byte("## Review\n\n- x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadReleaseFragments(os.DirFS(dir)); err == nil || !strings.Contains(err.Error(), "unreleased/nested") {
+		t.Fatalf("expected a nested fragment directory to be rejected, got %v", err)
 	}
 	dir = writeFragments(t, map[string]string{"9-notes.txt": "## Review\n\n- x\n"})
 	if _, err := ReadReleaseFragments(os.DirFS(dir)); err == nil {
