@@ -74,7 +74,7 @@ func catchUpJSON(args ...string) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.WaitDelay = 200 * time.Millisecond
-	out, err := cmd.Output()
+	out, err := forgeOutput(cmd)
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("%s timed out after %s", args[0], catchUpForgeTimeout)
 	}

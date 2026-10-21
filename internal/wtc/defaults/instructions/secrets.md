@@ -20,6 +20,7 @@ this workspace's preferred behavior. CLI flags still win.
 | `WTC_AGENT_ARGS` | — | args passed to the agent, replacing the built-in defaults |
 | `WTC_LAYOUT` | `auto` | `wide` / `narrow` / `auto` — herdr workspace layout at create time |
 | `WTC_LAYOUT_NARROW_AT` | `140` | session width (cols) below which `auto` picks narrow |
+| `WTC_PANES` | `minimal` | `full` → `wtc open` also opens browse and shell panes |
 | `WTC_STATUS_REPOS` | `no` | `yes` → status shows only the collection table |
 | `WTC_STATUS_WATCH` | `30` | redraw interval while the pane is focused; `0` prints once |
 | `WTC_STATUS_WATCH_BG` | `300` | redraw interval while it is not; `0` uses the focused one always |

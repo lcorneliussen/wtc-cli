@@ -23,6 +23,7 @@ type openPaneInfo struct {
 	TabID       string `json:"tab_id"`
 	Agent       string `json:"agent"`
 	AgentStatus string `json:"agent_status"`
+	Focused     bool   `json:"focused"`
 }
 
 type openTabInfo struct {

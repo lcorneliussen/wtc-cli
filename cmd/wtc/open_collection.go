@@ -107,7 +107,7 @@ func openCollection(source *wtc.Context, name string, opt openOptions, desired s
 				}
 			}
 		} else {
-			item.Layout = current // Auto does not flip a complete workspace.
+			item.Layout = current // Auto does not flip a narrow or wide workspace.
 		}
 	}
 	if opt.DryRun {
@@ -116,26 +116,26 @@ func openCollection(source *wtc.Context, name string, opt openOptions, desired s
 			item.Error = err.Error()
 			return item
 		}
+		for _, kind := range opt.Tools {
+			if openPaneByLabel(panes, kind).ID == "" {
+				item.Actions = append(item.Actions, "would add "+kind+" pane")
+			}
+		}
 		if err := openPlanPanes(&item, panes, opt); err != nil {
 			item.Error = err.Error()
 		}
 		return item
 	}
-	if pane, fresh, err := openEnsureBrowse(opt.Session, item.Workspace, target.Collection); err != nil {
-		item.Error = err.Error()
-		return item
-	} else if fresh {
-		item.Actions = append(item.Actions, "browse pane added")
+	added, err := openEnsureTools(opt.Session, item.Workspace, target.Collection, item.Layout, opt.Tools)
+	for _, pane := range added {
 		openWaitIdle(opt.Session, pane, 10*time.Second)
 	}
-	if !opt.NoStatus {
-		if pane, fresh, err := openEnsureStatus(opt.Session, item.Workspace, target.Collection); err != nil {
-			item.Error = err.Error()
-			return item
-		} else if fresh {
-			item.Actions = append(item.Actions, "status pane added")
-			openWaitIdle(opt.Session, pane, 10*time.Second)
-		}
+	if len(added) > 0 {
+		item.Actions = append(item.Actions, fmt.Sprintf("%d tool pane(s) added", len(added)))
+	}
+	if err != nil {
+		item.Error = err.Error()
+		return item
 	}
 	panes, err := openPanes(opt.Session, item.Workspace)
 	if err != nil {
@@ -269,6 +269,9 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 			continue
 		}
 		pane := openPaneByLabel(panes, label)
+		if pane.ID == "" && (label == "browse" || label == "shell") && !openWants(opt, label) {
+			continue // Tool panes come on demand.
+		}
 		state, inspectErr := openPaneState(opt.Session, pane)
 		if inspectErr != nil {
 			item.Actions = append(item.Actions, label+" inspection failed")
@@ -334,6 +337,15 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func openWants(opt openOptions, kind string) bool {
+	for _, tool := range opt.Tools {
+		if tool == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func openStartAgent(target *wtc.Context, opt openOptions, pane string) error {

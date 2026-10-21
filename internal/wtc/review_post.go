@@ -71,7 +71,7 @@ func reviewForgeCommand(worktree, name string, args []string, input []byte) ([]b
 	if input != nil {
 		cmd.Stdin = bytes.NewReader(input)
 	}
-	out, err := cmd.Output()
+	out, err := forgeOutput(cmd)
 	if err != nil {
 		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
