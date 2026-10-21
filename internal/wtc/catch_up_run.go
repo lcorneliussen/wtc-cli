@@ -406,6 +406,9 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, pr catch
 	if branch == "" && !catchUpGitOK(t.path, "merge-base", "--is-ancestor", "HEAD", target) {
 		return "needs-owner", "detached commits not contained in default tip; preserve them on an owner branch"
 	}
+	if branch != "" && pr.state != "MERGED" && reviewOnlyWorktree(t.path) {
+		return "current", "review-only PR worktree; `wtc review bundle` follows the PR head"
+	}
 	switch pr.state {
 	case "UNKNOWN":
 		return "needs-owner", "PR state unavailable; branch left untouched"

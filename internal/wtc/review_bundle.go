@@ -94,6 +94,14 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 	if err != nil {
 		return ReviewBundle{}, err
 	}
+	reviewOnly := reviewOnlyWorktree(worktree)
+	if reviewOnly {
+		// The merge with the tip would be a write to the author's branch.
+		opt.NoCatchUp = true
+		if mode, _ := ReadReviewMode(c.Collection); opt.PR == "" && mode.Repo == opt.Repo {
+			opt.PR = mode.PR
+		}
+	}
 	if opt.PR != "" && !prNumber.MatchString(opt.PR) {
 		return ReviewBundle{}, fmt.Errorf("invalid PR number %q", opt.PR)
 	}
@@ -181,7 +189,11 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 			prBranch = branchFromEnlistment
 		}
 	}
-	if opt.PR != "" && opt.Head == "HEAD" {
+	if reviewOnly && opt.PR != "" && opt.Head == "HEAD" {
+		if err := followReviewHead(c.Collection, worktree, forge, opt.PR, prBranch, prHead); err != nil {
+			return ReviewBundle{}, fmt.Errorf("move review worktree to PR #%s head: %w", opt.PR, err)
+		}
+	} else if opt.PR != "" && opt.Head == "HEAD" {
 		if prBranch != "" && branch != prBranch {
 			if err := checkoutReviewBranch(worktree, prBranch); err != nil {
 				return ReviewBundle{}, fmt.Errorf("check out PR #%s branch %q: %w", opt.PR, prBranch, err)

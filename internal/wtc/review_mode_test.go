@@ -1,0 +1,138 @@
+package wtc
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestReviewModeCollectionCannotPushAndFollowsPRHead(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	source := filepath.Join(c.Workspace, "source-widget")
+	commit := func(dir, file, message string) string {
+		t.Helper()
+		fixtureFile(t, filepath.Join(dir, file), message+"\n", 0644)
+		fixtureGit(t, "-C", dir, "add", file)
+		fixtureGit(t, "-C", dir, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", message)
+		return fixtureGit(t, "-C", dir, "rev-parse", "HEAD")
+	}
+	headFile := filepath.Join(c.Workspace, "pr-head")
+	publish := func(head string) {
+		t.Helper()
+		fixtureGit(t, "-C", source, "update-ref", "refs/pull/21/head", head)
+		fixtureFile(t, headFile, head, 0644)
+	}
+	fixtureGit(t, "-C", source, "checkout", "-qb", "feature")
+	publish(commit(source, "feature.txt", "first round"))
+	fixtureGit(t, "-C", source, "checkout", "-q", "main")
+	commit(source, "main.txt", "tip moved")
+	c.Registry.Repos[1].Remote = "https://github.com/example/widget.git"
+	bin := filepath.Join(c.Workspace, "bin")
+	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '{\"headRefName\":\"feature\",\"headRefOid\":\"%s\",\"baseRefName\":\"main\",\"title\":\"Review fixture\"}\\n' \"$(cat "+headFile+")\"\n", 0755)
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+
+	r, err := c.NewCollection(NewOptions{PR: "widget#21", Review: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(r.Collection, "widget")
+	if !r.Review || !reviewOnlyWorktree(worktree) || reviewOnlyWorktree(filepath.Join(r.Collection, "harness")) {
+		t.Fatalf("review mode not recorded for the PR worktree only: %+v", r)
+	}
+	note, err := os.ReadFile(filepath.Join(r.Collection, "HANDOFF.md"))
+	if err != nil || !strings.Contains(string(note), "Review-only collection") || strings.Contains(string(note), "git -C") {
+		t.Fatalf("launch note does not say review-only: %s (%v)", note, err)
+	}
+
+	// No push leaves the worktree: not to its remote, a raw URL or a remote
+	// added later. Another worktree of the same owner still pushes.
+	fixtureGit(t, "-C", worktree, "remote", "add", "later", source)
+	for _, target := range []string{"origin", source, "later"} {
+		if out, err := exec.Command("git", "-C", worktree, "push", target, "HEAD:refs/heads/leak").CombinedOutput(); err == nil || !strings.Contains(string(out), "push-disabled-in-wtc-review-mode") {
+			t.Fatalf("push to %s was not disabled: %s %v", target, out, err)
+		}
+	}
+	if _, err := gitOutput("-C", source, "rev-parse", "--verify", "refs/heads/leak"); err == nil {
+		t.Fatal("a review-only push reached the source")
+	}
+	fixtureGit(t, "-C", worktree, "remote", "remove", "later")
+	other := filepath.Join(c.Workspace, "other-widget")
+	fixtureGit(t, "--git-dir="+filepath.Join(c.Workspace, ".bare", "widget.git"), "worktree", "add", "-q", "--detach", other, "origin/main")
+	fixtureGit(t, "-C", other, "push", "-q", "origin", "HEAD:refs/heads/allowed")
+	if got := fixtureGit(t, "-C", other, "rev-parse", "--is-bare-repository"); got != "false" {
+		t.Fatalf("worktree of the locked owner reads as bare: %s", got)
+	}
+
+	target, err := OpenCollection(r.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.Registry.Repos[1].Remote = c.Registry.Repos[1].Remote
+	if _, err := target.ResolveReviewBundle(filepath.Join(r.Collection, "any-bundle"), ReviewResolveOptions{}); err == nil || !strings.Contains(err.Error(), "belongs to the PR author") {
+		t.Fatalf("resolve ran in review mode: %v", err)
+	}
+	row, err := statusLocalRepo(catchUpTarget{collection: filepath.Base(r.Collection), path: worktree, repo: "widget", ref: "origin/main"})
+	if err != nil || !row.ReviewOnly || !strings.HasSuffix(row.BranchDisplay, "(review-only)") {
+		t.Fatalf("status does not show review mode: %+v %v", row, err)
+	}
+
+	before := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD")
+	tip := fixtureGit(t, "-C", worktree, "rev-parse", "origin/main")
+	reconcile := catchUpTarget{collection: filepath.Base(r.Collection), path: worktree, repo: "widget", ref: "origin/main"}
+	if outcome, reason := target.catchUpReconcile(reconcile, "origin/main", tip, catchUpPR{state: "OPEN"}, CatchUpOptions{}); outcome != "current" || !strings.Contains(reason, "review-only") {
+		t.Fatalf("catch-up would update the review worktree: %s %s", outcome, reason)
+	}
+	if got := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD"); got != before {
+		t.Fatalf("catch-up moved the review worktree to %s", got)
+	}
+
+	bundle := func() (ReviewBundle, error) {
+		return target.BuildReviewBundle(ReviewBundleOptions{Repo: "widget"})
+	}
+	// The author pushes again: the next bundle fast-forwards, without the
+	// merge with the moved tip that catch-up would make.
+	fixtureGit(t, "-C", source, "checkout", "-q", "feature")
+	second := commit(source, "feature.txt", "second round")
+	publish(second)
+	b, err := bundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD"); got != second || b.Manifest.HeadSHA != second || b.Manifest.PR != "21" {
+		t.Fatalf("bundle did not follow the new head: HEAD %s, manifest %+v", got, b.Manifest)
+	}
+
+	// The author rewrites the branch: the reviewed head may be left behind.
+	fixtureGit(t, "-C", source, "reset", "-q", "--hard", "main")
+	rewritten := commit(source, "feature.txt", "rewritten")
+	publish(rewritten)
+	if _, err := bundle(); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD"); got != rewritten {
+		t.Fatalf("bundle did not follow the rewritten head: %s", got)
+	}
+
+	// A commit made here is never discarded.
+	local := commit(worktree, "local.txt", "local review commit")
+	fixtureGit(t, "-C", source, "reset", "-q", "--hard", "main")
+	publish(commit(source, "feature.txt", "rewritten again"))
+	if _, err := bundle(); err == nil || !strings.Contains(err.Error(), "not a PR head this collection reviewed") {
+		t.Fatalf("local commit was not protected: %v", err)
+	}
+	if got := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD"); got != local {
+		t.Fatalf("local commit was moved: %s", got)
+	}
+}
+
+func TestReviewModeNeedsPR(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	if _, err := c.NewCollection(NewOptions{Slug: "plain", Review: true}); err == nil || !strings.Contains(err.Error(), "needs a PR") {
+		t.Fatalf("review mode without a PR: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Workspace, "plain")); !os.IsNotExist(err) {
+		t.Fatalf("refused review collection left a folder: %v", err)
+	}
+}

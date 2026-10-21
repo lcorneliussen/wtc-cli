@@ -384,6 +384,9 @@ func openStartAgent(target *wtc.Context, opt openOptions, pane string) error {
 	if kind == "claude" {
 		prompt = "/wtc-start"
 	}
+	if _, ok := wtc.ReadReviewMode(target.Collection); ok {
+		prompt += " This collection is review-only: produce and post the review, nothing else. No commits, pushes, thread resolution or `wtc review ready`."
+	}
 	if _, err := openHerdr(opt.Session, "agent", "prompt", pane, prompt, "--wait", "--until", "working", "--timeout", "20000"); err == nil {
 		return nil
 	} else if !strings.Contains(err.Error(), "agent_prompt_stalled") {
