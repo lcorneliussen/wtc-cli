@@ -51,6 +51,12 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 			return RetireResult{}, fmt.Errorf("self-retirement requires a verified Herdr workspace ID")
 		}
 	}
+	if !opt.Self && collectionNamePattern.MatchString(opt.Name) {
+		target := filepath.Join(c.Workspace, opt.Name)
+		if info, err := os.Lstat(target); err == nil && info.IsDir() && RetiredFolder(target) {
+			return c.finishRetiredFolder(target)
+		}
+	}
 	result, worktrees, err := c.retirePreflight(opt)
 	if err != nil {
 		return result, err
@@ -134,12 +140,20 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 		if err := os.Remove(target); err == nil {
 			result.FolderRemoved = true
 		} else {
-			entries, readErr := os.ReadDir(target)
+			leftovers, readErr := retireLeftovers(target)
 			if readErr != nil {
 				return fmt.Errorf("remove collection folder: %w", err)
 			}
-			for _, entry := range entries {
-				result.Leftovers = append(result.Leftovers, entry.Name())
+			result.Leftovers = leftovers
+			// Without a marker the folder reads as a damaged collection: a
+			// stray harness/ would revive it for sweeps, and processes that
+			// outlived the retire would write back into it. An ad-hoc folder is the
+			// user's own directory, outside any sweep, and may be initialized
+			// again.
+			if !runtimeTarget.AdHoc {
+				if err := writeRetiredMarker(target, leftovers); err != nil {
+					result.Warnings = append(result.Warnings, "could not write "+RetiredMarkerFile+": "+err.Error())
+				}
 			}
 		}
 		if !opt.Self {
