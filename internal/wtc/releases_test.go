@@ -91,7 +91,17 @@ func TestParseReleaseFragment(t *testing.T) {
 	if len(fragment.Sections) != 2 || fragment.Sections[0].Heading != "Review" || fragment.Sections[0].Body != "- one\n  continued" || fragment.Sections[1].Body != "- two" {
 		t.Fatalf("unexpected sections: %#v", fragment.Sections)
 	}
+	fenced := "## Upgrade\n\n- Refresh:\n\n  ```sh\n  # Refresh the environment\n  ## not a heading\n  wtc env setup\n  ```\n\n~~~~\n# also code\n~~~\n## still code\n~~~~\n\n## Next\n\n- after\n"
+	fragment, err = ParseReleaseFragment("8-fence.md", fenced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fragment.Sections) != 2 || fragment.Sections[1].Heading != "Next" || !strings.Contains(fragment.Sections[0].Body, "  ## not a heading\n") || !strings.Contains(fragment.Sections[0].Body, "## still code\n~~~~") {
+		t.Fatalf("headings inside fences must stay code: %#v", fragment.Sections)
+	}
 	for name, content := range map[string]string{
+		"unclosed fence":  "## Upgrade\n\n```\n## inside\n",
+		"fence first":     "```\n## inside\n```\n",
 		"no heading":      "- loose entry\n",
 		"release heading": "# wtc unreleased\n\n## Review\n\n- x\n",
 		"empty section":   "## Review\n\n## Retire\n\n- x\n",

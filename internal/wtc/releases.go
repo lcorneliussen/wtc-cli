@@ -13,9 +13,10 @@ import (
 )
 
 // The unreleased directory always holds README.md, so the pattern matches
-// even when no change is pending.
+// even when no change is pending. Every file in it is embedded, so a
+// misnamed fragment fails reads the same way it fails cut and check.
 //
-//go:embed release-notes/*.md release-notes/unreleased/*.md
+//go:embed release-notes/*.md release-notes/unreleased/*
 var releaseNotes embed.FS
 
 // UnreleasedDir holds one fragment per pending change, relative to the
@@ -163,7 +164,21 @@ func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
 		fragment.Sections = append(fragment.Sections, *current)
 		return nil
 	}
+	fence := ""
 	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		if fence != "" || codeFence(line) != "" {
+			// Headings inside a fenced code block are example text.
+			if fence == "" {
+				fence = codeFence(line)
+			} else if closesFence(line, fence) {
+				fence = ""
+			}
+			if current == nil {
+				return ReleaseFragment{}, fmt.Errorf("start with a \"## <topic>\" heading")
+			}
+			body = append(body, line)
+			continue
+		}
 		if strings.HasPrefix(line, "# ") {
 			return ReleaseFragment{}, fmt.Errorf("use \"## <topic>\" headings; the release heading is added when notes are assembled")
 		}
@@ -186,6 +201,9 @@ func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
 		}
 		body = append(body, line)
 	}
+	if fence != "" {
+		return ReleaseFragment{}, fmt.Errorf("unclosed %s code fence", fence)
+	}
 	if err := finish(); err != nil {
 		return ReleaseFragment{}, err
 	}
@@ -193,6 +211,38 @@ func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
 		return ReleaseFragment{}, fmt.Errorf("no \"## <topic>\" section")
 	}
 	return fragment, nil
+}
+
+// codeFence returns the opening delimiter of a fenced code block (three or
+// more backticks or tildes, indented at most three spaces), or "".
+func codeFence(line string) string {
+	trimmed := strings.TrimLeft(line, " ")
+	if len(line)-len(trimmed) > 3 || len(trimmed) < 3 {
+		return ""
+	}
+	marker := trimmed[0]
+	if marker != '`' && marker != '~' {
+		return ""
+	}
+	n := 0
+	for n < len(trimmed) && trimmed[n] == marker {
+		n++
+	}
+	if n < 3 || (marker == '`' && strings.ContainsRune(trimmed[n:], '`')) {
+		return ""
+	}
+	return trimmed[:n]
+}
+
+// closesFence reports whether line ends the block opened by fence: the same
+// character, at least as many times, and nothing else.
+func closesFence(line, fence string) bool {
+	trimmed := strings.TrimLeft(line, " ")
+	if len(line)-len(trimmed) > 3 {
+		return false
+	}
+	trimmed = strings.TrimRight(trimmed, " \t")
+	return len(trimmed) >= len(fence) && strings.Trim(trimmed, fence[:1]) == ""
 }
 
 // AssembleReleaseNotes renders fragments as one release document headed
