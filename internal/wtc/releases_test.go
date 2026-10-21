@@ -112,6 +112,8 @@ func TestParseReleaseFragment(t *testing.T) {
 		"nested marker fence":   "## Upgrade\n\n- a\n    - ~~~sh\n      code\n      ~~~\n",
 		"third-level fence":     "## Upgrade\n\n- outer\n  - inner\n    - ~~~sh\n      ## echo ok\n      ~~~\n",
 		"subheading":            "## Upgrade\n\n### Steps\n\n- one\n",
+		"space separator":       "## Upgrade\n  \n- one\n",
+		"tab separator":         "## Upgrade\n\t\n\n- one\n",
 	} {
 		fragment, err := ParseReleaseFragment(name, content)
 		if err != nil || len(fragment.Sections) != 1 || fragment.Sections[0].Heading != "Upgrade" {
@@ -128,6 +130,9 @@ func TestParseReleaseFragment(t *testing.T) {
 		"indented entries": "## Review\n\n  - nests under the previous change\n",
 		"comment only":     "## Review\n\n<!-- todo -->\n",
 		"reference only":   "## Review\n\n[x]: https://example.com\n",
+		"subheading only":  "## Review\n\n### Only\n",
+		"reference link":   "## Review\n\n- [change][issue]\n\n[issue]: https://example.com/1\n",
+		"nested reference": "## Review\n\n- one\n\n  [issue]: https://example.com/1\n",
 		"no heading":       "- loose entry\n",
 		"release heading":  "# wtc unreleased\n\n## Review\n\n- x\n",
 		"empty section":    "## Review\n\n## Retire\n\n- x\n",

@@ -213,8 +213,14 @@ func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
 		if h.title == "" {
 			return ReleaseFragment{}, fmt.Errorf("empty section heading")
 		}
-		body := strings.Trim(string(source[h.end:stop]), "\n")
+		body := strings.TrimRight(string(source[h.end:stop]), "\n")
+		for strings.Contains(body, "\n") && strings.TrimSpace(body[:strings.Index(body, "\n")]) == "" {
+			body = body[strings.Index(body, "\n")+1:] // blank separator lines, spaces included
+		}
 		if strings.TrimSpace(body) == "" {
+			body = ""
+		}
+		if body == "" {
 			return ReleaseFragment{}, fmt.Errorf("section %q has no entries", h.title)
 		}
 		if body[0] == ' ' || body[0] == '\t' {
@@ -222,6 +228,9 @@ func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
 		}
 		if !visibleContent(body) {
 			return ReleaseFragment{}, fmt.Errorf("section %q has no entries", h.title)
+		}
+		if referenceDefinitions(body) {
+			return ReleaseFragment{}, fmt.Errorf("section %q: use inline links; reference definitions are document-wide and would collide with other fragments' labels", h.title)
 		}
 		if !closedBlocks(body) {
 			return ReleaseFragment{}, fmt.Errorf("section %q leaves a code fence or HTML block open; close it so it cannot swallow the sections after it", h.title)
@@ -239,16 +248,30 @@ func closedBlocks(body string) bool {
 	return ok && last.Level == 2 && string(last.Lines().Value([]byte(source))) == "wtc-release-notes-sentinel"
 }
 
+// referenceDefinitions reports whether body defines link references anywhere,
+// including inside lists.
+func referenceDefinitions(body string) bool {
+	found := false
+	_ = ast.Walk(parseMarkdown(body), func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if _, ok := node.(*ast.LinkReferenceDefinition); ok && entering {
+			found = true
+			return ast.WalkStop, nil
+		}
+		return ast.WalkContinue, nil
+	})
+	return found
+}
+
 func parseMarkdown(source string) ast.Node {
 	return goldmark.DefaultParser().Parse(text.NewReader([]byte(source)))
 }
 
-// visibleContent reports whether body renders anything: comments and link
-// reference definitions alone do not count as an entry.
+// visibleContent reports whether body holds an entry: comments, link
+// reference definitions and subheadings alone do not count.
 func visibleContent(body string) bool {
 	for node := parseMarkdown(body).FirstChild(); node != nil; node = node.NextSibling() {
 		switch node.(type) {
-		case *ast.HTMLBlock, *ast.LinkReferenceDefinition:
+		case *ast.HTMLBlock, *ast.LinkReferenceDefinition, *ast.Heading:
 		default:
 			return true
 		}

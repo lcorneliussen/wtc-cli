@@ -14,7 +14,8 @@ A fragment holds one or more topic sections, each with at least one entry:
 ```
 
 Use `## <topic>` headings only; `# wtc <version>` is added when the notes are
-assembled. `wtc release-notes unreleased` shows the fragments assembled:
+assembled. Start entries at the left margin and use inline links: reference
+definitions are document-wide and would collide with other fragments' labels. `wtc release-notes unreleased` shows the fragments assembled:
 sections with the same heading are merged, in issue order. Cutting a release
 turns them into `<version>.md` and deletes them; see `docs/release-notes.md`.
 
