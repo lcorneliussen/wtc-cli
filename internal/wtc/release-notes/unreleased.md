@@ -2,8 +2,8 @@
 
 ## Retire
 
-- When `wtc retire` cannot delete a collection folder because unexpected
-  files remain, it writes a `.wtc-retired` marker (JSON: `retired_at`,
+- When `wtc retire` cannot delete a managed collection folder because
+  unexpected files remain, it writes a `.wtc-retired` marker (JSON: `retired_at`,
   `cli_version`, `blocking_paths`). Workspace sweeps (`catch-up --all`,
   `env`, `skills`, `mcp` and `open` sweeps) skip a marked folder, commands
   run inside it say it holds a retired collection's leftovers, and status and

@@ -376,6 +376,13 @@ func TestRetiredLeftoversWithUnreadableMarkerStillListAndBlockWorktrees(t *testi
 		!strings.Contains(string(data), `"retired":[{"folder":"broken"`) {
 		t.Fatalf("unreadable marker not listed with current contents: %s %v", data, err)
 	}
+	fixtureFile(t, filepath.Join(folder, "stray", ".git"), "gitdir: elsewhere\n", 0644)
+	if _, err := c.RetireCollection(RetireOptions{Name: "broken"}); err == nil || !strings.Contains(err.Error(), "holds stray again") {
+		t.Fatalf("re-retire removed files around a worktree: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(folder, "stray")); err != nil {
+		t.Fatal(err)
+	}
 	fixtureFile(t, filepath.Join(folder, "harness", "README.md"), "back again\n", 0644)
 	if _, err := c.RetireCollection(RetireOptions{Name: "broken"}); err == nil || !strings.Contains(err.Error(), "holds harness again") {
 		t.Fatalf("re-retire removed files around a harness: %v", err)

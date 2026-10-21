@@ -145,8 +145,9 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 				return fmt.Errorf("remove collection folder: %w", err)
 			}
 			result.Leftovers = leftovers
-			// Without a marker the folder reads as a damaged collection, and
-			// sweeps would render files back into it. An ad-hoc folder is the
+			// Without a marker the folder reads as a damaged collection: a
+			// stray harness/ would revive it for sweeps, and processes that
+			// outlived the retire would write back into it. An ad-hoc folder is the
 			// user's own directory, outside any sweep, and may be initialized
 			// again.
 			if !runtimeTarget.AdHoc {
