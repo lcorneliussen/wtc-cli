@@ -167,6 +167,20 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	} else if !os.IsNotExist(err) {
 		return result, err
 	}
+	if opt.Review {
+		// Refused here, before any folder or checkout exists.
+		repo, err := c.Repository(primary)
+		if err != nil {
+			return result, err
+		}
+		bare, err := c.ensureBare(repo)
+		if err != nil {
+			return result, err
+		}
+		if err := refuseReviewPushURL(bare); err != nil {
+			return result, err
+		}
+	}
 	values := map[string]string{"collection": result.Collection, "source": result.Source, "branch": result.IntendedBranch}
 	if err := c.RunHook("new.pre", values); err != nil {
 		return result, err
@@ -191,8 +205,10 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 				result.LocalBranch, result.PushRemote = checkout.LocalBranch, checkout.PushRemote
 			}
 			if err == nil && opt.Review {
-				if err = lockReviewPush(result.Collection, filepath.Join(result.Collection, directory)); err == nil {
-					err = writeReviewMode(result.Collection, ReviewMode{Repo: primary, Dir: directory, Branch: checkout.LocalBranch, PR: prID, URL: prWebURL, Heads: []string{prHead}})
+				// The marker comes first: should the lock fail, the partial
+				// collection is still review-only, and catch-up leaves it alone.
+				if err = writeReviewMode(result.Collection, ReviewMode{Repo: primary, Dir: directory, Branch: checkout.LocalBranch, PR: prID, URL: prWebURL, Heads: []string{prHead}}); err == nil {
+					err = lockReviewPush(result.Collection, filepath.Join(result.Collection, directory))
 				}
 				result.Review = err == nil
 			}

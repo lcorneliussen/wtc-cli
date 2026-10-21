@@ -96,16 +96,12 @@ func (c *Context) RefuseInReviewMode(step string) error {
 // core.bare moved into the owner's own config.worktree, or every linked
 // worktree would read it as bare. Remotes are checked before those writes.
 func lockReviewPush(collection, worktree string) error {
+	if err := refuseReviewPushURL(worktree); err != nil {
+		return err
+	}
 	remotes, err := gitOutput("-C", worktree, "remote")
 	if err != nil {
 		return err
-	}
-	for _, remote := range strings.Fields(remotes) {
-		// pushurl is multi-valued: one added here would be pushed to
-		// alongside one set elsewhere.
-		if urls, _ := gitOutput("-C", worktree, "config", "--get-all", "remote."+remote+".pushurl"); urls != "" {
-			return fmt.Errorf("remote %s has remote.%s.pushurl set (%s), which a review-only worktree cannot override; remove it to review here", remote, remote, strings.ReplaceAll(urls, "\n", ", "))
-		}
 	}
 	common, err := gitOutput("-C", worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
@@ -154,6 +150,22 @@ func lockReviewPush(collection, worktree string) error {
 		return err
 	}
 	return verifyReviewPushLock(worktree)
+}
+
+// refuseReviewPushURL refuses a repository whose remotes have their own push
+// URL. pushurl is multi-valued: one added for a worktree would be pushed to
+// alongside one set elsewhere. dir is a worktree or a bare repository.
+func refuseReviewPushURL(dir string) error {
+	remotes, err := gitOutput("-C", dir, "remote")
+	if err != nil {
+		return err
+	}
+	for _, remote := range strings.Fields(remotes) {
+		if urls, _ := gitOutput("-C", dir, "config", "--get-all", "remote."+remote+".pushurl"); urls != "" {
+			return fmt.Errorf("remote %s has remote.%s.pushurl set (%s), which a review-only worktree cannot override; remove it to review here", remote, remote, strings.ReplaceAll(urls, "\n", ", "))
+		}
+	}
+	return nil
 }
 
 // verifyReviewPushLock checks the effective push URL of every remote.

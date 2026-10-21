@@ -197,8 +197,12 @@ func TestReviewModeRefusesSharedPushURLBeforeChangingOwner(t *testing.T) {
 	bin := filepath.Join(c.Workspace, "bin")
 	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' '{\"headRefName\":\"feature\",\"headRefOid\":\""+head+"\",\"title\":\"Review fixture\"}'\n", 0755)
 	t.Setenv("PATH", bin+":/usr/bin:/bin")
-	if _, err := c.NewCollection(NewOptions{PR: "widget#22", Review: true}); err == nil || !strings.Contains(err.Error(), "remote.origin.pushurl") {
+	r, err := c.NewCollection(NewOptions{PR: "widget#22", Review: true})
+	if err == nil || !strings.Contains(err.Error(), "remote.origin.pushurl") {
 		t.Fatalf("explicit pushurl was not refused: %v", err)
+	}
+	if _, err := os.Lstat(r.Collection); r.Collection == "" || !os.IsNotExist(err) {
+		t.Fatalf("refusal left a collection with a pushable checkout: %v", err)
 	}
 	if got, _ := gitOutput("--git-dir="+bare, "config", "extensions.worktreeConfig"); got != "" {
 		t.Fatalf("owner was changed before the refusal: extensions.worktreeConfig=%s", got)
