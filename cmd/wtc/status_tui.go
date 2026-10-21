@@ -1087,7 +1087,8 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 func statusTUIRetiredLines(snapshot wtc.StatusSnapshot, width int, styled bool) []string {
 	var lines []string
 	for _, retired := range snapshot.Retired {
-		note := fmt.Sprintf("retired %s: leftovers %s", retired.Folder, strings.Join(retired.BlockingPaths, ", "))
+		// Names come from the filesystem or the marker; keep controls out.
+		note := statusTUISafe(fmt.Sprintf("retired %s: leftovers %s", retired.Folder, strings.Join(retired.BlockingPaths, ", ")))
 		if styled {
 			note = statusTUIStyle(statusTUIFit(note, width), statusToneDim)
 		} else {

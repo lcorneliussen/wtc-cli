@@ -763,10 +763,13 @@ func TestStatusTUIFollowStateNamesWaitingTier(t *testing.T) {
 
 func TestStatusTableShowsRetiredLeftoversInWorkspaceSweep(t *testing.T) {
 	snapshot := wtc.StatusSnapshot{Schema: 1, ShowCollectionColumn: true,
-		Retired: []wtc.StatusRetired{{Folder: "old-task", BlockingPaths: []string{"design"}}}}
+		Retired: []wtc.StatusRetired{{Folder: "old-task", BlockingPaths: []string{"design", "evil\x1b[2J\nname"}}}}
 	for _, reposOnly := range []bool{false, true} {
 		if table := statusTable(snapshot, reposOnly, 80); !strings.Contains(table, "retired old-task: leftovers design") {
 			t.Fatalf("reposOnly=%v table omits leftovers:\n%s", reposOnly, table)
+		}
+		if table := statusTable(snapshot, reposOnly, 80); strings.Contains(table, "\x1b[2J") || strings.Contains(table, "evil\nname") {
+			t.Fatalf("control characters reached the terminal: %q", table)
 		}
 	}
 }

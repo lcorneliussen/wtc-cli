@@ -333,7 +333,10 @@ func TestRetireMarksLeftoverFolderAndOtherCommandsRespectIt(t *testing.T) {
 		t.Fatal("a lingering status loop repopulated the retired folder")
 	}
 	report := CatchUpReport{}
-	for _, path := range []string{filepath.Join(target, ".wtc-catch-up.json"), filepath.Join(target, "design", "report.json")} {
+	if err := os.Symlink(filepath.Join(target, "design"), filepath.Join(c.Collection, "reports")); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(target, ".wtc-catch-up.json"), filepath.Join(target, "design", "report.json"), filepath.Join(c.Collection, "reports", "report.json")} {
 		if err := SaveCatchUpReport(&report, path); err == nil {
 			t.Fatalf("a catch-up report was written into the retired folder: %s", path)
 		}
