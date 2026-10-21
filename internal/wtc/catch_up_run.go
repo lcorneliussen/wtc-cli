@@ -462,6 +462,18 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 	}
 	for _, t := range targets {
 		source, err := catchUpGit(t.path, "rev-parse", "--verify", "HEAD")
+		if fetched[t.owner] == "failed" {
+			// Nothing is reconciled from stale refs, so no PR or ref check can
+			// change the outcome. Repo-scoped hooks never needed the remote;
+			// collection-level renders wait for a harness known to be current.
+			report.add("repo", t.collection, t.repo, "failed", "owner fetch failed; stale refs not used", source, "", source)
+			report.Outcomes[len(report.Outcomes)-1].TargetRef = t.ref
+			c.catchUpHooks(&report, t, opt, true)
+			if t.harness && opt.ReloadStatus {
+				report.add("pane", t.collection, "status", "skipped", "harness update needs attention; pane left running", "", "", "")
+			}
+			continue
+		}
 		if err != nil {
 			report.add("repo", t.collection, t.repo, "failed", "worktree HEAD unreadable; target may have moved or disappeared", "", "", "")
 			continue
@@ -484,10 +496,7 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		}
 		target, targetErr := catchUpGit(t.path, "rev-parse", "--verify", ref+"^{commit}")
 		outcome, reason := "failed", ref+" unavailable"
-		fetchFailed := fetched[t.owner] == "failed"
-		if fetchFailed {
-			reason = "owner fetch failed; stale refs not used"
-		} else if targetErr != nil && (pr.state == "OPEN" || pr.state == "DRAFT") {
+		if targetErr != nil && (pr.state == "OPEN" || pr.state == "DRAFT") {
 			outcome, reason = "needs-owner", "open PR merge target "+ref+" is unavailable; branch left untouched"
 		} else if targetErr == nil {
 			outcome, reason = c.catchUpReconcile(t, ref, target, pr, opt)
@@ -504,14 +513,7 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		}
 		if outcome == "updated" || outcome == "current" || outcome == "planned" {
 			c.catchUpHooks(&report, t, opt, false)
-			continue
-		}
-		if fetchFailed {
-			// Repo-scoped hooks never needed the remote; collection-level
-			// renders wait for a harness that is known to be current.
-			c.catchUpHooks(&report, t, opt, true)
-		}
-		if t.harness && opt.ReloadStatus {
+		} else if t.harness && opt.ReloadStatus {
 			report.add("pane", t.collection, "status", "skipped", "harness update needs attention; pane left running", "", "", "")
 		}
 	}

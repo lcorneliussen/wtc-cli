@@ -674,3 +674,36 @@ func TestCatchUpRepoOnlyHooksSkipCollectionRenders(t *testing.T) {
 		t.Fatalf("repo-only hooks ran collection renders: %+v", report.Outcomes)
 	}
 }
+
+func TestCatchUpLinksSecretsWhenFetchFailsBeforePRPreflight(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	owner := filepath.Join(c.Workspace, ".bare", "widget.git")
+	worktree := filepath.Join(c.Collection, "widget")
+	fixtureGit(t, "--git-dir="+owner, "worktree", "add", "-q", "-b", "topic", worktree, "origin/main")
+	// A forge remote whose fetch fails offline, with an open PR whose merge
+	// target is missing: the preflight that used to exit before the hooks.
+	fixtureGit(t, "--git-dir="+owner, "remote", "set-url", "origin", "git@github.com:example/widget.git")
+	t.Setenv("GIT_SSH_COMMAND", "false")
+	bin := filepath.Join(c.Workspace, "bin")
+	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' '[{\"state\":\"OPEN\",\"isDraft\":false,\"baseRefName\":\"\"}]'\n", 0755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	report, err := c.CatchUp(CatchUpOptions{Repos: []string{"widget"}, NoSkills: true, NoMCP: true, NoEnv: true})
+	if err == nil || report.ExitStatus != 1 {
+		t.Fatalf("failed fetch was not loud: %+v %v", report, err)
+	}
+	repo, secrets := 0, 0
+	for _, row := range report.Outcomes {
+		if row.Kind == "repo" {
+			repo++
+			if row.Outcome != "failed" || !strings.Contains(row.Reason, "stale refs not used") {
+				t.Fatalf("repo row: %+v", row)
+			}
+		}
+		if row.Kind == "hook" && row.Repo == "secrets:widget" && row.Outcome == "ok" {
+			secrets++
+		}
+	}
+	if repo != 1 || secrets != 1 {
+		t.Fatalf("want one repo row and one secrets run: %+v", report.Outcomes)
+	}
+}
