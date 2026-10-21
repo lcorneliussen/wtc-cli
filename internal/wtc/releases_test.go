@@ -1,6 +1,8 @@
 package wtc
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -78,5 +80,109 @@ func TestSelectReleaseNotes(t *testing.T) {
 		if _, err := SelectReleaseNotes(args[0], args[1]); err == nil {
 			t.Fatalf("expected error for %q", args)
 		}
+	}
+}
+
+func TestParseReleaseFragment(t *testing.T) {
+	fragment, err := ParseReleaseFragment("7-x.md", "\n## Review\n\n- one\n  continued\n\n## Retire\n\n- two\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fragment.Sections) != 2 || fragment.Sections[0].Heading != "Review" || fragment.Sections[0].Body != "- one\n  continued" || fragment.Sections[1].Body != "- two" {
+		t.Fatalf("unexpected sections: %#v", fragment.Sections)
+	}
+	for name, content := range map[string]string{
+		"no heading":      "- loose entry\n",
+		"release heading": "# wtc unreleased\n\n## Review\n\n- x\n",
+		"empty section":   "## Review\n\n## Retire\n\n- x\n",
+		"empty heading":   "## \n\n- x\n",
+		"nothing":         "\n",
+	} {
+		if _, err := ParseReleaseFragment(name, content); err == nil {
+			t.Fatalf("%s: expected an error", name)
+		}
+	}
+}
+
+func writeFragments(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, UnreleasedDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, UnreleasedDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestAssembleReleaseNotesMergesSectionsInIssueOrder(t *testing.T) {
+	dir := writeFragments(t, map[string]string{
+		"README.md":    "# Not a fragment\n",
+		"117-later.md": "## Review\n\n- later review\n",
+		"46-first.md":  "## Review\n\n- first review\n",
+		"56-retire.md": "## Retire\n\n- retire\n\n## Review\n\n- middle review\n",
+		"misc.md":      "## Docs\n\n- unnumbered\n",
+	})
+	fragments, err := ReadReleaseFragments(os.DirFS(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := AssembleReleaseNotes("1.2.3", fragments)
+	want := "# wtc 1.2.3\n\n## Review\n\n- first review\n- middle review\n- later review\n\n## Retire\n\n- retire\n\n## Docs\n\n- unnumbered\n"
+	if got != want {
+		t.Fatalf("assembled notes:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestReadReleaseFragmentsNamesTheBrokenFile(t *testing.T) {
+	dir := writeFragments(t, map[string]string{"9-bad.md": "- no heading\n"})
+	if _, err := ReadReleaseFragments(os.DirFS(dir)); err == nil || !strings.Contains(err.Error(), "unreleased/9-bad.md") {
+		t.Fatalf("expected an error naming the fragment, got %v", err)
+	}
+	dir = writeFragments(t, map[string]string{"9-notes.txt": "## Review\n\n- x\n"})
+	if _, err := ReadReleaseFragments(os.DirFS(dir)); err == nil {
+		t.Fatal("expected a non-Markdown fragment to be rejected")
+	}
+}
+
+func TestCutReleaseNotes(t *testing.T) {
+	dir := writeFragments(t, map[string]string{
+		"README.md":   "# Unreleased\n",
+		"2-second.md": "## Status\n\n- second\n",
+		"1-first.md":  "## Status\n\n- first\n",
+	})
+	path, err := CutReleaseNotes(dir, "v1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != filepath.Join(dir, "1.2.3.md") {
+		t.Fatalf("wrote %s", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "# wtc 1.2.3\n\n## Status\n\n- first\n- second\n" {
+		t.Fatalf("release file %q: %v", data, err)
+	}
+	left, _ := os.ReadDir(filepath.Join(dir, UnreleasedDir))
+	if len(left) != 1 || left[0].Name() != "README.md" {
+		t.Fatalf("fragments left behind: %v", left)
+	}
+	if _, err := CutReleaseNotes(dir, "1.2.4"); err == nil {
+		t.Fatal("expected an error with no fragments")
+	}
+	dir = writeFragments(t, map[string]string{"1-x.md": "## Status\n\n- x\n"})
+	if err := os.WriteFile(filepath.Join(dir, "1.2.3.md"), []byte("# wtc 1.2.3\n\nkept\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CutReleaseNotes(dir, "1.2.3"); err == nil {
+		t.Fatal("expected an existing release file to be refused")
+	}
+	if _, err := os.Stat(filepath.Join(dir, UnreleasedDir, "1-x.md")); err != nil {
+		t.Fatal("a refused cut must keep its fragments")
+	}
+	if _, err := CutReleaseNotes(dir, "1.2"); err == nil {
+		t.Fatal("expected an invalid version to be refused")
 	}
 }

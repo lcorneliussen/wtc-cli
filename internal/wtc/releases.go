@@ -3,14 +3,26 @@ package wtc
 import (
 	"embed"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
 )
 
-//go:embed release-notes/*.md
+// The unreleased directory always holds README.md, so the pattern matches
+// even when no change is pending.
+//
+//go:embed release-notes/*.md release-notes/unreleased/*.md
 var releaseNotes embed.FS
+
+// UnreleasedDir holds one fragment per pending change, relative to the
+// release-notes directory.
+const UnreleasedDir = "unreleased"
+
+const unreleasedReadme = "README.md"
 
 // ReleaseNote is a committed release document embedded in this binary.
 type ReleaseNote struct {
@@ -29,39 +41,180 @@ func releaseVersion(value string) (*semver.Version, error) {
 // EmbeddedReleaseNotes returns releases in semantic version order, followed by
 // unreleased changes. It neither discovers a collection nor contacts a forge.
 func EmbeddedReleaseNotes() ([]ReleaseNote, error) {
-	entries, err := releaseNotes.ReadDir("release-notes")
+	root, err := fs.Sub(releaseNotes, "release-notes")
 	if err != nil {
 		return nil, err
 	}
-	notes := make([]ReleaseNote, 0, len(entries))
-	var pending *ReleaseNote
+	entries, err := fs.ReadDir(root, ".")
+	if err != nil {
+		return nil, err
+	}
+	notes := make([]ReleaseNote, 0, len(entries)+1)
 	for _, entry := range entries {
-		name := strings.TrimSuffix(entry.Name(), ".md")
-		if name != "unreleased" {
-			if _, err := releaseVersion(name); err != nil {
-				return nil, err
-			}
+		if entry.IsDir() {
+			continue
 		}
-		content, err := releaseNotes.ReadFile("release-notes/" + entry.Name())
+		name := strings.TrimSuffix(entry.Name(), ".md")
+		if _, err := releaseVersion(name); err != nil {
+			return nil, err
+		}
+		content, err := fs.ReadFile(root, entry.Name())
 		if err != nil {
 			return nil, err
 		}
-		note := ReleaseNote{Version: name, Content: string(content)}
-		if name == "unreleased" {
-			pending = &note
-		} else {
-			notes = append(notes, note)
-		}
+		notes = append(notes, ReleaseNote{Version: name, Content: string(content)})
 	}
 	sort.Slice(notes, func(i, j int) bool {
 		a, _ := releaseVersion(notes[i].Version)
 		b, _ := releaseVersion(notes[j].Version)
 		return a.LessThan(b)
 	})
-	if pending != nil {
-		notes = append(notes, *pending)
+	fragments, err := ReadReleaseFragments(root)
+	if err != nil {
+		return nil, err
 	}
-	return notes, nil
+	pending := "# wtc unreleased\n\nNo unreleased changes.\n"
+	if len(fragments) > 0 {
+		pending = AssembleReleaseNotes("unreleased", fragments)
+	}
+	return append(notes, ReleaseNote{Version: "unreleased", Content: pending}), nil
+}
+
+// ReleaseFragment is one pending change's notes: level-two topic headings,
+// each followed by its entries.
+type ReleaseFragment struct {
+	Name     string
+	Sections []ReleaseSection
+}
+
+// ReleaseSection is one topic heading and the Markdown body below it.
+type ReleaseSection struct {
+	Heading string
+	Body    string
+}
+
+// ReadReleaseFragments reads and validates the unreleased fragments of a
+// release-notes directory, ordered by issue number, then file name.
+func ReadReleaseFragments(root fs.FS) ([]ReleaseFragment, error) {
+	entries, err := fs.ReadDir(root, UnreleasedDir)
+	if err != nil {
+		return nil, err
+	}
+	var fragments []ReleaseFragment
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || name == unreleasedReadme {
+			continue
+		}
+		path := UnreleasedDir + "/" + name
+		if !strings.HasSuffix(name, ".md") {
+			return nil, fmt.Errorf("%s: release note fragments are Markdown files", path)
+		}
+		content, err := fs.ReadFile(root, path)
+		if err != nil {
+			return nil, err
+		}
+		fragment, err := ParseReleaseFragment(name, string(content))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		fragments = append(fragments, fragment)
+	}
+	sort.SliceStable(fragments, func(i, j int) bool {
+		a, b := fragmentNumber(fragments[i].Name), fragmentNumber(fragments[j].Name)
+		if a != b {
+			return a < b
+		}
+		return fragments[i].Name < fragments[j].Name
+	})
+	return fragments, nil
+}
+
+// fragmentNumber orders "<issue>-<slug>.md" fragments by issue number, so #117
+// follows #46. Names without a leading number sort after numbered ones.
+func fragmentNumber(name string) int {
+	n, digits := 0, 0
+	for _, r := range name {
+		if r < '0' || r > '9' {
+			break
+		}
+		n, digits = n*10+int(r-'0'), digits+1
+	}
+	if digits == 0 {
+		return int(^uint(0) >> 1)
+	}
+	return n
+}
+
+// ParseReleaseFragment splits a fragment into its topic sections. A fragment
+// starts with a "## " heading and every heading has at least one entry.
+func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
+	fragment := ReleaseFragment{Name: name}
+	var current *ReleaseSection
+	var body []string
+	finish := func() error {
+		if current == nil {
+			return nil
+		}
+		current.Body = strings.Trim(strings.Join(body, "\n"), "\n")
+		if strings.TrimSpace(current.Body) == "" {
+			return fmt.Errorf("section %q has no entries", current.Heading)
+		}
+		fragment.Sections = append(fragment.Sections, *current)
+		return nil
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		if strings.HasPrefix(line, "# ") {
+			return ReleaseFragment{}, fmt.Errorf("use \"## <topic>\" headings; the release heading is added when notes are assembled")
+		}
+		if strings.HasPrefix(line, "## ") {
+			if err := finish(); err != nil {
+				return ReleaseFragment{}, err
+			}
+			heading := strings.TrimSpace(strings.TrimPrefix(line, "## "))
+			if heading == "" {
+				return ReleaseFragment{}, fmt.Errorf("empty section heading")
+			}
+			current, body = &ReleaseSection{Heading: heading}, nil
+			continue
+		}
+		if current == nil {
+			if strings.TrimSpace(line) != "" {
+				return ReleaseFragment{}, fmt.Errorf("start with a \"## <topic>\" heading")
+			}
+			continue
+		}
+		body = append(body, line)
+	}
+	if err := finish(); err != nil {
+		return ReleaseFragment{}, err
+	}
+	if len(fragment.Sections) == 0 {
+		return ReleaseFragment{}, fmt.Errorf("no \"## <topic>\" section")
+	}
+	return fragment, nil
+}
+
+// AssembleReleaseNotes renders fragments as one release document headed
+// "# wtc <version>". Sections with the same heading are merged; headings keep
+// the order in which fragments, in ReadReleaseFragments order, first use them.
+func AssembleReleaseNotes(version string, fragments []ReleaseFragment) string {
+	var order []string
+	bodies := map[string][]string{}
+	for _, fragment := range fragments {
+		for _, section := range fragment.Sections {
+			if _, seen := bodies[section.Heading]; !seen {
+				order = append(order, section.Heading)
+			}
+			bodies[section.Heading] = append(bodies[section.Heading], section.Body)
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# wtc %s\n", version)
+	for _, heading := range order {
+		fmt.Fprintf(&b, "\n## %s\n\n%s\n", heading, strings.Join(bodies[heading], "\n"))
+	}
+	return b.String()
 }
 
 // SelectReleaseNotes selects one version (latest by default), or all published
@@ -113,4 +266,39 @@ func SelectReleaseNotes(version, since string) ([]ReleaseNote, error) {
 		return nil, fmt.Errorf("release notes for %q are not embedded in this binary; run wtc release-notes --list", version)
 	}
 	return selected, nil
+}
+
+// CutReleaseNotes writes <version>.md in dir from the unreleased fragments and
+// deletes them, so one commit carries both. It refuses an existing release
+// file and an empty fragment set.
+func CutReleaseNotes(dir, version string) (string, error) {
+	v, err := releaseVersion(version)
+	if err != nil {
+		return "", err
+	}
+	fragments, err := ReadReleaseFragments(os.DirFS(dir))
+	if err != nil {
+		return "", err
+	}
+	if len(fragments) == 0 {
+		return "", fmt.Errorf("no unreleased fragments in %s", filepath.Join(dir, UnreleasedDir))
+	}
+	path := filepath.Join(dir, v.String()+".md")
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return "", err
+	}
+	_, err = file.WriteString(AssembleReleaseNotes(v.String(), fragments))
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return "", err
+	}
+	for _, fragment := range fragments {
+		if err := os.Remove(filepath.Join(dir, UnreleasedDir, fragment.Name)); err != nil {
+			return "", err
+		}
+	}
+	return path, nil
 }
