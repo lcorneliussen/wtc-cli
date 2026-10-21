@@ -192,7 +192,7 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 			}
 			if err == nil && opt.Review {
 				if err = lockReviewPush(result.Collection, filepath.Join(result.Collection, directory)); err == nil {
-					err = writeReviewMode(result.Collection, ReviewMode{Repo: primary, Dir: directory, PR: prID, URL: prWebURL, Heads: []string{prHead}})
+					err = writeReviewMode(result.Collection, ReviewMode{Repo: primary, Dir: directory, Branch: checkout.LocalBranch, PR: prID, URL: prWebURL, Heads: []string{prHead}})
 				}
 				result.Review = err == nil
 			}

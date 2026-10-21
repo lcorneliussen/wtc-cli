@@ -25,9 +25,12 @@ type ReviewMode struct {
 	SchemaVersion int    `json:"schema_version"`
 	Repo          string `json:"repo"`
 	Dir           string `json:"dir"`
-	PR            string `json:"pr"`
-	URL           string `json:"url,omitempty"`
-	CreatedAt     string `json:"created_at"`
+	// Branch is the local branch the PR head was checked out on, which may
+	// be an alternate name. Following the head moves only this branch.
+	Branch    string `json:"branch"`
+	PR        string `json:"pr"`
+	URL       string `json:"url,omitempty"`
+	CreatedAt string `json:"created_at"`
 	// Heads lists every PR head this collection checked out, oldest first.
 	// Only these may be left behind when the author rewrites the branch.
 	Heads []string `json:"heads"`
@@ -200,17 +203,20 @@ func followReviewHead(collection, worktree, forge, pr, branch, base, expected st
 	if expected != "" && !SameReviewSHA(head, expected) {
 		return fmt.Errorf("fetched %s, but the PR head is %s", head[:7], expected[:min(7, len(expected))])
 	}
+	mode, _ := ReadReviewMode(collection)
+	if checkedOut, _ := gitOutput("-C", worktree, "symbolic-ref", "--quiet", "--short", "HEAD"); mode.Branch == "" || checkedOut != mode.Branch {
+		return fmt.Errorf("the review worktree is on %q, not its review branch %q; switch back before bundling", checkedOut, mode.Branch)
+	}
 	current, err := gitOutput("-C", worktree, "rev-parse", "HEAD")
 	if err != nil || current == head {
 		return err
 	}
-	mode, _ := ReadReviewMode(collection)
 	if status, err := gitOutput("-C", worktree, "status", "--porcelain", "--untracked-files=no"); err != nil {
 		return err
 	} else if status != "" {
 		return fmt.Errorf("worktree has local changes; review mode makes none, so discard them first")
 	}
-	if _, err := gitOutput("-C", worktree, "merge-base", "--is-ancestor", "HEAD", head); err == nil {
+	if _, ancestry := gitOutput("-C", worktree, "merge-base", "--is-ancestor", "HEAD", head); ancestry == nil {
 		_, err = gitOutput("-C", worktree, "merge", "--ff-only", "--quiet", head)
 	} else if !slices.Contains(mode.Heads, current) {
 		// The author rewrote the branch, and HEAD is not a head reviewed

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -124,6 +125,42 @@ func TestReviewModeCollectionCannotPushAndFollowsPRHead(t *testing.T) {
 	}
 	if got := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD"); got != rewritten {
 		t.Fatalf("bundle did not follow the rewritten head: %s", got)
+	}
+
+	// Following the head moves only the review branch, never one checked
+	// out to look around.
+	fixtureGit(t, "-C", source, "checkout", "-q", "feature")
+	blocked := commit(source, "blocker.txt", "adds a file")
+	publish(blocked)
+	fixtureGit(t, "-C", worktree, "switch", "-q", "-c", "inspect", "origin/main")
+	inspect := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD")
+	if _, err := bundle(); err == nil || !strings.Contains(err.Error(), "not its review branch") {
+		t.Fatalf("bundle followed the head on another branch: %v", err)
+	}
+	if got := fixtureGit(t, "-C", worktree, "rev-parse", "inspect"); got != inspect {
+		t.Fatalf("the inspected branch moved to %s", got)
+	}
+	fixtureGit(t, "-C", worktree, "switch", "-q", "feature")
+
+	// A move git refuses stops the bundle and is not recorded.
+	fixtureFile(t, filepath.Join(worktree, "blocker.txt"), "untracked\n", 0644)
+	if _, err := bundle(); err == nil {
+		t.Fatal("bundle went on after the fast-forward was refused")
+	}
+	if got := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD"); got != rewritten {
+		t.Fatalf("refused fast-forward moved HEAD to %s", got)
+	}
+	if mode, _ := ReadReviewMode(r.Collection); slices.Contains(mode.Heads, blocked) {
+		t.Fatalf("refused head was recorded as reviewed: %v", mode.Heads)
+	}
+	if err := os.Remove(filepath.Join(worktree, "blocker.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bundle(); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD"); got != blocked {
+		t.Fatalf("bundle did not follow once unblocked: %s", got)
 	}
 
 	// A commit made here is never discarded.
