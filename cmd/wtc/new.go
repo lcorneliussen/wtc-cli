@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -77,7 +78,7 @@ func openAfterNew(source *wtc.Context, collection string, explicitOpen, noOpen b
 	if err != nil {
 		return fmt.Errorf("collection created at %s, but cannot read its configuration: %w", collection, err)
 	}
-	opt := openOptions{Session: openSession(target, "")}
+	opt := openOptions{Session: openSession(target, ""), Tools: openWantedTools(statusSetting(target, "WTC_PANES") == "full", nil)}
 	running := openSessionRunning(opt.Session)
 	if !running {
 		if err := openEnsureSession(opt.Session); err != nil {
@@ -87,6 +88,9 @@ func openAfterNew(source *wtc.Context, collection string, explicitOpen, noOpen b
 	}
 	item := openCollection(source, filepath.Base(collection), opt, openDesiredLayout(target, opt, running), running, true)
 	if item.Error != "" {
+		if strings.Contains(item.Error, "openpty") {
+			item.Error += "; " + openPtyHint
+		}
 		return fmt.Errorf("collection created at %s, but opening failed: %s", collection, item.Error)
 	}
 	return nil

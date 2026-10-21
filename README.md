@@ -120,7 +120,7 @@ committing. Retirement checks for local work before removing worktrees;
 remote branches remain available.
 
 Use an ordinary editor and terminal, or `wtc open` for a herdr workspace with
-agent, browse, shell, and status panes. `/wtc-start` is the agent orientation
+agent and status panes, plus browse and shell panes on demand. `/wtc-start` is the agent orientation
 procedure.
 
 ## Your harness, your workflow
