@@ -223,11 +223,11 @@ func (c *Context) GetReviewStatus(repo, number string, trusted bool) (ReviewStat
 	} else {
 		view := exec.Command("bb", "pr", "view", number, "--json")
 		view.Dir = worktree
-		head, err = view.Output()
+		head, err = forgeOutput(view)
 		if err == nil {
 			list := exec.Command("bb", "pr", "comments", "list", number, "--all", "--json")
 			list.Dir = worktree
-			comments, err = list.Output()
+			comments, err = forgeOutput(list)
 		}
 	}
 	if err != nil {

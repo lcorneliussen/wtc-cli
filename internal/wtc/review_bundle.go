@@ -118,7 +118,7 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 		} else {
 			cmd := exec.Command("bb", "pr", "view", opt.PR, "--json")
 			cmd.Dir = worktree
-			raw, err = cmd.Output()
+			raw, err = forgeOutput(cmd)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "wtc: warning: PR #%s metadata unavailable; bundle will use local refs\n", opt.PR)
