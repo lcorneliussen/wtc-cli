@@ -95,7 +95,7 @@ func TestOpenClawInstallFlagsAndErrors(t *testing.T) {
 
 	// --dir writes the plugin and calls nothing.
 	dir := filepath.Join(root, "plugin")
-	if out, err := run(bin, "--dir", dir); err != nil || !strings.Contains(out, "openclaw plugins install "+dir) {
+	if out, err := run(bin, "--dir", dir); err != nil || !strings.Contains(out, "openclaw plugins install "+dir+" --force --accept-capabilities") {
 		t.Fatalf("--dir: %s %v", out, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "openclaw.plugin.json")); err != nil {

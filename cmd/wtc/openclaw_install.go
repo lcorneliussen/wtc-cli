@@ -30,11 +30,11 @@ embedded in this binary, so it is always the one that matches this wtc.
 install turns on custom Control UI plugins (` + customPluginsKey + `,
 skip with --no-config) and runs "openclaw plugins install <plugin> --force
 --accept-capabilities", which also replaces an older wtc plugin, then
-"openclaw plugins reload wtc"
-so that the running gateway uses it. Running it is consent to the
-capabilities the plugin declares: a Control UI panel and session actions.
-That is also how to upgrade: install the new wtc, then run this again. With --dir it only writes the plugin there, for
-a gateway on another host or in an image build.`,
+"openclaw plugins reload wtc" so that the running gateway uses it. Running
+it is consent to the capabilities the plugin declares: a Control UI panel
+and session actions. That is also how to upgrade: install the new wtc, then
+run this again. With --dir it only writes the plugin there, for a gateway on
+another host or in an image build.`,
 		Args: cobra.NoArgs,
 	}
 	install.Flags().StringVar(&dir, "dir", "", "Write the plugin into this directory and install nothing")
