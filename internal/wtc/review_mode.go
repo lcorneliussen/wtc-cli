@@ -31,7 +31,7 @@ type ReviewMode struct {
 	PR        string `json:"pr"`
 	URL       string `json:"url,omitempty"`
 	CreatedAt string `json:"created_at"`
-	// Heads lists every PR head this collection checked out, oldest first.
+	// Heads lists every PR head this collection fetched to check out, oldest first.
 	// Only these may be left behind when the author rewrites the branch.
 	Heads []string `json:"heads"`
 }
@@ -81,9 +81,9 @@ func (c *Context) RefuseInReviewMode(step string) error {
 	return fmt.Errorf("%s belongs to the PR author; this collection only reviews %s", step, pr)
 }
 
-// lockReviewPush disables pushing from one worktree without touching the
-// others that share its repository, in three layers of the worktree's own
-// config:
+// lockReviewPush disables pushing from one worktree while the others that
+// share its repository stay pushable. The lock is three layers of the
+// worktree's own config:
 //   - each remote gets a push URL; an explicit pushurl is used as is, so no
 //     url.*.pushInsteadOf rule, which git picks by longest prefix, redirects it;
 //   - an empty-prefix pushInsteadOf rewrites remotes added later and URLs given
@@ -217,18 +217,23 @@ func followReviewHead(collection, worktree, forge, pr, branch, base, expected st
 	} else if status != "" {
 		return fmt.Errorf("worktree has local changes; review mode makes none, so discard them first")
 	}
-	if _, ancestry := gitOutput("-C", worktree, "merge-base", "--is-ancestor", "HEAD", head); ancestry == nil {
+	_, ancestry := gitOutput("-C", worktree, "merge-base", "--is-ancestor", "HEAD", head)
+	if ancestry != nil && !slices.Contains(mode.Heads, current) {
+		// The author rewrote the branch, and HEAD is not a head recorded
+		// here, so it may hold commits made in this collection.
+		return fmt.Errorf("HEAD %s is not a PR head this collection recorded; review mode makes no commits, so check it before bundling", current[:7])
+	}
+	// Recorded before the move, so a moved HEAD is always a known head.
+	if !slices.Contains(mode.Heads, head) {
+		mode.Heads = append(mode.Heads, head)
+		if err := writeReviewMode(collection, mode); err != nil {
+			return err
+		}
+	}
+	if ancestry == nil {
 		_, err = gitOutput("-C", worktree, "merge", "--ff-only", "--quiet", head)
-	} else if !slices.Contains(mode.Heads, current) {
-		// The author rewrote the branch, and HEAD is not a head reviewed
-		// here, so it holds commits made in this collection.
-		return fmt.Errorf("HEAD %s is not a PR head this collection reviewed; review mode makes no commits", current[:7])
 	} else {
 		_, err = gitOutput("-C", worktree, "reset", "--keep", "--quiet", head)
 	}
-	if err != nil {
-		return err
-	}
-	mode.Heads = append(mode.Heads, head)
-	return writeReviewMode(collection, mode)
+	return err
 }

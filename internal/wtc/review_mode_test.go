@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -146,16 +145,13 @@ func TestReviewModeCollectionCannotPushAndFollowsPRHead(t *testing.T) {
 	}
 	fixtureGit(t, "-C", worktree, "switch", "-q", "feature")
 
-	// A move git refuses stops the bundle and is not recorded.
+	// A move git refuses stops the bundle.
 	fixtureFile(t, filepath.Join(worktree, "blocker.txt"), "untracked\n", 0644)
 	if _, err := bundle(); err == nil {
 		t.Fatal("bundle went on after the fast-forward was refused")
 	}
 	if got := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD"); got != rewritten {
 		t.Fatalf("refused fast-forward moved HEAD to %s", got)
-	}
-	if mode, _ := ReadReviewMode(r.Collection); slices.Contains(mode.Heads, blocked) {
-		t.Fatalf("refused head was recorded as reviewed: %v", mode.Heads)
 	}
 	if err := os.Remove(filepath.Join(worktree, "blocker.txt")); err != nil {
 		t.Fatal(err)
@@ -171,7 +167,7 @@ func TestReviewModeCollectionCannotPushAndFollowsPRHead(t *testing.T) {
 	local := commit(worktree, "local.txt", "local review commit")
 	fixtureGit(t, "-C", source, "reset", "-q", "--hard", "main")
 	publish(commit(source, "feature.txt", "rewritten again"))
-	if _, err := bundle(); err == nil || !strings.Contains(err.Error(), "not a PR head this collection reviewed") {
+	if _, err := bundle(); err == nil || !strings.Contains(err.Error(), "not a PR head this collection recorded") {
 		t.Fatalf("local commit was not protected: %v", err)
 	}
 	if got := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD"); got != local {
