@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCatchUpInventoryUsesTargetIdentityAndRejectsUnknownSelector(t *testing.T) {
@@ -722,5 +723,168 @@ func TestCatchUpLocalRefAcceptsEveryDevelopmentRefForm(t *testing.T) {
 	}
 	if got := catchUpLocalRef(catchUpTarget{}, "origin/main"); got != "origin/main" {
 		t.Errorf("owner with a remote rewrote its ref: %s", got)
+	}
+}
+
+// squashFixture puts a widget worktree on a two-commit branch and lands the
+// same change on the source's main as one squash commit. With unrelated set,
+// main moves first, so the trees differ and only the change itself matches.
+func squashFixture(t *testing.T, unrelated bool) (*Context, catchUpTarget, string) {
+	t.Helper()
+	c := newWorkspaceFixture(t)
+	owner := filepath.Join(c.Workspace, ".bare", "widget.git")
+	worktree := filepath.Join(c.Collection, "widget")
+	fixtureGit(t, "--git-dir="+owner, "worktree", "add", "-q", "-b", "topic", worktree, "origin/main")
+	commit := func(dir, name, body string) {
+		fixtureFile(t, filepath.Join(dir, name), body, 0644)
+		fixtureGit(t, "-C", dir, "add", name)
+		fixtureGit(t, "-C", dir, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", name)
+	}
+	commit(worktree, "feature.txt", "one\n")
+	commit(worktree, "feature.txt", "one\ntwo\n")
+	source := filepath.Join(c.Workspace, "source-widget")
+	if unrelated {
+		commit(source, "other.txt", "elsewhere\n")
+	}
+	commit(source, "feature.txt", "one\ntwo\n")
+	squash := fixtureGit(t, "-C", source, "rev-parse", "HEAD")
+	fixtureGit(t, "--git-dir="+owner, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+	_, targets, err := c.CatchUpInventory(CatchUpOptions{Repos: []string{"widget"}, DryRun: true})
+	if err != nil || len(targets) != 1 {
+		t.Fatalf("inventory: %+v %v", targets, err)
+	}
+	return c, targets[0], squash
+}
+
+func TestCatchUpLandedAcceptsSquashMergeByContent(t *testing.T) {
+	for _, unrelated := range []bool{false, true} {
+		_, target, squash := squashFixture(t, unrelated)
+		tip := fixtureGit(t, "-C", target.path, "rev-parse", "origin/main")
+		if !catchUpLanded(target, tip, catchUpPR{state: "MERGED", mergeCommit: squash}) {
+			t.Fatalf("squash merge (unrelated main commit: %v) not established as landed", unrelated)
+		}
+		if catchUpLanded(target, tip, catchUpPR{state: "MERGED"}) {
+			t.Fatal("landing established without a merge commit")
+		}
+		parent := fixtureGit(t, "-C", target.path, "rev-parse", squash+"^")
+		if catchUpLanded(target, tip, catchUpPR{state: "MERGED", mergeCommit: parent}) {
+			t.Fatal("a merge commit without the branch's content established landing")
+		}
+	}
+}
+
+func TestStatusReturnsCleanMergedWorktreeToTip(t *testing.T) {
+	c, target, squash := squashFixture(t, true)
+	records := []PRRecord{{Repo: "widget", Number: "7", Branch: "topic"}}
+	details := []statusPRDetail{{Number: "7", State: "MERGED", MergeCommit: squash}}
+	tip := fixtureGit(t, "-C", target.path, "rev-parse", "origin/main")
+
+	onTopic := func(why string) {
+		t.Helper()
+		snapshot, err := c.StatusLocalSnapshot(false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.statusReturnMerged(&snapshot, records, details)
+		if fixtureGit(t, "-C", target.path, "symbolic-ref", "--short", "HEAD") != "topic" {
+			t.Fatalf("%s: worktree left its branch", why)
+		}
+	}
+	for _, value := range []string{"off", "0", "false", "no"} {
+		t.Setenv("WTC_STATUS_RETURN_MERGED", value)
+		onTopic("env opt-out " + value)
+	}
+	t.Setenv("WTC_STATUS_RETURN_MERGED", "")
+	off := false
+	c.Config.Status.ReturnMerged = &off
+	onTopic("wtc.toml opt-out")
+	c.Config.Status.ReturnMerged = nil
+	parent := fixtureGit(t, "-C", target.path, "rev-parse", squash+"^")
+	details[0].MergeCommit = parent
+	onTopic("unlanded branch")
+	details[0].MergeCommit = squash
+	records = append(records, PRRecord{Repo: "widget", Number: "8", Branch: "topic"})
+	details = append(details, statusPRDetail{Number: "8", State: "OPEN"})
+	onTopic("reused branch with an open PR")
+	records, details = records[:1], details[:1]
+
+	fixtureFile(t, filepath.Join(target.path, "scratch.txt"), "local\n", 0644)
+	onTopic("dirty worktree")
+	if err := os.Remove(filepath.Join(target.path, "scratch.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reconciliation refuses a worktree that moved off the branch it was read for.
+	moved := catchUpPR{state: "MERGED", mergeCommit: squash, branch: "elsewhere"}
+	if outcome, reason := c.catchUpReconcile(target, target.ref, tip, moved, CatchUpOptions{CleanOnly: true}); outcome != "needs-owner" || !strings.Contains(reason, "left elsewhere") {
+		t.Fatalf("moved branch: %s %s", outcome, reason)
+	}
+
+	var progress []string
+	c.StatusProgress = func(message string) { progress = append(progress, message) }
+	snapshot, _ := c.StatusLocalSnapshot(false)
+	for j := range snapshot.Repos {
+		if snapshot.Repos[j].Dir == "widget" {
+			snapshot.Repos[j].Runtime = "1 service up"
+		}
+	}
+	c.statusReturnMerged(&snapshot, records, details)
+	if got := fixtureGit(t, "-C", target.path, "rev-parse", "HEAD"); got != tip || catchUpGitOK(target.path, "symbolic-ref", "-q", "HEAD") {
+		t.Fatalf("merged worktree not detached at the tip: %s", got)
+	}
+	// Safe pruning refuses a squash-merged branch, so the local ref survives.
+	if log := strings.Join(progress, "\n"); !strings.Contains(log, "Returned widget to origin/main after its PR merged") || !strings.Contains(log, "local branch retained") {
+		t.Fatalf("refresh log: %v", progress)
+	}
+	if !catchUpGitOK(target.path, "rev-parse", "--verify", "refs/heads/topic") {
+		t.Fatal("unmerged local branch was force-deleted")
+	}
+	for _, row := range snapshot.Repos {
+		if row.Dir == "widget" && (row.BranchKind != "detached" || row.Behind != 0 || row.Runtime != "1 service up") {
+			t.Fatalf("snapshot row not refreshed: %+v", row)
+		}
+	}
+}
+
+func TestStatusReturnMergedTreatsHarnessAliasesAsOneWorktree(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	fixtureGit(t, "-C", c.Harness, "switch", "-qc", "topic") // Landed: no commits beyond the tip.
+	records := []PRRecord{{Repo: "harness", Number: "7", Branch: "topic"}, {Repo: "agent-harness", Number: "8", Branch: "topic"}}
+	details := []statusPRDetail{{Number: "7", State: "MERGED"}, {Number: "8", State: "OPEN"}}
+	snapshot, err := c.StatusLocalSnapshot(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.statusReturnMerged(&snapshot, records, details)
+	if fixtureGit(t, "-C", c.Harness, "symbolic-ref", "--short", "HEAD") != "topic" {
+		t.Fatal("an open PR under the other harness alias did not keep the branch")
+	}
+	// An inherited identity naming another repo must not redirect a merged
+	// widget PR onto the harness branch of the same name.
+	t.Setenv("WTC_HARNESS_REPO", "widget")
+	c.statusReturnMerged(&snapshot, []PRRecord{{Repo: "widget", Number: "9", Branch: "topic"}}, []statusPRDetail{{Number: "9", State: "MERGED"}})
+	if fixtureGit(t, "-C", c.Harness, "symbolic-ref", "--short", "HEAD") != "topic" {
+		t.Fatal("inherited WTC_HARNESS_REPO redirected a widget merge to the harness")
+	}
+	t.Setenv("WTC_HARNESS_REPO", "agent-harness")
+	c.statusReturnMerged(&snapshot, records[:1], details[:1])
+	if catchUpGitOK(c.Harness, "symbolic-ref", "-q", "HEAD") {
+		t.Fatal("a landed merged harness branch was not returned to the tip")
+	}
+}
+
+func TestCatchUpForgeLookupIsBounded(t *testing.T) {
+	bin := t.TempDir()
+	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nexec sleep 10\n", 0755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	old := catchUpForgeTimeout
+	catchUpForgeTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { catchUpForgeTimeout = old })
+	start := time.Now()
+	if _, err := catchUpJSON("gh", "pr", "view", "7"); err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("stalled forge lookup: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("lookup was not bounded: %s", elapsed)
 	}
 }

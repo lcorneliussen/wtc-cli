@@ -58,6 +58,11 @@ type Config struct {
 		Backend string `toml:"backend"`
 		Binary  string `toml:"binary"`
 	} `toml:"runtime"`
+	Status struct {
+		// ReturnMerged lets a status refresh return a clean worktree whose
+		// PR it sees merged to the development tip. Unset means on.
+		ReturnMerged *bool `toml:"return_merged"`
+	} `toml:"status"`
 	// OpenClaw is set in a gateway's collection folder only.
 	OpenClaw struct {
 		// Harness names the gateway-configured harness of the collection,

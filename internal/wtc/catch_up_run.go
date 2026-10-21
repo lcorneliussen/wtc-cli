@@ -2,6 +2,7 @@ package wtc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,10 +10,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type catchUpPR struct {
 	state, mergeCommit, head, base string
+	// branch, when set, is the local branch these facts were read for.
+	// Reconciliation refuses a worktree that has moved to another branch.
+	branch string
 }
 
 func catchUpGit(path string, args ...string) (string, error) {
@@ -59,9 +64,21 @@ func catchUpFetch(owner string) error {
 	return err
 }
 
+// catchUpForgeTimeout bounds one forge CLI call, as status bounds its own.
+var catchUpForgeTimeout = 30 * time.Second
+
+// catchUpJSON runs a forge CLI. A stalled gh or bb fails the lookup, which
+// leaves the branch untouched, instead of blocking a sweep or status refresh.
 func catchUpJSON(args ...string) ([]byte, error) {
-	cmd := exec.Command(args[0], args[1:]...)
-	return cmd.Output()
+	ctx, cancel := context.WithTimeout(context.Background(), catchUpForgeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.WaitDelay = 200 * time.Millisecond
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("%s timed out after %s", args[0], catchUpForgeTimeout)
+	}
+	return out, err
 }
 
 func catchUpForge(remote string) (string, string) {
@@ -261,9 +278,16 @@ func catchUpLanded(t catchUpTarget, target string, pr catchUpPR) bool {
 	if extra == "0" {
 		return true
 	}
-	if pr.mergeCommit != "" && pr.head != "" && catchUpGitOK(t.path, "merge-base", "--is-ancestor", pr.mergeCommit, target) {
-		prHead, err := catchUpGit(t.path, "rev-parse", "--verify", pr.head+"^{commit}")
-		if head, headErr := catchUpGit(t.path, "rev-parse", "HEAD"); err == nil && headErr == nil && head == prHead {
+	if pr.mergeCommit != "" && catchUpGitOK(t.path, "merge-base", "--is-ancestor", pr.mergeCommit, target) {
+		if pr.head != "" {
+			prHead, err := catchUpGit(t.path, "rev-parse", "--verify", pr.head+"^{commit}")
+			if head, headErr := catchUpGit(t.path, "rev-parse", "HEAD"); err == nil && headErr == nil && head == prHead {
+				return true
+			}
+		}
+		// A squash merge rewrites the branch's commits into one, so cherry
+		// finds no equivalents. It still carries the branch's content.
+		if catchUpSquashCarries(t.path, pr.mergeCommit) {
 			return true
 		}
 	}
@@ -277,6 +301,50 @@ func catchUpLanded(t catchUpTarget, target string, pr catchUpPR) bool {
 		}
 	}
 	return true
+}
+
+// catchUpSquashCarries reports whether a merge commit on the target carries
+// the branch at HEAD: either both have the same tree, or the merge commit's
+// own change has the same patch-id as the branch's cumulative change since it
+// forked (whitespace and line numbers aside).
+func catchUpSquashCarries(worktree, merge string) bool {
+	head, err := catchUpGit(worktree, "rev-parse", "--verify", "HEAD^{tree}")
+	if err != nil {
+		return false
+	}
+	if tree, err := catchUpGit(worktree, "rev-parse", "--verify", merge+"^{tree}"); err == nil && tree == head {
+		return true
+	}
+	parent, err := catchUpGit(worktree, "rev-parse", "--verify", merge+"^1")
+	if err != nil {
+		return false
+	}
+	base, err := catchUpGit(worktree, "merge-base", "HEAD", parent)
+	if err != nil {
+		return false
+	}
+	branch := catchUpPatchID(worktree, base, "HEAD")
+	return branch != "" && branch == catchUpPatchID(worktree, parent, merge)
+}
+
+// catchUpPatchID identifies the change between two commits independently of
+// how it was committed. An empty change has no identity.
+func catchUpPatchID(worktree, from, to string) string {
+	diff, err := exec.Command("git", "-C", worktree, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--binary", from, to).Output()
+	if err != nil || len(diff) == 0 {
+		return ""
+	}
+	cmd := exec.Command("git", "-C", worktree, "patch-id", "--stable")
+	cmd.Stdin = bytes.NewReader(diff)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 func catchUpOperation(t catchUpTarget) string {
@@ -332,6 +400,9 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, pr catch
 		return "needs-owner", "dirty worktree; clean-only leaves it untouched"
 	}
 	branch, _ := catchUpGit(t.path, "symbolic-ref", "-q", "--short", "HEAD")
+	if pr.branch != "" && branch != pr.branch {
+		return "needs-owner", "worktree left " + pr.branch + " while its PR was read; untouched"
+	}
 	if branch == "" && !catchUpGitOK(t.path, "merge-base", "--is-ancestor", "HEAD", target) {
 		return "needs-owner", "detached commits not contained in default tip; preserve them on an owner branch"
 	}
