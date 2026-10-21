@@ -339,9 +339,16 @@ func harnessRepos(repos []string, worktree, branch, flag string, worker bool) ([
 		if _, _, gitURL, err := openclaw.ProjectSource(add.arg); err == nil && gitURL != "" {
 			url = gitURL
 		}
-		if openclaw.SameRepository(url, h.Remote) && !worker {
-			// The harness is added once, above, or is there already.
-			continue
+		if openclaw.SameRepository(url, h.Remote) {
+			if !worker {
+				// The harness is added once, above, or is there already.
+				continue
+			}
+			if add.branch == "" {
+				// A worker on the harness starts where the harness is configured
+				// to, unless the task has a branch or base there.
+				add.branch = h.Ref
+			}
 		}
 		adds = append(adds, add)
 	}

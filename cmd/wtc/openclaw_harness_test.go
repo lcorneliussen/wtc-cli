@@ -336,6 +336,13 @@ func TestAddRepoSpawnsAWorker(t *testing.T) {
 	if intents, err := addRepoPlan(t, "example-org/platform-harness", "--worktree", "12-x", "--worker", "h", "--work", "Document paging."); err != nil || summary(intents) != "platform-harness@platform-harness:origin/main" {
 		t.Errorf("a worker on the harness: %s %v", summary(intents), err)
 	}
+	// On a harness the task has not planned yet, a worker starts at the
+	// harness's configured ref.
+	withGatewayConfig(t, `{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness", "ref": "develop"}]}`)
+	if intents, err := addRepoPlan(t, "example-org/platform-harness", "--worktree", "13-y", "--worker", "h", "--work", "Document paging."); err != nil || summary(intents) != "platform-harness@platform-harness:origin/develop" {
+		t.Errorf("a worker on an unplanned harness: %s %v", summary(intents), err)
+	}
+	withGatewayConfig(t, `{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}]}`)
 	// A worker is measured against the task's base, not the registry's.
 	git(filepath.Join(state, "repos", "web"), "config", "branch.openclaw/12-x.wtcbase", "develop")
 	if intents, err := addRepoPlan(t, "web", "--worktree", "12-x", "--worker", "b", "--work", "x"); err != nil || summary(intents) != "web@web:origin/develop" {
