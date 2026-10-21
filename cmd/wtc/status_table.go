@@ -18,6 +18,7 @@ func statusTable(snapshot wtc.StatusSnapshot, reposOnly bool, width int) string 
 	if !reposOnly {
 		lines = append(lines, statusTUIPRLines(snapshot, width, false, false)...)
 	}
+	lines = append(lines, statusTUIRetiredLines(snapshot, width, false)...)
 	if snapshot.StaleCount > 0 {
 		lines = append(lines, "", statusTUIFit(fmt.Sprintf("%d worktree(s) behind the development tip", snapshot.StaleCount), width))
 	}

@@ -184,6 +184,12 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 	if len(s.Runtime) != 0 {
 		b.WriteString("\n## Runtime\n\n```text\n" + RuntimeText(s.Runtime) + "```\n")
 	}
+	if len(s.Retired) != 0 {
+		b.WriteString("\n## Retired leftovers\n\n")
+		for _, row := range s.Retired {
+			fmt.Fprintf(&b, "- **%s** — %s; `wtc retire %s` finishes once they are gone\n", row.Folder, statusRetiredHolding(row), row.Folder)
+		}
+	}
 	if s.ShowCollectionColumn || !includePRs {
 		b.WriteString("\n")
 		return b.String()
@@ -289,4 +295,11 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+func statusRetiredHolding(row StatusRetired) string {
+	if len(row.BlockingPaths) == 0 {
+		return "nothing left"
+	}
+	return "holds " + strings.Join(row.BlockingPaths, ", ")
 }
