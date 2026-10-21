@@ -100,6 +100,9 @@ func (c *Context) finishRetiredFolder(target string) (RetireResult, error) {
 	if err != nil {
 		return result, err
 	}
+	if _, err := os.Lstat(filepath.Join(target, ".git")); err == nil {
+		return result, fmt.Errorf("%s carries %s but is a Git checkout itself; inspect it before retiring", target, RetiredMarkerFile)
+	}
 	for _, entry := range entries {
 		if _, err := os.Lstat(filepath.Join(target, entry.Name(), ".git")); entry.Name() == "harness" || err == nil {
 			return result, fmt.Errorf("%s carries %s but holds %s again; inspect it before retiring", target, RetiredMarkerFile, entry.Name())

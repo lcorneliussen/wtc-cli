@@ -382,6 +382,19 @@ func TestRetiredLeftoversWithUnreadableMarkerStillListAndBlockWorktrees(t *testi
 		!strings.Contains(string(data), `"retired":[{"folder":"broken"`) {
 		t.Fatalf("unreadable marker not listed with current contents: %s %v", data, err)
 	}
+	fixtureFile(t, filepath.Join(folder, ".git"), "gitdir: elsewhere\n", 0644)
+	fixtureFile(t, filepath.Join(folder, "mise.toml"), "restored\n", 0644)
+	if _, err := c.RetireCollection(RetireOptions{Name: "broken"}); err == nil || !strings.Contains(err.Error(), "Git checkout itself") {
+		t.Fatalf("re-retire cleaned a checkout at the folder root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(folder, "mise.toml")); err != nil {
+		t.Fatal("a restored checkout's file was removed")
+	}
+	for _, name := range []string{".git", "mise.toml"} {
+		if err := os.Remove(filepath.Join(folder, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	fixtureFile(t, filepath.Join(folder, "stray", ".git"), "gitdir: elsewhere\n", 0644)
 	if _, err := c.RetireCollection(RetireOptions{Name: "broken"}); err == nil || !strings.Contains(err.Error(), "holds stray again") {
 		t.Fatalf("re-retire removed files around a worktree: %v", err)
