@@ -53,6 +53,10 @@ func EmbeddedReleaseNotes() ([]ReleaseNote, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readReleaseNotes(root)
+}
+
+func readReleaseNotes(root fs.FS) ([]ReleaseNote, error) {
 	entries, err := fs.ReadDir(root, ".")
 	if err != nil {
 		return nil, err
@@ -213,6 +217,12 @@ func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
 		if strings.TrimSpace(body) == "" {
 			return ReleaseFragment{}, fmt.Errorf("section %q has no entries", h.title)
 		}
+		if body[0] == ' ' || body[0] == '\t' {
+			return ReleaseFragment{}, fmt.Errorf("section %q: start its entries at the left margin, so they cannot nest under another change's entries when sections are merged", h.title)
+		}
+		if !visibleContent(body) {
+			return ReleaseFragment{}, fmt.Errorf("section %q has no entries", h.title)
+		}
 		if !closedBlocks(body) {
 			return ReleaseFragment{}, fmt.Errorf("section %q leaves a code fence or HTML block open; close it so it cannot swallow the sections after it", h.title)
 		}
@@ -233,16 +243,17 @@ func parseMarkdown(source string) ast.Node {
 	return goldmark.DefaultParser().Parse(text.NewReader([]byte(source)))
 }
 
-// sectionJoin separates two bodies merged under one heading. When one body
-// ends in a list and the next starts with one, a single newline keeps them one
-// tight list; anything else gets a blank line, so blocks stay apart.
-func sectionJoin(previous, next string) string {
-	_, endsList := parseMarkdown(previous).LastChild().(*ast.List)
-	_, startsList := parseMarkdown(next).FirstChild().(*ast.List)
-	if endsList && startsList {
-		return "\n"
+// visibleContent reports whether body renders anything: comments and link
+// reference definitions alone do not count as an entry.
+func visibleContent(body string) bool {
+	for node := parseMarkdown(body).FirstChild(); node != nil; node = node.NextSibling() {
+		switch node.(type) {
+		case *ast.HTMLBlock, *ast.LinkReferenceDefinition:
+		default:
+			return true
+		}
 	}
-	return "\n\n"
+	return false
 }
 
 // AssembleReleaseNotes renders fragments as one release document headed
@@ -263,12 +274,9 @@ func AssembleReleaseNotes(version string, fragments []ReleaseFragment) string {
 	fmt.Fprintf(&b, "# wtc %s\n", version)
 	for _, heading := range order {
 		fmt.Fprintf(&b, "\n## %s\n\n", heading)
-		for i, body := range bodies[heading] {
-			if i > 0 {
-				b.WriteString(sectionJoin(bodies[heading][i-1], body))
-			}
-			b.WriteString(body)
-		}
+		// A blank line keeps each change's entries a block of their own: a
+		// tighter join can merge, nest or swallow another change's list.
+		b.WriteString(strings.Join(bodies[heading], "\n\n"))
 		b.WriteString("\n")
 	}
 	return b.String()

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestEmbeddedReleaseNotes(t *testing.T) {
@@ -105,7 +106,7 @@ func TestParseReleaseFragment(t *testing.T) {
 		t.Fatalf("a fence opened on a list marker must parse: %#v, %v", fragment, err)
 	}
 	for name, content := range map[string]string{
-		"indented code":         "## Upgrade\n\n    ~~~sh\n",
+		"indented code":         "## Upgrade\n\nRun:\n\n    ~~~sh\n",
 		"indented in list item": "## Upgrade\n\n- step\n\n      ```\n",
 		"code on marker line":   "## Upgrade\n\n-     ~~~sh\n",
 		"nested marker fence":   "## Upgrade\n\n- a\n    - ~~~sh\n      code\n      ~~~\n",
@@ -122,14 +123,17 @@ func TestParseReleaseFragment(t *testing.T) {
 		t.Fatalf("a fence inside a list item must parse: %#v, %v", fragment, err)
 	}
 	for name, content := range map[string]string{
-		"fence first":     "```\n## inside\n```\n",
-		"unclosed fence":  "## Upgrade\n\n```\n## inside to the end\n",
-		"no heading":      "- loose entry\n",
-		"release heading": "# wtc unreleased\n\n## Review\n\n- x\n",
-		"empty section":   "## Review\n\n## Retire\n\n- x\n",
-		"empty heading":   "## \n\n- x\n",
-		"setext heading":  "Topic\n-----\n\n- x\n",
-		"nothing":         "\n",
+		"fence first":      "```\n## inside\n```\n",
+		"unclosed fence":   "## Upgrade\n\n```\n## inside to the end\n",
+		"indented entries": "## Review\n\n  - nests under the previous change\n",
+		"comment only":     "## Review\n\n<!-- todo -->\n",
+		"reference only":   "## Review\n\n[x]: https://example.com\n",
+		"no heading":       "- loose entry\n",
+		"release heading":  "# wtc unreleased\n\n## Review\n\n- x\n",
+		"empty section":    "## Review\n\n## Retire\n\n- x\n",
+		"empty heading":    "## \n\n- x\n",
+		"setext heading":   "Topic\n-----\n\n- x\n",
+		"nothing":          "\n",
 	} {
 		if _, err := ParseReleaseFragment(name, content); err == nil {
 			t.Fatalf("%s: expected an error", name)
@@ -164,33 +168,34 @@ func TestAssembleReleaseNotesMergesSectionsInIssueOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := AssembleReleaseNotes("1.2.3", fragments)
-	want := "# wtc 1.2.3\n\n## Review\n\n- first review\n- middle review\n- later review\n\n## Retire\n\n- retire\n\n## Docs\n\n- unnumbered\n"
+	want := "# wtc 1.2.3\n\n## Review\n\n- first review\n\n- middle review\n\n- later review\n\n## Retire\n\n- retire\n\n## Docs\n\n- unnumbered\n"
 	if got != want {
 		t.Fatalf("assembled notes:\n%s\nwant:\n%s", got, want)
 	}
 }
 
-func TestAssembleReleaseNotesSeparatesProseFromLists(t *testing.T) {
+func TestAssembleReleaseNotesKeepsEachChangeABlock(t *testing.T) {
 	fragments := []ReleaseFragment{
-		{Name: "1-a.md", Sections: []ReleaseSection{{Heading: "Upgrade", Body: "- one\n  continued"}}},
-		{Name: "2-b.md", Sections: []ReleaseSection{{Heading: "Upgrade", Body: "Prose paragraph."}}},
-		{Name: "3-c.md", Sections: []ReleaseSection{{Heading: "Upgrade", Body: "- two"}}},
+		{Name: "1.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "- first\n  continued"}}},
+		{Name: "2.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "2. second"}}},
+		{Name: "3.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "Prose."}}},
 	}
-	want := "# wtc 1.0.0\n\n## Upgrade\n\n- one\n  continued\n\nProse paragraph.\n\n- two\n"
-	if got := AssembleReleaseNotes("1.0.0", []ReleaseFragment{
-		{Name: "1.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "Run the command\n  with flags."}}},
-		{Name: "2.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "2. step"}}},
-	}); got != "# wtc 1.0.0\n\n## Steps\n\nRun the command\n  with flags.\n\n2. step\n" {
-		t.Fatalf("indented prose must stay apart from a following list: %q", got)
-	}
-	if got := AssembleReleaseNotes("1.0.0", []ReleaseFragment{
-		{Name: "1.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "1. first"}}},
-		{Name: "2.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "* second"}}},
-	}); got != "# wtc 1.0.0\n\n## Steps\n\n1. first\n* second\n" {
-		t.Fatalf("lists with other markers must stay tight: %q", got)
-	}
+	want := "# wtc 1.0.0\n\n## Steps\n\n- first\n  continued\n\n2. second\n\nProse.\n"
 	if got := AssembleReleaseNotes("1.0.0", fragments); got != want {
 		t.Fatalf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestReleaseNotesWithoutFragments(t *testing.T) {
+	notes, err := readReleaseNotes(fstest.MapFS{
+		"0.1.0.md":             {Data: []byte("# wtc 0.1.0\n\n- first\n")},
+		"unreleased/README.md": {Data: []byte("# Unreleased\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 2 || notes[1].Version != "unreleased" || notes[1].Content != "# wtc unreleased\n\nNo unreleased changes.\n" {
+		t.Fatalf("got %#v", notes)
 	}
 }
 
@@ -249,7 +254,7 @@ func TestCutReleaseNotes(t *testing.T) {
 		t.Fatalf("wrote %s", path)
 	}
 	data, err := os.ReadFile(path)
-	if err != nil || string(data) != "# wtc 1.2.3\n\n## Status\n\n- first\n- second\n" {
+	if err != nil || string(data) != "# wtc 1.2.3\n\n## Status\n\n- first\n\n- second\n" {
 		t.Fatalf("release file %q: %v", data, err)
 	}
 	left, _ := os.ReadDir(filepath.Join(dir, UnreleasedDir))
