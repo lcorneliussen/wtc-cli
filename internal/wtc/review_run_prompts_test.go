@@ -58,7 +58,7 @@ if [ "$id" = lead ]; then
   printf 'pass\n' > "$bundle/verdict"
   exit 0
 fi
-grep -q 'You review one concern only' "$3" || exit 4
+grep -q "${WANT_CONCERN:?}" "$3" || exit 4
 printf '{"concern":"%s","status":"ok","findings":[]}\n' "$id" > "$bundle/findings/$id.json"
 `)
 	if err := os.Chmod(launcher, 0755); err != nil {
@@ -86,6 +86,7 @@ printf '{"concern":"%s","status":"ok","findings":[]}\n' "$id" > "$bundle/finding
 		return got
 	}
 
+	t.Setenv("WANT_CONCERN", "You review one concern only")
 	t.Setenv("WANT_LEAD", "You are the lead reviewer")
 	if got := run(); got.Verdict != "pass" || got.Concerns != 1 {
 		t.Fatalf("private run without harness prompts: %+v", got)
@@ -95,5 +96,30 @@ printf '{"concern":"%s","status":"ok","findings":[]}\n' "$id" > "$bundle/finding
 	t.Setenv("WANT_LEAD", "Harness lead override")
 	if got := run(); got.Verdict != "pass" {
 		t.Fatalf("harness lead override with default concern prompt: %+v", got)
+	}
+
+	if err := os.Remove(filepath.Join(harness, "review", "prompts", "lead.md")); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(harness, "review", "prompts", "concern.md"), "Harness concern override.\n{{FINDINGS_FILE}}\n")
+	t.Setenv("WANT_CONCERN", "Harness concern override")
+	t.Setenv("WANT_LEAD", "You are the lead reviewer")
+	if got := run(); got.Verdict != "pass" {
+		t.Fatalf("harness concern override was not used: %+v", got)
+	}
+
+	// Only a missing file falls back; any other read error stops the run.
+	if err := os.Remove(filepath.Join(harness, "review", "prompts", "concern.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(harness, "review", "prompts", "concern.md"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "app", Base: "main", NoCatchUp: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RunReviewBundle(bundle.Dir, opt); err == nil {
+		t.Fatal("unreadable harness concern prompt fell back to the default")
 	}
 }
