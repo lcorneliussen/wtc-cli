@@ -67,8 +67,9 @@ are gone, `wtc retire <collection>` again removes the folder, along with any
 generated file a lingering process wrote there. A self-retire waits for the
 initiating agent to finish its turn. After a final pane check, it closes the
 source workspace before running hooks or removing worktrees; another live
-agent pane blocks the handoff. Inspect the `--cleanup--` pane for the final result. Its post hook
-runs after product teardown and before the harness worktree is removed.
+agent pane blocks the handoff. Inspect the `--cleanup--` pane for the final
+result. Its post hook runs after product teardown and before the harness
+worktree is removed.
 
 `--force` overrides the pre-flight refusal. Use it only when you have
 established the work is genuinely disposable — and say in your report that you

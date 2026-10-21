@@ -306,8 +306,9 @@ func TestRetireMarksLeftoverFolderAndOtherCommandsRespectIt(t *testing.T) {
 	}
 
 	// Sweeps and discovery treat the folder as leftovers, never as a target.
+	// Even a stray harness directory does not revive it.
 	if err := os.Mkdir(filepath.Join(target, "harness"), 0755); err != nil {
-		t.Fatal(err) // Even a stray harness directory does not revive it.
+		t.Fatal(err)
 	}
 	dirs, err := WorkspaceCollections(c.Workspace)
 	if err != nil {
