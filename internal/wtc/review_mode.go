@@ -77,12 +77,31 @@ func (c *Context) RefuseInReviewMode(step string) error {
 }
 
 // lockReviewPush disables pushing from one worktree without touching the
-// others that share its repository. An empty url.<prefix>.pushInsteadOf in
-// the worktree's own config rewrites every push URL, including remotes added
-// later and URLs given on the command line. Per-worktree config needs
-// extensions.worktreeConfig; a bare owner's core.bare then moves into the
-// owner's own config.worktree, or every linked worktree would read it as bare.
-func lockReviewPush(worktree string) error {
+// others that share its repository, in three layers of the worktree's own
+// config:
+//   - each remote gets a push URL; an explicit pushurl is used as is, so no
+//     url.*.pushInsteadOf rule, which git picks by longest prefix, redirects it;
+//   - an empty-prefix pushInsteadOf rewrites remotes added later and URLs given
+//     on the command line, unless a longer rule elsewhere wins;
+//   - core.hooksPath points at a pre-push hook that refuses, for those cases
+//     too, unless the push skips hooks with --no-verify.
+//
+// Per-worktree config needs extensions.worktreeConfig. Enabling it writes to
+// the shared owner: format version 1, the extension, and, for a bare owner,
+// core.bare moved into the owner's own config.worktree, or every linked
+// worktree would read it as bare. Remotes are checked before those writes.
+func lockReviewPush(collection, worktree string) error {
+	remotes, err := gitOutput("-C", worktree, "remote")
+	if err != nil {
+		return err
+	}
+	for _, remote := range strings.Fields(remotes) {
+		// pushurl is multi-valued: one added here would be pushed to
+		// alongside one set elsewhere.
+		if urls, _ := gitOutput("-C", worktree, "config", "--get-all", "remote."+remote+".pushurl"); urls != "" {
+			return fmt.Errorf("remote %s has remote.%s.pushurl set (%s), which a review-only worktree cannot override; remove it to review here", remote, remote, strings.ReplaceAll(urls, "\n", ", "))
+		}
+	}
 	common, err := gitOutput("-C", worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return err
@@ -110,15 +129,29 @@ func lockReviewPush(worktree string) error {
 			return err
 		}
 	}
+	for _, remote := range strings.Fields(remotes) {
+		if _, err := gitOutput("-C", worktree, "config", "--worktree", "remote."+remote+".pushurl", reviewPushPrefix+remote); err != nil {
+			return err
+		}
+	}
 	if _, err := gitOutput("-C", worktree, "config", "--worktree", "url."+reviewPushPrefix+".pushInsteadOf", ""); err != nil {
+		return err
+	}
+	hooks := filepath.Join(collection, ".wtc", "review-hooks")
+	if err := os.MkdirAll(hooks, 0755); err != nil {
+		return err
+	}
+	hook := "#!/bin/sh\necho 'push-disabled-in-wtc-review-mode: this collection only reviews the PR and pushes nothing' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(hooks, "pre-push"), []byte(hook), 0755); err != nil {
+		return err
+	}
+	if _, err := gitOutput("-C", worktree, "config", "--worktree", "core.hooksPath", hooks); err != nil {
 		return err
 	}
 	return verifyReviewPushLock(worktree)
 }
 
-// verifyReviewPushLock checks the effective push URL of every remote. An
-// explicit remote.<name>.pushurl is not rewritten by pushInsteadOf, so a
-// remote that has one leaves the worktree pushable.
+// verifyReviewPushLock checks the effective push URL of every remote.
 func verifyReviewPushLock(worktree string) error {
 	remotes, err := gitOutput("-C", worktree, "remote")
 	if err != nil {
@@ -131,7 +164,7 @@ func verifyReviewPushLock(worktree string) error {
 		}
 		for _, url := range strings.Split(urls, "\n") {
 			if !strings.HasPrefix(url, reviewPushPrefix) {
-				return fmt.Errorf("remote %s still pushes to %s (an explicit pushurl is not rewritten); remove it to review here", remote, url)
+				return fmt.Errorf("remote %s still pushes to %s after the review-only lock", remote, url)
 			}
 		}
 	}
@@ -139,10 +172,11 @@ func verifyReviewPushLock(worktree string) error {
 }
 
 // followReviewHead moves a review-only worktree to the PR's current head, so
-// each bundle reviews what the author last pushed. It never merges: a new
-// head is reached by fast-forward, or by reset when the author rewrote the
-// branch. Commits that exist only here stop it, since review mode writes none.
-func followReviewHead(collection, worktree, forge, pr, branch, expected string) error {
+// each bundle reviews what the author last pushed. It never creates a merge
+// commit: a new head is reached by fast-forward, or by reset when the author
+// rewrote the branch. Commits that exist only here stop it, since review mode
+// writes none. The base branch is fetched too, since catch-up is skipped.
+func followReviewHead(collection, worktree, forge, pr, branch, base, expected string) error {
 	ref := "refs/remotes/wtc-pr/" + pr
 	source := "+refs/pull/" + pr + "/head:" + ref
 	if forge == "bitbucket" {
@@ -151,7 +185,11 @@ func followReviewHead(collection, worktree, forge, pr, branch, expected string) 
 		}
 		source = "+refs/heads/" + branch + ":" + ref
 	}
-	if _, err := gitOutput("-C", worktree, "fetch", "origin", source); err != nil {
+	fetch := []string{"-C", worktree, "fetch", "origin", source}
+	if base != "" {
+		fetch = append(fetch, "+refs/heads/"+base+":refs/remotes/origin/"+base)
+	}
+	if _, err := gitOutput(fetch...); err != nil {
 		return err
 	}
 	head, err := gitOutput("-C", worktree, "rev-parse", "--verify", ref+"^{commit}")

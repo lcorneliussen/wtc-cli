@@ -388,6 +388,10 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 		if err := os.RemoveAll(filepath.Join(wtcDir, "skills")); err != nil {
 			return err
 		}
+		// The pre-push hook of a review-only collection.
+		if err := os.RemoveAll(filepath.Join(wtcDir, "review-hooks")); err != nil {
+			return err
+		}
 		// A dev build is regenerated with wtc dev install.
 		if err := os.RemoveAll(devBuildDir(target)); err != nil {
 			return err

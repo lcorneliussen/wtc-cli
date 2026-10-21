@@ -19,6 +19,9 @@ func TestRetireCollectionRunsTeardownAndKeepsRemoteRefs(t *testing.T) {
 	// A dev build is generated and must not keep the folder alive.
 	fixtureFile(t, filepath.Join(target, ".wtc", "dev", "wtc"), "#!/bin/sh\n", 0755)
 	fixtureFile(t, filepath.Join(target, ".wtc", "dev", "version"), "0.1.40-dev.1+dev.gabc1234\n", 0644)
+	// So are a review-only collection's mode file and pre-push hook.
+	fixtureFile(t, filepath.Join(target, ReviewModeFile), "{}\n", 0644)
+	fixtureFile(t, filepath.Join(target, ".wtc", "review-hooks", "pre-push"), "#!/bin/sh\nexit 1\n", 0755)
 	widget := filepath.Join(target, "widget")
 	if err := os.Remove(filepath.Join(widget, "init-ran")); err != nil {
 		t.Fatal(err)

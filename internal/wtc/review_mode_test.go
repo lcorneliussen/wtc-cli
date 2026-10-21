@@ -27,8 +27,13 @@ func TestReviewModeCollectionCannotPushAndFollowsPRHead(t *testing.T) {
 	fixtureGit(t, "-C", source, "checkout", "-qb", "feature")
 	publish(commit(source, "feature.txt", "first round"))
 	fixtureGit(t, "-C", source, "checkout", "-q", "main")
-	commit(source, "main.txt", "tip moved")
+	tipMoved := commit(source, "main.txt", "tip moved")
 	c.Registry.Repos[1].Remote = "https://github.com/example/widget.git"
+	// A longer pushInsteadOf in any scope beats the worktree's empty prefix;
+	// the per-remote push URL must hold regardless.
+	global := filepath.Join(c.Workspace, "global.gitconfig")
+	fixtureFile(t, global, "[url \""+source+"\"]\n\tpushInsteadOf = "+source+"\n", 0644)
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
 	bin := filepath.Join(c.Workspace, "bin")
 	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '{\"headRefName\":\"feature\",\"headRefOid\":\"%s\",\"baseRefName\":\"main\",\"title\":\"Review fixture\"}\\n' \"$(cat "+headFile+")\"\n", 0755)
 	t.Setenv("PATH", bin+":/usr/bin:/bin")
@@ -53,6 +58,9 @@ func TestReviewModeCollectionCannotPushAndFollowsPRHead(t *testing.T) {
 		if out, err := exec.Command("git", "-C", worktree, "push", target, "HEAD:refs/heads/leak").CombinedOutput(); err == nil || !strings.Contains(string(out), "push-disabled-in-wtc-review-mode") {
 			t.Fatalf("push to %s was not disabled: %s %v", target, out, err)
 		}
+	}
+	if out, err := exec.Command("git", "-C", worktree, "push", "--no-verify", "origin", "HEAD:refs/heads/leak").CombinedOutput(); err == nil || !strings.Contains(string(out), "push-disabled-in-wtc-review-mode") {
+		t.Fatalf("push skipping hooks reached origin: %s %v", out, err)
 	}
 	if _, err := gitOutput("-C", source, "rev-parse", "--verify", "refs/heads/leak"); err == nil {
 		t.Fatal("a review-only push reached the source")
@@ -103,6 +111,9 @@ func TestReviewModeCollectionCannotPushAndFollowsPRHead(t *testing.T) {
 	if got := fixtureGit(t, "-C", worktree, "rev-parse", "HEAD"); got != second || b.Manifest.HeadSHA != second || b.Manifest.PR != "21" {
 		t.Fatalf("bundle did not follow the new head: HEAD %s, manifest %+v", got, b.Manifest)
 	}
+	if got := fixtureGit(t, "-C", worktree, "rev-parse", "origin/main"); got != tipMoved {
+		t.Fatalf("bundle diffed against a stale base %s, want %s", got, tipMoved)
+	}
 
 	// The author rewrites the branch: the reviewed head may be left behind.
 	fixtureGit(t, "-C", source, "reset", "-q", "--hard", "main")
@@ -134,5 +145,28 @@ func TestReviewModeNeedsPR(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(c.Workspace, "plain")); !os.IsNotExist(err) {
 		t.Fatalf("refused review collection left a folder: %v", err)
+	}
+}
+
+func TestReviewModeRefusesSharedPushURLBeforeChangingOwner(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	source := filepath.Join(c.Workspace, "source-widget")
+	head := fixtureGit(t, "-C", source, "rev-parse", "HEAD")
+	fixtureGit(t, "-C", source, "branch", "feature")
+	fixtureGit(t, "-C", source, "update-ref", "refs/pull/22/head", head)
+	c.Registry.Repos[1].Remote = "https://github.com/example/widget.git"
+	bare := filepath.Join(c.Workspace, ".bare", "widget.git")
+	fixtureGit(t, "--git-dir="+bare, "config", "remote.origin.pushurl", source)
+	bin := filepath.Join(c.Workspace, "bin")
+	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' '{\"headRefName\":\"feature\",\"headRefOid\":\""+head+"\",\"title\":\"Review fixture\"}'\n", 0755)
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	if _, err := c.NewCollection(NewOptions{PR: "widget#22", Review: true}); err == nil || !strings.Contains(err.Error(), "remote.origin.pushurl") {
+		t.Fatalf("explicit pushurl was not refused: %v", err)
+	}
+	if got, _ := gitOutput("--git-dir="+bare, "config", "extensions.worktreeConfig"); got != "" {
+		t.Fatalf("owner was changed before the refusal: extensions.worktreeConfig=%s", got)
+	}
+	if got := fixtureGit(t, "--git-dir="+bare, "config", "--bool", "core.bare"); got != "true" {
+		t.Fatalf("owner core.bare moved before the refusal: %s", got)
 	}
 }

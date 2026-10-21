@@ -190,7 +190,7 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 		}
 	}
 	if reviewOnly && opt.PR != "" && opt.Head == "HEAD" {
-		if err := followReviewHead(c.Collection, worktree, forge, opt.PR, prBranch, prHead); err != nil {
+		if err := followReviewHead(c.Collection, worktree, forge, opt.PR, prBranch, prBase, prHead); err != nil {
 			return ReviewBundle{}, fmt.Errorf("move review worktree to PR #%s head: %w", opt.PR, err)
 		}
 	} else if opt.PR != "" && opt.Head == "HEAD" {
