@@ -104,7 +104,9 @@ func ReadReleaseFragments(root fs.FS) ([]ReleaseFragment, error) {
 	var fragments []ReleaseFragment
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || name == unreleasedReadme {
+		// go:embed skips dot and underscore files; so does cut, so a stray
+		// editor or OS file never breaks a local cut.
+		if entry.IsDir() || name == unreleasedReadme || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 			continue
 		}
 		path := UnreleasedDir + "/" + name
@@ -213,6 +215,18 @@ func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
 	return fragment, nil
 }
 
+// sectionJoin separates two bodies merged under one heading. Consecutive
+// lists stay one tight list; anything else gets a blank line, so prose is not
+// read as a continuation of the previous list item.
+func sectionJoin(previous, next string) string {
+	lines := strings.Split(previous, "\n")
+	last := lines[len(lines)-1]
+	if strings.HasPrefix(next, "- ") && (strings.HasPrefix(last, "- ") || strings.HasPrefix(last, "  ")) {
+		return "\n"
+	}
+	return "\n\n"
+}
+
 // codeFence returns the opening delimiter of a fenced code block (three or
 // more backticks or tildes, indented at most three spaces), or "".
 func codeFence(line string) string {
@@ -262,7 +276,14 @@ func AssembleReleaseNotes(version string, fragments []ReleaseFragment) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# wtc %s\n", version)
 	for _, heading := range order {
-		fmt.Fprintf(&b, "\n## %s\n\n%s\n", heading, strings.Join(bodies[heading], "\n"))
+		fmt.Fprintf(&b, "\n## %s\n\n", heading)
+		for i, body := range bodies[heading] {
+			if i > 0 {
+				b.WriteString(sectionJoin(bodies[heading][i-1], body))
+			}
+			b.WriteString(body)
+		}
+		b.WriteString("\n")
 	}
 	return b.String()
 }

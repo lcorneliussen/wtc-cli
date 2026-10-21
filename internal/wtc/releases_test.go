@@ -147,6 +147,38 @@ func TestAssembleReleaseNotesMergesSectionsInIssueOrder(t *testing.T) {
 	}
 }
 
+func TestAssembleReleaseNotesSeparatesProseFromLists(t *testing.T) {
+	fragments := []ReleaseFragment{
+		{Name: "1-a.md", Sections: []ReleaseSection{{Heading: "Upgrade", Body: "- one\n  continued"}}},
+		{Name: "2-b.md", Sections: []ReleaseSection{{Heading: "Upgrade", Body: "Prose paragraph."}}},
+		{Name: "3-c.md", Sections: []ReleaseSection{{Heading: "Upgrade", Body: "- two"}}},
+	}
+	want := "# wtc 1.0.0\n\n## Upgrade\n\n- one\n  continued\n\nProse paragraph.\n\n- two\n"
+	if got := AssembleReleaseNotes("1.0.0", fragments); got != want {
+		t.Fatalf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestReleaseFragmentsSkipFilesEmbedSkips(t *testing.T) {
+	dir := writeFragments(t, map[string]string{".DS_Store": "\x00binary", "_draft.md": "no heading", "1-x.md": "## A\n\n- x\n"})
+	fragments, err := ReadReleaseFragments(os.DirFS(dir))
+	if err != nil || len(fragments) != 1 {
+		t.Fatalf("got %v, %v", fragments, err)
+	}
+}
+
+// The embed pattern must take every file in unreleased/, or a misnamed
+// fragment would vanish from reads instead of failing them.
+func TestEmbedPatternIncludesEveryFragmentFile(t *testing.T) {
+	source, err := os.ReadFile("releases.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), "//go:embed release-notes/*.md release-notes/unreleased/*\n") {
+		t.Fatal("go:embed must include release-notes/unreleased/*, not only *.md")
+	}
+}
+
 func TestReadReleaseFragmentsNamesTheBrokenFile(t *testing.T) {
 	dir := writeFragments(t, map[string]string{"9-bad.md": "- no heading\n"})
 	if _, err := ReadReleaseFragments(os.DirFS(dir)); err == nil || !strings.Contains(err.Error(), "unreleased/9-bad.md") {
