@@ -70,7 +70,7 @@ func TestOpenClawInstallRunsOpenClaw(t *testing.T) {
 	}
 	calls, _ := os.ReadFile(log)
 	lines := strings.Split(strings.TrimSpace(string(calls)), "\n")
-	if len(lines) != 4 || lines[0] != "config set "+customPluginsKey+" true" || !strings.HasPrefix(lines[1], "plugins install ") || !strings.HasSuffix(lines[1], " --force") || lines[2] != "manifest" || lines[3] != "plugins reload wtc" {
+	if len(lines) != 4 || lines[0] != "config set "+customPluginsKey+" true" || !strings.HasPrefix(lines[1], "plugins install ") || !strings.HasSuffix(lines[1], " --force --accept-capabilities") || lines[2] != "manifest" || lines[3] != "plugins reload wtc" {
 		t.Fatalf("openclaw was called with:\n%s", calls)
 	}
 }
