@@ -19,6 +19,7 @@ Run from any existing collection's harness worktree.
 | Issue | `wtc new --issue <issue-id> <slug> [repos…]` | `<issue-id>-<slug>` |
 | tracker ticket | `wtc new --tracker <KEY> <slug> [repos…]` | `<key-lowercased>-<slug>` |
 | PR review | `wtc new --pr <repo>#<n> [repos…]` | `<repo>-pr<n>`, on the PR's head branch |
+| Someone else's PR, review only | `wtc review start <repo>#<n> [repos…]` | `<repo>-pr<n>`, pushing disabled |
 
 Prefer `--issue` whenever an issue exists or should: it gives a
 convention-correct `<issue-id>-<slug>` branch for free and pulls in the repo
@@ -57,7 +58,10 @@ A repo brought in only for context never grows a branch at all, and needs no
 cleanup later.
 
 `--pr` is the exception: it checks out the PR's head branch for real, because
-review work pushes to it.
+review work pushes to it. When the PR is someone else's and the task is only
+to review it, use `wtc review start <repo>#<n>` instead: the collection is
+review-only, pushing from the PR worktree is disabled, and the author's steps
+(resolving threads, marking ready) refuse.
 
 ## 4. Run it
 

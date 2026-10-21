@@ -10,6 +10,13 @@ after a separate reviewer process posts a passing summary for its current head.
 The review is independent of the authoring agent; do not write its findings,
 summary, or verdict yourself.
 
+In a review-only collection (`wtc review start`, `wtc status` shows
+`review-only`), you review someone else's PR: build, run and post the review
+only (steps 2 and 3). Make no commits, pushes or thread resolutions, and do not
+mark the PR ready; those steps belong to the author, and the tools refuse them.
+After the author pushes, `wtc review bundle` again starts the next round on
+the new head.
+
 1. Inspect `wtc review activity <repo> <pr>` on GitHub before spending local
    review time. Let an active Copilot/Cursor pass finish, then address or answer
    and resolve its open threads. Inspect review bodies as well as inline

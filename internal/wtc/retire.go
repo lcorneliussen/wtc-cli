@@ -351,7 +351,7 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 		"WTC-SCOPE.md", ".env.toolchain",
 		".wtc-runtime.lock",
 		".wtc-prs", ".wtc-prs.lock", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
-		".wtc-catch-up.json", ".wtc-catch-up.json.md",
+		".wtc-catch-up.json", ".wtc-catch-up.json.md", ReviewModeFile,
 	}
 	if adHoc {
 		// An ad-hoc registry is remembered per user. Hand-written local
@@ -386,6 +386,10 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 			return err
 		}
 		if err := os.RemoveAll(filepath.Join(wtcDir, "skills")); err != nil {
+			return err
+		}
+		// The pre-push hook of a review-only collection.
+		if err := os.RemoveAll(filepath.Join(wtcDir, "review-hooks")); err != nil {
 			return err
 		}
 		// A dev build is regenerated with wtc dev install.
