@@ -1,12 +1,14 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
+	"github.com/spf13/cobra"
 )
 
 func TestBrowseSocketMatchesShellContract(t *testing.T) {
@@ -20,22 +22,6 @@ func TestBrowseSocketMatchesShellContract(t *testing.T) {
 	got := browseSocket("/work/example-wtc", name)
 	if got != "/tmp/wtc-browse-"+("example-wtc-" + name)[:60]+"-1785337918.nvim" {
 		t.Fatalf("long socket differs from shell spelling: %s", got)
-	}
-}
-
-func TestBrowseSessionRespectsActiveAndConfiguredHerdrSessions(t *testing.T) {
-	c := &wtc.Context{Workspace: "/work/sample-wtc", ConfigRoot: t.TempDir()}
-	t.Setenv("HARNESS_HERDR_SESSION", "configured")
-	t.Setenv("HERDR_SESSION", "active")
-	if got := browseSession(c, ""); got != "active" {
-		t.Fatalf("active session ignored: %s", got)
-	}
-	if got := browseSession(c, "explicit"); got != "explicit" {
-		t.Fatalf("explicit session ignored: %s", got)
-	}
-	t.Setenv("HERDR_SESSION", "")
-	if got := browseSession(c, ""); got != "configured" {
-		t.Fatalf("configured session ignored: %s", got)
 	}
 }
 
@@ -88,28 +74,31 @@ func TestBrowseViewAllowsHarnessOverlay(t *testing.T) {
 	}
 }
 
-func TestBrowseAgentUsesTargetPaneWithoutTakingOverCaller(t *testing.T) {
+func TestBrowseFromAgentPaneDoesNotTakeItOver(t *testing.T) {
 	root := t.TempDir()
+	collection := filepath.Join(root, "target")
+	if err := os.MkdirAll(filepath.Join(collection, "harness"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(collection, "harness", ".harness-repos.yml"), []byte("repos:\n  - name: example\n    remote: https://github.com/example/example.git\n    default_ref: origin/main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	bin := filepath.Join(root, "bin")
 	if err := os.Mkdir(bin, 0755); err != nil {
 		t.Fatal(err)
 	}
-	log := filepath.Join(root, "herdr.log")
-	program := `#!/bin/sh
-printf '%s\n' "$*" >> "$BROWSE_TEST_LOG"
+	log := filepath.Join(root, "calls.log")
+	herdr := `#!/bin/sh
+printf 'herdr %s\n' "$*" >> "$BROWSE_TEST_LOG"
 case "$*" in
   *'agent list') echo '{"result":{"agents":[{"pane_id":"caller-agent"}]}}' ;;
-  *'workspace list') echo '{"result":{"workspaces":[{"label":"target","workspace_id":"target-ws"}]}}' ;;
-  *'pane list --workspace target-ws') echo '{"result":{"panes":[{"label":"agent","pane_id":"target-agent","tab_id":"t1"},{"label":"browse","pane_id":"target-browse","tab_id":"t1"}]}}' ;;
-  *'pane process-info --pane target-browse') echo '{"result":{"process_info":{"foreground_process_group_id":4,"foreground_processes":[{"pid":4,"name":"zsh","argv":["-zsh"]}]}}}' ;;
-  *'pane run target-browse '*) echo '{"result":{}}' ;;
   *) exit 2 ;;
 esac
 `
-	if err := os.WriteFile(filepath.Join(bin, "herdr"), []byte(program), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "herdr"), []byte(herdr), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "nvim"), []byte("#!/bin/sh\nprintf 'nvim %s\\n' \"$*\" >> \"$BROWSE_TEST_LOG\"\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -120,70 +109,19 @@ esac
 	if agent, err := browseCallerIsAgent(); err != nil || !agent {
 		t.Fatalf("registered herdr caller was not recognized as an agent: %v", err)
 	}
-	c := &wtc.Context{Collection: filepath.Join(root, "target"), Harness: filepath.Join(root, "target", "harness"), Workspace: root}
-	if err := browseInPane(c, "test-session"); err != nil {
-		t.Fatal(err)
+	t.Chdir(collection)
+	cli := &cobra.Command{Use: "wtc"}
+	asJSON := false
+	addBrowseCommand(cli, &asJSON)
+	cli.SetArgs([]string{"browse"})
+	cli.SetOut(io.Discard)
+	cli.SetErr(io.Discard)
+	err := cli.Execute()
+	if err == nil || !strings.Contains(err.Error(), "wtc open target --session caller-session --add browse") {
+		t.Fatalf("agent pane was not pointed at wtc open --add browse: %v", err)
 	}
-	body, err := os.ReadFile(log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(body)
-	if !strings.Contains(text, "pane run target-browse cd '"+c.Collection+"' && wtc browse --here") || strings.Contains(text, "pane run target-agent") {
-		t.Fatalf("browse was not routed to the target pane: %s", text)
-	}
-}
-
-func TestBrowsePaneCommandUsesCLIWhenLegacyShimExists(t *testing.T) {
-	root := t.TempDir()
-	c := &wtc.Context{Collection: filepath.Join(root, "target"), Harness: filepath.Join(root, "target", "harness")}
-	shim := filepath.Join(c.Harness, "tools", "wtc-browse.sh")
-	if err := os.MkdirAll(filepath.Dir(shim), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(shim, []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	command, err := browsePaneCommand(c)
-	if err != nil || command != "cd '"+c.Collection+"' && wtc browse --here" {
-		t.Fatalf("browse pane did not use the CLI: %q, %v", command, err)
-	}
-}
-
-func TestBrowsePRTabUsesHerdrRootPaneResponse(t *testing.T) {
-	root := t.TempDir()
-	bin := filepath.Join(root, "bin")
-	if err := os.Mkdir(bin, 0755); err != nil {
-		t.Fatal(err)
-	}
-	log := filepath.Join(root, "herdr.log")
-	program := `#!/bin/sh
-printf '%s\n' "$*" >> "$BROWSE_TEST_LOG"
-case "$*" in
-  *'tab list --workspace target-ws') echo '{"result":{"tabs":[]}}' ;;
-  *'tab create --workspace target-ws '*) echo '{"result":{"root_pane":{"pane_id":"pr-pane"},"tab":{"tab_id":"pr-tab"}}}' ;;
-  *'pane rename pr-pane pr') echo '{"result":{}}' ;;
-  *'pane list --workspace target-ws') echo '{"result":{"panes":[{"label":"pr","pane_id":"pr-pane","tab_id":"pr-tab"}]}}' ;;
-  *'pane process-info --pane pr-pane') echo '{"result":{"process_info":{"foreground_process_group_id":8,"foreground_processes":[{"pid":8,"name":"zsh","argv":["-zsh"]}]}}}' ;;
-  *'pane run pr-pane gh dash') echo '{"result":{}}' ;;
-  *) exit 2 ;;
-esac
-`
-	if err := os.WriteFile(filepath.Join(bin, "herdr"), []byte(program), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("BROWSE_TEST_LOG", log)
-	browseEnsurePRTab(&wtc.Context{Collection: filepath.Join(root, "target")}, "test-session", "target-ws")
-	body, err := os.ReadFile(log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(body)
-	if !strings.Contains(text, "pane rename pr-pane pr") || !strings.Contains(text, "pane run pr-pane gh dash") {
-		t.Fatalf("herdr's root pane was not used for the PR tab: %s", text)
+	body, _ := os.ReadFile(log)
+	if strings.Contains(string(body), "nvim ") || strings.Contains(string(body), "pane ") {
+		t.Fatalf("browse took over or routed from the agent pane: %s", body)
 	}
 }

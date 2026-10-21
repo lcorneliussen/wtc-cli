@@ -205,6 +205,9 @@ func run() error {
 			path, err := exec.LookPath(name)
 			checks = append(checks, map[string]any{"name": name, "ok": err == nil, "detail": path})
 		}
+		if budget, low := openPtyReport(); budget != "" {
+			checks = append(checks, map[string]any{"name": "pty", "ok": !low, "detail": budget})
+		}
 		if c.Config.Compatibility.Requires != "" {
 			checks = append(checks, map[string]any{"name": "compatibility", "ok": compatible(c.Config.Compatibility.Requires, version), "detail": fmt.Sprintf("requires %s; running %s", c.Config.Compatibility.Requires, version)})
 		}
@@ -229,6 +232,9 @@ func run() error {
 			state := "ok"
 			if !check["ok"].(bool) {
 				state = "missing"
+				if check["name"] == "pty" {
+					state = "low"
+				}
 			}
 			fmt.Printf("%-15s %-8s %v\n", check["name"], state, check["detail"])
 		}
