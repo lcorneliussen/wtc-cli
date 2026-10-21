@@ -142,7 +142,7 @@ func SaveCatchUpReport(report *CatchUpReport, path string) error {
 	if path == "" {
 		return nil
 	}
-	if dir := filepath.Dir(path); RetiredFolder(dir) {
+	if dir := retiredAncestor(filepath.Dir(path)); dir != "" {
 		report.ExitStatus = 1
 		report.ReportError = retiredFolderError(dir).Error()
 		return errors.New(report.ReportError)

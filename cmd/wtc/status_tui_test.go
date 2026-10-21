@@ -760,3 +760,13 @@ func TestStatusTUIFollowStateNamesWaitingTier(t *testing.T) {
 		t.Fatalf("PR table should show the tier the merge waits on: %q", prs)
 	}
 }
+
+func TestStatusTableShowsRetiredLeftoversInWorkspaceSweep(t *testing.T) {
+	snapshot := wtc.StatusSnapshot{Schema: 1, ShowCollectionColumn: true,
+		Retired: []wtc.StatusRetired{{Folder: "old-task", BlockingPaths: []string{"design"}}}}
+	for _, reposOnly := range []bool{false, true} {
+		if table := statusTable(snapshot, reposOnly, 80); !strings.Contains(table, "retired old-task: leftovers design") {
+			t.Fatalf("reposOnly=%v table omits leftovers:\n%s", reposOnly, table)
+		}
+	}
+}

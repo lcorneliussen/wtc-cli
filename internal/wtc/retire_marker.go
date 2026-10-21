@@ -54,6 +54,21 @@ func writeRetiredMarker(dir string, blocking []string) error {
 	return writeCatchUpFile(filepath.Join(dir, RetiredMarkerFile), append(data, '\n'))
 }
 
+// retiredAncestor returns the nearest of dir and its ancestors that carries a
+// retire marker, or "" when none does.
+func retiredAncestor(dir string) string {
+	for {
+		if RetiredFolder(dir) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
 func retiredFolderError(dir string) error {
 	return fmt.Errorf("%s holds the leftovers of a retired collection (see %s); run `wtc retire %s` once they are gone",
 		dir, RetiredMarkerFile, filepath.Base(dir))
@@ -103,7 +118,16 @@ func (c *Context) finishRetiredFolder(target string) (RetireResult, error) {
 			return result, err
 		}
 		if err := os.Remove(target); err != nil {
-			return result, fmt.Errorf("remove collection folder: %w", err)
+			// The folder survives, so it must stay marked as leftovers.
+			removeErr := fmt.Errorf("remove collection folder: %w", err)
+			current, listErr := retireLeftovers(target)
+			if listErr == nil {
+				listErr = writeRetiredMarker(target, current)
+			}
+			if listErr != nil {
+				return result, fmt.Errorf("%w; restoring %s failed: %v", removeErr, RetiredMarkerFile, listErr)
+			}
+			return result, removeErr
 		}
 		result.FolderRemoved = true
 		return result, nil

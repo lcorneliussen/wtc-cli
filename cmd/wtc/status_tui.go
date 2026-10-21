@@ -1079,6 +1079,13 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 		}
 		lines = append(lines, warning)
 	}
+	return lines
+}
+
+// statusTUIRetiredLines lists the folders a retire left behind. Only workspace
+// sweeps carry them, so they render outside the collection's PR section.
+func statusTUIRetiredLines(snapshot wtc.StatusSnapshot, width int, styled bool) []string {
+	var lines []string
 	for _, retired := range snapshot.Retired {
 		note := fmt.Sprintf("retired %s: leftovers %s", retired.Folder, strings.Join(retired.BlockingPaths, ", "))
 		if styled {
@@ -1087,6 +1094,9 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 			note = statusTUIFit(note, width)
 		}
 		lines = append(lines, note)
+	}
+	if len(lines) != 0 {
+		lines = append([]string{""}, lines...)
 	}
 	return lines
 }
@@ -1168,6 +1178,7 @@ func (m statusTUIModel) contentLines() []string {
 		if !m.reposOnly {
 			lines = append(lines, statusTUIPRLines(m.snapshot, width, m.showArchived, true)...)
 		}
+		lines = append(lines, statusTUIRetiredLines(m.snapshot, width, true)...)
 		if m.snapshot.StaleCount > 0 {
 			lines = append(lines, "", fmt.Sprintf("%d worktree(s) behind the development tip", m.snapshot.StaleCount))
 		}

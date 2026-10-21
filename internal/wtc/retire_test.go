@@ -333,8 +333,10 @@ func TestRetireMarksLeftoverFolderAndOtherCommandsRespectIt(t *testing.T) {
 		t.Fatal("a lingering status loop repopulated the retired folder")
 	}
 	report := CatchUpReport{}
-	if err := SaveCatchUpReport(&report, filepath.Join(target, ".wtc-catch-up.json")); err == nil {
-		t.Fatal("a catch-up report was written into the retired folder")
+	for _, path := range []string{filepath.Join(target, ".wtc-catch-up.json"), filepath.Join(target, "design", "report.json")} {
+		if err := SaveCatchUpReport(&report, path); err == nil {
+			t.Fatalf("a catch-up report was written into the retired folder: %s", path)
+		}
 	}
 	snapshot, err := c.StatusLocalSnapshot(true)
 	if err != nil {
@@ -390,5 +392,22 @@ func TestRetiredLeftoversWithUnreadableMarkerStillListAndBlockWorktrees(t *testi
 	}
 	if _, err := os.Stat(filepath.Join(folder, "notes.txt")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFinishRetiredFolderKeepsMarkerWhenRemovalFails(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	parent := filepath.Join(c.Workspace, "locked")
+	folder := filepath.Join(parent, "leftover")
+	fixtureFile(t, filepath.Join(folder, RetiredMarkerFile), "{}\n", 0644)
+	if err := os.Chmod(parent, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0755) })
+	if _, err := c.finishRetiredFolder(folder); err == nil {
+		t.Fatal("removal under a read-only parent succeeded")
+	}
+	if !RetiredFolder(folder) {
+		t.Fatal("surviving folder lost its retire marker")
 	}
 }
