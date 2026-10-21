@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeLargeBB puts a bb on PATH that behaves like Node writing --json in one
@@ -59,6 +60,18 @@ func TestForgeOutputKeepsStderrOnFailure(t *testing.T) {
 	exitErr, ok := err.(*exec.ExitError)
 	if !ok || strings.TrimSpace(string(exitErr.Stderr)) != "broken" {
 		t.Fatalf("stderr was not kept: %v", err)
+	}
+}
+
+func TestStatusErrorsQuoteTheRightStream(t *testing.T) {
+	script := "echo out; echo broken >&2; exit 3"
+	_, err := statusJSON("sh", "-c", script)
+	if err == nil || !strings.HasSuffix(err.Error(), ": broken") {
+		t.Fatalf("forge error should quote stderr only: %v", err)
+	}
+	_, err = statusCommand(5*time.Second, "sh", "-c", script)
+	if err == nil || !strings.HasSuffix(err.Error(), ": out\nbroken") {
+		t.Fatalf("command error should quote combined output: %v", err)
 	}
 }
 
