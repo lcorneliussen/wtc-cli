@@ -29,6 +29,24 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	var base, head, dir string
 	var round int
 	var public, noCatchUp bool
+	var startOpen, startNoOpen bool
+	start := &cobra.Command{Use: "start <repo>#<number> [repo ...]", Short: "Create a review-only collection for someone else's PR (wtc new --pr … --review)", Args: cobra.MinimumNArgs(1)}
+	start.Flags().BoolVar(&startOpen, "open", false, "Open the new collection in herdr")
+	start.Flags().BoolVar(&startNoOpen, "no-open", false, "Leave the collection unopened")
+	start.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := refuseUnderGateway("review start"); err != nil {
+			return err
+		}
+		if startOpen && startNoOpen {
+			return fmt.Errorf("--open and --no-open cannot be combined")
+		}
+		c, err := context()
+		if err != nil {
+			return err
+		}
+		return runNew(c, wtc.NewOptions{PR: args[0], Repos: args[1:], Review: true}, startOpen, startNoOpen, *asJSON)
+	}
+	review.AddCommand(start)
 	bundle := &cobra.Command{Use: "bundle <repo> [pr-number]", Short: "Build a local review bundle", Args: cobra.RangeArgs(1, 2)}
 	bundle.Flags().StringVar(&base, "base", "", "Base ref (default: PR destination or repository default)")
 	bundle.Flags().StringVar(&head, "head", "HEAD", "Head commit ref")
@@ -241,6 +259,10 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	ready.RunE = func(cmd *cobra.Command, args []string) error {
 		c, err := context()
 		if err != nil {
+			return err
+		}
+		// Not even --user-authorized: undrafting someone else's PR is theirs.
+		if err := c.RefuseInReviewMode("marking the PR ready"); err != nil {
 			return err
 		}
 		name := repo
