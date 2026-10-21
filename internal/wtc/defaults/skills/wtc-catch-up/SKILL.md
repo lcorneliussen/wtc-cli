@@ -209,7 +209,9 @@ git -C <wt> branch -d <branch>
 
 Run the detach only after establishing that the branch landed: zero commits
 outside the tip, a verified PR head matching HEAD with its merge commit on the
-tip, or patch equivalence (`git cherry` succeeds without `+` entries). A nonzero
+tip, patch equivalence (`git cherry` succeeds without `+` entries), or a squash
+merge commit on the tip that carries the branch: the same tree as HEAD, or the
+same change as the branch's cumulative diff since it forked. A nonzero
 count alone can be residual squash history. Missing or failed evidence leaves
 the worktree untouched for its owner to inspect.
 

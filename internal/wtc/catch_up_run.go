@@ -237,9 +237,16 @@ func catchUpLanded(t catchUpTarget, target string, pr catchUpPR) bool {
 	if extra == "0" {
 		return true
 	}
-	if pr.mergeCommit != "" && pr.head != "" && catchUpGitOK(t.path, "merge-base", "--is-ancestor", pr.mergeCommit, target) {
-		prHead, err := catchUpGit(t.path, "rev-parse", "--verify", pr.head+"^{commit}")
-		if head, headErr := catchUpGit(t.path, "rev-parse", "HEAD"); err == nil && headErr == nil && head == prHead {
+	if pr.mergeCommit != "" && catchUpGitOK(t.path, "merge-base", "--is-ancestor", pr.mergeCommit, target) {
+		if pr.head != "" {
+			prHead, err := catchUpGit(t.path, "rev-parse", "--verify", pr.head+"^{commit}")
+			if head, headErr := catchUpGit(t.path, "rev-parse", "HEAD"); err == nil && headErr == nil && head == prHead {
+				return true
+			}
+		}
+		// A squash merge rewrites the branch's commits into one, so cherry
+		// finds no equivalents. It still carries the branch's content.
+		if catchUpSquashCarries(t.path, pr.mergeCommit) {
 			return true
 		}
 	}
@@ -253,6 +260,49 @@ func catchUpLanded(t catchUpTarget, target string, pr catchUpPR) bool {
 		}
 	}
 	return true
+}
+
+// catchUpSquashCarries reports whether a merge commit on the target carries
+// exactly the branch at HEAD: either both have the same tree, or the merge
+// commit's own change equals the branch's cumulative change since it forked.
+func catchUpSquashCarries(worktree, merge string) bool {
+	head, err := catchUpGit(worktree, "rev-parse", "--verify", "HEAD^{tree}")
+	if err != nil {
+		return false
+	}
+	if tree, err := catchUpGit(worktree, "rev-parse", "--verify", merge+"^{tree}"); err == nil && tree == head {
+		return true
+	}
+	parent, err := catchUpGit(worktree, "rev-parse", "--verify", merge+"^1")
+	if err != nil {
+		return false
+	}
+	base, err := catchUpGit(worktree, "merge-base", "HEAD", parent)
+	if err != nil {
+		return false
+	}
+	branch := catchUpPatchID(worktree, base, "HEAD")
+	return branch != "" && branch == catchUpPatchID(worktree, parent, merge)
+}
+
+// catchUpPatchID identifies the change between two commits independently of
+// how it was committed. An empty change has no identity.
+func catchUpPatchID(worktree, from, to string) string {
+	diff, err := exec.Command("git", "-C", worktree, "diff", "--binary", from, to).Output()
+	if err != nil || len(diff) == 0 {
+		return ""
+	}
+	cmd := exec.Command("git", "-C", worktree, "patch-id", "--stable")
+	cmd.Stdin = bytes.NewReader(diff)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 func catchUpOperation(t catchUpTarget) string {

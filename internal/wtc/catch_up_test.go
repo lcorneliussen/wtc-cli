@@ -564,3 +564,94 @@ func TestCatchUpRunsSecretsHookForSiblingRegisteredByHarnessUpdate(t *testing.T)
 		}
 	}
 }
+
+// squashFixture puts a widget worktree on a two-commit branch and lands the
+// same change on the source's main as one squash commit. With unrelated set,
+// main moves first, so the trees differ and only the change itself matches.
+func squashFixture(t *testing.T, unrelated bool) (*Context, catchUpTarget, string) {
+	t.Helper()
+	c := newWorkspaceFixture(t)
+	owner := filepath.Join(c.Workspace, ".bare", "widget.git")
+	worktree := filepath.Join(c.Collection, "widget")
+	fixtureGit(t, "--git-dir="+owner, "worktree", "add", "-q", "-b", "topic", worktree, "origin/main")
+	commit := func(dir, name, body string) {
+		fixtureFile(t, filepath.Join(dir, name), body, 0644)
+		fixtureGit(t, "-C", dir, "add", name)
+		fixtureGit(t, "-C", dir, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", name)
+	}
+	commit(worktree, "feature.txt", "one\n")
+	commit(worktree, "feature.txt", "one\ntwo\n")
+	source := filepath.Join(c.Workspace, "source-widget")
+	if unrelated {
+		commit(source, "other.txt", "elsewhere\n")
+	}
+	commit(source, "feature.txt", "one\ntwo\n")
+	squash := fixtureGit(t, "-C", source, "rev-parse", "HEAD")
+	fixtureGit(t, "--git-dir="+owner, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+	_, targets, err := c.CatchUpInventory(CatchUpOptions{Repos: []string{"widget"}, DryRun: true})
+	if err != nil || len(targets) != 1 {
+		t.Fatalf("inventory: %+v %v", targets, err)
+	}
+	return c, targets[0], squash
+}
+
+func TestCatchUpLandedAcceptsSquashMergeByContent(t *testing.T) {
+	for _, unrelated := range []bool{false, true} {
+		_, target, squash := squashFixture(t, unrelated)
+		tip := fixtureGit(t, "-C", target.path, "rev-parse", "origin/main")
+		if !catchUpLanded(target, tip, catchUpPR{state: "MERGED", mergeCommit: squash}) {
+			t.Fatalf("squash merge (unrelated main commit: %v) not established as landed", unrelated)
+		}
+		if catchUpLanded(target, tip, catchUpPR{state: "MERGED"}) {
+			t.Fatal("landing established without a merge commit")
+		}
+		parent := fixtureGit(t, "-C", target.path, "rev-parse", squash+"^")
+		if catchUpLanded(target, tip, catchUpPR{state: "MERGED", mergeCommit: parent}) {
+			t.Fatal("a merge commit without the branch's content established landing")
+		}
+	}
+}
+
+func TestStatusReturnsCleanMergedWorktreeToTip(t *testing.T) {
+	c, target, squash := squashFixture(t, true)
+	records := []PRRecord{{Repo: "widget", Number: "7", Branch: "topic"}}
+	details := []statusPRDetail{{Number: "7", State: "MERGED", MergeCommit: squash}}
+	tip := fixtureGit(t, "-C", target.path, "rev-parse", "origin/main")
+
+	t.Setenv("WTC_STATUS_RETURN_MERGED", "off")
+	snapshot, err := c.StatusLocalSnapshot(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.statusReturnMerged(&snapshot, records, details)
+	if fixtureGit(t, "-C", target.path, "symbolic-ref", "--short", "HEAD") != "topic" {
+		t.Fatal("opt-out did not keep the worktree on its branch")
+	}
+
+	t.Setenv("WTC_STATUS_RETURN_MERGED", "")
+	fixtureFile(t, filepath.Join(target.path, "scratch.txt"), "local\n", 0644)
+	snapshot, _ = c.StatusLocalSnapshot(false)
+	c.statusReturnMerged(&snapshot, records, details)
+	if fixtureGit(t, "-C", target.path, "symbolic-ref", "--short", "HEAD") != "topic" {
+		t.Fatal("a dirty worktree was moved")
+	}
+	if err := os.Remove(filepath.Join(target.path, "scratch.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	var progress []string
+	c.StatusProgress = func(message string) { progress = append(progress, message) }
+	snapshot, _ = c.StatusLocalSnapshot(false)
+	c.statusReturnMerged(&snapshot, records, details)
+	if got := fixtureGit(t, "-C", target.path, "rev-parse", "HEAD"); got != tip || catchUpGitOK(target.path, "symbolic-ref", "-q", "HEAD") {
+		t.Fatalf("merged worktree not detached at the tip: %s", got)
+	}
+	if !strings.Contains(strings.Join(progress, "\n"), "Returned widget to origin/main after its PR merged") {
+		t.Fatalf("refresh log: %v", progress)
+	}
+	for _, row := range snapshot.Repos {
+		if row.Dir == "widget" && (row.BranchKind != "detached" || row.Behind != 0) {
+			t.Fatalf("snapshot row not refreshed: %+v", row)
+		}
+	}
+}

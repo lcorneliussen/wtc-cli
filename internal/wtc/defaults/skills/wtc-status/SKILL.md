@@ -76,7 +76,12 @@ in `$WTC_CONFIG_ROOT/wtc.env`.
   a merge or review action.
 - The PR section lists `.wtc-prs` enlistments in a table, with active rows
   before muted merged rows. `C`, `M`, and `R` mean checks, mergeability, and
-  reviews. A merged PR on its old branch calls for catch-up.
+  reviews. A merged PR on its old branch calls for catch-up. A collection
+  refresh does that itself for a clean worktree, not in a Git operation, whose
+  landing is established. It detaches the worktree at the tip, prunes the
+  branch with a safe delete, and says so in the refresh log. Opt out with
+  `WTC_STATUS_RETURN_MERGED=off` or `[status] return_merged = false` in
+  `harness/wtc.toml`. Dirty or unlanded worktrees keep the orphan notice.
   An `unknown` state means the forge lookup was unavailable; it does not prove
   the PR is open. Older merged entries can be hidden behind the `a` toggle.
   The refresh log distinguishes recorded merges from live PR checks.

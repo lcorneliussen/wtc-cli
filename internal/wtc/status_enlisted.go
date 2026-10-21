@@ -232,6 +232,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		} else if count != 0 {
 			c.statusProgress(fmt.Sprintf("Recorded %d final merges", count))
 		}
+		c.statusReturnMerged(&snapshot, records, details)
 	}
 	forgeByRepo := map[string]struct{ slug, forge string }{}
 	for i, record := range records {
@@ -322,4 +323,64 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		}
 	}
 	return snapshot, nil
+}
+
+// statusReturnMergedEnabled reads the opt-out: WTC_STATUS_RETURN_MERGED=off
+// (or 0, false) for one shell, or return_merged = false under [status] in
+// the harness's wtc.toml.
+func (c *Context) statusReturnMergedEnabled() bool {
+	switch strings.ToLower(os.Getenv("WTC_STATUS_RETURN_MERGED")) {
+	case "off", "0", "false", "no":
+		return false
+	}
+	return c.Config.Status.ReturnMerged == nil || *c.Config.Status.ReturnMerged
+}
+
+// statusReturnMerged returns each clean worktree still on a branch whose PR is
+// merged to the development tip, as a single-worktree catch-up would, once
+// landing is established. Everything else keeps the orphan notice.
+func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecord, details []statusPRDetail) {
+	if !c.statusReturnMergedEnabled() || len(records) != len(details) {
+		return
+	}
+	harnessName, _ := c.HarnessRepoName()
+	for i, record := range records {
+		if details[i].State != "MERGED" || record.Branch == "" {
+			continue
+		}
+		dir := record.Repo
+		if record.Repo == "harness" || record.Repo == harnessName {
+			dir = "harness"
+		}
+		for j, row := range snapshot.Repos {
+			if row.Dir != dir || row.BranchKind != "branch" || row.Branch != record.Branch || row.Tree != "clean" || row.Operation != "" {
+				continue
+			}
+			_, targets, err := c.CatchUpInventory(CatchUpOptions{Repos: []string{dir}, DryRun: true})
+			if err != nil || len(targets) != 1 {
+				break
+			}
+			t := targets[0]
+			tip, err := catchUpGit(t.path, "rev-parse", "--verify", t.ref+"^{commit}")
+			if err != nil {
+				break
+			}
+			pr := catchUpPR{state: "MERGED", mergeCommit: details[i].MergeCommit}
+			outcome, reason := c.catchUpReconcile(t, t.ref, tip, pr, CatchUpOptions{CleanOnly: true})
+			if outcome != "updated" {
+				break
+			}
+			c.statusProgress(fmt.Sprintf("Returned %s to %s after its PR merged: %s", dir, t.ref, reason))
+			if updated, err := statusLocalRepo(t); err == nil {
+				if row.Behind != 0 {
+					snapshot.StaleCount--
+				}
+				if updated.Behind != 0 {
+					snapshot.StaleCount++
+				}
+				snapshot.Repos[j] = updated
+			}
+			break
+		}
+	}
 }
