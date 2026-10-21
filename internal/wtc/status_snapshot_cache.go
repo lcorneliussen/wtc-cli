@@ -121,6 +121,10 @@ func (c *Context) WriteStatusSnapshot(snapshot StatusSnapshot) error {
 	if snapshot.Schema != 1 || snapshot.Collection != filepath.Base(c.Collection) || snapshot.ShowCollectionColumn {
 		return fmt.Errorf("snapshot does not describe this collection")
 	}
+	// A status loop that outlived its collection's retire must not repopulate it.
+	if RetiredFolder(c.Collection) {
+		return retiredFolderError(c.Collection)
+	}
 	canonical, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return err

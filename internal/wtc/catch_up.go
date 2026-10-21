@@ -2,6 +2,7 @@ package wtc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -165,6 +166,27 @@ func writeCatchUpFile(path string, data []byte) error {
 func SaveCatchUpReport(report *CatchUpReport, path string) error {
 	if path == "" {
 		return nil
+	}
+	// Check the path as given and as resolved, so a symlinked directory
+	// cannot lead into a retired folder.
+	parent, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		report.ExitStatus = 1
+		report.ReportError = err.Error()
+		return err
+	}
+	resolved, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		report.ExitStatus = 1
+		report.ReportError = err.Error()
+		return err
+	}
+	for _, dir := range []string{parent, resolved} {
+		if retired := retiredAncestor(dir); retired != "" {
+			report.ExitStatus = 1
+			report.ReportError = retiredFolderError(retired).Error()
+			return errors.New(report.ReportError)
+		}
 	}
 	markdownErr := writeCatchUpFile(path+".md", []byte(report.Markdown()))
 	if markdownErr != nil {

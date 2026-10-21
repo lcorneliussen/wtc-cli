@@ -138,6 +138,7 @@ func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.
 		snapshot.Repos = append(snapshot.Repos, part.Repos...)
 		snapshot.StaleCount += part.StaleCount
 	}
+	c.statusRetired(&snapshot)
 	c.statusRuntime(&snapshot, true)
 	return snapshot, report, nil
 }
