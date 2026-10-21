@@ -600,7 +600,7 @@ func TestCatchUpReconcilesRemotelessOwnerAgainstLocalBranches(t *testing.T) {
 		switch {
 		case row.Kind == "fetch":
 			fetches++
-			if row.Outcome != "no-remote" || !strings.Contains(row.Reason, "no origin remote") {
+			if row.Outcome != "no-remote" || !strings.Contains(row.Reason, "no remote;") {
 				t.Fatalf("remote-less fetch row: %+v", row)
 			}
 		case row.Kind == "repo":
@@ -662,5 +662,15 @@ func TestCatchUpNamesUnreachableRemoteAndStillLinksSecrets(t *testing.T) {
 	}
 	if !fetch || !repo || !secrets {
 		t.Fatalf("unreachable remote rows: %+v", report.Outcomes)
+	}
+}
+
+func TestCatchUpRepoOnlyHooksSkipCollectionRenders(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	target := catchUpTarget{collection: filepath.Base(c.Collection), path: c.Harness, repo: "agent-harness", harness: true, managed: true}
+	report := CatchUpReport{Initiator: c.Collection}
+	c.catchUpHooks(&report, target, CatchUpOptions{DryRun: true}, true)
+	if len(report.Outcomes) != 1 || report.Outcomes[0].Repo != "secrets:agent-harness" {
+		t.Fatalf("repo-only hooks ran collection renders: %+v", report.Outcomes)
 	}
 }

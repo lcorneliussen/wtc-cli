@@ -449,7 +449,7 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		if t.noRemote {
 			// Reported on its own outcome, which callers may treat as they
 			// choose; it does not fail the sweep by itself.
-			state, reason = "no-remote", "no origin remote; reconciling against local branches"
+			state, reason = "no-remote", "no remote; reconciling against local branches"
 		} else if !opt.DryRun {
 			if err := catchUpFetch(t.owner); err != nil {
 				state, reason = "failed", err.Error()

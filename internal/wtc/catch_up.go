@@ -65,13 +65,13 @@ type catchUpTarget struct {
 	// the secret linker would reject its directory name. Hooks re-resolve it
 	// from the current registry, since a harness self-update may change it.
 	managed bool
-	// noRemote records an owner without an origin remote. Its own branches
+	// noRemote records an owner without any remote. Its own branches
 	// are the only truth it has, so development refs resolve locally.
 	noRemote bool
 }
 
 // catchUpLocalRef maps a remote-tracking development ref onto the owner's own
-// branch when the owner has no origin remote.
+// branch when the owner has no remote at all.
 func catchUpLocalRef(t catchUpTarget, ref string) string {
 	if t.noRemote {
 		return strings.TrimPrefix(ref, "origin/")
