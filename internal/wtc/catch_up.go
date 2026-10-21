@@ -65,6 +65,18 @@ type catchUpTarget struct {
 	// the secret linker would reject its directory name. Hooks re-resolve it
 	// from the current registry, since a harness self-update may change it.
 	managed bool
+	// noRemote records an owner without an origin remote. Its own branches
+	// are the only truth it has, so development refs resolve locally.
+	noRemote bool
+}
+
+// catchUpLocalRef maps a remote-tracking development ref onto the owner's own
+// branch when the owner has no origin remote.
+func catchUpLocalRef(t catchUpTarget, ref string) string {
+	if t.noRemote {
+		return strings.TrimPrefix(ref, "origin/")
+	}
+	return ref
 }
 
 var catchUpSelector = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
@@ -262,8 +274,11 @@ func (c *Context) CatchUpInventory(opt CatchUpOptions) (CatchUpReport, []catchUp
 			if ref == "" {
 				ref = "origin/main"
 			}
-			targets = append(targets, catchUpTarget{collection: name, path: path, repo: repoName, owner: owner, ref: ref,
-				harness: label == "harness", managed: repoErr == nil || label == "harness"})
+			_, remoteErr := gitOutput("--git-dir="+owner, "remote", "get-url", "origin")
+			t := catchUpTarget{collection: name, path: path, repo: repoName, owner: owner,
+				harness: label == "harness", managed: repoErr == nil || label == "harness", noRemote: remoteErr != nil}
+			t.ref = catchUpLocalRef(t, ref)
+			targets = append(targets, t)
 		}
 	}
 	var unmatched []string

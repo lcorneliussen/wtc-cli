@@ -39,6 +39,9 @@ func (c *Context) StatusRefreshRefsWithAge(all bool, maxAge time.Duration) (Stat
 	seen := map[string]bool{}
 	c.statusProgress("Checking remote refs")
 	for _, target := range targets {
+		if target.noRemote {
+			continue // Its local refs are current by definition.
+		}
 		common, err := statusCommonDir(target.path)
 		if err != nil {
 			report.Failed++
