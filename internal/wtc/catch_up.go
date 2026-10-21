@@ -65,6 +65,31 @@ type catchUpTarget struct {
 	// the secret linker would reject its directory name. Hooks re-resolve it
 	// from the current registry, since a harness self-update may change it.
 	managed bool
+	// noRemote records an owner without any remote. Its own branches
+	// are the only truth it has, so development refs resolve locally.
+	noRemote bool
+}
+
+// catchUpLocalRef maps a remote-tracking development ref onto the owner's own
+// branch when the owner has no remote at all. It is fully qualified, so a tag
+// of the same name cannot stand in for the branch.
+func catchUpLocalRef(t catchUpTarget, ref string) string {
+	if t.noRemote {
+		return "refs/heads/" + catchUpBranchName(ref)
+	}
+	return ref
+}
+
+// catchUpBranchName is the branch a development ref names, for display and
+// for comparison with a worktree's current branch. It accepts short and
+// qualified, local and origin forms.
+func catchUpBranchName(ref string) string {
+	for _, prefix := range []string{"refs/heads/", "refs/remotes/origin/", "origin/"} {
+		if strings.HasPrefix(ref, prefix) {
+			return strings.TrimPrefix(ref, prefix)
+		}
+	}
+	return ref
 }
 
 var catchUpSelector = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
@@ -256,14 +281,19 @@ func (c *Context) CatchUpInventory(opt CatchUpOptions) (CatchUpReport, []catchUp
 				continue
 			}
 			// Unmanaged ext. siblings are valid worktrees too. Their default
-			// development ref follows the shell contract's origin/main fallback.
+			// development ref follows the shell contract's origin/main fallback,
+			// which catchUpLocalRef maps to local main for an owner without any
+			// remote. An owner with only other remotes still fails its fetch.
 			repo, repoErr := target.Repository(repoName)
 			ref := repo.DefaultRef
 			if ref == "" {
 				ref = "origin/main"
 			}
-			targets = append(targets, catchUpTarget{collection: name, path: path, repo: repoName, owner: owner, ref: ref,
-				harness: label == "harness", managed: repoErr == nil || label == "harness"})
+			remotes, remoteErr := gitOutput("--git-dir="+owner, "remote")
+			t := catchUpTarget{collection: name, path: path, repo: repoName, owner: owner,
+				harness: label == "harness", managed: repoErr == nil || label == "harness", noRemote: remoteErr == nil && remotes == ""}
+			t.ref = catchUpLocalRef(t, ref)
+			targets = append(targets, t)
 		}
 	}
 	var unmatched []string
