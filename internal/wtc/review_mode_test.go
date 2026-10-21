@@ -211,3 +211,34 @@ func TestReviewModeRefusesSharedPushURLBeforeChangingOwner(t *testing.T) {
 		t.Fatalf("owner core.bare moved before the refusal: %s", got)
 	}
 }
+
+func TestReviewModeFailedLockLeavesCollectionReviewOnly(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	source := filepath.Join(c.Workspace, "source-widget")
+	head := fixtureGit(t, "-C", source, "rev-parse", "HEAD")
+	fixtureGit(t, "-C", source, "branch", "feature")
+	fixtureGit(t, "-C", source, "update-ref", "refs/pull/23/head", head)
+	c.Registry.Repos[1].Remote = "https://github.com/example/widget.git"
+	bin := filepath.Join(c.Workspace, "bin")
+	fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' '{\"headRefName\":\"feature\",\"headRefOid\":\""+head+"\",\"title\":\"Review fixture\"}'\n", 0755)
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	// An insteadOf rule elsewhere rewrites even the dead push URL, so the
+	// lock's own verification fails after the checkout exists.
+	global := filepath.Join(c.Workspace, "global.gitconfig")
+	fixtureFile(t, global, "[url \""+source+"/\"]\n\tinsteadOf = "+reviewPushPrefix+"\n", 0644)
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	r, err := c.NewCollection(NewOptions{PR: "widget#23", Review: true})
+	if err == nil || !strings.Contains(err.Error(), "after the review-only lock") {
+		t.Fatalf("lock failure was not reported: %v", err)
+	}
+	if !reviewOnlyWorktree(filepath.Join(r.Collection, "widget")) {
+		t.Fatal("partial collection with a failed lock is not review-only")
+	}
+	target, err := OpenCollection(r.Collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := target.RefuseInReviewMode("resolving review threads"); err == nil {
+		t.Fatal("author steps run in the partial collection")
+	}
+}
