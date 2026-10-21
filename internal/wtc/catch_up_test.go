@@ -699,6 +699,14 @@ func TestStatusReturnMergedTreatsHarnessAliasesAsOneWorktree(t *testing.T) {
 	if fixtureGit(t, "-C", c.Harness, "symbolic-ref", "--short", "HEAD") != "topic" {
 		t.Fatal("an open PR under the other harness alias did not keep the branch")
 	}
+	// An inherited identity naming another repo must not redirect a merged
+	// widget PR onto the harness branch of the same name.
+	t.Setenv("WTC_HARNESS_REPO", "widget")
+	c.statusReturnMerged(&snapshot, []PRRecord{{Repo: "widget", Number: "9", Branch: "topic"}}, []statusPRDetail{{Number: "9", State: "MERGED"}})
+	if fixtureGit(t, "-C", c.Harness, "symbolic-ref", "--short", "HEAD") != "topic" {
+		t.Fatal("inherited WTC_HARNESS_REPO redirected a widget merge to the harness")
+	}
+	t.Setenv("WTC_HARNESS_REPO", "agent-harness")
 	c.statusReturnMerged(&snapshot, records[:1], details[:1])
 	if catchUpGitOK(c.Harness, "symbolic-ref", "-q", "HEAD") {
 		t.Fatal("a landed merged harness branch was not returned to the tip")

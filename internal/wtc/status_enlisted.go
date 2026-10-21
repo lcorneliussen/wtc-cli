@@ -345,7 +345,12 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 	if !c.statusReturnMergedEnabled() || len(records) != len(details) {
 		return
 	}
-	harnessName, _ := c.HarnessRepoName()
+	// Resolve the harness from this collection's own owner or origin, as
+	// catch-up does; an inherited WTC_HARNESS_REPO must not redirect it.
+	harnessName, err := c.catchUpHarnessRepo()
+	if err != nil {
+		return
+	}
 	worktreeDir := func(repo string) string {
 		if repo == "harness" || repo == harnessName {
 			return "harness"
@@ -389,10 +394,9 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 				if full.state != "MERGED" {
 					break
 				}
-				pr.head = full.head
-				if full.mergeCommit != "" {
-					pr.mergeCommit = full.mergeCommit
-				}
+				// Take head and merge commit from the same PR, never mixed
+				// with this record's facts.
+				pr.head, pr.mergeCommit = full.head, full.mergeCommit
 			}
 			outcome, reason := c.catchUpReconcile(t, t.ref, tip, pr, CatchUpOptions{CleanOnly: true})
 			if outcome != "updated" {
