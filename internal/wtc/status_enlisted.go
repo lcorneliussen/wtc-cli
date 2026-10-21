@@ -346,22 +346,25 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 		return
 	}
 	harnessName, _ := c.HarnessRepoName()
+	worktreeDir := func(repo string) string {
+		if repo == "harness" || repo == harnessName {
+			return "harness"
+		}
+		return repo
+	}
 	// A branch name may be reused: any other record on it that is not merged
 	// leaves the branch to its owner. This is stricter than catch-up, which
-	// settles on one state per branch.
+	// settles on one state per branch. Both harness aliases name one worktree.
 	live := map[string]bool{}
 	for i, record := range records {
 		if details[i].State != "MERGED" {
-			live[record.Repo+"\x00"+record.Branch] = true
+			live[worktreeDir(record.Repo)+"\x00"+record.Branch] = true
 		}
 	}
 	for i, record := range records {
-		if details[i].State != "MERGED" || record.Branch == "" || live[record.Repo+"\x00"+record.Branch] {
+		dir := worktreeDir(record.Repo)
+		if details[i].State != "MERGED" || record.Branch == "" || live[dir+"\x00"+record.Branch] {
 			continue
-		}
-		dir := record.Repo
-		if record.Repo == "harness" || record.Repo == harnessName {
-			dir = "harness"
 		}
 		for j, row := range snapshot.Repos {
 			if row.Dir != dir || row.BranchKind != "branch" || row.Branch != record.Branch || row.Tree != "clean" || row.Operation != "" {
@@ -376,13 +379,28 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 			if err != nil {
 				break
 			}
-			pr := catchUpPR{state: "MERGED", mergeCommit: details[i].MergeCommit}
+			// The snapshot predates the forge lookups; reconcile only the
+			// branch it saw.
+			pr := catchUpPR{state: "MERGED", mergeCommit: details[i].MergeCommit, branch: record.Branch}
+			if !catchUpLanded(t, tip, pr) {
+				// Recorded merges carry no PR head. Ask the forge for it, as
+				// catch-up does, before giving up on the head evidence.
+				full := c.catchUpPRState(t, record.Branch)
+				if full.state != "MERGED" {
+					break
+				}
+				pr.head = full.head
+				if full.mergeCommit != "" {
+					pr.mergeCommit = full.mergeCommit
+				}
+			}
 			outcome, reason := c.catchUpReconcile(t, t.ref, tip, pr, CatchUpOptions{CleanOnly: true})
 			if outcome != "updated" {
 				break
 			}
 			c.statusProgress(fmt.Sprintf("Returned %s to %s after its PR merged: %s", dir, t.ref, reason))
 			if updated, err := statusLocalRepo(t); err == nil {
+				updated.Runtime = row.Runtime // Services are untouched by the move.
 				if row.Behind != 0 {
 					snapshot.StaleCount--
 				}

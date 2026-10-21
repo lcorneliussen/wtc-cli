@@ -653,9 +653,20 @@ func TestStatusReturnsCleanMergedWorktreeToTip(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Reconciliation refuses a worktree that moved off the branch it was read for.
+	moved := catchUpPR{state: "MERGED", mergeCommit: squash, branch: "elsewhere"}
+	if outcome, reason := c.catchUpReconcile(target, target.ref, tip, moved, CatchUpOptions{CleanOnly: true}); outcome != "needs-owner" || !strings.Contains(reason, "left elsewhere") {
+		t.Fatalf("moved branch: %s %s", outcome, reason)
+	}
+
 	var progress []string
 	c.StatusProgress = func(message string) { progress = append(progress, message) }
 	snapshot, _ := c.StatusLocalSnapshot(false)
+	for j := range snapshot.Repos {
+		if snapshot.Repos[j].Dir == "widget" {
+			snapshot.Repos[j].Runtime = "1 service up"
+		}
+	}
 	c.statusReturnMerged(&snapshot, records, details)
 	if got := fixtureGit(t, "-C", target.path, "rev-parse", "HEAD"); got != tip || catchUpGitOK(target.path, "symbolic-ref", "-q", "HEAD") {
 		t.Fatalf("merged worktree not detached at the tip: %s", got)
@@ -668,8 +679,27 @@ func TestStatusReturnsCleanMergedWorktreeToTip(t *testing.T) {
 		t.Fatal("unmerged local branch was force-deleted")
 	}
 	for _, row := range snapshot.Repos {
-		if row.Dir == "widget" && (row.BranchKind != "detached" || row.Behind != 0) {
+		if row.Dir == "widget" && (row.BranchKind != "detached" || row.Behind != 0 || row.Runtime != "1 service up") {
 			t.Fatalf("snapshot row not refreshed: %+v", row)
 		}
+	}
+}
+
+func TestStatusReturnMergedTreatsHarnessAliasesAsOneWorktree(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	fixtureGit(t, "-C", c.Harness, "switch", "-qc", "topic") // Landed: no commits beyond the tip.
+	records := []PRRecord{{Repo: "harness", Number: "7", Branch: "topic"}, {Repo: "agent-harness", Number: "8", Branch: "topic"}}
+	details := []statusPRDetail{{Number: "7", State: "MERGED"}, {Number: "8", State: "OPEN"}}
+	snapshot, err := c.StatusLocalSnapshot(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.statusReturnMerged(&snapshot, records, details)
+	if fixtureGit(t, "-C", c.Harness, "symbolic-ref", "--short", "HEAD") != "topic" {
+		t.Fatal("an open PR under the other harness alias did not keep the branch")
+	}
+	c.statusReturnMerged(&snapshot, records[:1], details[:1])
+	if catchUpGitOK(c.Harness, "symbolic-ref", "-q", "HEAD") {
+		t.Fatal("a landed merged harness branch was not returned to the tip")
 	}
 }

@@ -12,6 +12,9 @@ import (
 
 type catchUpPR struct {
 	state, mergeCommit, head, base string
+	// branch, when set, is the local branch these facts were read for.
+	// Reconciliation refuses a worktree that has moved to another branch.
+	branch string
 }
 
 func catchUpGit(path string, args ...string) (string, error) {
@@ -359,6 +362,9 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, pr catch
 		return "needs-owner", "dirty worktree; clean-only leaves it untouched"
 	}
 	branch, _ := catchUpGit(t.path, "symbolic-ref", "-q", "--short", "HEAD")
+	if pr.branch != "" && branch != pr.branch {
+		return "needs-owner", "worktree left " + pr.branch + " while its PR was read; untouched"
+	}
 	if branch == "" && !catchUpGitOK(t.path, "merge-base", "--is-ancestor", "HEAD", target) {
 		return "needs-owner", "detached commits not contained in default tip; preserve them on an owner branch"
 	}
