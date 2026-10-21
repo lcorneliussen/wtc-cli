@@ -107,9 +107,15 @@ func TestParseReleaseFragment(t *testing.T) {
 	for name, content := range map[string]string{
 		"indented code":         "## Upgrade\n\n    ~~~sh\n",
 		"indented in list item": "## Upgrade\n\n- step\n\n      ```\n",
+		"code on marker line":   "## Upgrade\n\n-     ~~~sh\n",
+		"nested marker fence":   "## Upgrade\n\n- a\n    - ~~~sh\n      code\n      ~~~\n",
+		"third-level fence":     "## Upgrade\n\n- outer\n  - inner\n    - ~~~sh\n      ## echo ok\n      ~~~\n",
+		"unclosed fence":        "## Upgrade\n\n```\n## inside to the end\n",
+		"subheading":            "## Upgrade\n\n### Steps\n\n- one\n",
 	} {
-		if _, err := ParseReleaseFragment(name, content); err != nil {
-			t.Fatalf("%s: indented code is literal, not a fence: %v", name, err)
+		fragment, err := ParseReleaseFragment(name, content)
+		if err != nil || len(fragment.Sections) != 1 || fragment.Sections[0].Heading != "Upgrade" {
+			t.Fatalf("%s: one Upgrade section expected: %#v, %v", name, fragment, err)
 		}
 	}
 	fragment, err = ParseReleaseFragment("10-item-fence.md", "## Upgrade\n\n- step\n\n  ```\n  ## code\n  ```\n\n## Next\n\n- x\n")
@@ -117,12 +123,12 @@ func TestParseReleaseFragment(t *testing.T) {
 		t.Fatalf("a fence inside a list item must parse: %#v, %v", fragment, err)
 	}
 	for name, content := range map[string]string{
-		"unclosed fence":  "## Upgrade\n\n```\n## inside\n",
 		"fence first":     "```\n## inside\n```\n",
 		"no heading":      "- loose entry\n",
 		"release heading": "# wtc unreleased\n\n## Review\n\n- x\n",
 		"empty section":   "## Review\n\n## Retire\n\n- x\n",
 		"empty heading":   "## \n\n- x\n",
+		"setext heading":  "Topic\n-----\n\n- x\n",
 		"nothing":         "\n",
 	} {
 		if _, err := ParseReleaseFragment(name, content); err == nil {

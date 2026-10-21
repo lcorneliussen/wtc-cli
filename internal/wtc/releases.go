@@ -1,6 +1,7 @@
 package wtc
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,9 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 )
 
 // The unreleased directory always holds README.md, so the pattern matches
@@ -158,70 +162,59 @@ func fragmentNumber(name string) int {
 }
 
 // ParseReleaseFragment splits a fragment into its topic sections. A fragment
-// starts with a "## " heading and every heading has at least one entry.
+// starts with a "## " heading and every heading has at least one entry. The
+// fragment is parsed as CommonMark, so only top-level headings start
+// sections; "#" lines in code blocks, fences and list items are body text.
 func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
-	fragment := ReleaseFragment{Name: name}
-	var current *ReleaseSection
-	var body []string
-	finish := func() error {
-		if current == nil {
-			return nil
-		}
-		current.Body = strings.Trim(strings.Join(body, "\n"), "\n")
-		if strings.TrimSpace(current.Body) == "" {
-			return fmt.Errorf("section %q has no entries", current.Heading)
-		}
-		fragment.Sections = append(fragment.Sections, *current)
-		return nil
+	source := []byte(strings.ReplaceAll(content, "\r\n", "\n"))
+	doc := goldmark.DefaultParser().Parse(text.NewReader(source))
+	type heading struct {
+		title      string
+		start, end int // the heading's own line
 	}
-	fence, item := "", -1
-	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
-		if fence == "" {
-			item = listItemIndent(line, item)
+	var headings []heading
+	for node := doc.FirstChild(); node != nil; node = node.NextSibling() {
+		h, ok := node.(*ast.Heading)
+		if !ok || h.Level > 2 {
+			continue // "###" subheadings belong to the section body
 		}
-		if fence != "" || codeFence(line, item) != "" {
-			// Headings inside a fenced code block are example text.
-			if fence == "" {
-				fence = codeFence(line, item)
-			} else if closesFence(line, fence) {
-				fence = ""
-			}
-			if current == nil {
-				return ReleaseFragment{}, fmt.Errorf("start with a \"## <topic>\" heading")
-			}
-			body = append(body, line)
-			continue
+		lines := h.Lines()
+		if lines.Len() == 0 {
+			return ReleaseFragment{}, fmt.Errorf("empty section heading")
 		}
-		if strings.HasPrefix(line, "# ") {
+		segment := lines.At(0)
+		start := bytes.LastIndexByte(source[:segment.Start], '\n') + 1
+		end := len(source)
+		if i := bytes.IndexByte(source[segment.Stop:], '\n'); i >= 0 {
+			end = segment.Stop + i + 1
+		}
+		marker := strings.TrimLeft(string(source[start:segment.Start]), " ")
+		if h.Level != 2 || !strings.HasPrefix(marker, "## ") {
 			return ReleaseFragment{}, fmt.Errorf("use \"## <topic>\" headings; the release heading is added when notes are assembled")
 		}
-		if strings.HasPrefix(line, "## ") {
-			if err := finish(); err != nil {
-				return ReleaseFragment{}, err
-			}
-			heading := strings.TrimSpace(strings.TrimPrefix(line, "## "))
-			if heading == "" {
-				return ReleaseFragment{}, fmt.Errorf("empty section heading")
-			}
-			current, body = &ReleaseSection{Heading: heading}, nil
-			continue
-		}
-		if current == nil {
-			if strings.TrimSpace(line) != "" {
-				return ReleaseFragment{}, fmt.Errorf("start with a \"## <topic>\" heading")
-			}
-			continue
-		}
-		body = append(body, line)
+		title := strings.TrimSpace(string(segment.Value(source)))
+		headings = append(headings, heading{title: title, start: start, end: end})
 	}
-	if fence != "" {
-		return ReleaseFragment{}, fmt.Errorf("unclosed %s code fence", fence)
-	}
-	if err := finish(); err != nil {
-		return ReleaseFragment{}, err
-	}
-	if len(fragment.Sections) == 0 {
+	if len(headings) == 0 {
 		return ReleaseFragment{}, fmt.Errorf("no \"## <topic>\" section")
+	}
+	if strings.TrimSpace(string(source[:headings[0].start])) != "" {
+		return ReleaseFragment{}, fmt.Errorf("start with a \"## <topic>\" heading")
+	}
+	fragment := ReleaseFragment{Name: name}
+	for i, h := range headings {
+		stop := len(source)
+		if i+1 < len(headings) {
+			stop = headings[i+1].start
+		}
+		if h.title == "" {
+			return ReleaseFragment{}, fmt.Errorf("empty section heading")
+		}
+		body := strings.Trim(string(source[h.end:stop]), "\n")
+		if strings.TrimSpace(body) == "" {
+			return ReleaseFragment{}, fmt.Errorf("section %q has no entries", h.title)
+		}
+		fragment.Sections = append(fragment.Sections, ReleaseSection{Heading: h.title, Body: body})
 	}
 	return fragment, nil
 }
@@ -238,63 +231,7 @@ func sectionJoin(previous, next string) string {
 	return "\n\n"
 }
 
-// listItemIndent tracks the content indentation of the list item a line
-// belongs to: a list marker line starts an item, a blank line keeps it, and a
-// line indented less than the item's content leaves it (-1: no item).
-func listItemIndent(line string, item int) int {
-	if strings.TrimSpace(line) == "" {
-		return item
-	}
-	indent := len(line) - len(strings.TrimLeft(line, " "))
-	if marker := listMarker.FindString(line[indent:]); marker != "" && indent-max(item, 0) <= 3 {
-		return indent + len(marker)
-	}
-	if item >= 0 && indent < item {
-		return -1
-	}
-	return item
-}
-
-// codeFence returns the opening delimiter of a fenced code block (three or
-// more backticks or tildes), or "". The fence may follow list markers, as in
-// "- ~~~sh", and is indented at most three spaces relative to the list item
-// it is in (item, -1 for none); deeper indentation is an indented code block.
-func codeFence(line string, item int) string {
-	trimmed := strings.TrimLeft(line, " ")
-	indent := len(line) - len(trimmed)
-	if item >= 0 && indent >= item {
-		indent -= item
-	}
-	if indent > 3 {
-		return ""
-	}
-	trimmed = listMarker.ReplaceAllString(trimmed, "")
-	if len(trimmed) < 3 {
-		return ""
-	}
-	marker := trimmed[0]
-	if marker != '`' && marker != '~' {
-		return ""
-	}
-	n := 0
-	for n < len(trimmed) && trimmed[n] == marker {
-		n++
-	}
-	if n < 3 || (marker == '`' && strings.ContainsRune(trimmed[n:], '`')) {
-		return ""
-	}
-	return trimmed[:n]
-}
-
 var listMarker = regexp.MustCompile(`^(?:(?:[-*+]|[0-9]+[.)])[ ]+)+`)
-
-// closesFence reports whether line ends the block opened by fence: the same
-// character, at least as many times, and nothing else. A fence inside a list
-// item closes at the item's indentation, so any indentation is accepted.
-func closesFence(line, fence string) bool {
-	trimmed := strings.Trim(line, " \t")
-	return len(trimmed) >= len(fence) && strings.Trim(trimmed, fence[:1]) == ""
-}
 
 // AssembleReleaseNotes renders fragments as one release document headed
 // "# wtc <version>". Sections with the same heading are merged; headings keep
