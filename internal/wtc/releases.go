@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -214,24 +213,37 @@ func ParseReleaseFragment(name, content string) (ReleaseFragment, error) {
 		if strings.TrimSpace(body) == "" {
 			return ReleaseFragment{}, fmt.Errorf("section %q has no entries", h.title)
 		}
+		if !closedBlocks(body) {
+			return ReleaseFragment{}, fmt.Errorf("section %q leaves a code fence or HTML block open; close it so it cannot swallow the sections after it", h.title)
+		}
 		fragment.Sections = append(fragment.Sections, ReleaseSection{Heading: h.title, Body: body})
 	}
 	return fragment, nil
 }
 
-// sectionJoin separates two bodies merged under one heading. A list that
-// follows a list (any marker) stays tight; anything else gets a blank line, so
-// prose is not read as a continuation of the previous list item.
+// closedBlocks reports whether body ends with every block closed: a heading
+// placed after it still parses as a top-level heading.
+func closedBlocks(body string) bool {
+	source := body + "\n\n## wtc-release-notes-sentinel\n"
+	last, ok := parseMarkdown(source).LastChild().(*ast.Heading)
+	return ok && last.Level == 2 && string(last.Lines().Value([]byte(source))) == "wtc-release-notes-sentinel"
+}
+
+func parseMarkdown(source string) ast.Node {
+	return goldmark.DefaultParser().Parse(text.NewReader([]byte(source)))
+}
+
+// sectionJoin separates two bodies merged under one heading. When one body
+// ends in a list and the next starts with one, a single newline keeps them one
+// tight list; anything else gets a blank line, so blocks stay apart.
 func sectionJoin(previous, next string) string {
-	lines := strings.Split(previous, "\n")
-	last := lines[len(lines)-1]
-	if listMarker.MatchString(next) && (listMarker.MatchString(last) || strings.HasPrefix(last, " ")) {
+	_, endsList := parseMarkdown(previous).LastChild().(*ast.List)
+	_, startsList := parseMarkdown(next).FirstChild().(*ast.List)
+	if endsList && startsList {
 		return "\n"
 	}
 	return "\n\n"
 }
-
-var listMarker = regexp.MustCompile(`^(?:(?:[-*+]|[0-9]+[.)])[ ]+)+`)
 
 // AssembleReleaseNotes renders fragments as one release document headed
 // "# wtc <version>". Sections with the same heading are merged; headings keep

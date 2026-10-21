@@ -110,7 +110,6 @@ func TestParseReleaseFragment(t *testing.T) {
 		"code on marker line":   "## Upgrade\n\n-     ~~~sh\n",
 		"nested marker fence":   "## Upgrade\n\n- a\n    - ~~~sh\n      code\n      ~~~\n",
 		"third-level fence":     "## Upgrade\n\n- outer\n  - inner\n    - ~~~sh\n      ## echo ok\n      ~~~\n",
-		"unclosed fence":        "## Upgrade\n\n```\n## inside to the end\n",
 		"subheading":            "## Upgrade\n\n### Steps\n\n- one\n",
 	} {
 		fragment, err := ParseReleaseFragment(name, content)
@@ -124,6 +123,7 @@ func TestParseReleaseFragment(t *testing.T) {
 	}
 	for name, content := range map[string]string{
 		"fence first":     "```\n## inside\n```\n",
+		"unclosed fence":  "## Upgrade\n\n```\n## inside to the end\n",
 		"no heading":      "- loose entry\n",
 		"release heading": "# wtc unreleased\n\n## Review\n\n- x\n",
 		"empty section":   "## Review\n\n## Retire\n\n- x\n",
@@ -177,6 +177,12 @@ func TestAssembleReleaseNotesSeparatesProseFromLists(t *testing.T) {
 		{Name: "3-c.md", Sections: []ReleaseSection{{Heading: "Upgrade", Body: "- two"}}},
 	}
 	want := "# wtc 1.0.0\n\n## Upgrade\n\n- one\n  continued\n\nProse paragraph.\n\n- two\n"
+	if got := AssembleReleaseNotes("1.0.0", []ReleaseFragment{
+		{Name: "1.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "Run the command\n  with flags."}}},
+		{Name: "2.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "2. step"}}},
+	}); got != "# wtc 1.0.0\n\n## Steps\n\nRun the command\n  with flags.\n\n2. step\n" {
+		t.Fatalf("indented prose must stay apart from a following list: %q", got)
+	}
 	if got := AssembleReleaseNotes("1.0.0", []ReleaseFragment{
 		{Name: "1.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "1. first"}}},
 		{Name: "2.md", Sections: []ReleaseSection{{Heading: "Steps", Body: "* second"}}},
