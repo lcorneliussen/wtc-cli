@@ -57,7 +57,7 @@ func (c *Context) StatusRefreshRefsWithAge(all bool, maxAge time.Duration) (Stat
 		}
 		report.Attempted++
 		c.statusProgress(fmt.Sprintf("Fetching remote refs %d", report.Attempted))
-		if _, err := statusJSON("git", "--git-dir="+common, "fetch", "--prune", "origin"); err != nil {
+		if _, err := statusCommand(30*time.Second, "git", "--git-dir="+common, "fetch", "--prune", "origin"); err != nil {
 			report.Failed++
 		}
 	}
