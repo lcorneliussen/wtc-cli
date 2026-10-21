@@ -59,8 +59,12 @@ Actual Azure provisioning and connectivity across machines remain onboarding
 checks for the project using them.
 
 [Release notes](release-notes.md) are committed and embedded separately from
-generated harness guidance. Before tagging, add the matching numbered note;
-the release workflow publishes that exact file as the GitHub release body.
+generated harness guidance. A change that affects behaviour adds its own
+fragment, `internal/wtc/release-notes/unreleased/<issue>-<slug>.md`; it never
+edits a shared file, so concurrent branches do not conflict over notes. Before
+tagging, `go run ./tools/release-notes cut <version>` turns the fragments into
+the numbered note; the release workflow publishes that exact file as the
+GitHub release body and fails while fragments remain.
 
 [Public demos](demos/README.md) record actual collection and bootstrap commands
 against synthetic local repositories. They need no forge account or agent.
