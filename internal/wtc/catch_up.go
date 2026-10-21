@@ -144,7 +144,12 @@ func SaveCatchUpReport(report *CatchUpReport, path string) error {
 	}
 	// Check the path as given and as resolved, so a symlinked directory
 	// cannot lead into a retired folder.
-	parent := filepath.Dir(path)
+	parent, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		report.ExitStatus = 1
+		report.ReportError = err.Error()
+		return err
+	}
 	resolved, err := filepath.EvalSymlinks(parent)
 	if err != nil {
 		report.ExitStatus = 1

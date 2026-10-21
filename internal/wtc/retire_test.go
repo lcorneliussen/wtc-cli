@@ -341,6 +341,10 @@ func TestRetireMarksLeftoverFolderAndOtherCommandsRespectIt(t *testing.T) {
 			t.Fatalf("a catch-up report was written into the retired folder: %s", path)
 		}
 	}
+	t.Chdir(filepath.Join(target, "design"))
+	if err := SaveCatchUpReport(&report, "report.json"); err == nil {
+		t.Fatal("a relative report path wrote into the retired folder")
+	}
 	snapshot, err := c.StatusLocalSnapshot(true)
 	if err != nil {
 		t.Fatal(err)
