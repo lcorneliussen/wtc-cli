@@ -97,8 +97,18 @@ const baseKey = "wtcbase"
 
 // RecordBase notes branch as the base of the managed worktree name in the
 // clone at dir: what it is compared with, caught up from and published to.
+// An empty branch forgets the recorded base, so the repository's default
+// applies.
 func RecordBase(dir, name, branch string) error {
-	_, err := git(dir, "config", "branch."+Branch(name)+"."+baseKey, strings.TrimPrefix(branch, "origin/"))
+	key := "branch." + Branch(name) + "." + baseKey
+	if branch == "" {
+		if RecordedBase(dir, name) == "" {
+			return nil
+		}
+		_, err := git(dir, "config", "--unset", key)
+		return err
+	}
+	_, err := git(dir, "config", key, strings.TrimPrefix(branch, "origin/"))
 	return err
 }
 

@@ -319,6 +319,12 @@ func HasBranch(dir, branch string) bool {
 	return gitOK(dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch+"^{commit}")
 }
 
+// HasRemoteBranch reports whether the repository at dir has fetched branch
+// from origin.
+func HasRemoteBranch(dir, branch string) bool {
+	return gitOK(dir, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch+"^{commit}")
+}
+
 // WorkerSeparator joins a task's worktree name and a worker's: worker a of
 // task 12-paging works in collection 12-paging--a, on branch
 // openclaw/12-paging--a.

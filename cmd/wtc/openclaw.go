@@ -206,6 +206,17 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 				}
 			}
 		}
+		if worker != "" && baseFlag != "" {
+			// An explicit base that is a branch only here, another worker's or
+			// the task's before it is published, is where the worker starts.
+			// It is still measured and caught up against the task's base.
+			if dir := openclaw.GatewayProjectDirByName(gatewayStateDir(), project); dir != "" && openclaw.HasBranch(dir, baseFlag) && !openclaw.HasRemoteBranch(dir, baseFlag) {
+				base = baseFlag
+				if err := openclaw.RecordBase(dir, target, openclaw.RecordedBase(dir, task)); err != nil {
+					return fmt.Errorf("recording the base of %s: %w", repo, err)
+				}
+			}
+		}
 		if worker != "" && baseFlag == "" {
 			// A worker builds on the task's work so far, when the task has a
 			// branch in this repository, and is measured and caught up
