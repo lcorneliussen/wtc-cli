@@ -75,15 +75,21 @@ type catchUpTarget struct {
 // of the same name cannot stand in for the branch.
 func catchUpLocalRef(t catchUpTarget, ref string) string {
 	if t.noRemote {
-		return "refs/heads/" + strings.TrimPrefix(ref, "origin/")
+		return "refs/heads/" + catchUpBranchName(ref)
 	}
 	return ref
 }
 
 // catchUpBranchName is the branch a development ref names, for display and
-// for comparison with a worktree's current branch.
+// for comparison with a worktree's current branch. It accepts short and
+// qualified, local and origin forms.
 func catchUpBranchName(ref string) string {
-	return strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "origin/")
+	for _, prefix := range []string{"refs/heads/", "refs/remotes/origin/", "origin/"} {
+		if strings.HasPrefix(ref, prefix) {
+			return strings.TrimPrefix(ref, prefix)
+		}
+	}
+	return ref
 }
 
 var catchUpSelector = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)

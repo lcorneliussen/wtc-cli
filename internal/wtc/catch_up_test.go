@@ -709,3 +709,18 @@ func TestCatchUpLinksSecretsWhenFetchFailsBeforePRPreflight(t *testing.T) {
 		t.Fatalf("want one repo row and one secrets run: %+v", report.Outcomes)
 	}
 }
+
+func TestCatchUpLocalRefAcceptsEveryDevelopmentRefForm(t *testing.T) {
+	local := catchUpTarget{noRemote: true}
+	for _, ref := range []string{"origin/main", "main", "refs/heads/main", "refs/remotes/origin/main"} {
+		if got := catchUpLocalRef(local, ref); got != "refs/heads/main" {
+			t.Errorf("%s resolved to %s", ref, got)
+		}
+		if got := catchUpBranchName(ref); got != "main" {
+			t.Errorf("%s names branch %s", ref, got)
+		}
+	}
+	if got := catchUpLocalRef(catchUpTarget{}, "origin/main"); got != "origin/main" {
+		t.Errorf("owner with a remote rewrote its ref: %s", got)
+	}
+}
