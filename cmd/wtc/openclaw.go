@@ -382,11 +382,13 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 // unlistedError asks the agent to ask the person what to do with
 // repositories the collection's harness does not list: add them beside the
 // harness ad hoc, register them in it first, or give them a collection of
-// their own without a harness. The commands run as printed: they name the
-// collection and, while it has not recorded its harness yet, the harness
-// this add-repo chose. 1 adds every repository asked for; 2 adds the harness
-// first when the collection has no worktree of it, then every repository;
-// 3 adds the unlisted ones elsewhere and the listed ones here.
+// their own without a harness. Its add-repo commands for this collection
+// run as printed: they name it and, while it has not recorded its harness
+// yet, the harness this add-repo chose. 1 is one such command, for every
+// repository asked for. 2 adds the harness first when the collection has no
+// worktree of it, then, after the registry edit, every repository. 3 adds
+// the unlisted ones to another collection, whose name the person picks for
+// <another-name>, and the listed ones here.
 func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string, unrecorded, hasWorktree bool) error {
 	here := " --worktree " + worktree
 	if unrecorded {

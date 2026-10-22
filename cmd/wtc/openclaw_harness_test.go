@@ -514,9 +514,10 @@ func TestWorkersInStatusAndCatchUp(t *testing.T) {
 	}
 }
 
-// The commands the question about an unlisted repository prints run as
-// printed: they keep the listed repositories and the harness this add-repo
-// chose, which a new collection has not recorded yet.
+// The add-repo commands for this collection that the question about an
+// unlisted repository prints run as printed: choice 1, and the part of
+// choice 3 that stays here. They keep the listed repositories and the
+// harness this add-repo chose, which a new collection has not recorded yet.
 func TestAddRepoUnlistedChoicesRunAsPrinted(t *testing.T) {
 	_, _ = harnessGateway(t)
 	for _, config := range []string{
