@@ -53,6 +53,27 @@
       "defaultHarness": {
         "type": "string",
         "description": "The harness a collection uses when it does not name one. Without it, a collection uses the only configured harness, or the one whose registry lists the repositories it adds; otherwise the agent asks."
+      },
+      "sandboxGit": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "port"
+        ],
+        "description": "Serve the gateway's clones to sandboxed sessions, read-only, and take back their branches with wtc catch-up. The sandboxes reach it on a Docker network they share with the gateway, at the address set as WTC_GATEWAY_GIT in their environment. It answers sandbox containers of this gateway only.",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "The port to listen on."
+          },
+          "host": {
+            "type": "string",
+            "default": "0.0.0.0",
+            "description": "The address to listen on: the gateway's address on the sandboxes' network, or all."
+          }
+        }
       }
     },
     "additionalProperties": false

@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { startSandboxGit } from "./sandbox-git.js";
 
 const PLUGIN_ID = "wtc";
 
@@ -346,6 +347,31 @@ export default {
       requiredScopes: ["operator.write"],
       handler: (action) => svcAction(action, "restart"),
     });
+
+    // The gateway's git service for sandboxed sessions, when configured.
+    const sandboxGit = api.pluginConfig?.sandboxGit;
+    if (sandboxGit?.port && api.registerService) {
+      let server = null;
+      api.registerService({
+        id: "sandbox-git",
+        start() {
+          server = startSandboxGit({
+            host: sandboxGit.host ?? "0.0.0.0",
+            port: sandboxGit.port,
+            run,
+            openclaw: onPath("openclaw") ? ["openclaw"] : [process.execPath, path.resolve(process.argv[1] ?? "")],
+            listSessionEntries: (params) => api.runtime.agent.session.listSessionEntries(params),
+            collectionOf,
+            worktreeOf,
+            logger: api.logger,
+          });
+        },
+        stop() {
+          server?.close();
+          server = null;
+        },
+      });
+    }
 
     api.session.controls.registerSessionAction({
       id: "catch-up",

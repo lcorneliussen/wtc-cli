@@ -120,19 +120,41 @@ echo "head=$(git rev-parse HEAD)"; echo "parents=$(git log -1 --format=%P | wc -
 	})
 }
 
-// A catch-up resolved in the sandbox, with Git's own merge state: the
-// sandbox fetches its session branch and the base from the gateway's clone,
-// which needs no forge credential, merges there, and only the files come
-// back. The gateway then records the merge commit the sandbox made: the same
-// parents and the same tree.
-func TestSandboxMergesFromGateway(t *testing.T) {
-	g := startGateway(t, gatewayOptions{repos: syntheticRepos, stubModel: true, sandbox: true, sandboxNetwork: true})
+// wtc catch-up in a sandbox, through the plugin's git service: the sandbox
+// reads the gateway's clone, merges its base with Git's own conflict state,
+// and the gateway takes the branch, the sandbox's commits included. Only
+// the collection's branches and origin's are served, and nothing is taken
+// by a push.
+func TestSandboxCatchUp(t *testing.T) {
+	g := startGateway(t, gatewayOptions{repos: syntheticRepos, stubModel: true, sandbox: true, sandboxNetwork: true, plugin: true})
 	const who = "-c user.name=t -c user.email=t@example.com"
-	g.sh(`cd /home/node/repos/api && printf 'base\n' > shared.md && printf 'base\n' > other.md && git add . && git ` + who + ` commit -qm base`)
+	upstream := func(script string) {
+		t.Helper()
+		g.sh(`rm -rf /tmp/up && git clone -q /tmp/origins/api.git /tmp/up && cd /tmp/up && ` + script + ` && git add -A && git ` + who + ` commit -qm "main moves" && git push -q origin main
+git -C /home/node/repos/api fetch -q /tmp/origins/api.git +refs/heads/main:refs/remotes/origin/main`)
+	}
+	upstream(`printf 'base\n' > shared.md && printf 'base\n' > notes.md`)
+	// Sessions start from the clone's main: its origin is not reachable here.
+	g.sh("git -C /home/node/repos/api merge -q --ff-only origin/main")
+	// Another collection's branch, which this one must not see.
+	hidden := g.sh(`cd /home/node/repos/api && h=$(git ` + who + ` commit-tree -p origin/main -m "someone else's" 'origin/main^{tree}') && git update-ref refs/heads/openclaw/someone-else "$h" && echo "$h"`)
 	if r := g.call("projects.register", map[string]any{"path": "/home/node/repos/api", "name": "api"}); r.str("id") != "api" {
 		t.Fatalf("projects.register: %v", r)
 	}
-	worktree := fmt.Sprintf("wtc-mrg-%d", time.Now().Unix())
+	out, err := exec.Command("docker", "inspect", "--format", `{{(index .NetworkSettings.Networks "`+g.network+`").IPAddress}}`, g.container).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := "http://" + strings.TrimSpace(string(out)) + ":18790"
+	g.sh(gatewayEnv + `node dist/index.js config set ` + PluginConfigKey + `.sandboxGit '{"port":18790}' --strict-json >/dev/null
+node dist/index.js config set agents.defaults.sandbox.docker.env '{"` + GatewayGitEnv + `":"` + service + `"}' --strict-json >/dev/null
+node dist/index.js plugins reload wtc >/dev/null 2>&1 || true
+for _ in $(seq 1 60); do curl -s localhost:18790/wtc/session | grep -q sandbox && break; sleep 1; done`)
+	if answer := g.sh("curl -s localhost:18790/wtc/session"); !strings.Contains(answer, "no sandbox container") {
+		t.Fatalf("the gateway itself, which is no sandbox, was answered: %s", answer)
+	}
+
+	worktree := fmt.Sprintf("wtc-cu-%d", time.Now().Unix())
 	branch := Branch(worktree)
 	parent := g.call("sessions.create", map[string]any{"agentId": "dev", "label": worktree}).str("key")
 	add, err := AddRepo("api", "api", "", worktree, "", "Work on api")
@@ -144,6 +166,9 @@ func TestSandboxMergesFromGateway(t *testing.T) {
 	if child == "" || path == "" {
 		t.Fatalf("no child session: %v", created)
 	}
+	// The base moves after the session started, against its work.
+	upstream(`printf 'main\n' > shared.md && printf 'new\n' > new.md`)
+	base := g.sh("git -C /home/node/repos/api rev-parse origin/main")
 	const workdir = "/workspace"
 	sandbox := func(message, command string) map[string]string {
 		t.Helper()
@@ -155,86 +180,72 @@ func TestSandboxMergesFromGateway(t *testing.T) {
 		t.Logf("%s, in the sandbox:\n%s", message, results[len(results)-1])
 		return fields(results[len(results)-1])
 	}
-	settled := func(want string) string {
-		t.Helper()
-		var status string
-		for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
-			if status = g.sh("git -C " + path + " status --porcelain"); strings.Contains(status, want) {
-				return status
-			}
-		}
-		t.Fatalf("%s did not reach the managed worktree: %q", want, status)
-		return ""
-	}
 
-	// The session's work, committed on the gateway as wtc does; then the
-	// base moves and conflicts with it.
-	sandbox("Edit shared.md.", `printf 'session\n' > shared.md`)
-	settled("shared.md")
-	g.sh("git -C " + path + " " + who + " commit -qam 'session work'")
-	g.sh(`cd /home/node/repos/api && printf 'main\n' > shared.md && printf 'main\n' > other.md && printf 'new\n' > new.md && git add . && git ` + who + ` commit -qm 'main moves'`)
-	session, base := g.sh("git -C "+path+" rev-parse HEAD"), g.sh("git -C /home/node/repos/api rev-parse main")
-
-	// The gateway's clone, served read-only. Telling sessions apart and
-	// limiting each to its own repositories is the broker's, not this test's.
-	g.sh(`nohup git daemon --reuseaddr --export-all --base-path=/home/node/repos --listen=0.0.0.0 --port=9418 /home/node/repos > /tmp/git-daemon.log 2>&1 &
-sleep 1`)
-	out, err := exec.Command("docker", "inspect", "--format", `{{(index .NetworkSettings.Networks "`+g.network+`").IPAddress}}`, g.container).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	remote := "git://" + strings.TrimSpace(string(out)) + "/api"
-
-	var merged map[string]string
-	t.Run("the sandbox merges with Git's merge state", func(t *testing.T) {
-		merged = sandbox("Catch up with main.", `g() { git `+who+` "$@"; }
-echo "before=$(git rev-parse HEAD) shallow=$(git rev-parse --is-shallow-repository)"
-git fetch -q --unshallow `+remote+` `+branch+`:refs/remotes/gateway/session main:refs/remotes/gateway/main 2>&1 || git fetch -q `+remote+` `+branch+`:refs/remotes/gateway/session main:refs/remotes/gateway/main 2>&1
-git reset -q gateway/session
-echo "afterreset=$(git status --porcelain -- . ':!.openclaw' | tr '\n' ';')"
-g merge -q --no-edit gateway/main 2>&1 | tail -1
+	var first map[string]string
+	t.Run("the merge stops on the conflict, with Git's merge state", func(t *testing.T) {
+		first = sandbox("Work, then catch up.", `g() { git `+who+` "$@"; }
+printf 'session\n' > shared.md && g commit -qam "session work"
+printf 'wip\n' > notes.md
+echo "doctor=$(wtc doctor 2>&1 | tr '\n' ';')"
+wtc catch-up > /tmp/cu.out 2>&1; echo "catchup=$?"; echo "said=$(tr '\n' ' ' < /tmp/cu.out)"
 echo "conflicted=$(git diff --name-only --diff-filter=U | tr '\n' ' ')"
 echo "mergelog=$(git log --merge --format=%s | tr '\n' ';')"
-echo "base=$(git show :1:shared.md) ours=$(git show :2:shared.md) theirs=$(git show :3:shared.md)"
-printf 'resolved\n' > shared.md && g add shared.md && g commit -q --no-edit
-echo "head=$(git rev-parse HEAD)"; echo "parents=$(git log -1 --format=%P)"; echo "tree=$(git rev-parse 'HEAD^{tree}')"`)
-		if merged["conflicted"] != "shared.md " {
-			t.Fatalf("the merge in the sandbox did not stop on shared.md: %v", merged)
+echo "theirs=$(git show :3:shared.md)"
+echo "refs=$(git ls-remote gateway | awk '{print $2}' | tr '\n' ' ')"
+echo "hidden=$(git fetch -q gateway `+hidden+` >/dev/null 2>&1 && git cat-file -e `+hidden+` 2>/dev/null && echo fetched || echo refused)"
+echo "push=$(git push -q gateway HEAD:refs/heads/pushed >/dev/null 2>&1 && echo pushed || echo refused)"`)
+		if first["catchup"] != "0" || first["conflicted"] != "shared.md " || first["theirs"] != "main" {
+			t.Fatalf("the catch-up did not stop on shared.md with the base's side: %v", first)
 		}
-		if merged["afterreset"] != "" {
-			t.Errorf("the sandbox's files differ from the session branch it fetched: %q", merged["afterreset"])
+		if !strings.Contains(first["mergelog"], "session work") || !strings.Contains(first["mergelog"], "main moves") {
+			t.Errorf("git log --merge does not show both sides: %q", first["mergelog"])
 		}
-		if merged["parents"] != session+" "+base {
-			t.Errorf("the sandbox merged %q, want %s %s", merged["parents"], session, base)
+		if !strings.Contains(first["doctor"], "read-only from the gateway") {
+			t.Errorf("wtc doctor in the sandbox: %q", first["doctor"])
+		}
+		if strings.Contains(first["refs"], "someone-else") || !strings.Contains(first["refs"], "refs/heads/"+branch) || !strings.Contains(first["refs"], "refs/remotes/origin/main") {
+			t.Errorf("the sandbox was shown %q", first["refs"])
+		}
+		if first["hidden"] != "refused" {
+			t.Errorf("another collection's commit could be fetched: %q", first["hidden"])
+		}
+		if g.sh("git -C /home/node/repos/api branch --list pushed") != "" || first["push"] != "refused" {
+			t.Errorf("a push was taken: %q", first["push"])
 		}
 	})
 	if t.Failed() {
 		return
 	}
 
-	t.Run("the gateway records the same merge", func(t *testing.T) {
-		status := settled("new.md")
-		t.Logf("the managed worktree after the turn:\n%s", status)
-		// The parents are what the gateway served; the tree is what came back.
-		commit := g.sh(`cd ` + path + ` && git add -A -- . ':!.openclaw' && git ` + who + ` commit-tree "$(git write-tree)" -p ` + session + ` -p ` + base + ` -m "Merge main" | tee /tmp/merge && git update-ref HEAD "$(cat /tmp/merge)" ` + session + ` >&2`)
-		tree := g.sh("git -C " + path + " rev-parse '" + commit + "^{tree}'")
-		if tree != merged["tree"] {
-			t.Errorf("the gateway's merge has tree %s, the sandbox's %s:\n%s", tree, merged["tree"], g.sh("git -C "+path+" diff --stat "+merged["tree"]+" "+tree+" || true"))
+	t.Run("the gateway takes the resolved merge and the sandbox's commits", func(t *testing.T) {
+		seen := sandbox("Resolve.", `printf 'resolved\n' > shared.md && git add shared.md
+wtc catch-up --continue > /tmp/cu.out 2>&1; echo "catchup=$?"; echo "said=$(tr '\n' ' ' < /tmp/cu.out)"
+echo "head=$(git rev-parse HEAD)"; echo "parents=$(git log -1 --format=%P)"; echo "notes=$(cat notes.md)"`)
+		if seen["catchup"] != "0" || seen["notes"] != "wip" {
+			t.Fatalf("continue: %v", seen)
 		}
-		if left := g.sh("git -C " + path + " status --porcelain -- . ':!.openclaw'"); left != "" {
-			t.Errorf("the managed worktree is not clean after the merge: %q", left)
+		if gw := g.sh("git -C " + path + " rev-parse HEAD"); gw != seen["head"] {
+			t.Fatalf("the gateway is at %s, the sandbox at %s", gw, seen["head"])
+		}
+		if parents := strings.Fields(seen["parents"]); len(parents) != 2 || parents[1] != base || g.sh("git -C "+path+" log -1 --format=%s "+parents[0]) != "session work" {
+			t.Errorf("the merge's parents %q: the sandbox's commit and origin/main %s", seen["parents"], base)
+		}
+		var status string
+		for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
+			if status = g.sh("git -C " + path + " status --porcelain -- . ':!.openclaw'"); status == "M notes.md" {
+				break
+			}
+		}
+		if status != "M notes.md" {
+			t.Errorf("the managed worktree after the turn, want only the uncommitted notes.md: %q", status)
 		}
 		t.Logf("on the gateway:\n%s", g.sh("git -C "+path+" log --graph --oneline -6"))
 	})
 
-	t.Run("the session goes on after the merge", func(t *testing.T) {
-		seen := sandbox("Look around.", `git fetch -q `+remote+` `+branch+`:refs/remotes/gateway/session 2>&1; git reset -q gateway/session
-echo "head=$(git rev-parse HEAD)"; echo "status=$(git status --porcelain -- . ':!.openclaw' | tr '\n' ';')"; echo "shared=$(cat shared.md)"; printf 'more\n' >> other.md`)
-		if seen["shared"] != "resolved" || seen["status"] != "" {
-			t.Errorf("the sandbox after the merge: %v", seen)
-		}
-		if status := settled("other.md"); !strings.Contains(status, "M other.md") {
-			t.Errorf("a later edit did not reconcile: %q", status)
+	t.Run("the session goes on", func(t *testing.T) {
+		seen := sandbox("Look around.", `echo "status=$(git status --porcelain -- . ':!.openclaw' | tr '\n' ';')"; wtc catch-up > /tmp/cu.out 2>&1; echo "catchup=$?"; echo "said=$(tr '\n' ' ' < /tmp/cu.out)"`)
+		if seen["catchup"] != "0" || !strings.Contains(seen["said"], "already contains") {
+			t.Errorf("a second catch-up: %v", seen)
 		}
 	})
 }

@@ -193,6 +193,10 @@ func run() error {
 	var doctorOpenClaw bool
 	doctor.Flags().BoolVar(&doctorOpenClaw, "openclaw", false, "Check the OpenClaw gateway on this host, also from outside an agent's command")
 	doctor.RunE = func(cmd *cobra.Command, args []string) error {
+		if gw := openclaw.GatewayFromEnv(os.Getenv); gw != nil {
+			env := realOpenClawEnv()
+			return printDoctor(sandboxChecks(gw, os.Getenv, env.run), "OpenClaw sandbox diagnostics", asJSON)
+		}
 		if doctorOpenClaw || currentHost() == openclaw.HostOpenClaw {
 			return printDoctor(openClawChecks(realOpenClawEnv()), "OpenClaw gateway diagnostics", asJSON)
 		}

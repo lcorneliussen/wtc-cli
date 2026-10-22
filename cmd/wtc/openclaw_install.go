@@ -87,6 +87,7 @@ another host or in an image build.`,
 		return nil
 	}
 	oc.AddCommand(install)
+	addSandboxGitCommands(oc)
 	root.AddCommand(oc)
 }
 

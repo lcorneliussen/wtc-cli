@@ -14,7 +14,7 @@ import (
 func addCatchUpCommand(root *cobra.Command, asJSON *bool) {
 	var opt wtc.CatchUpOptions
 	var repos, dest, from string
-	var harnessOnly bool
+	var harnessOnly, cont bool
 	cmd := &cobra.Command{Use: "catch-up [collection ...]", Short: "Catch up selected worktree collections"}
 	cmd.Flags().BoolVar(&opt.All, "all", false, "Select every collection in the workspace (clean only)")
 	cmd.Flags().StringVar(&repos, "repos", "", "Comma-separated sibling or registry names")
@@ -29,7 +29,14 @@ func addCatchUpCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&opt.NoSecrets, "no-secrets", false, "Skip secret links")
 	cmd.Flags().StringVar(&dest, "dest", "", "Under OpenClaw: branch to merge in (default: origin's default branch)")
 	cmd.Flags().StringVar(&from, "from", "", "Under OpenClaw: merge a worker's branch (openclaw/<task>--<worker>) instead, with no fetch")
+	cmd.Flags().BoolVar(&cont, "continue", false, "In an OpenClaw sandbox: finish a catch-up that stopped on conflicts, once they are resolved")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if gw := openclaw.GatewayFromEnv(os.Getenv); gw != nil {
+			return sandboxCatchUp(gw, cont, *asJSON)
+		}
+		if cont {
+			return fmt.Errorf("--continue is for a catch-up in an OpenClaw sandbox (%s set)", openclaw.GatewayGitEnv)
+		}
 		if currentHost() == openclaw.HostOpenClaw {
 			return catchUpCheckout(dest, from, *asJSON)
 		}
