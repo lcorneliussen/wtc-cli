@@ -222,3 +222,51 @@ func TestConflictMarkers(t *testing.T) {
 		t.Fatalf("markers in %v after resolving", got)
 	}
 }
+
+func TestSandboxCatchUpKeepsConflictingEdits(t *testing.T) {
+	c, gw := managedWorktree(t, "https://github.com/example-org/docs.git")
+	g, sb, sbgit := sandboxCopy(t, c)
+	writeAt(t, sb, "README.md", "uncommitted\n")
+	upstream(t, c, "README.md", "upstream\n")
+
+	r, err := SandboxCatchUpCheckout(sb, g, false)
+	if err != nil || strings.Join(r.Unstashed, " ") != "README.md" || r.Delivered == nil {
+		t.Fatalf("edits that conflict with the base: %+v %v", r, err)
+	}
+	// A fast-forward to the base: the gateway has the commit already.
+	if gw("rev-parse", "HEAD") != gw("rev-parse", "origin/main") {
+		t.Fatal("the gateway did not move to the base")
+	}
+	if !strings.Contains(sbgit("diff"), "uncommitted") || sbgit("stash", "list") == "" {
+		t.Fatal("the conflicting edits are neither in the file nor kept in the stash")
+	}
+}
+
+func TestSandboxCatchUpMarkersFromTheBase(t *testing.T) {
+	c, _ := managedWorktree(t, "https://github.com/example-org/docs.git")
+	g, sb, sbgit := sandboxCopy(t, c)
+	writeAt(t, sb, "README.md", "session\n")
+	sbgit("commit", "-qam", "work")
+	// The base brings a fixture that looks like a conflict, and a conflict.
+	upstream(t, c, "fixture.txt", "<<<<<<< ours\nx\n>>>>>>> theirs\n")
+	upstream(t, c, "README.md", "upstream\n")
+	if r, err := SandboxCatchUpCheckout(sb, g, false); err != nil || strings.Join(r.Conflicts, " ") != "README.md" {
+		t.Fatalf("catch-up: %+v %v", r, err)
+	}
+	writeAt(t, sb, "README.md", "both\n")
+	sbgit("add", "README.md")
+	if r, err := SandboxCatchUpCheckout(sb, g, true); err != nil || r.Delivered == nil {
+		t.Fatalf("the base's own markers blocked the merge: %+v %v", r, err)
+	}
+}
+
+func TestAcceptSandboxBranchRefusesGatewayTrailers(t *testing.T) {
+	c, gw := managedWorktree(t, "https://github.com/example-org/docs.git")
+	head := gw("rev-parse", "HEAD")
+	for _, body := range []string{"work\n\nCo-authored-by: Someone <someone@example.com>", "work\n\nOpenClaw-Publication: 1"} {
+		commit := gw("commit-tree", "-p", head, "-m", body, head+"^{tree}")
+		if _, err := AcceptSandboxBranch(c.Dir, commit, ""); err == nil || !strings.Contains(err.Error(), "only the gateway writes") {
+			t.Errorf("%q: %v", body, err)
+		}
+	}
+}

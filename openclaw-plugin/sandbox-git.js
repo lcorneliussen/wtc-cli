@@ -106,9 +106,11 @@ export function startSandboxGit({ host, port, run, openclaw, listSessionEntries,
 
   // The session a connection's sandbox works for, and the repositories its
   // collection may read.
-  const identify = async (address) => {
-    let container = (await containersByAddress(false)).get(address);
-    if (!container) container = (await containersByAddress(true)).get(address);
+  // A delivery asks Docker again: an address a container gave up may
+  // already be another's.
+  const identify = async (address, fresh = false) => {
+    let container = (await containersByAddress(fresh)).get(address);
+    if (!container && !fresh) container = (await containersByAddress(true)).get(address);
     if (!container) return { error: "this address is no sandbox container of the gateway's" };
     const id = projectionWorktreeId(container.workspaceDir);
     const agentId = String(container.sessionKey ?? "").split(":")[1];
@@ -206,7 +208,8 @@ export function startSandboxGit({ host, port, run, openclaw, listSessionEntries,
   const server = createServer(async (req, res) => {
     try {
       const address = String(req.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
-      const who = await identify(address);
+      const delivery = req.method === "POST" && req.url.startsWith("/wtc/deliver");
+      const who = await identify(address, delivery);
       if (who.error) {
         req.resume();
         return send(res, 403, { error: who.error });

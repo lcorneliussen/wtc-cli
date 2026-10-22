@@ -79,7 +79,8 @@ func sandboxCatchUp(gw *openclaw.HTTPGateway, cont, asJSON bool) error {
 }
 
 // sandboxChecks is wtc doctor in a sandbox: the gateway's git service
-// answers for this session, and nothing here can push.
+// answers for this session, and none of the usual credentials that could
+// push is present.
 func sandboxChecks(gw *openclaw.HTTPGateway, getenv func(string) string, run func(name string, args ...string) (string, error)) []doctorCheck {
 	fetch := doctorCheck{Name: "fetch", Required: true}
 	if s, err := gw.Session(); err != nil {

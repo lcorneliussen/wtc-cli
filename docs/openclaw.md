@@ -172,7 +172,10 @@ sandbox. Then, in the sandbox:
   and put back after.
 - Then the gateway takes the session's branch, the sandbox's commits and the
   merge included, if it extends the gateway's branch, merges only origin's
-  commits and leaves no conflict markers. Its branch and index move to it;
+  commits and leaves no conflict markers. The commits keep the sandbox's
+  author; one that carries a `Co-authored-by` trailer or the publication
+  marker is refused, since [credit](#credit-for-the-people-who-asked) is the
+  gateway's to add. Its branch and index move to it;
   the files arrive from the sandbox, as every edit does. Publishing stays the
   person's: ↑ in the card.
 - If the gateway committed since (a publication), the sandbox's history

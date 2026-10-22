@@ -66,3 +66,54 @@ test("a connection from no sandbox container is refused", async () => {
     server.close();
   }
 });
+
+test("a sandbox container is served its session, cannot push, and delivers its branch", async () => {
+  const asked = [];
+  let inspected = 0;
+  const server = startSandboxGit({
+    host: "127.0.0.1",
+    port: 0,
+    run: async (argv, options) => {
+      asked.push({ argv: argv.join(" "), cwd: options?.cwd });
+      if (argv[1] === "sandbox") {
+        return { code: 0, stdout: JSON.stringify({ containers: [{ containerName: "sbx-1", backendId: "docker", running: true, sessionKey: "agent:dev:required-session:x", workspaceDir: "/state/worktree-projections/w1/workspace" }] }), stderr: "" };
+      }
+      if (argv[0] === "docker") {
+        inspected += 1;
+        return { code: 0, stdout: "/sbx-1 127.0.0.1\n", stderr: "" };
+      }
+      if (argv[2] === "sandbox-session") return { code: 0, stdout: JSON.stringify({ branch: "openclaw/x", base: "main", head: "h" }), stderr: "" };
+      if (argv[2] === "sandbox-deliver") return { code: 0, stdout: JSON.stringify({ branch: "openclaw/x", head: "c", commits: 1, merges: 0 }), stderr: "" };
+      return { code: 1, stdout: "", stderr: "unexpected" };
+    },
+    openclaw: ["openclaw"],
+    listSessionEntries: ({ agentId }) => (agentId === "dev" ? [
+      { sessionKey: "s1", entry: { worktree: { id: "w1", branch: "openclaw/x" }, projectId: "api", workspaceDir: "/wt/api" } },
+      { sessionKey: "s2", entry: { worktree: { id: "w2", branch: "openclaw/y" }, projectId: "api", workspaceDir: "/wt/other" } },
+    ] : []),
+    collectionOf: () => ({ children: [] }),
+    worktreeOf: (entry) => entry?.workspaceDir ?? null,
+  });
+  try {
+    await new Promise((resolve) => server.once("listening", resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const session = await (await fetch(`${base}/wtc/session`)).json();
+    assert.deepEqual([session.repo, session.branch, session.repos], ["api", "openclaw/x", ["api"]]);
+    assert.equal(asked.find((a) => a.argv.includes("sandbox-session")).cwd, "/wt/api");
+
+    const push = await fetch(`${base}/api/info/refs?service=git-receive-pack`);
+    assert.equal(push.status, 403);
+    assert.match((await push.json()).error, /read-only/);
+    assert.equal((await fetch(`${base}/web/info/refs?service=git-upload-pack`)).status, 404);
+
+    const before = inspected;
+    const delivered = await fetch(`${base}/wtc/deliver?commit=${"a".repeat(40)}`, { method: "POST", body: Buffer.from("bundle") });
+    assert.equal(delivered.status, 200);
+    const deliver = asked.find((a) => a.argv.includes("sandbox-deliver"));
+    assert.match(deliver.argv, new RegExp(`--commit ${"a".repeat(40)} --bundle \\S+branch\\.bundle$`));
+    assert.equal(deliver.cwd, "/wt/api");
+    assert.ok(inspected > before, "a delivery did not ask Docker again who the address is");
+  } finally {
+    server.close();
+  }
+});

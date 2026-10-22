@@ -2,13 +2,13 @@
 
 package openclaw
 
-// What a read-only fetch credential for sandboxed sessions (#113) relies on:
-// that a sandbox on a network it shares with the gateway can reach a broker
-// there, that the broker can tell which sandbox container asks from the
+// What the gateway's git service for sandboxed sessions (#113) relies on:
+// that a sandbox on a network it shares with the gateway can reach a service
+// there, that the service can tell which sandbox container asks from the
 // connection alone, and what becomes of commits made in a sandbox's private
-// checkout.
+// checkout. Then wtc catch-up through the plugin's service.
 //
-//	go test -tags openclaw_integration ./internal/openclaw/ -run SandboxBroker -v
+//	go test -tags openclaw_integration ./internal/openclaw/ -run 'SandboxBroker|SandboxCatchUp' -v
 
 import (
 	"fmt"
@@ -106,8 +106,8 @@ echo "head=$(git rev-parse HEAD)"; echo "parents=$(git log -1 --format=%P | wc -
 		t.Logf("on the gateway, commits since the turn:\n%s\nstatus:\n%s\nbranches: %s", log, status, g.sh("git -C "+path+" branch --format='%(refname:short)' | tr '\n' ' '"))
 		// The sandbox's Git metadata is private: its commits, branches and
 		// merges stay there, and only the files reconcile, as changes for the
-		// gateway to commit. So a merge in the sandbox would reach the gateway
-		// as plain edits, and catch-up merges belong on the gateway.
+		// gateway to commit. Only wtc catch-up, below, hands the gateway the
+		// sandbox's commits.
 		if seen["parents"] != "2" {
 			t.Fatalf("the sandbox did not make its merge: %v", seen)
 		}

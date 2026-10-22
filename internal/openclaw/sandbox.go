@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -92,7 +93,8 @@ func AcceptSandboxBranch(dir, commit, bundle string) (Delivery, error) {
 	if what := c.inProgress(); what != "" {
 		return d, fmt.Errorf("%s is in progress in the gateway's worktree: it has to finish first", what)
 	}
-	const incoming = "refs/wtc/sandbox-incoming"
+	// One per branch: worktrees of a clone share its refs.
+	incoming := "refs/wtc/sandbox-incoming/" + d.Branch
 	defer func() { _, _ = git(c.Dir, "update-ref", "-d", incoming) }()
 	if bundle != "" {
 		if _, err := git(c.Dir, "bundle", "verify", "--quiet", bundle); err != nil {
@@ -126,6 +128,9 @@ func AcceptSandboxBranch(dir, commit, bundle string) (Delivery, error) {
 			continue
 		}
 		d.Commits++
+		if trailer := gatewayTrailer(c.Dir, hashes[0]); trailer != "" {
+			return d, fmt.Errorf("commit %.12s carries %s, which only the gateway writes: credit and publication records are the gateway's. Amend the message without it", hashes[0], trailer)
+		}
 		if len(hashes) < 3 {
 			continue
 		}
@@ -148,6 +153,20 @@ func AcceptSandboxBranch(dir, commit, bundle string) (Delivery, error) {
 	_, _ = git(c.Dir, "update-index", "-q", "--refresh")
 	d.Head = commit
 	return d, nil
+}
+
+// gatewayTrailer is the first line of commit's message that only the
+// gateway may write: the publication marker publishedHead trusts, or a
+// co-author trailer, which the gateway adds for verified people only.
+func gatewayTrailer(dir, commit string) string {
+	body, _ := git(dir, "log", "-1", "--format=%B", commit)
+	for _, line := range strings.Split(body, "\n") {
+		l := strings.ToLower(strings.TrimSpace(line))
+		if strings.HasPrefix(l, strings.ToLower(publicationMarker)) || strings.HasPrefix(l, "co-authored-by:") {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
 }
 
 func mergedFromOrigin(dir, commit string) bool {
@@ -184,23 +203,41 @@ func conflictMarkers(dir, merge string) []string {
 }
 
 // stagedConflictMarkers lists the files where the index adds a conflict
-// marker that HEAD does not have.
+// marker that neither side of the merge has: one a side brings, in a test
+// fixture say, is not left over.
 func stagedConflictMarkers(dir string) []string {
-	out, err := git(dir, "diff", "--cached", "--no-color", "--no-renames", "-U0")
-	if err != nil {
-		return nil
+	added := func(against string) map[string]map[string]bool {
+		out, err := git(dir, "diff", "--cached", "--no-color", "--no-renames", "-U0", against)
+		markers := map[string]map[string]bool{}
+		if err != nil {
+			return markers
+		}
+		file := ""
+		for _, line := range strings.Split(out, "\n") {
+			if name, ok := strings.CutPrefix(line, "+++ b/"); ok {
+				file = name
+				continue
+			}
+			if body, ok := strings.CutPrefix(line, "+"); ok && isConflictMarker(body) {
+				if markers[file] == nil {
+					markers[file] = map[string]bool{}
+				}
+				markers[file][body] = true
+			}
+		}
+		return markers
 	}
+	ours, theirs := added("HEAD"), added("MERGE_HEAD")
 	var files []string
-	file := ""
-	for _, line := range strings.Split(out, "\n") {
-		if name, ok := strings.CutPrefix(line, "+++ b/"); ok {
-			file = name
-			continue
-		}
-		if body, ok := strings.CutPrefix(line, "+"); ok && isConflictMarker(body) && (len(files) == 0 || files[len(files)-1] != file) {
-			files = append(files, file)
+	for file, lines := range ours {
+		for line := range lines {
+			if theirs[file][line] {
+				files = append(files, file)
+				break
+			}
 		}
 	}
+	sort.Strings(files)
 	return files
 }
 
