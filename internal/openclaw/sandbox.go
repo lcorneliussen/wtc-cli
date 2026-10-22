@@ -189,8 +189,9 @@ func conflictMarkers(dir, merge string) []string {
 			file = name
 			continue
 		}
-		// Combined diff lines start with one column per parent.
-		if len(line) < 3 || !strings.Contains(line[:2], "+") || strings.ContainsAny(line[:2], "@") {
+		// Combined diff lines start with one column per parent: "++" is a
+		// line neither parent has.
+		if len(line) < 3 || line[:2] != "++" {
 			continue
 		}
 		if isConflictMarker(line[2:]) {
@@ -535,6 +536,9 @@ func unstash(dir string, r *SandboxCatchUp) error {
 		if r.Unstashed = strings.Fields(conflicts); len(r.Unstashed) == 0 {
 			return fmt.Errorf("the catch-up is done, but the uncommitted edits could not be put back (%w). They are in stash %.12s: move the files in the way aside, then git stash apply %.12s", err, hash, hash)
 		}
+		// The markers are in the files; the index goes back to HEAD, so the
+		// edits are ordinary uncommitted ones again.
+		_, _ = git(dir, "reset", "--quiet")
 		r.Note = fmt.Sprintf("the uncommitted edits conflict with the merge in %s; they are also kept in stash %.12s: resolve the markers, then git stash drop it", strings.Join(r.Unstashed, ", "), hash)
 		return nil
 	}

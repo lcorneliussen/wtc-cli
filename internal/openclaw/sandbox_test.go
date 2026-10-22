@@ -223,6 +223,36 @@ func TestConflictMarkers(t *testing.T) {
 	}
 }
 
+// A marker one side brings, next to a hunk the merge resolved, is not left
+// over.
+func TestConflictMarkersFromOneSide(t *testing.T) {
+	c, gw := managedWorktree(t, "https://github.com/example-org/docs.git")
+	write(t, c, "f.txt", "a\nb\nc\n")
+	gw("add", ".")
+	gw("commit", "-qm", "f")
+	base := gw("rev-parse", "HEAD")
+	write(t, c, "f.txt", "a\nb\nours\n")
+	gw("commit", "-qam", "ours")
+	ours := gw("rev-parse", "HEAD")
+	gw("checkout", "-q", base)
+	write(t, c, "f.txt", "<<<<<<< fixture\na\nb\ntheirs\n")
+	gw("commit", "-qam", "theirs")
+	theirs := gw("rev-parse", "HEAD")
+	tree := func(content string) string {
+		write(t, c, "f.txt", content)
+		gw("add", "f.txt")
+		return gw("write-tree")
+	}
+	merge := gw("commit-tree", "-p", ours, "-p", theirs, "-m", "merge", tree("<<<<<<< fixture\na\nb\nboth\n"))
+	if got := conflictMarkers(c.Dir, merge); len(got) != 0 {
+		t.Fatalf("a marker from one side was taken for a leftover: %v", got)
+	}
+	left := gw("commit-tree", "-p", ours, "-p", theirs, "-m", "merge", tree("<<<<<<< fixture\na\nb\n<<<<<<< HEAD\nboth\n"))
+	if got := conflictMarkers(c.Dir, left); strings.Join(got, " ") != "f.txt" {
+		t.Fatalf("a leftover marker was missed: %v", got)
+	}
+}
+
 func TestSandboxCatchUpKeepsConflictingEdits(t *testing.T) {
 	c, gw := managedWorktree(t, "https://github.com/example-org/docs.git")
 	g, sb, sbgit := sandboxCopy(t, c)
@@ -239,6 +269,12 @@ func TestSandboxCatchUpKeepsConflictingEdits(t *testing.T) {
 	}
 	if !strings.Contains(sbgit("diff"), "uncommitted") || sbgit("stash", "list") == "" {
 		t.Fatal("the conflicting edits are neither in the file nor kept in the stash")
+	}
+	if got := sbgit("diff", "--name-only", "--diff-filter=U"); got != "" {
+		t.Fatalf("unmerged entries left in the index: %s", got)
+	}
+	if again, err := SandboxCatchUpCheckout(sb, g, false); err != nil || !strings.Contains(again.Note, "already contains") {
+		t.Fatalf("a catch-up after the conflicting edits: %+v %v", again, err)
 	}
 }
 
