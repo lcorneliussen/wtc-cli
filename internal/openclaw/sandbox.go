@@ -529,12 +529,13 @@ func unstash(dir string, r *SandboxCatchUp) error {
 	hash := strings.TrimSpace(string(data))
 	_ = os.Remove(p)
 	if _, err := git(dir, "stash", "apply", "--quiet", hash); err != nil {
-		// The stash stays until the conflicts are resolved.
+		// The stash is kept as a copy: the agent drops it once the
+		// conflicts in the files are resolved.
 		conflicts, _ := git(dir, "diff", "--name-only", "--diff-filter=U")
 		if r.Unstashed = strings.Fields(conflicts); len(r.Unstashed) == 0 {
 			return fmt.Errorf("the catch-up is done, but the uncommitted edits could not be put back (%w). They are in stash %.12s: move the files in the way aside, then git stash apply %.12s", err, hash, hash)
 		}
-		r.Note = fmt.Sprintf("the uncommitted edits conflict with the merge in %s; they are also in stash %.12s", strings.Join(r.Unstashed, ", "), hash)
+		r.Note = fmt.Sprintf("the uncommitted edits conflict with the merge in %s; they are also kept in stash %.12s: resolve the markers, then git stash drop it", strings.Join(r.Unstashed, ", "), hash)
 		return nil
 	}
 	if list, err := git(dir, "stash", "list", "--format=%H"); err == nil {
