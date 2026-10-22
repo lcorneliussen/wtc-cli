@@ -181,6 +181,14 @@ test("panel: an empty collection", async () => {
   view.dispose();
 });
 
+test("panel: a new conversation, with no folder yet", async () => {
+  const { host, view } = await mount("panel", { collection: { label: null, sessionKey: "agent:main:dashboard:new" }, repos: [], services: [] });
+  const all = texts(host);
+  assert.ok(all.includes("agent:main:dashboard:new"));
+  assert.ok(!all.includes("null"));
+  view.dispose();
+});
+
 test("panel: a busy collection", async () => {
   const { host, view } = await mount("panel", busy);
   const all = texts(host);
