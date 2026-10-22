@@ -221,7 +221,7 @@ func TestAddRepoAsksWhichHarnessWhenItIsNotClear(t *testing.T) {
 // a default harness: ad hoc beside it, registered in it, or a collection of
 // its own.
 func TestAddRepoAsksAboutAnUnlistedRepository(t *testing.T) {
-	_, _ = harnessGateway(t)
+	state, git := harnessGateway(t)
 	withGatewayConfig(t, `{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}], "defaultHarness": "platform"}`)
 	for _, args := range [][]string{{"infra", "--worktree", "20-x"}, {"api", "infra", "--worktree", "21-x"}} {
 		_, err := addRepoPlan(t, args...)
@@ -239,6 +239,31 @@ func TestAddRepoAsksAboutAnUnlistedRepository(t *testing.T) {
 	}
 	if intents, err := addRepoPlan(t, "infra", "--worktree", "23-x", "--harness", "none"); err != nil || summary(intents) != "infra@infra:" {
 		t.Errorf("--harness none: %s %v", summary(intents), err)
+	}
+
+	// The collection's own harness asks too, and once it has a worktree of
+	// the harness the registry to edit is already there.
+	if _, err := addRepoPlan(t, "api", "--worktree", "24-x"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := addRepoPlan(t, "infra", "--worktree", "24-x"); err == nil || !strings.Contains(err.Error(), "run `wtc add-repo https://github.com/example-org/platform-harness` first") {
+		t.Errorf("a recorded harness without its worktree: %v", err)
+	}
+	wt := filepath.Join(state, "worktrees", "h1", "24-x")
+	git(filepath.Join(state, "repos", "platform-harness"), "worktree", "add", "-q", "-b", "openclaw/24-x", wt)
+	_, err := addRepoPlan(t, "infra", "--worktree", "24-x")
+	if err == nil || !strings.Contains(err.Error(), "does not list infra") || strings.Contains(err.Error(), "first") {
+		t.Errorf("a recorded harness with its worktree: %v", err)
+	}
+	// A worker of the task is not asked again.
+	if _, err := addRepoPlan(t, "infra", "--worktree", "24-x", "--worker", "a", "--work", "x"); err != nil {
+		t.Errorf("a worker: %v", err)
+	}
+
+	// The only harness, without a default, asks as well.
+	withGatewayConfig(t, `{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}]}`)
+	if _, err := addRepoPlan(t, "infra", "--worktree", "25-x"); err == nil || !strings.Contains(err.Error(), "does not list infra") {
+		t.Errorf("the only harness: %v", err)
 	}
 }
 
@@ -402,11 +427,11 @@ func TestAddRepoSpawnsAWorker(t *testing.T) {
 	}
 
 	for args, want := range map[string]string{
-		"api --worktree 12-x --worker a":                                     "what should the worker do",
-		"api --worktree 12-x --worker a --work x --separate":                 "do not go together",
-		"api --worktree 12-x --worker Bad --work x":                          "not a worker of 12-x",
-		"api --worktree 12-x --worker a--b --work x":                         "not a worker of 12-x",
-		"example-org/elsewhere --worktree 12-x --worker a --work x --ad-hoc": "a worker needs it there",
+		"api --worktree 12-x --worker a":                            "what should the worker do",
+		"api --worktree 12-x --worker a --work x --separate":        "do not go together",
+		"api --worktree 12-x --worker Bad --work x":                 "not a worker of 12-x",
+		"api --worktree 12-x --worker a--b --work x":                "not a worker of 12-x",
+		"example-org/elsewhere --worktree 12-x --worker a --work x": "a worker needs it there",
 	} {
 		if _, err := addRepoPlan(t, strings.Fields(args)...); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", args, err, want)

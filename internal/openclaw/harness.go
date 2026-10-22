@@ -59,6 +59,12 @@ func NewCollectionFolder(stateDir, name, harness string) string {
 	if dir := CollectionFolder(stateDir, name); dir != "" {
 		return dir
 	}
+	// A worker's collection is beside its task's, in the task's harness.
+	if i := strings.LastIndex(name, WorkerSeparator); harness == "" && i > 0 {
+		if task := CollectionFolder(stateDir, name[:i]); task != "" && filepath.Base(filepath.Dir(filepath.Dir(task))) == "wtc" {
+			return filepath.Join(filepath.Dir(task), name)
+		}
+	}
 	if harness == "" {
 		harness = AdHocFolder
 	}

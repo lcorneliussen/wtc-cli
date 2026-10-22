@@ -114,6 +114,13 @@ func TestCollectionFolder(t *testing.T) {
 	if got := CollectionFolder(state, "3-x"); got != filepath.Join(state, "wtc-collections", "3-x") {
 		t.Errorf("a folder from before: %s", got)
 	}
+	// A worker's collection goes beside its task's.
+	if got := NewCollectionFolder(state, "2-x--a", ""); got != filepath.Join(state, "wtc", "platform", "2-x--a") {
+		t.Errorf("a worker of a task in a harness: %s", got)
+	}
+	if got := NewCollectionFolder(state, "3-x--a", ""); got != filepath.Join(state, "wtc", AdHocFolder, "3-x--a") {
+		t.Errorf("a worker of a task from before: %s", got)
+	}
 	if _, err := ParseGatewayConfig(`{"harnesses": [{"name": "ad-hoc", "remote": "https://github.com/o/h"}]}`); err == nil {
 		t.Error("a harness called ad-hoc")
 	}

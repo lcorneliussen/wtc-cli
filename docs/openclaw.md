@@ -241,7 +241,8 @@ A collection works in at most one harness:
   `default_ref` from the harness's `.harness-repos.yml`: from the
   collection's worktree of the harness once there is one, before that from
   the gateway's clone at `ref`. `--base` still wins. A URL or `owner/name`
-  that is not in the registry is added ad hoc.
+  that is in the registry resolves to its entry; one that is not is the
+  person's choice (above).
 - **Instructions.** `wtc status` shows the harness and its worktree; the
   agent reads its `AGENTS.md` from there.
 

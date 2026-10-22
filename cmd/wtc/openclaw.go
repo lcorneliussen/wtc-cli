@@ -362,7 +362,9 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 		}
 		adds = append(adds, add)
 	}
-	if len(unlisted) > 0 && !adHoc {
+	// A worker takes part of the task, whose session already decided about
+	// its repositories.
+	if len(unlisted) > 0 && !adHoc && !worker {
 		return nil, nil, unlistedError(*h, unlisted, reg.worktree != "")
 	}
 	return adds, h, nil
@@ -374,7 +376,7 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 // their own without a harness.
 func unlistedError(h openclaw.Harness, repos []string, hasWorktree bool) error {
 	which := strings.Join(repos, " ")
-	register := fmt.Sprintf("add `wtc add-repo %s` first, ", h.Remote)
+	register := fmt.Sprintf("run `wtc add-repo %s` first, then ", h.Remote)
 	if hasWorktree {
 		register = ""
 	}

@@ -95,3 +95,30 @@ test("a collection's folder is where wtc made it", () => {
   assert.equal(collectionFolder(state, "2-x"), path.join(state, "wtc/ad-hoc/2-x"));
   assert.equal(collectionFolder(state, "3-x"), path.join(state, "wtc-collections/3-x"));
 });
+
+test("a service action runs in the collection's folder, and says when there is none yet", async () => {
+  const state = mkdtempSync(path.join(os.tmpdir(), "wtc-state-"));
+  const actions = new Map();
+  const cwds = [];
+  const entries = [
+    { sessionKey: "agent:main:c", entry: {} },
+    { sessionKey: "agent:main:repo:api", entry: { parentSessionKey: "agent:main:c", projectId: "api", worktree: { id: "w1", branch: "openclaw/9-x" }, workspaceDir: "/worktrees/w1" } },
+  ];
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      state: { resolveStateDir: () => state },
+      agent: { session: { listSessionEntries: () => entries, getSessionEntry: async () => undefined } },
+      system: { runCommandWithTimeout: async (argv, options) => { cwds.push(options.cwd); return { code: 0, stdout: "", stderr: "" }; } },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const up = () => actions.get("svc").handler({ sessionKey: "agent:main:c", agentId: "main", payload: { op: "up" } });
+  assert.match((await up()).error, /no folder yet/);
+  mkdirSync(path.join(state, "wtc/platform/9-x"), { recursive: true });
+  assert.equal((await up()).ok, true);
+  assert.equal(cwds.at(-1), path.join(state, "wtc/platform/9-x"));
+});
