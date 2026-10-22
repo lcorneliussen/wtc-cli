@@ -3,6 +3,8 @@ package openclaw
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -29,6 +31,40 @@ type GatewayConfig struct {
 // NoHarness is what --harness takes for a collection without one.
 const NoHarness = "none"
 
+// AdHocFolder is the folder of collections without a harness, beside one
+// per harness: $OPENCLAW_STATE_DIR/wtc/<harness>/<name>, so the path says
+// which harness a collection works in.
+const AdHocFolder = "ad-hoc"
+
+// CollectionFolder is the folder of the gateway collection called name, or
+// "" while it has none. Folders made before there was one per harness, in
+// wtc-collections/<name>, are still found.
+func CollectionFolder(stateDir, name string) string {
+	legacy := filepath.Join(stateDir, "wtc-collections", name)
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	found, _ := filepath.Glob(filepath.Join(stateDir, "wtc", "*", name))
+	for _, dir := range found {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+	return ""
+}
+
+// NewCollectionFolder is where the collection called name gets its folder:
+// the one it has, else under its harness, else under AdHocFolder.
+func NewCollectionFolder(stateDir, name, harness string) string {
+	if dir := CollectionFolder(stateDir, name); dir != "" {
+		return dir
+	}
+	if harness == "" {
+		harness = AdHocFolder
+	}
+	return filepath.Join(stateDir, "wtc", harness, name)
+}
+
 var (
 	harnessName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 	branchName  = regexp.MustCompile(`^[A-Za-z0-9._][A-Za-z0-9._/-]*$`)
@@ -47,8 +83,8 @@ func ParseGatewayConfig(out string) (GatewayConfig, error) {
 	}
 	seen := map[string]bool{}
 	for i, h := range cfg.Harnesses {
-		if !harnessName.MatchString(h.Name) || h.Name == NoHarness {
-			return cfg, fmt.Errorf("%s: harness name %q: lowercase letters, digits and hyphens, and not %q", PluginConfigKey, h.Name, NoHarness)
+		if !harnessName.MatchString(h.Name) || h.Name == NoHarness || h.Name == AdHocFolder {
+			return cfg, fmt.Errorf("%s: harness name %q: lowercase letters, digits and hyphens, and neither %q nor %q", PluginConfigKey, h.Name, NoHarness, AdHocFolder)
 		}
 		if seen[h.Name] {
 			return cfg, fmt.Errorf("%s: harness %s is configured twice", PluginConfigKey, h.Name)
@@ -89,10 +125,14 @@ func (c GatewayConfig) names() string {
 
 // ChooseHarness decides the harness of a collection, or nil for none. flag is
 // --harness, recorded the harness the collection already has, and names the
-// repositories add-repo was given by name; has says whether a harness's
-// registry lists one. A collection keeps its harness. Otherwise the choice
-// has to be clear: given, the default, the only one, or the only one that
-// lists every name. When it is not, the agent asks the person.
+// repositories add-repo was given, by name or URL; has says whether a
+// harness's registry lists one. A collection keeps its harness, and a given
+// one wins. Otherwise the registries decide: the harness that lists the
+// repositories (of several that list some, the ones that list all); of
+// several still, the default, or the person when none of them is. When none
+// lists them, or there are none to go by, the default or the only harness,
+// and add-repo asks the person what to do with a repository it does not
+// list.
 func ChooseHarness(cfg GatewayConfig, flag, recorded string, names []string, has func(Harness, string) bool) (*Harness, error) {
 	ask := fmt.Sprintf("Ask the person which harness this collection works in (%s), then pass --harness <name>, or --harness %s for a collection without one", cfg.names(), NoHarness)
 	switch {
@@ -118,27 +158,51 @@ func ChooseHarness(cfg GatewayConfig, flag, recorded string, names []string, has
 		return h, nil
 	case len(cfg.Harnesses) == 0:
 		return nil, nil
-	case cfg.DefaultHarness != "":
-		return cfg.Find(cfg.DefaultHarness), nil
-	case len(cfg.Harnesses) == 1:
-		return &cfg.Harnesses[0], nil
+	case len(names) == 0:
+		if cfg.DefaultHarness != "" {
+			return cfg.Find(cfg.DefaultHarness), nil
+		}
+		if len(cfg.Harnesses) == 1 {
+			return &cfg.Harnesses[0], nil
+		}
+		return nil, fmt.Errorf("which harness? %s", ask)
 	}
-	var fits []*Harness
-	if len(names) > 0 {
-		for i, h := range cfg.Harnesses {
-			all := true
-			for _, n := range names {
-				all = all && has(h, n)
-			}
-			if all {
-				fits = append(fits, &cfg.Harnesses[i])
+	var some, all []*Harness
+	for i, h := range cfg.Harnesses {
+		n := 0
+		for _, name := range names {
+			if has(h, name) {
+				n++
 			}
 		}
+		if n > 0 {
+			some = append(some, &cfg.Harnesses[i])
+		}
+		if n == len(names) {
+			all = append(all, &cfg.Harnesses[i])
+		}
 	}
-	if len(fits) == 1 {
+	fits := some
+	if len(some) > 1 && len(all) > 0 {
+		fits = all
+	}
+	switch {
+	case len(fits) == 0 && cfg.DefaultHarness != "":
+		// add-repo asks the person about what it does not list.
+		return cfg.Find(cfg.DefaultHarness), nil
+	case len(fits) == 0 && len(cfg.Harnesses) == 1:
+		return &cfg.Harnesses[0], nil
+	case len(fits) == 0:
+		return nil, fmt.Errorf("which harness? None lists %s. %s", strings.Join(names, ", "), ask)
+	case len(fits) == 1:
 		return fits[0], nil
 	}
-	return nil, fmt.Errorf("which harness? %s", ask)
+	for _, h := range fits {
+		if h.Name == cfg.DefaultHarness {
+			return h, nil
+		}
+	}
+	return nil, fmt.Errorf("which harness? Several list these repositories. %s", ask)
 }
 
 // FileAt is the content of path at ref in the repository at dir, read with

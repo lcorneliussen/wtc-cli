@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -146,7 +147,7 @@ func TestAddRepoResolvesThroughTheHarness(t *testing.T) {
 	if got := git(filepath.Join(state, "repos", "api"), "config", "branch.openclaw/12-paging.wtcbase"); got != "develop" {
 		t.Errorf("recorded base of api: %q", got)
 	}
-	folder := filepath.Join(state, "wtc-collections", "12-paging")
+	folder := filepath.Join(state, "wtc", "platform", "12-paging")
 	if name, remote, err := wtc.GatewayHarness(folder); err != nil || name != "platform" || !strings.Contains(remote, "platform-harness") {
 		t.Errorf("recorded harness %q %q %v", name, remote, err)
 	}
@@ -196,7 +197,11 @@ func TestAddRepoAsksWhichHarnessWhenItIsNotClear(t *testing.T) {
 	if got, want := summary(intents), "ops-harness@ops-harness:origin/develop infra@infra:"; got != want {
 		t.Errorf("only ops lists infra: %s, want %s", got, want)
 	}
-	for _, args := range [][]string{{"example-org/api", "--worktree", "8-x"}, {"api", "infra", "--worktree", "9-x"}} {
+	// A URL counts by its registered remote.
+	if intents, err := addRepoPlan(t, "example-org/api", "--worktree", "8-x"); err != nil || !strings.HasPrefix(summary(intents), "platform-harness@") {
+		t.Errorf("a URL platform lists: %s %v", summary(intents), err)
+	}
+	for _, args := range [][]string{{"example-org/elsewhere", "--worktree", "8-y"}, {"api", "infra", "--worktree", "9-x"}} {
 		if _, err := addRepoPlan(t, args...); err == nil || !strings.Contains(err.Error(), "Ask the person which harness") || !strings.Contains(err.Error(), "platform, ops") {
 			t.Errorf("%v: %v", args, err)
 		}
@@ -209,6 +214,31 @@ func TestAddRepoAsksWhichHarnessWhenItIsNotClear(t *testing.T) {
 	}
 	if _, err := addRepoPlan(t, "api", "--worktree", "12-x", "--harness", "nope"); err == nil || !strings.Contains(err.Error(), "no harness nope") {
 		t.Errorf("unknown harness: %v", err)
+	}
+}
+
+// A repository the harness does not list is the person's choice, even with
+// a default harness: ad hoc beside it, registered in it, or a collection of
+// its own.
+func TestAddRepoAsksAboutAnUnlistedRepository(t *testing.T) {
+	_, _ = harnessGateway(t)
+	withGatewayConfig(t, `{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}], "defaultHarness": "platform"}`)
+	for _, args := range [][]string{{"infra", "--worktree", "20-x"}, {"api", "infra", "--worktree", "21-x"}} {
+		_, err := addRepoPlan(t, args...)
+		if err == nil {
+			t.Fatalf("%v: no question", args)
+		}
+		for _, want := range []string{"does not list infra", "--ad-hoc", ".harness-repos.yml", "--harness none"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%v: %v, want %q", args, err, want)
+			}
+		}
+	}
+	if intents, err := addRepoPlan(t, "api", "infra", "--worktree", "22-x", "--ad-hoc"); err != nil || summary(intents) != "platform-harness@platform-harness:origin/main api@api:origin/develop infra@infra:" {
+		t.Errorf("--ad-hoc: %s %v", summary(intents), err)
+	}
+	if intents, err := addRepoPlan(t, "infra", "--worktree", "23-x", "--harness", "none"); err != nil || summary(intents) != "infra@infra:" {
+		t.Errorf("--harness none: %s %v", summary(intents), err)
 	}
 }
 
@@ -234,8 +264,8 @@ func TestAddRepoWithoutHarnesses(t *testing.T) {
 	if _, err := addRepoPlan(t, "api", "--worktree", "5-x"); err == nil || !strings.Contains(err.Error(), "reading plugins.entries.wtc.config") {
 		t.Errorf("an unreadable config: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(os.Getenv("OPENCLAW_STATE_DIR"), "wtc-collections", "5-x")); !os.IsNotExist(err) {
-		t.Errorf("an unreadable config made a folder: %v", err)
+	if dir := openclaw.CollectionFolder(os.Getenv("OPENCLAW_STATE_DIR"), "5-x"); dir != "" {
+		t.Errorf("an unreadable config made a folder: %s", dir)
 	}
 	runOpenClaw = func(...string) (string, error) {
 		return `{"harnesses": [{"name": "x", "remote": "https://example.org/x.git"}]}`, nil
@@ -260,11 +290,11 @@ func TestAddRepoHarnessEdgeCases(t *testing.T) {
 
 	// A repository that is not on the gateway: the plan fails, nothing is
 	// recorded, and the collection can still choose.
-	if _, err := addRepoPlan(t, "example-org/elsewhere", "--worktree", "4-x"); err == nil || !strings.Contains(err.Error(), "not on the gateway yet") {
+	if _, err := addRepoPlan(t, "example-org/elsewhere", "--worktree", "4-x", "--ad-hoc"); err == nil || !strings.Contains(err.Error(), "not on the gateway yet") {
 		t.Fatalf("not on the gateway: %v", err)
 	}
-	if name, _, err := wtc.GatewayHarness(filepath.Join(state, "wtc-collections", "4-x")); err != nil || name != "" {
-		t.Errorf("a failed add-repo recorded %q %v", name, err)
+	if dir := openclaw.CollectionFolder(state, "4-x"); dir != "" {
+		t.Errorf("a failed add-repo made %s", dir)
 	}
 	if _, err := addRepoPlan(t, "api", "--worktree", "4-x", "--harness", "none"); err != nil {
 		t.Errorf("choosing after a failed add-repo: %v", err)
@@ -280,8 +310,8 @@ func TestAddRepoHarnessEdgeCases(t *testing.T) {
 		t.Errorf("harness without a registry: %v", err)
 	}
 	for _, w := range []string{"5-x", "6-x"} {
-		if _, err := os.Stat(filepath.Join(state, "wtc-collections", w)); !os.IsNotExist(err) {
-			t.Errorf("%s: a folder was made: %v", w, err)
+		if dir := openclaw.CollectionFolder(state, w); dir != "" {
+			t.Errorf("%s: a folder was made: %s", w, dir)
 		}
 	}
 }
@@ -298,7 +328,7 @@ func TestAddRepoRefusesABadWorktreeNameFirst(t *testing.T) {
 		if out, _ := exec.Command("git", "-C", filepath.Join(state, "repos", "api"), "config", "--get-regexp", "wtcbase").Output(); len(out) != 0 {
 			t.Errorf("%s: a base was recorded: %s", config, out)
 		}
-		if entries, _ := os.ReadDir(filepath.Join(state, "wtc-collections")); len(entries) != 0 {
+		if entries, _ := os.ReadDir(filepath.Join(state, "wtc")); len(entries) != 0 {
 			t.Errorf("%s: a folder was made", config)
 		}
 	}
@@ -328,7 +358,7 @@ func TestAddRepoSpawnsAWorker(t *testing.T) {
 			t.Errorf("worker intent: %+v", in.Args)
 		}
 	}
-	if name, _, _ := wtc.GatewayHarness(filepath.Join(state, "wtc-collections", "12-x--a")); name != "" {
+	if name, _, _ := wtc.GatewayHarness(filepath.Join(state, "wtc", "platform", "12-x--a")); name != "" {
 		t.Errorf("the worker's collection recorded harness %q", name)
 	}
 	// The harness itself can be a worker's repository, measured against the
@@ -372,11 +402,11 @@ func TestAddRepoSpawnsAWorker(t *testing.T) {
 	}
 
 	for args, want := range map[string]string{
-		"api --worktree 12-x --worker a":                            "what should the worker do",
-		"api --worktree 12-x --worker a --work x --separate":        "do not go together",
-		"api --worktree 12-x --worker Bad --work x":                 "not a worker of 12-x",
-		"api --worktree 12-x --worker a--b --work x":                "not a worker of 12-x",
-		"example-org/elsewhere --worktree 12-x --worker a --work x": "a worker needs it there",
+		"api --worktree 12-x --worker a":                                     "what should the worker do",
+		"api --worktree 12-x --worker a --work x --separate":                 "do not go together",
+		"api --worktree 12-x --worker Bad --work x":                          "not a worker of 12-x",
+		"api --worktree 12-x --worker a--b --work x":                         "not a worker of 12-x",
+		"example-org/elsewhere --worktree 12-x --worker a --work x --ad-hoc": "a worker needs it there",
 	} {
 		if _, err := addRepoPlan(t, strings.Fields(args)...); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", args, err, want)

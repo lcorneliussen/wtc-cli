@@ -21,7 +21,7 @@ driven from one conversation:
 |---|---|
 | the collection (one task) | the conversation the task started in |
 | a repository in it | a gateway-managed worktree, held by a **hidden owner** (a subagent session) |
-| the collection folder | `$OPENCLAW_STATE_DIR/wtc-collections/<name>`: a link per repository to its worktree, kept by `wtc status`; services run here |
+| the collection folder | `$OPENCLAW_STATE_DIR/wtc/<harness>/<name>`, or `wtc/ad-hoc/<name>` without a harness (`wtc-collections/<name>` for one made before): a link per repository to its worktree, kept by `wtc status`; services run here |
 | the branch | `openclaw/<name>`; `<name>` is the collection's `<issue-id>-<slug>` |
 
 The conversation edits, builds and commits in the worktrees through the
@@ -221,11 +221,19 @@ gateway's own project settings. `ref` defaults to `main`.
 A collection works in at most one harness:
 
 - **Which one.** The collection keeps the harness it started with. A new
-  collection takes `--harness <name>` if given, else `defaultHarness`, else
-  the only configured harness, else the only one whose registry lists every
-  repository named. Otherwise `wtc add-repo` asks the agent to ask the
-  person; `--harness none` starts a collection without one. Without
-  harnesses configured, every collection is ad hoc, as before.
+  collection takes `--harness <name>` if given; otherwise the registries
+  decide: the harness that lists the repositories asked for, by name, URL
+  or `owner/name` (of several that list some, the ones that list all; of
+  several still, `defaultHarness`). When none lists them, `defaultHarness`
+  or the only configured harness. Otherwise `wtc add-repo` asks the agent
+  to ask the person; `--harness none` starts a collection without one.
+  Without harnesses configured, every collection is ad hoc, as before.
+- **A repository the harness does not list** is the person's choice, even
+  with a default harness. `wtc add-repo` stops and the agent asks: ad hoc
+  beside the harness in this collection (`--ad-hoc`), registered in the
+  harness first (an entry in `.harness-repos.yml` in the collection's
+  worktree of the harness, published like any change), or a collection of
+  its own without a harness (`--harness none` and another name).
 - **A worktree like the others.** The first `wtc add-repo` of a collection
   adds a managed worktree of the harness, on the collection's branch, so a
   task can change the harness and publish that like any repository.

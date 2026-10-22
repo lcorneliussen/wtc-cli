@@ -22,8 +22,10 @@ Read that before the first `wtc` command of a task and follow it. In short:
 - A gateway with harnesses resolves repository names through the
   collection's harness, and adds a worktree of the harness first. When
   `wtc add-repo` asks which harness, ask the person, then pass
-  `--harness <name>`. Read the harness's `AGENTS.md` (`wtc status` shows
-  where it is) before working in the collection.
+  `--harness <name>`. When it says the harness does not list a repository,
+  put its three choices to the person and run the one they pick. Read the
+  harness's `AGENTS.md` (`wtc status` shows where it is) before working in
+  the collection: it says which other repositories a task may need.
 - `wtc status <name>` shows the collection folder; edit, build, test and
   commit in `<folder>/<repo>`.
 - **Pushing is the person's.** When work is committed, run

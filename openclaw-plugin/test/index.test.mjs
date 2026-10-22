@@ -1,7 +1,10 @@
 // The gateway side of the plugin, where it needs no gateway.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import plugin, { versionWarning } from "../index.js";
+import plugin, { collectionFolder, versionWarning } from "../index.js";
+import { mkdirSync, mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 test("the panel warns when the gateway's wtc is not the release the plugin came from", () => {
   assert.equal(versionWarning("0.1.42", "wtc version 0.1.42\n"), null);
@@ -82,4 +85,13 @@ test("the branches of a gateway project are read outside its clone", async () =>
   const refused = await branches({ project: "docs" });
   assert.equal(refused.ok, false);
   assert.ok(!calls.some((argv) => argv.includes("ls-remote")));
+});
+
+test("a collection's folder is where wtc made it", () => {
+  const state = mkdtempSync(path.join(os.tmpdir(), "wtc-state-"));
+  assert.equal(collectionFolder(state, "1-x"), null);
+  for (const dir of ["wtc/platform/1-x", "wtc/ad-hoc/2-x", "wtc-collections/3-x"]) mkdirSync(path.join(state, dir), { recursive: true });
+  assert.equal(collectionFolder(state, "1-x"), path.join(state, "wtc/platform/1-x"));
+  assert.equal(collectionFolder(state, "2-x"), path.join(state, "wtc/ad-hoc/2-x"));
+  assert.equal(collectionFolder(state, "3-x"), path.join(state, "wtc-collections/3-x"));
 });
