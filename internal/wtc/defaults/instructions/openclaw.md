@@ -62,7 +62,8 @@ remote, based on its `default_ref` unless `--base` says otherwise.
 
 `wtc add-repo` takes the collection's harness when it has one. Otherwise the
 registries decide: the harness that lists the repositories asked for, by
-name, URL or `owner/name`; between several, the gateway's default. When none
+name, URL or `owner/name`; between several that list some, the ones that list
+all; between several still, the gateway's default. When none
 lists them, the default or the only harness configured. When that does not
 settle it, it says so: ask the person which harness the task belongs to, then
 pass `--harness <name>`, or `--harness none` for a collection without one.
