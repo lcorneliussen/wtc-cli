@@ -54,7 +54,8 @@ func CollectionFolder(stateDir, name string) string {
 }
 
 // NewCollectionFolder is where the collection called name gets its folder:
-// the one it has, else under its harness, else under AdHocFolder.
+// the one it has; a worker's beside its task's; else under its harness, or
+// under AdHocFolder without one.
 func NewCollectionFolder(stateDir, name, harness string) string {
 	if dir := CollectionFolder(stateDir, name); dir != "" {
 		return dir
@@ -142,6 +143,11 @@ func (c GatewayConfig) names() string {
 func ChooseHarness(cfg GatewayConfig, flag, recorded string, names []string, has func(Harness, string) bool) (*Harness, error) {
 	ask := fmt.Sprintf("Ask the person which harness this collection works in (%s), then pass --harness <name>, or --harness %s for a collection without one", cfg.names(), NoHarness)
 	switch {
+	case recorded == NoHarness:
+		if flag != "" && flag != NoHarness {
+			return nil, fmt.Errorf("this collection works without a harness; a collection has one harness or none. Start another collection for work in %s", flag)
+		}
+		return nil, nil
 	case recorded != "":
 		h := cfg.Find(recorded)
 		if h == nil {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -62,6 +63,8 @@ func harnessGateway(t *testing.T) (state string, git func(dir string, args ...st
 	clone("api", "")
 	clone("web", "")
 	clone("infra", "")
+	// A project on the gateway that no harness lists.
+	clone("tools", "")
 	t.Setenv("OPENCLAW_STATE_DIR", state)
 	t.Setenv("OPENCLAW_SHELL", "exec")
 	t.Chdir(t.TempDir())
@@ -260,6 +263,20 @@ func TestAddRepoAsksAboutAnUnlistedRepository(t *testing.T) {
 		t.Errorf("a worker: %v", err)
 	}
 
+	// --harness none binds the collection to none: a later add-repo of a
+	// listed repository does not give it a harness after all.
+	if _, err := addRepoPlan(t, "api", "--worktree", "23-x"); err != nil {
+		t.Errorf("after --harness none: %v", err)
+	} else if intents, _ := addRepoPlan(t, "api", "--worktree", "23-x"); summary(intents) != "api@api:" {
+		t.Errorf("after --harness none: %s", summary(intents))
+	}
+	if _, err := addRepoPlan(t, "api", "--worktree", "23-x", "--harness", "platform"); err == nil || !strings.Contains(err.Error(), "without a harness") {
+		t.Errorf("a harness for a collection without one: %v", err)
+	}
+	if h := gatewayHarness(openclaw.CollectionFolder(state, "23-x"), nil); h != nil {
+		t.Errorf("status shows harness %+v", h)
+	}
+
 	// The only harness, without a default, asks as well.
 	withGatewayConfig(t, `{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}]}`)
 	if _, err := addRepoPlan(t, "infra", "--worktree", "25-x"); err == nil || !strings.Contains(err.Error(), "does not list infra") {
@@ -386,6 +403,10 @@ func TestAddRepoSpawnsAWorker(t *testing.T) {
 	if name, _, _ := wtc.GatewayHarness(filepath.Join(state, "wtc", "platform", "12-x--a")); name != "" {
 		t.Errorf("the worker's collection recorded harness %q", name)
 	}
+	// Its folder goes beside the task's, in the task's harness.
+	if got, want := openclaw.NewCollectionFolder(state, "12-x--a", ""), filepath.Join(state, "wtc", "platform", "12-x--a"); openclaw.CollectionFolder(state, "12-x") != filepath.Join(state, "wtc", "platform", "12-x") || got != want {
+		t.Errorf("the worker's folder: %s, want %s", got, want)
+	}
 	// The harness itself can be a worker's repository, measured against the
 	// task's base there.
 	if intents, err := addRepoPlan(t, "example-org/platform-harness", "--worktree", "12-x", "--worker", "h", "--work", "Document paging."); err != nil || summary(intents) != "platform-harness@platform-harness:origin/main" {
@@ -489,5 +510,41 @@ func TestWorkersInStatusAndCatchUp(t *testing.T) {
 	}
 	if workers := gatewayWorkers("12-x", all); workers[0].String() != "worker a: api merged" {
 		t.Errorf("after catch-up --from: %+v", workers)
+	}
+}
+
+// The commands the question about an unlisted repository prints run as
+// printed: they keep the listed repositories and the harness this add-repo
+// chose, which a new collection has not recorded yet.
+func TestAddRepoUnlistedChoicesRunAsPrinted(t *testing.T) {
+	_, _ = harnessGateway(t)
+	for _, config := range []string{
+		`{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}, {"name": "ops", "remote": "git@github.com:example-org/ops-harness.git"}]}`,
+		`{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}, {"name": "ops", "remote": "git@github.com:example-org/ops-harness.git"}], "defaultHarness": "ops"}`,
+	} {
+		withGatewayConfig(t, config)
+		for i, want := range map[int]string{1: "platform-harness@platform-harness:origin/main api@api:origin/develop tools@tools:", 3: "platform-harness@platform-harness:origin/main api@api:origin/develop"} {
+			worktree := fmt.Sprintf("30-x-%d-%d", i, len(config))
+			_, err := addRepoPlan(t, "api", "tools", "--worktree", worktree)
+			if err == nil {
+				t.Fatal("no question")
+			}
+			var line string
+			for _, l := range strings.Split(err.Error(), "\n") {
+				if strings.HasPrefix(l, fmt.Sprintf("  %d. ", i)) {
+					line = l
+				}
+			}
+			command := line[strings.Index(line, "wtc add-repo"):]
+			if i == 3 {
+				// The part for this collection.
+				command = command[strings.Index(command, ", and here ")+len(", and here "):]
+			}
+			args := strings.Fields(strings.TrimPrefix(command, "wtc add-repo "))
+			intents, err := addRepoPlan(t, append(args, "--worktree", worktree)...)
+			if err != nil || !strings.Contains(summary(intents), want) {
+				t.Errorf("%s choice %d %q: %s %v, want %s", config, i, command, summary(intents), err, want)
+			}
+		}
 	}
 }
