@@ -107,6 +107,23 @@ export async function bitbucketRepos(login, query) {
   })).slice(0, 20);
 }
 
+// The folder of the collection called name, as wtc makes it: wtc/<harness
+// or ad-hoc>/<name>, or wtc-collections/<name> from before there was one per
+// harness.
+export function collectionFolder(stateDir, name) {
+  const legacy = path.join(stateDir, "wtc-collections", name);
+  if (existsSync(legacy)) return legacy;
+  let groups = [];
+  try {
+    groups = readdirSync(path.join(stateDir, "wtc")).sort();
+  } catch {}
+  for (const group of groups) {
+    const dir = path.join(stateDir, "wtc", group, name);
+    if (existsSync(dir)) return dir;
+  }
+  return null;
+}
+
 // A child that owns a repository has a managed worktree to look at.
 const worktreeOf = (entry) => (entry?.worktree ? entry.workspaceDir || entry.spawnedCwd || null : null);
 
@@ -330,7 +347,9 @@ export default {
         // the conversation can install one first.
         if (payload.add && !payload.stop && !onPath(TUNNEL_PROGRAMS[provider])) return { ok: true, result: { missing: TUNNEL_PROGRAMS[provider] } };
       }
-      const r = await run(argv, { cwd: path.join(stateDir, "wtc-collections", name), timeoutMs: 180000, env: { OPENCLAW_SHELL: "exec" } });
+      const cwd = collectionFolder(stateDir, name);
+      if (!cwd) return { ok: false, error: `collection ${name} has no folder yet: wtc status ${name} makes it` };
+      const r = await run(argv, { cwd, timeoutMs: 180000, env: { OPENCLAW_SHELL: "exec" } });
       return r.code === 0 ? { ok: true, result: { message: `${argv.slice(2).join(" ")}: done` } } : { ok: false, error: (r.stderr || r.stdout).trim().slice(-400) || `exit ${r.code}` };
     };
     api.session.controls.registerSessionAction({

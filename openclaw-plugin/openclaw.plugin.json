@@ -52,7 +52,7 @@
       },
       "defaultHarness": {
         "type": "string",
-        "description": "The harness a collection uses when it does not name one. Without it, a collection uses the only configured harness, or the one whose registry lists the repositories it adds; otherwise the agent asks."
+        "description": "Chooses between harnesses whose registries list the repositories a new collection adds, and stands in when none lists them (as the only configured harness does). A harness that lists them beats it; a repository the chosen harness does not list is asked about."
       }
     },
     "additionalProperties": false

@@ -60,12 +60,25 @@ first `wtc add-repo` adds a worktree of the harness too, and a name like
 `api` resolves through the harness's `.harness-repos.yml`: that entry's
 remote, based on its `default_ref` unless `--base` says otherwise.
 
-`wtc add-repo` takes the collection's harness when it has one, else the
-gateway's default, the only one configured, or the only one whose registry
-lists every name given. When none of that settles it, it says so: ask the
-person which harness the task belongs to, then pass `--harness <name>`, or
-`--harness none` for a collection without one. One collection never mixes
-harnesses; work in another one is another collection.
+`wtc add-repo` takes the collection's harness when it has one. Otherwise the
+registries decide: the harness that lists the repositories asked for, by
+name, URL or `owner/name`; between several that list some, the ones that list
+all; between several still, the gateway's default. When none
+lists them, the default or the only harness configured. When that does not
+settle it, it says so: ask the person which harness the task belongs to, then
+pass `--harness <name>`, or `--harness none` for a collection without one.
+One collection never mixes harnesses; work in another one is another
+collection.
+
+A repository the harness does not list stops `wtc add-repo` with three
+choices. Put them to the person and run the one they pick: ad hoc beside the
+harness (`--ad-hoc`), registered in the harness first (an entry in
+`.harness-repos.yml` in the collection's worktree of the harness, committed
+there), or a collection of its own (`--harness none` and another name).
+
+The collection's folder says which harness it works in:
+`$OPENCLAW_STATE_DIR/wtc/<harness>/<name>`, or `wtc/ad-hoc/<name>` without
+one.
 
 `wtc status <name>` shows the harness and its worktree. Read its `AGENTS.md`
 and the instructions it points to before working in the collection: they are

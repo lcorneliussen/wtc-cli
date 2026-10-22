@@ -1,7 +1,10 @@
 // The gateway side of the plugin, where it needs no gateway.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import plugin, { versionWarning } from "../index.js";
+import plugin, { collectionFolder, versionWarning } from "../index.js";
+import { mkdirSync, mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 test("the panel warns when the gateway's wtc is not the release the plugin came from", () => {
   assert.equal(versionWarning("0.1.42", "wtc version 0.1.42\n"), null);
@@ -82,4 +85,40 @@ test("the branches of a gateway project are read outside its clone", async () =>
   const refused = await branches({ project: "docs" });
   assert.equal(refused.ok, false);
   assert.ok(!calls.some((argv) => argv.includes("ls-remote")));
+});
+
+test("a collection's folder is where wtc made it", () => {
+  const state = mkdtempSync(path.join(os.tmpdir(), "wtc-state-"));
+  assert.equal(collectionFolder(state, "1-x"), null);
+  for (const dir of ["wtc/platform/1-x", "wtc/ad-hoc/2-x", "wtc-collections/3-x"]) mkdirSync(path.join(state, dir), { recursive: true });
+  assert.equal(collectionFolder(state, "1-x"), path.join(state, "wtc/platform/1-x"));
+  assert.equal(collectionFolder(state, "2-x"), path.join(state, "wtc/ad-hoc/2-x"));
+  assert.equal(collectionFolder(state, "3-x"), path.join(state, "wtc-collections/3-x"));
+});
+
+test("a service action runs in the collection's folder, and says when there is none yet", async () => {
+  const state = mkdtempSync(path.join(os.tmpdir(), "wtc-state-"));
+  const actions = new Map();
+  const cwds = [];
+  const entries = [
+    { sessionKey: "agent:main:c", entry: {} },
+    { sessionKey: "agent:main:repo:api", entry: { parentSessionKey: "agent:main:c", projectId: "api", worktree: { id: "w1", branch: "openclaw/9-x" }, workspaceDir: "/worktrees/w1" } },
+  ];
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      state: { resolveStateDir: () => state },
+      agent: { session: { listSessionEntries: () => entries, getSessionEntry: async () => undefined } },
+      system: { runCommandWithTimeout: async (argv, options) => { cwds.push(options.cwd); return { code: 0, stdout: "", stderr: "" }; } },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const up = () => actions.get("svc").handler({ sessionKey: "agent:main:c", agentId: "main", payload: { op: "up" } });
+  assert.match((await up()).error, /no folder yet/);
+  mkdirSync(path.join(state, "wtc/platform/9-x"), { recursive: true });
+  assert.equal((await up()).ok, true);
+  assert.equal(cwds.at(-1), path.join(state, "wtc/platform/9-x"));
 });

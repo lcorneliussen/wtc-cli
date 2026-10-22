@@ -75,7 +75,9 @@ func LinkGatewayCollection(dir string, repos []LinkedRepo) (*Context, error) {
 }
 
 // GatewayHarness is the harness recorded for the gateway collection at dir
-// and its remote, or "" when it has none or the folder does not exist yet.
+// and its remote: "none" (with no remote) when the person chose to work
+// without one, or "" when nothing is recorded or the folder does not exist
+// yet.
 func GatewayHarness(dir string) (name, remote string, err error) {
 	c, err := OpenCollection(dir)
 	if err != nil {
@@ -88,8 +90,9 @@ func GatewayHarness(dir string) (name, remote string, err error) {
 }
 
 // RecordGatewayHarness records name as the harness of the gateway collection
-// at dir, creating the folder when needed. A collection has one harness: a
-// different one already recorded is an error.
+// at dir, creating the folder when needed; "none" records that it works
+// without one. A collection has one harness or none: a different one already
+// recorded is an error.
 func RecordGatewayHarness(dir, name, remote string) error {
 	if _, err := LinkGatewayCollection(dir, nil); err != nil {
 		return err
