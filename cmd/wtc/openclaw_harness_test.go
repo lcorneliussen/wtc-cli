@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -249,7 +250,7 @@ func TestAddRepoAsksAboutAnUnlistedRepository(t *testing.T) {
 	if _, err := addRepoPlan(t, "api", "--worktree", "24-x"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := addRepoPlan(t, "infra", "--worktree", "24-x"); err == nil || !strings.Contains(err.Error(), "run `wtc add-repo https://github.com/example-org/platform-harness` first") {
+	if _, err := addRepoPlan(t, "infra", "--worktree", "24-x"); err == nil || !strings.Contains(err.Error(), "run `wtc add-repo https://github.com/example-org/platform-harness --worktree 24-x` first") {
 		t.Errorf("a recorded harness without its worktree: %v", err)
 	}
 	wt := filepath.Join(state, "worktrees", "h1", "24-x")
@@ -541,7 +542,10 @@ func TestAddRepoUnlistedChoicesRunAsPrinted(t *testing.T) {
 				command = command[strings.Index(command, ", and here ")+len(", and here "):]
 			}
 			args := strings.Fields(strings.TrimPrefix(command, "wtc add-repo "))
-			intents, err := addRepoPlan(t, append(args, "--worktree", worktree)...)
+			if i == 1 && !slices.Contains(args, worktree) {
+				t.Errorf("choice 1 does not name the collection: %q", command)
+			}
+			intents, err := addRepoPlan(t, args...)
 			if err != nil || !strings.Contains(summary(intents), want) {
 				t.Errorf("%s choice %d %q: %s %v, want %s", config, i, command, summary(intents), err, want)
 			}

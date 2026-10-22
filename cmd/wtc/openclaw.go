@@ -374,7 +374,7 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 	// A worker takes part of the task, whose session already decided about
 	// its repositories.
 	if len(unlisted) > 0 && !adHoc && !worker {
-		return nil, nil, unlistedError(*h, repos, unlisted, recorded == "", reg.worktree != "")
+		return nil, nil, unlistedError(*h, worktree, repos, unlisted, recorded == "", reg.worktree != "")
 	}
 	return adds, h, nil
 }
@@ -382,16 +382,18 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 // unlistedError asks the agent to ask the person what to do with
 // repositories the collection's harness does not list: add them beside the
 // harness ad hoc, register them in it first, or give them a collection of
-// their own without a harness. Each choice is a command to run as printed:
-// it repeats every repository asked for and, while the collection has not
-// recorded its harness yet, the harness this add-repo chose.
-func unlistedError(h openclaw.Harness, repos, unlisted []string, unrecorded, hasWorktree bool) error {
-	harness := ""
+// their own without a harness. The commands run as printed: they name the
+// collection and, while it has not recorded its harness yet, the harness
+// this add-repo chose. 1 adds every repository asked for; 2 adds the harness
+// first when the collection has no worktree of it, then every repository;
+// 3 adds the unlisted ones elsewhere and the listed ones here.
+func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string, unrecorded, hasWorktree bool) error {
+	here := " --worktree " + worktree
 	if unrecorded {
-		harness = " --harness " + h.Name
+		here += " --harness " + h.Name
 	}
 	all := strings.Join(repos, " ")
-	register := fmt.Sprintf("run `wtc add-repo %s%s` first, then ", h.Remote, harness)
+	register := fmt.Sprintf("run `wtc add-repo %s%s` first, then ", h.Remote, here)
 	if hasWorktree {
 		register = ""
 	}
@@ -403,13 +405,13 @@ func unlistedError(h openclaw.Harness, repos, unlisted []string, unrecorded, has
 	}
 	separate := fmt.Sprintf("wtc add-repo %s --worktree <another-name> --harness %s", strings.Join(unlisted, " "), openclaw.NoHarness)
 	if len(listed) > 0 {
-		separate += fmt.Sprintf(", and here wtc add-repo %s%s", strings.Join(listed, " "), harness)
+		separate += fmt.Sprintf(", and here wtc add-repo %s%s", strings.Join(listed, " "), here)
 	}
 	return fmt.Errorf("harness %s does not list %s. Ask the person which they want:\n"+
 		"  1. ad hoc beside the harness, in this collection: wtc add-repo %s%s --ad-hoc\n"+
 		"  2. registered in the harness: %sadd it to .harness-repos.yml in the collection's worktree of %s and commit that (it is published like any repository), then wtc add-repo %s%s\n"+
 		"  3. a collection of its own without a harness: %s",
-		h.Name, strings.Join(unlisted, ", "), all, harness, register, h.Name, all, harness, separate)
+		h.Name, strings.Join(unlisted, ", "), all, here, register, h.Name, all, here, separate)
 }
 
 // harnessRegistry is a harness's registry as a collection sees it: from its

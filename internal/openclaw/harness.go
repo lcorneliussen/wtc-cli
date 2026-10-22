@@ -133,8 +133,9 @@ func (c GatewayConfig) names() string {
 // ChooseHarness decides the harness of a collection, or nil for none. flag is
 // --harness, recorded the harness the collection already has, and names the
 // repositories add-repo was given, by name or URL; has says whether a
-// harness's registry lists one. A collection keeps its harness, and a given
-// one wins. Otherwise the registries decide: the harness that lists the
+// harness's registry lists one. A collection keeps the harness it recorded,
+// or none, and refuses another --harness; a new collection takes the one
+// given. Otherwise the registries decide: the harness that lists the
 // repositories (of several that list some, the ones that list all); of
 // several still, the default, or the person when none of them is. When none
 // lists them, or there are none to go by, the default or the only harness,
