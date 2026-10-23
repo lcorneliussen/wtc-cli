@@ -60,12 +60,25 @@ first `wtc add-repo` adds a worktree of the harness too, and a name like
 `api` resolves through the harness's `.harness-repos.yml`: that entry's
 remote, based on its `default_ref` unless `--base` says otherwise.
 
-`wtc add-repo` takes the collection's harness when it has one, else the
-gateway's default, the only one configured, or the only one whose registry
-lists every name given. When none of that settles it, it says so: ask the
-person which harness the task belongs to, then pass `--harness <name>`, or
-`--harness none` for a collection without one. One collection never mixes
-harnesses; work in another one is another collection.
+`wtc add-repo` takes the collection's harness when it has one. Otherwise the
+registries decide: the harness that lists the repositories asked for, by
+name, URL or `owner/name`; between several that list some, the ones that list
+all; between several still, the gateway's default. When none
+lists them, the default or the only harness configured. When that does not
+settle it, it says so: ask the person which harness the task belongs to, then
+pass `--harness <name>`, or `--harness none` for a collection without one.
+One collection never mixes harnesses; work in another one is another
+collection.
+
+A repository the harness does not list stops `wtc add-repo` with three
+choices. Put them to the person and run the one they pick: ad hoc beside the
+harness (`--ad-hoc`), registered in the harness first (an entry in
+`.harness-repos.yml` in the collection's worktree of the harness, committed
+there), or a collection of its own (`--harness none` and another name).
+
+The collection's folder says which harness it works in:
+`$OPENCLAW_STATE_DIR/wtc/<harness>/<name>`, or `wtc/ad-hoc/<name>` without
+one.
 
 `wtc status <name>` shows the harness and its worktree. Read its `AGENTS.md`
 and the instructions it points to before working in the collection: they are
@@ -86,7 +99,7 @@ the args, and do not do the work some other way.
 |---|---|---|
 | add a repository | `wtc add-repo <repo> --worktree <name>` | call `sessions_spawn` once per intent |
 | see the collection | `wtc status [<name>]` | — |
-| check before publishing | `wtc publish --title "<what changed>"` in `<folder>/<repo>` | — |
+| check before publishing | `wtc publish --title "<what changed>" --body-file <file>` in `<folder>/<repo>` | — |
 | publish | nothing: tell the person it is ready. They push it with **↑** for the repository in the collection card, as themselves, after confirming | — |
 | take in upstream changes | `wtc catch-up` in `<folder>/<repo>` | publish again to send the merge |
 | run a service | `wtc svc add <name> --port-env <VAR> -- <cmd>` in the folder | `wtc svc` shows it; the panel too |
@@ -107,6 +120,15 @@ publish the wrong thing:
   worktree, so read the plan's `pending` list before you call the tool:
   anything that is not part of the work has to be removed or ignored first.
 
+**Describe the pull request.** `--title` (one line, at most 256 characters)
+and `--body` or `--body-file` (Markdown, at most 8192) are recorded for the
+branch in the worktree's git directory, never committed. The card's ↑ opens
+the pull request with them, so write the description a reviewer needs: what
+changed and why, how it was checked, what is left. Follow the repository's
+pull request template when it has one. The gateway takes the text only when
+it opens the pull request; later pushes keep it. One you leave out keeps
+what was recorded before. Bitbucket's publish takes the title only.
+
 **Pushing is the person's.** The collection card's ↑ has the gateway push
 the repository with their own GitHub or Bitbucket account, after they
 confirm. On GitHub the gateway commits what is pending first, so the
@@ -123,6 +145,17 @@ arrives in the session without a new turn. On another forge the intent has a
 `forge` and no `tool`: commit first, then hand the plan to that forge's
 skill. If the skill says the gateway keeps logins out of your commands, you
 cannot push there: the person pushes from the card. Never force-push.
+
+## Pull request news
+
+The wtc plugin tells the collection's conversation when one of its pull
+requests changes: opened, ready for review, merged or closed, checks failed
+or passed, approved, changes requested, conflicting with its base. It comes
+as a system event starting with `wtc: pull request news`, usually with a
+turn of its own. Update the task's progress with it. For a failure, a review
+or a conflict, read it (`gh pr checks <n>`, `gh pr view <n> --comments`) and
+tell the person what you will do. Fix in `<folder>/<repo>` and commit, and
+they push again. Don't answer review comments on the forge yourself.
 
 ## Catching up
 

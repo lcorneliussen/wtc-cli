@@ -328,6 +328,44 @@ test("composer: a push is the person's, with their own account, after they confi
   view.dispose();
 });
 
+test("composer: a new pull request opens with the title and description the agent proposed", async () => {
+  personal = { state: "connected", account: { id: 1, login: "octo" }, generation: "g1" };
+  bitbucket = { user: "ada@example.com", name: "Ada" };
+  const proposal = { branch: "openclaw/test", title: "Add a web preview", body: "What, why, and how it was checked." };
+  const data = collection([
+    repo("web", { dirty: 1, proposal }),
+    repo("hooks", { forge: "bitbucket", ahead: 1, unpublished: 1, proposal }),
+    repo("docs", { ahead: 1 }),
+    // An open pull request keeps its text: the gateway takes it only when it opens one.
+    repo("api", { ahead: 1, unpublished: 1, proposal, pullRequest: { number: 7, state: "open", url: "https://github.com/octo/api/pull/7", checks: "none" } }),
+  ]);
+  const { host, view } = await mount("composer", data);
+  await settle();
+  const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
+  const push = (what) => [...card().all()].find((n) => n.tagName === "BUTTON" && n.title.startsWith(what));
+  assert.match(push("1 file to push").title, /Title: "Add a web preview", with the agent's description\./);
+  assert.match([...card().all()].find((n) => n.tagName === "BUTTON" && /Bitbucket/.test(n.title)).title, /Title: "Add a web preview"\.$/);
+  assert.match(push("1 commit to push. Commit what is pending, push the branch and open a draft pull request, with your own GitHub").title, /proposed no title or description/);
+  assert.doesNotMatch(push("1 commit to push. Commit what is pending and push it to #7").title, /Title|proposed/);
+  calls.length = 0;
+  await push("1 file to push").onclick();
+  await settle();
+  const published = calls.find((c) => c.method === "sessions.github.publish");
+  assert.equal(published.title, "Add a web preview");
+  assert.equal(published.body, "What, why, and how it was checked.");
+  await push("1 commit to push. Commit what is pending and push it to #7").onclick();
+  await settle();
+  const again = calls.filter((c) => c.method === "sessions.github.publish").at(-1);
+  assert.equal("title" in again || "body" in again, false);
+  const bb = [...card().all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push.*Bitbucket/.test(n.title));
+  await bb.onclick();
+  await settle();
+  assert.deepEqual(calls.at(-1).payload, { draft: true, dest: "main", title: "Add a web preview" });
+  bitbucket = undefined;
+  personal = null;
+  view.dispose();
+});
+
 test("composer: a repository without a branch yet", async () => {
   const { host, view } = await mount("composer", collection([repo("api", { branch: null })]));
   assert.ok(texts(host).includes("at main"));

@@ -45,7 +45,10 @@ type CheckoutStatus struct {
 	// next publication would send.
 	Unpublished int          `json:"unpublished"`
 	PullRequest *PullRequest `json:"pullRequest"`
-	Error       string       `json:"error,omitempty"`
+	// Proposal is the title and description proposed for the branch's pull
+	// request, which the person's push opens it with.
+	Proposal *Proposal `json:"proposal,omitempty"`
+	Error    string    `json:"error,omitempty"`
 }
 
 // PullRequest is the pull request of a checkout's branch.
@@ -212,6 +215,7 @@ func checkoutStatus(path string, pullRequests bool) CheckoutStatus {
 			}
 		}
 	}
+	s.Proposal = ReadProposal(top, s.Branch)
 	if pullRequests && origin.Forge == ForgeGitHub && s.Branch != "" {
 		s.PullRequest = gitHubPullRequest(top, origin, s.Branch)
 	}

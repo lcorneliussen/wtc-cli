@@ -63,8 +63,10 @@ async function publishRepo(host, agentId, r, say) {
     return { connect: true };
   }
   say(`Pushing ${name}…`);
+  const p = proposalOf(r);
   const out = await host.request("sessions.github.publish", {
     ...target, idempotencyKey: uuid(), selection: { source: "personal", account: mine.account, generation: mine.generation },
+    ...(p?.title ? { title: p.title } : {}), ...(p?.body ? { body: p.body } : {}),
   });
   return settle(host, target, name, out, say);
 }
@@ -106,7 +108,11 @@ const bitbucketAccount = (c) => c?.name ? `${c.name} (${c.account})` : c?.accoun
 async function publishBitbucket(host, agentId, r, say, dest) {
   const name = r.repo ?? r.project;
   say(`Asking to push ${name}…`);
-  const out = await bitbucketAction(host, agentId, r, "publish", { draft: true, ...(dest ? { dest } : {}) });
+  // Its publish takes a title, not yet a description. Its rows carry no
+  // pull request, so the title goes with every push; the Bitbucket plugin
+  // uses it only when it creates the pull request.
+  const title = proposalOf(r)?.title;
+  const out = await bitbucketAction(host, agentId, r, "publish", { draft: true, ...(dest ? { dest } : {}), ...(title ? { title } : {}) });
   if (out?.status === "not_connected") {
     say(`${name}: ${CONNECT.bitbucket}.`);
     return { connect: true };
@@ -281,6 +287,17 @@ const askConversation = (host, sessionKey, message) => host.request("sessions.se
 // Pushing goes to the repository's own branch and, without one yet, opens a
 // draft pull request for it.
 const pushTitle = (pr) => pr ? `Commit what is pending and push it to #${pr.number}` : "Commit what is pending, push the branch and open a draft pull request";
+// The title and description the agent proposed with wtc publish, which a new
+// pull request opens with; the gateway takes them only when it opens one.
+const proposalOf = (r) => (r.pullRequest ? null : r.proposal?.title || r.proposal?.body ? r.proposal : null);
+const proposalTitle = (r) => {
+  if (r.pullRequest) return "";
+  const p = proposalOf(r);
+  // Bitbucket's publish takes a title, not yet a description.
+  const body = r.forge !== BITBUCKET && p?.body;
+  if (!p?.title && !body) return " The agent proposed no title or description: ask it to run wtc publish with them, or the pull request opens as \"Publish <branch>\".";
+  return p.title ? ` Title: "${p.title}"${body ? ", with the agent's description" : ""}.` : " With the agent's description.";
+};
 
 // Services. wtc svc starts, stops and restarts them (one, or all without a
 // group) and opens or closes their tunnels; the gateway runs it in the
@@ -637,7 +654,7 @@ function collectionTables(v) {
     const left = r.forge === BITBUCKET && r.dirty ? ` Uncommitted files stay behind: ask the conversation to commit them first.` : "";
     // Asked again on the click, so a connection just made is used at once.
     if (mine[r.forge] === null) return count(label, `${what} to push. Pushing needs your own ${account}: click to push, or for how to connect it`, TONE.none, () => publish(r));
-    return count(label, `${what} to push. ${pushTitle(r.pullRequest)}, with your own ${account}, after you confirm.${left}`, TONE.pending, () => publish(r));
+    return count(label, `${what} to push. ${pushTitle(r.pullRequest)}, with your own ${account}, after you confirm.${proposalTitle(r)}${left}`, TONE.pending, () => publish(r));
   }
   function repoRow(r) {
     const pr = r.pullRequest;

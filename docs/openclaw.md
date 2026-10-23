@@ -21,7 +21,7 @@ driven from one conversation:
 |---|---|
 | the collection (one task) | the conversation the task started in |
 | a repository in it | a gateway-managed worktree, held by a **hidden owner** (a subagent session) |
-| the collection folder | `$OPENCLAW_STATE_DIR/wtc-collections/<name>`: a link per repository to its worktree, kept by `wtc status`; services run here |
+| the collection folder | `$OPENCLAW_STATE_DIR/wtc/<harness>/<name>`, or `wtc/ad-hoc/<name>` without a harness (`wtc-collections/<name>` for one made before): a link per repository to its worktree, kept by `wtc status`; services run here |
 | the branch | `openclaw/<name>`; `<name>` is the collection's `<issue-id>-<slug>` |
 
 The conversation edits, builds and commits in the worktrees through the
@@ -40,7 +40,7 @@ digits and hyphens, at most 64 characters.
 |---|---|---|
 | add a repository | `wtc add-repo <repo> --worktree <name>` | calls `sessions_spawn` with each intent's `args` |
 | see the collection | `wtc status [<name>]` | reads it: folder, repositories, pull requests, services |
-| check a publication | `wtc publish --title "…"` in `<folder>/<repo>` | tells the person it is ready: they push it with ↑ in the card. Only when they ask the agent to publish does the owner call `github_publish` |
+| check a publication | `wtc publish --title "…" --body-file <file>` in `<folder>/<repo>` | tells the person it is ready: they push it with ↑ in the card, which opens the pull request with that title and description. Only when they ask the agent to publish does the owner call `github_publish` |
 | catch up | `wtc catch-up` in `<folder>/<repo>` | publishes again to send the merge |
 
 `<repo>` names a project on the gateway, or a GitHub repository as
@@ -79,6 +79,36 @@ given to `wtc add-repo`.
 After `github_publish` the gateway commits what is pending as its GitHub
 identity, pushes the session's branch and opens or updates a **draft** pull
 request, once the turn that asked has ended. People merge.
+
+## The pull request's title and description
+
+`wtc publish` records `--title` and `--body` (or `--body-file`, `-` for
+stdin) for the branch, in the worktree's git directory, so nothing is
+committed. `wtc status --json` reports them per repository as `proposal`, and
+the card's ↑ hands them to `sessions.github.publish` and shows the title
+before the push. The gateway's limits apply: one line of at most 256
+characters, a description of at most 8192. The gateway uses them only when it
+opens the pull request. Without a proposal, it opens as "Publish
+openclaw/<name>". Bitbucket's publish takes the title only.
+
+## Pull request news in the conversation
+
+The card's ↑ runs outside the agent's turn, and a merge or a review happens
+on the forge. The plugin compares each look at a collection's pull requests
+with the one before and tells the collection's conversation what changed. It
+queues one system event (`wtc: pull request news for this collection`, a line
+per change) and asks for a turn, so the agent updates its progress without
+waiting for the person. It reports a pull request that was opened, became
+ready or went back to draft, was merged, closed or reopened, failed or passed
+its checks, was approved, got a request for changes, or conflicts with its
+base.
+
+It looks whenever a card loads, and every `pullRequestPollMinutes` (default 5)
+at collections with an open pull request. What it saw is kept in
+`$OPENCLAW_STATE_DIR/plugins/wtc/pull-requests.json`, so a restart doesn't
+repeat news. `pullRequestEvents` is `wake` (the default), `queue` (told on
+the conversation's next turn) or `off`. Pull requests come from `gh`, so this
+covers GitHub.
 
 ## What `wtc publish` refuses
 
@@ -271,11 +301,19 @@ gateway's own project settings. `ref` defaults to `main`.
 A collection works in at most one harness:
 
 - **Which one.** The collection keeps the harness it started with. A new
-  collection takes `--harness <name>` if given, else `defaultHarness`, else
-  the only configured harness, else the only one whose registry lists every
-  repository named. Otherwise `wtc add-repo` asks the agent to ask the
-  person; `--harness none` starts a collection without one. Without
-  harnesses configured, every collection is ad hoc, as before.
+  collection takes `--harness <name>` if given; otherwise the registries
+  decide: the harness that lists the repositories asked for, by name, URL
+  or `owner/name` (of several that list some, the ones that list all; of
+  several still, `defaultHarness`). When none lists them, `defaultHarness`
+  or the only configured harness. Otherwise `wtc add-repo` asks the agent
+  to ask the person; `--harness none` starts a collection without one.
+  Without harnesses configured, every collection is ad hoc, as before.
+- **A repository the harness does not list** is the person's choice, even
+  with a default harness. `wtc add-repo` stops and the agent asks: ad hoc
+  beside the harness in this collection (`--ad-hoc`), registered in the
+  harness first (an entry in `.harness-repos.yml` in the collection's
+  worktree of the harness, published like any change), or a collection of
+  its own without a harness (`--harness none` and another name).
 - **A worktree like the others.** The first `wtc add-repo` of a collection
   adds a managed worktree of the harness, on the collection's branch, so a
   task can change the harness and publish that like any repository.
@@ -283,7 +321,8 @@ A collection works in at most one harness:
   `default_ref` from the harness's `.harness-repos.yml`: from the
   collection's worktree of the harness once there is one, before that from
   the gateway's clone at `ref`. `--base` still wins. A URL or `owner/name`
-  that is not in the registry is added ad hoc.
+  that is in the registry resolves to its entry; one that is not is the
+  person's choice (above).
 - **Instructions.** `wtc status` shows the harness and its worktree; the
   agent reads its `AGENTS.md` from there.
 

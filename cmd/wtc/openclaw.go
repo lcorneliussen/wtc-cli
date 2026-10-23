@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -17,6 +19,15 @@ import (
 )
 
 func currentHost() openclaw.HostKind { return openclaw.DetectHost(os.Getenv) }
+
+// readBodyFile reads a pull request description from path, or from stdin
+// for -.
+func readBodyFile(path string) ([]byte, error) {
+	if path == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	return os.ReadFile(path)
+}
 
 // printPlan writes the plan to stdout as the command's whole output, and what
 // to do with it to stderr, where it reaches the agent without getting in the
@@ -92,11 +103,17 @@ request through a forge skill elsewhere.
 
 It refuses when history that was already published has been rewritten, when a
 merge or rebase is unfinished, when files that look like credentials would be
-committed, and outside a gateway-managed worktree.`,
+committed, and outside a gateway-managed worktree.
+
+--title and --body (or --body-file) are recorded for the branch, in the
+worktree's git directory: the person's push from the collection card opens the
+pull request with them. One left out keeps what was recorded before.`,
 		Args: cobra.NoArgs,
 	}
-	publish.Flags().StringVar(&opt.Title, "title", "", "Pull request title")
-	publish.Flags().StringVar(&opt.Body, "body", "", "Pull request description")
+	var bodyFile string
+	publish.Flags().StringVar(&opt.Title, "title", "", "Pull request title, one line")
+	publish.Flags().StringVar(&opt.Body, "body", "", "Pull request description (Markdown)")
+	publish.Flags().StringVar(&bodyFile, "body-file", "", "Read the pull request description from a file, - for stdin")
 	publish.Flags().StringVar(&dest, "dest", "", "Branch the pull request goes into (default: origin's default branch)")
 	publish.Flags().BoolVar(&opt.AllowSensitive, "allow-sensitive", false, "Publish uncommitted files even when their names look like credentials")
 	publish.RunE = func(cmd *cobra.Command, args []string) error {
@@ -107,6 +124,19 @@ committed, and outside a gateway-managed worktree.`,
 		if err != nil {
 			return err
 		}
+		if bodyFile != "" {
+			if opt.Body != "" {
+				return fmt.Errorf("pass --body or --body-file, not both")
+			}
+			data, err := readBodyFile(bodyFile)
+			if err != nil {
+				return err
+			}
+			opt.Body = string(data)
+		}
+		if err := openclaw.CheckProposal(strings.TrimSpace(opt.Title), strings.TrimSpace(opt.Body)); err != nil {
+			return err
+		}
 		checkout, err := openclaw.OpenCheckout(cwd, dest)
 		if err != nil {
 			return err
@@ -114,6 +144,20 @@ committed, and outside a gateway-managed worktree.`,
 		plan, err := checkout.PlanPublish(opt)
 		if err != nil {
 			return err
+		}
+		if checkout.Private {
+			plan.Warnings = append(plan.Warnings, "A sandbox's copy cannot record the title and description for the collection card: give them to github_publish when the person asks you to publish.")
+		} else if proposal, err := checkout.Propose(opt.Title, opt.Body); err != nil {
+			return fmt.Errorf("cannot record the title and description: %w", err)
+		} else if proposal == nil || proposal.Title == "" || proposal.Body == "" {
+			what := "No title and description are"
+			switch {
+			case proposal != nil && proposal.Title != "":
+				what = "No description is"
+			case proposal != nil && proposal.Body != "":
+				what = "No title is"
+			}
+			plan.Warnings = append(plan.Warnings, what+" recorded for the pull request yet: pass --title and --body-file (what changed and why, how it was checked, what is left; the repository's pull request template if it has one). Without a title the pull request opens as \"Publish "+checkout.Branch()+"\".")
 		}
 		return printPlan(plan)
 	}
@@ -125,7 +169,7 @@ committed, and outside a gateway-managed worktree.`,
 // the worktrees, so that it owns them and can publish them. A collection with
 // a harness resolves names through the harness's registry, and gets a
 // worktree of the harness itself first; a worker never does.
-func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separate bool, worker, work string) error {
+func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separate, adHoc bool, worker, work string) error {
 	if worktree == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			worktree = openclaw.CurrentWorktree(cwd)
@@ -158,7 +202,7 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 			return err
 		}
 	}
-	adds, harness, err := harnessRepos(repos, task, baseFlag, harnessFlag, worker != "")
+	adds, harness, err := harnessRepos(repos, task, baseFlag, harnessFlag, adHoc, worker != "")
 	if err != nil {
 		return err
 	}
@@ -243,10 +287,18 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 			projects = append(projects, project)
 		}
 	}
-	if harness != nil && worker == "" {
-		// Only a plan that can be carried out binds the collection.
-		if err := wtc.RecordGatewayHarness(filepath.Join(gatewayStateDir(), "wtc-collections", worktree), harness.Name, harness.Remote); err != nil {
-			return err
+	if worker == "" {
+		// Only a plan that can be carried out binds the collection: to its
+		// harness, or, when the person chose none, to none, so that a later
+		// add-repo does not bind it to a harness after all.
+		if harness != nil {
+			if err := wtc.RecordGatewayHarness(openclaw.NewCollectionFolder(gatewayStateDir(), worktree, harness.Name), harness.Name, harness.Remote); err != nil {
+				return err
+			}
+		} else if harnessFlag == openclaw.NoHarness {
+			if err := wtc.RecordGatewayHarness(openclaw.NewCollectionFolder(gatewayStateDir(), worktree, ""), openclaw.NoHarness, ""); err != nil {
+				return err
+			}
 		}
 	}
 	plan := openclaw.NewPlan(intents...)
@@ -276,7 +328,7 @@ type repoToAdd struct {
 // remote, based on its default_ref unless --base says otherwise. When the
 // collection has no worktree of the harness yet, it comes first, except for
 // a worker.
-func harnessRepos(repos []string, worktree, branch, flag string, worker bool) ([]repoToAdd, *openclaw.Harness, error) {
+func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker bool) ([]repoToAdd, *openclaw.Harness, error) {
 	plain := func() []repoToAdd {
 		var adds []repoToAdd
 		for _, r := range repos {
@@ -288,15 +340,10 @@ func harnessRepos(repos []string, worktree, branch, flag string, worker bool) ([
 	if err != nil {
 		return nil, nil, err
 	}
-	folder := filepath.Join(gatewayStateDir(), "wtc-collections", worktree)
-	recorded, _, err := wtc.GatewayHarness(folder)
-	if err != nil {
-		return nil, nil, err
-	}
-	var names []string
-	for _, r := range repos {
-		if _, _, gitURL, err := openclaw.ProjectSource(r); err == nil && gitURL == "" {
-			names = append(names, r)
+	recorded := ""
+	if folder := openclaw.CollectionFolder(gatewayStateDir(), worktree); folder != "" {
+		if recorded, _, err = wtc.GatewayHarness(folder); err != nil {
+			return nil, nil, err
 		}
 	}
 	registries := map[string]harnessRegistry{}
@@ -308,8 +355,18 @@ func harnessRepos(repos []string, worktree, branch, flag string, worker bool) ([
 		registries[h.Name] = r
 		return r
 	}
-	h, err := openclaw.ChooseHarness(cfg, flag, recorded, names, func(h openclaw.Harness, name string) bool {
-		_, ok := registryOf(h).find(name)
+	// A repository counts by its registry name, or by a URL or owner/name
+	// that is a registered remote.
+	h, err := openclaw.ChooseHarness(cfg, flag, recorded, repos, func(h openclaw.Harness, r string) bool {
+		reg := registryOf(h)
+		if _, ok := reg.find(r); ok {
+			return true
+		}
+		_, _, gitURL, err := openclaw.ProjectSource(r)
+		if err != nil || gitURL == "" {
+			return false
+		}
+		_, ok := reg.findRemote(gitURL)
 		return ok
 	})
 	if err != nil || h == nil {
@@ -323,6 +380,7 @@ func harnessRepos(repos []string, worktree, branch, flag string, worker bool) ([
 	if reg.worktree == "" && !worker {
 		adds = append(adds, repoToAdd{arg: h.Remote, branch: h.Ref, resolved: true})
 	}
+	var unlisted []string
 	for _, r := range repos {
 		add := repoToAdd{arg: r, branch: branch}
 		entry, ok := reg.find(r)
@@ -351,10 +409,54 @@ func harnessRepos(repos []string, worktree, branch, flag string, worker bool) ([
 				// to, unless the task has a branch or base there.
 				add.branch = h.Ref
 			}
+		} else if !ok {
+			unlisted = append(unlisted, r)
 		}
 		adds = append(adds, add)
 	}
+	// A worker takes part of the task, whose session already decided about
+	// its repositories.
+	if len(unlisted) > 0 && !adHoc && !worker {
+		return nil, nil, unlistedError(*h, worktree, repos, unlisted, recorded == "", reg.worktree != "")
+	}
 	return adds, h, nil
+}
+
+// unlistedError asks the agent to ask the person what to do with
+// repositories the collection's harness does not list: add them beside the
+// harness ad hoc, register them in it first, or give them a collection of
+// their own without a harness. Its add-repo commands for this collection
+// run as printed: they name it and, while it has not recorded its harness
+// yet, the harness this add-repo chose. 1 is one such command, for every
+// repository asked for. 2 adds the harness first when the collection has no
+// worktree of it, then, after the registry edit, every repository. 3 adds
+// the unlisted ones to another collection, whose name the person picks for
+// <another-name>, and the listed ones here.
+func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string, unrecorded, hasWorktree bool) error {
+	here := " --worktree " + worktree
+	if unrecorded {
+		here += " --harness " + h.Name
+	}
+	all := strings.Join(repos, " ")
+	register := fmt.Sprintf("run `wtc add-repo %s%s` first, then ", h.Remote, here)
+	if hasWorktree {
+		register = ""
+	}
+	var listed []string
+	for _, r := range repos {
+		if !slices.Contains(unlisted, r) {
+			listed = append(listed, r)
+		}
+	}
+	separate := fmt.Sprintf("wtc add-repo %s --worktree <another-name> --harness %s", strings.Join(unlisted, " "), openclaw.NoHarness)
+	if len(listed) > 0 {
+		separate += fmt.Sprintf(", and here wtc add-repo %s%s", strings.Join(listed, " "), here)
+	}
+	return fmt.Errorf("harness %s does not list %s. Ask the person which they want:\n"+
+		"  1. ad hoc beside the harness, in this collection: wtc add-repo %s%s --ad-hoc\n"+
+		"  2. registered in the harness: %sadd it to .harness-repos.yml in the collection's worktree of %s and commit that (it is published like any repository), then wtc add-repo %s%s\n"+
+		"  3. a collection of its own without a harness: %s",
+		h.Name, strings.Join(unlisted, ", "), all, here, register, h.Name, all, here, separate)
 }
 
 // harnessRegistry is a harness's registry as a collection sees it: from its
@@ -625,7 +727,7 @@ func (h *gatewayHarnessStatus) String() string {
 // worktree among the collection's, or nil.
 func gatewayHarness(folder string, worktrees []string) *gatewayHarnessStatus {
 	name, remote, err := wtc.GatewayHarness(folder)
-	if err != nil || name == "" {
+	if err != nil || name == "" || name == openclaw.NoHarness {
 		return nil
 	}
 	h := &gatewayHarnessStatus{Name: name, Remote: remote}
@@ -656,7 +758,9 @@ func linkGatewayFolder(name string, repos []openclaw.CheckoutStatus) (string, []
 		}
 		linked = append(linked, wtc.LinkedRepo{Name: r.Repo, Remote: strings.TrimSpace(string(remote)), DefaultRef: base, Path: r.Path})
 	}
-	folder := filepath.Join(gatewayStateDir(), "wtc-collections", name)
+	// A collection whose first add-repo chose a harness has its folder by
+	// now; one without a harness gets it here.
+	folder := openclaw.NewCollectionFolder(gatewayStateDir(), name, "")
 	c, err := wtc.LinkGatewayCollection(folder, linked)
 	if err != nil {
 		return folder, []wtc.RuntimeItem{}, err.Error()

@@ -50,9 +50,21 @@
           }
         }
       },
+      "pullRequestEvents": {
+        "type": "string",
+        "enum": ["wake", "queue", "off"],
+        "default": "wake",
+        "description": "How a collection's conversation hears that a pull request of it was opened, merged or closed, became ready, failed or passed its checks, was approved, got a request for changes or conflicts with its base: wake gives it a turn now, queue tells it on its next turn, off says nothing."
+      },
+      "pullRequestPollMinutes": {
+        "type": "number",
+        "default": 5,
+        "minimum": 0,
+        "description": "How often collections with an open pull request are looked at while nobody has their card open. 0 looks only when a card does."
+      },
       "defaultHarness": {
         "type": "string",
-        "description": "The harness a collection uses when it does not name one. Without it, a collection uses the only configured harness, or the one whose registry lists the repositories it adds; otherwise the agent asks."
+        "description": "Chooses between harnesses whose registries list the repositories a new collection adds, and stands in when none lists them (as the only configured harness does). A harness that lists them beats it; a repository the chosen harness does not list is asked about."
       },
       "sandboxGit": {
         "type": "object",
