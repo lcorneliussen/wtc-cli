@@ -1,6 +1,8 @@
 package openclaw
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -47,5 +49,29 @@ func TestCheckProposal(t *testing.T) {
 		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 			t.Errorf("%.20q: %v, want %q", tc.title, err, tc.want)
 		}
+	}
+}
+
+// A merged pull request says whether the checkout has its merge commit yet,
+// so that the card can offer the catch-up that brings it in.
+func TestStatusOfAMergedPullRequest(t *testing.T) {
+	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
+	write(t, c, "notes.md", "one\n")
+	git("add", ".")
+	git("commit", "-qm", "Add notes")
+	merge := git("commit-tree", "-p", "origin/main", "-p", "HEAD", "-m", "Merge pull request #1", "HEAD^{tree}")
+	bin := t.TempDir()
+	script := "#!/bin/sh\nprintf '%s' '[{\"number\":1,\"url\":\"u\",\"state\":\"MERGED\",\"isDraft\":false,\"title\":\"t\",\"statusCheckRollup\":[],\"mergeable\":\"UNKNOWN\",\"reviewDecision\":\"\",\"mergeCommit\":{\"oid\":\"" + merge + "\"}}]'\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	pr := CheckoutsStatus([]string{c.Dir}, true).Repos[0].PullRequest
+	if pr == nil || pr.State != "merged" || pr.MergedIn {
+		t.Fatalf("before the catch-up: %+v", pr)
+	}
+	git("merge", "-q", "--ff-only", merge)
+	if pr := CheckoutsStatus([]string{c.Dir}, true).Repos[0].PullRequest; pr == nil || !pr.MergedIn {
+		t.Fatalf("after it: %+v", pr)
 	}
 }

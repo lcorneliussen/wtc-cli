@@ -41,7 +41,8 @@ Read that before the first `wtc` command of a task and follow it. In short:
   changes, a conflict, or a merge. Update the task's progress with it. For a
   failure, a review or a conflict, look at it (`gh pr checks`,
   `gh pr view --comments`) and tell the person what you will do. After a
-  merge, say what is done and what is left. Don't answer review comments on
+  merge, run `wtc catch-up` in that repository's checkout so it continues
+  from the merge, then say what is done and what is left. Don't answer review comments on
   the forge yourself.
 - Parallel parts of a task go to workers, never to two writers in one
   checkout: `wtc add-repo <repo> --worker <name> --work "<part>"`, then

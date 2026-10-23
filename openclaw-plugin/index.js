@@ -360,7 +360,14 @@ export default {
     const tell = (agentId, sessionKey, lines) => {
       const mode = api.pluginConfig?.pullRequestEvents ?? "wake";
       if (lines.length === 0 || mode === "off") return;
-      const text = ["wtc: pull request news for this collection", ...lines.map((l) => `- ${l}`)].join("\n");
+      // A heartbeat turn tends to find nothing to do: say what is.
+      const text = [
+        "wtc: pull request news for this collection",
+        ...lines.map((l) => `- ${l}`),
+        "Bring the task's progress up to date with this.",
+        ...(lines.some((l) => / was merged\.$|opened and merged\.$/.test(l)) ? ["After a merge, run wtc catch-up in that repository's checkout, so it continues from the merge, and check what is left of the task."] : []),
+        "Tell the person only what they need to act on.",
+      ].join("\n");
       try {
         api.runtime.system.enqueueSystemEvent(text, { agentId, sessionKey });
         // Now, as the gateway's own system event with --mode now does: an

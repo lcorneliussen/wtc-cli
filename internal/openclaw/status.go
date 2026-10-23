@@ -69,6 +69,9 @@ type PullRequest struct {
 	// Review is the review decision: approved, changes_requested,
 	// review_required, or empty when the repository requires none.
 	Review string `json:"review,omitempty"`
+	// MergedIn says, of a merged pull request, that the checkout already
+	// has its merge commit: a catch-up brought it in.
+	MergedIn bool `json:"mergedIn,omitempty"`
 }
 
 // ManagedCollections finds the gateway's collections: the managed worktrees
@@ -228,7 +231,7 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "--repo", origin.Owner+"/"+origin.Repo, "--head", branch,
-		"--state", "all", "--limit", "1", "--json", "number,url,state,isDraft,title,statusCheckRollup,mergeable,reviewDecision")
+		"--state", "all", "--limit", "1", "--json", "number,url,state,isDraft,title,statusCheckRollup,mergeable,reviewDecision,mergeCommit")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -242,7 +245,10 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 		Title   string `json:"title"`
 		Merge   string `json:"mergeable"`
 		Review  string `json:"reviewDecision"`
-		Rollup  []struct {
+		Commit  *struct {
+			OID string `json:"oid"`
+		} `json:"mergeCommit"`
+		Rollup []struct {
 			Status     string `json:"status"`
 			Conclusion string `json:"conclusion"`
 			State      string `json:"state"`
@@ -254,6 +260,9 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 	f := found[0]
 	pr := &PullRequest{Number: f.Number, URL: f.URL, State: strings.ToLower(f.State), Draft: f.IsDraft, Title: f.Title, Checks: "none",
 		Mergeable: strings.ToLower(f.Merge), Review: strings.ToLower(f.Review)}
+	if pr.State == "merged" && f.Commit != nil && f.Commit.OID != "" {
+		pr.MergedIn = gitOK(dir, "merge-base", "--is-ancestor", f.Commit.OID, "HEAD")
+	}
 	// Check runs report status and conclusion, commit statuses a state.
 	for _, c := range f.Rollup {
 		switch result := strings.ToUpper(c.Conclusion + c.State); {
