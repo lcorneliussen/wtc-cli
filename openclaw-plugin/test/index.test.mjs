@@ -1,7 +1,7 @@
 // The gateway side of the plugin, where it needs no gateway.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import plugin, { collectionFolder, pullRequestChanges, pullRequestWatch, versionWarning, wtcVersionOf } from "../index.js";
+import plugin, { collectionFolder, decideProjects, matchProjects, openaiDecisions, pullRequestChanges, pullRequestWatch, versionWarning, wtcVersionOf } from "../index.js";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -287,5 +287,177 @@ test("the collection names its wtc project: its harness, or ad hoc by its folder
     });
     const r = await actions.get("collection").handler({ sessionKey: "agent:main:c", agentId: "main", payload: {} });
     assert.equal(r.result.collection.project, want, JSON.stringify(col));
+  }
+});
+
+const PROJECTS = [
+  { name: "wtc", repos: [
+    { name: "wtc-site", role: "The official wtc site; what it says about wtc comes from wtc-cli." },
+    { name: "wtc-cli", role: "The wtc CLI and OpenClaw plugin, what the site describes." },
+  ] },
+  { name: "shop", repos: [{ name: "storefront", role: "The web shop" }, { name: "billing", role: "Invoices and payments" }] },
+];
+
+test("a message's words suggest a project and its repositories", () => {
+  assert.deepEqual(matchProjects("lets work on the site", PROJECTS), { project: "wtc", repos: ["wtc-site"], source: "match" });
+  assert.deepEqual(matchProjects("the invoices are wrong", PROJECTS), { project: "shop", repos: ["billing"], source: "match" });
+  assert.deepEqual(matchProjects("fix the cli", PROJECTS).repos, ["wtc-cli"]);
+  // The project's own name sets no repository of it apart.
+  assert.deepEqual(matchProjects("fix the wtc cli", PROJECTS), { project: "wtc", repos: ["wtc-cli"], source: "match" });
+  // A repository named like its project; a project named without a match.
+  assert.deepEqual(matchProjects("fix the shop", [{ name: "shop", repos: [{ name: "shop" }] }]).repos, ["shop"]);
+  assert.deepEqual(matchProjects("wtc payments", PROJECTS), { project: "shop", repos: ["billing"], source: "match" });
+  assert.equal(matchProjects("hello there", PROJECTS), null);
+  assert.equal(matchProjects("", PROJECTS), null);
+});
+
+test("the decision model chooses when the gateway selected one", async () => {
+  const asked = [];
+  const decisions = {
+    evaluate: async (batch, opts) => {
+      asked.push({ batch, opts });
+      return { status: "ok", answers: { where: { choice: "shop/storefront", probabilities: { none: 0.05, "wtc/wtc-site": 0.02, "wtc/wtc-cli": 0.01, "shop/storefront": 0.6, "shop/billing": 0.32 } } } };
+    },
+  };
+  assert.deepEqual(await decideProjects(decisions, "main", "the checkout page breaks", PROJECTS), { project: "shop", repos: ["storefront", "billing"], source: "decision" });
+  const { batch, opts } = asked[0];
+  assert.equal(batch.questions.where.type, "choice");
+  assert.ok("none" in batch.questions.where.criteria && "wtc/wtc-site" in batch.questions.where.criteria);
+  assert.equal(opts.agentId, "main");
+  assert.equal(batch.state, "the checkout page breaks");
+  // Contract 2: typed evidence.
+  let v2;
+  await decideProjects({ evaluateV2: async (b) => { v2 = b; return { status: "ok", result: { answers: { where: { type: "choice", choice: "wtc/wtc-site", probabilities: { "wtc/wtc-site": 0.9 } } } } }; }, evaluate: async () => { throw new Error("v1 used"); } }, "main", "the site", PROJECTS)
+    .then((r) => assert.deepEqual(r, { project: "wtc", repos: ["wtc-site"], source: "decision" }));
+  assert.deepEqual(v2.state, { type: "text", text: "the site" });
+  // None chosen, unavailable, failing or absent: no suggestion from it.
+  assert.deepEqual(await decideProjects({ evaluate: async () => ({ status: "ok", answers: { where: { choice: "none", probabilities: {} } } }) }, "main", "hi", PROJECTS), { none: true });
+  assert.equal(await decideProjects({ evaluate: async () => ({ status: "unavailable", reason: "no model" }) }, "main", "site", PROJECTS), null);
+  assert.equal(await decideProjects({ evaluate: async () => { throw new Error("down"); } }, "main", "site", PROJECTS), null);
+  assert.equal(await decideProjects(undefined, "main", "site", PROJECTS), null);
+});
+
+test("a draft not sent yet never reaches the gateway's decision runtime", async () => {
+  const actions = new Map();
+  let asked = 0;
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      decisions: { evaluateV2: async () => { asked += 1; return { status: "ok", result: { answers: { where: { choice: "none", probabilities: {} } } } }; } },
+      state: { resolveStateDir: () => "/nonexistent" },
+      agent: { session: { listSessionEntries: () => [], getSessionEntry: async () => undefined } },
+      system: { runCommandWithTimeout: async (argv) => ({ code: 0, stdout: argv[1] === "projects" ? JSON.stringify({ ok: true, data: { projects: PROJECTS } }) : "", stderr: "" }) },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const r = await actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text: "work on the site", draft: true } });
+  assert.equal(r.result.source, "match");
+  assert.equal(asked, 0);
+  await actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text: "work on the site" } });
+  assert.equal(asked, 1);
+});
+
+test("the suggest action asks wtc projects once a minute, the decision model first", async () => {
+  const actions = new Map();
+  let projectRuns = 0;
+  let decide = null;
+  const agents = [];
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      decisions: { evaluate: async (batch, opts) => { agents.push(opts.agentId); return decide; } },
+      state: { resolveStateDir: () => "/nonexistent" },
+      agent: { session: { listSessionEntries: () => [], getSessionEntry: async () => undefined } },
+      system: { runCommandWithTimeout: async (argv) => {
+        if (argv[1] === "projects") projectRuns += 1;
+        return { code: 0, stdout: argv[1] === "projects" ? JSON.stringify({ ok: true, data: { projects: PROJECTS } }) : "", stderr: "" };
+      } },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const suggest = (text) => actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text } });
+  // The model's choice wins over the words, and its "none" stands.
+  decide = { status: "ok", answers: { where: { choice: "shop/billing", probabilities: { "shop/billing": 0.9 } } } };
+  assert.deepEqual((await suggest("work on the site")).result, { project: "shop", repos: ["billing"], source: "decision" });
+  decide = { status: "ok", answers: { where: { choice: "none", probabilities: {} } } };
+  assert.equal((await suggest("work on the site")).result, null);
+  assert.deepEqual(agents, ["main", "main"]);
+  // Unavailable: the words.
+  decide = { status: "unavailable", reason: "no model" };
+  assert.deepEqual((await suggest("work on the site")).result, { project: "wtc", repos: ["wtc-site"], source: "match" });
+  assert.equal((await suggest("hello")).result, null);
+  assert.equal((await suggest("")).result, null);
+  assert.equal(projectRuns, 1);
+});
+
+test("without a runtime (CLI metadata, setup) the plugin registers nothing", () => {
+  for (const registrationMode of ["cli-metadata", "setup-only"]) {
+    plugin.register({ registrationMode, get runtime() { throw new Error("runtime is intentionally unavailable"); }, session: { controls: { registerSessionAction() { throw new Error("registered"); } } } });
+  }
+});
+
+test("OpenAI's Decisions API called directly answers like the gateway's runtime", async () => {
+  const sent = [];
+  const reply = (status, body) => async (url, init) => { sent.push({ url, init }); return { ok: status === 200, status, json: async () => body }; };
+  const ok = openaiDecisions({ apiKey: "sk-test", fetchImpl: reply(200, { model: "gpt-6-luna", answers: [{ name: "where", type: "choice", choice: "shop/billing", confidence: 0.9, probabilities: [{ value: "none", probability: 0.05 }, { value: "shop/billing", probability: 0.8 }, { value: "shop/storefront", probability: 0.15 }] }] }) });
+  assert.deepEqual(await decideProjects(ok, "main", "the invoices are wrong", PROJECTS), { project: "shop", repos: ["billing"], source: "decision" });
+  const { url, init } = sent[0];
+  assert.equal(url, "https://api.openai.com/v1/decisions");
+  assert.equal(init.headers.authorization, "Bearer sk-test");
+  const body = JSON.parse(init.body);
+  assert.equal(body.model, "gpt-6-luna");
+  assert.equal(body.input, "the invoices are wrong");
+  assert.equal(body.questions[0].type, "choice");
+  assert.ok(body.questions[0].choices.some((c) => c.value === "none") && body.questions[0].choices.some((c) => c.value === "wtc/wtc-site"));
+  // Refused, failing or malformed: unavailable, so the words decide.
+  for (const [status, body] of [[401, {}], [500, {}], [200, { answers: [] }]]) {
+    assert.equal(await decideProjects(openaiDecisions({ apiKey: "k", fetchImpl: reply(status, body) }), "main", "site", PROJECTS), null);
+  }
+  assert.equal(await decideProjects(openaiDecisions({ apiKey: "k", fetchImpl: async () => { throw new Error("offline"); } }), "main", "site", PROJECTS), null);
+});
+
+test("the suggest action calls OpenAI itself with WTC_DECISIONS_OPENAI_API_KEY, and only then", async () => {
+  const actions = new Map();
+  plugin.register({
+    pluginConfig: { decisionModel: "gpt-6-test" },
+    runtime: {
+      state: { resolveStateDir: () => "/nonexistent" },
+      agent: { session: { listSessionEntries: () => [], getSessionEntry: async () => undefined } },
+      system: { runCommandWithTimeout: async (argv) => ({ code: 0, stdout: argv[1] === "projects" ? JSON.stringify({ ok: true, data: { projects: PROJECTS } }) : "", stderr: "" }) },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const realFetch = globalThis.fetch;
+  const models = [];
+  globalThis.fetch = async (url, init) => {
+    models.push(JSON.parse(init.body).model);
+    return { ok: true, status: 200, json: async () => ({ model: "gpt-6-test", answers: [{ name: "where", type: "choice", choice: "none", probabilities: [{ value: "none", probability: 0.9 }] }] }) };
+  };
+  const was = process.env.WTC_DECISIONS_OPENAI_API_KEY;
+  try {
+    const suggest = () => actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text: "work on the site" } });
+    delete process.env.WTC_DECISIONS_OPENAI_API_KEY;
+    assert.equal((await suggest()).result.source, "match");
+    assert.deepEqual(models, []);
+    process.env.WTC_DECISIONS_OPENAI_API_KEY = "sk-test";
+    // Its "none" stands over the words.
+    assert.equal((await suggest()).result, null);
+    assert.deepEqual(models, ["gpt-6-test"]);
+    // A draft not sent yet never leaves the gateway: the words only.
+    const fromDraft = await actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text: "work on the site", draft: true } });
+    assert.equal(fromDraft.result.source, "match");
+    assert.deepEqual(models, ["gpt-6-test"]);
+  } finally {
+    globalThis.fetch = realFetch;
+    if (was === undefined) delete process.env.WTC_DECISIONS_OPENAI_API_KEY; else process.env.WTC_DECISIONS_OPENAI_API_KEY = was;
   }
 });

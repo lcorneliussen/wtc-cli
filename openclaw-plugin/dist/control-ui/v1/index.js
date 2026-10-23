@@ -182,8 +182,8 @@ function watchCollection(host, sessionKey, agentId, onChange) {
 // progress: collapsed, what is not pushed yet, the open pull requests with
 // their CI and the services that run; expanded, each repository on its branch
 // with its Push and Catch up buttons, and each service with its local address
-// and tunnels. It wraps the
-// built-in composer and adds nothing to sessions that are not collections.
+// and tunnels. It wraps the built-in composer. In a session that is not a
+// collection yet it shows only a suggestion of where to start one, if any.
 const OPEN_KEY = "wtc.collectionCard.open";
 const remembered = () => { try { return localStorage.getItem(OPEN_KEY) === "1"; } catch { return false; } };
 const remember = (open) => { try { localStorage.setItem(OPEN_KEY, open ? "1" : "0"); } catch {} };
@@ -792,6 +792,30 @@ function collectionTables(v) {
     table(narrow ? REPO_COLUMNS.map((c, i) => (i === 0 ? { ...c, width: "minmax(0,1fr)" } : c)) : REPO_COLUMNS, repos.map(repoRow), narrow), serviceTable, totals, prTable };
 }
 
+// The text of the latest message the person wrote, from chat.history.
+// Heartbeat polls and wtc's pull request news arrive as user messages too,
+// and are not theirs.
+export function latestUserText(messages) {
+  for (const m of [...(messages ?? [])].reverse()) {
+    if (m?.role !== "user") continue;
+    const text = typeof m.content === "string" ? m.content
+      : Array.isArray(m.content) ? m.content.filter((c) => c?.type === "text").map((c) => c.text ?? "").join("\n") : "";
+    if (!text.trim() || /^\[OpenClaw heartbeat poll\]|^wtc: pull request news/.test(text.trim())) continue;
+    // What Start sent (marked "(wtc) ") was acted on: nothing to suggest
+    // until the person writes again.
+    if (/(^|\n)\(wtc\) /.test(text)) return "";
+    return text.trim();
+  }
+  return "";
+}
+// The agent's main session (Home) routes work: it starts a conversation of
+// its own for a task rather than becoming a collection itself.
+export const isMainSession = (sessionKey) => /^agent:[^:]+:main$/.test(String(sessionKey ?? ""));
+// What Start asks the conversation to do.
+export const startMessage = (s, main = false) => main
+  ? `Start a new conversation for this task in wtc project ${s.project} with ${s.repos.join(", ")}: sessions_spawn with visible: true and a task that runs wtc add-repo ${s.repos.join(" ")} --project ${s.project} --worktree <a short name for this task> there, reads the project's AGENTS.md and adds what else the task needs. Send me its link.`
+  : `Start this conversation's collection in wtc project ${s.project} with ${s.repos.join(", ")}: wtc add-repo ${s.repos.join(" ")} --project ${s.project} --worktree <a short name for this task>. Then read the project's AGENTS.md and add what else the task needs.`;
+
 function mountComposer(container, context) {
   let ctx = context;
   let watch = null;
@@ -850,11 +874,110 @@ function mountComposer(container, context) {
     refresh: () => watch?.refresh(), pause: (on) => watch?.pause(on), rerender: () => entry && render(entry),
   });
 
+  // A conversation without a collection: where the draft being typed, or
+  // the person's latest message, asks to work, suggested by the gateway (its
+  // decision model, OpenAI's asked directly, or the words) as a card to
+  // start the collection from. The draft is asked about once typing pauses;
+  // the latest message on each collection refresh, not more than every ten
+  // seconds. Dismissed until the card is mounted again.
+  let suggestion = null;
+  let askedAt = 0;
+  let draftTimer = null;
+  let lastDraft = "";
+  const dismissed = new Set();
+  async function ask(sessionKey, text, fromDraft) {
+    if (!text || dismissed.has(sessionKey) || (suggestion?.key === sessionKey && suggestion.text === text)) return;
+    try {
+      // A draft is matched by its words on the gateway; only a sent message
+      // may go to a decision model.
+      const res = await ctx.host.request("plugins.sessionAction", { pluginId: PLUGIN_ID, actionId: "suggest", sessionKey, ...(agentOf(ctx) ? { agentId: agentOf(ctx) } : {}), payload: { text, ...(fromDraft ? { draft: true } : {}) } });
+      if (sessionKey !== key) return;
+      suggestion = { key: sessionKey, text, fromDraft, result: res?.ok === false ? null : res?.result ?? null };
+      if (entry) render(entry);
+    } catch { /* no suggestion: the conversation still can */ }
+  }
+  async function suggestFor(sessionKey) {
+    if (dismissed.has(sessionKey) || Date.now() - askedAt < 10000 || suggestion?.fromDraft) return;
+    askedAt = Date.now();
+    try {
+      const history = await ctx.host.request("chat.history", { sessionKey, limit: 20 });
+      await ask(sessionKey, latestUserText(history?.messages), false);
+    } catch { /* as above */ }
+  }
+  // The draft, once typing pauses for a moment, while there is no collection.
+  function draftChanged() {
+    const draft = String(ctx.props?.draft ?? "").trim();
+    if (draft === lastDraft) return;
+    lastDraft = draft;
+    clearTimeout(draftTimer);
+    if (draft.length < 8) {
+      if (suggestion?.fromDraft) { suggestion = null; if (entry) render(entry); }
+      return;
+    }
+    if ((entry?.data?.repos ?? []).length) return;
+    draftTimer = setTimeout(() => void ask(key, draft, true), 800);
+  }
+  const pill = (text, title, run, strong) => {
+    const b = css(el("button", { type: "button", textContent: text, title }),
+      `border:1px solid var(--border, rgba(128,128,128,.3));background:${strong ? "var(--accent, #2563eb)" : "transparent"};color:${strong ? "var(--accent-foreground, #fff)" : "inherit"};cursor:pointer;font:inherit;font-size:12px;padding:2px 10px;border-radius:999px`);
+    b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); run(); };
+    return b;
+  };
+  function renderSuggestion(s) {
+    const main = isMainSession(key);
+    const what = css(el("span", {}, main ? "Start a conversation in wtc project " : "Work in wtc project ", el("strong", { textContent: s.project }), ` with ${s.repos.join(", ")}?`),
+      "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
+    what.title = `${s.source === "decision" ? "The decision model's" : "The words'"} suggestion for: ${suggestion.text}`;
+    summary.replaceChildren(
+      brand("14px", entry?.data?.version),
+      what,
+      css(el("span", {}, note ? css(el("span", { textContent: note }), "color:var(--muted, #888);font-size:12px") : null,
+        pill("Start", main ? "Ask the agent to start a conversation for this task in that wtc project" : "Ask the conversation to start this collection", () => {
+          const fromDraft = suggestion?.fromDraft === true;
+          dismissed.add(key);
+          // Home never becomes a collection: once Start went out, it can be
+          // suggested to again.
+          const done = () => { if (main) { dismissed.delete(key); suggestion = null; } };
+          note = "";
+          card.remove();
+          const draft = String(ctx.props?.draft ?? "").trim();
+          const fail = (err) => {
+            dismissed.delete(key);
+            // The draft as the person wrote it, without what Start added.
+            if (draft) { try { ctx.props?.setDraft?.(draft); } catch {} }
+            say(String(err?.message ?? err));
+          };
+          // A draft goes along with what Start asks, through the composer's own send.
+          if (fromDraft && draft && ctx.props?.setDraft && ctx.props?.send) {
+            try {
+              ctx.props.setDraft(`${draft}\n\n(wtc) ${startMessage(s, main)}`);
+              void Promise.resolve(ctx.props.send()).then((sent) => { if (sent === false) fail(new Error("The message was not sent.")); else done(); }, fail);
+            } catch (err) { fail(err); }
+          } else {
+            void askConversation(ctx.host, key, `(wtc) ${startMessage(s, main)}`).then(done, fail);
+          }
+        }, true),
+        pill("Change…", "Pick another wtc project or repositories in the Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
+        iconButton("✕", "Not now", () => { dismissed.add(key); card.remove(); })),
+      "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:6px;white-space:nowrap"),
+    );
+    detail.replaceChildren();
+    if (card.parentNode !== container) container.prepend(card);
+  }
+
   function render(next) {
     entry = next;
     const repos = entry?.data?.repos ?? [];
-    if (!ctx.presented || ctx.signal.aborted || repos.length === 0) {
+    if (!ctx.presented || ctx.signal.aborted) {
       card.remove();
+      return;
+    }
+    // Only a collection that loaded and has nothing yet: a failed load is
+    // no reason to start another one.
+    if (repos.length === 0) {
+      if (entry?.data) void suggestFor(key);
+      if (entry?.data && suggestion?.key === key && suggestion.result && !dismissed.has(key)) renderSuggestion(suggestion.result);
+      else card.remove();
       return;
     }
     const groups = serviceGroups(entry.data.services ?? []);
@@ -894,10 +1017,12 @@ function mountComposer(container, context) {
     update(next) {
       ctx = next;
       follow(next);
+      draftChanged();
       if (entry) render(entry);
     },
     dispose() {
       clearInterval(tick);
+      clearTimeout(draftTimer);
       sized?.disconnect();
       watch?.dispose();
       card.remove();
@@ -1268,15 +1393,15 @@ export default {
     const disposers = [
       host.ui.registerPanel({ id: "collection", label: TITLE, icon: "folder", mount: mountCollection }),
       host.ui.registerReplacement({ id: "collection-composer", surface: "composer", label: "Composer with collection", mount: mountComposer }),
-      // "header": a button in the chat header. "session": an entry in the
-      // session's menu in the sidebar.
-      ...["header", "session"].map((placement) =>
-        host.ui.registerAction({
-          id: `open-collection-${placement}`,
-          label: TITLE,
-          placement,
-          run: ({ sessionKey, agentId }) => host.ui.openPanel("collection", { sessionKey, agentId }),
-        })),
+      // An entry in the session's menu. No header action: OpenClaw shows one
+      // as a bar across every conversation, also one without a collection;
+      // the card's ⤢ and the header's Panels menu open the panel too.
+      host.ui.registerAction({
+        id: "open-collection-session",
+        label: TITLE,
+        placement: "session",
+        run: ({ sessionKey, agentId }) => host.ui.openPanel("collection", { sessionKey, agentId }),
+      }),
     ];
     // The card lives with the message box, so this composer is selected on
     // activation. Customize UI → Built-in switches back for this browser.

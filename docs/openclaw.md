@@ -309,6 +309,38 @@ harness name):
 agent can match what the person asks to work on before `wtc add-repo` starts
 the collection.
 
+A conversation starts without a collection, wherever OpenClaw's New session
+put it, and often only its first messages say where the work is. So the card
+of a conversation without a collection suggests one: "Work in wtc project
+**wtc** with wtc-site?". It suggests from what the person types, once they
+pause, and from their latest message. **Start** asks the conversation to run
+`wtc add-repo` for it, sending a draft along with that request. In the
+agent's main session (Home) it asks for a new conversation for the task
+instead. **Change…** opens the panel, and ✕ dismisses it.
+
+A draft that has not been sent is matched by its words only, on the
+gateway. Only a sent message goes to a decision model: the gateway's, when
+one is selected (`agents.defaults.decisionModel`), as one choice among the
+projects' repositories by name and role. No OpenClaw release has decision
+models yet, so meanwhile the plugin asks OpenAI's Decisions API itself when
+the gateway's environment has `WTC_DECISIONS_OPENAI_API_KEY` (the plugin's
+`decisionModel` setting picks the model, `gpt-6-luna` by default). Give the
+key that name only: OpenClaw's own OpenAI provider reads `OPENAI_API_KEY`,
+and the chat model could then use it. With the key, the person's sent
+message goes to OpenAI. Without either, the suggestion comes from matching
+the message's words against the names and roles
+([#159](https://github.com/lcorneliussen/wtc-cli/issues/159) tracks moving
+to OpenClaw's decision models).
+
+OpenAI's decision model (`openai/gpt-6-luna`, which needs an OpenAI Platform
+API key; a ChatGPT or Codex subscription doesn't authorize it) suits this
+best. In a small comparison
+([#155](https://github.com/lcorneliussen/wtc-cli/pull/155)), on twelve test
+messages over two projects, it chose right eleven times,
+in about 200 ms and a few hundred tokens each. The local ONNX classifiers
+chose right at most six times, mostly the same repository whatever was
+asked, and the word match nine times.
+
 Each harness must also be cloned on the gateway (an OpenClaw project), like
 the repositories its registry names: **Add repository** in the Collection
 panel, or the gateway's own project settings. `ref` defaults to `main`.

@@ -30,6 +30,11 @@ jobs:
       - run: go build ./cmd/wtc
       - name: Control UI render tests
         run: node --test openclaw-plugin/test/*.test.mjs
+      # Only this step gets the OpenAI secret; without it the test skips.
+      - name: Live decision test
+        run: node --test openclaw-plugin/test/decisions-live.test.mjs
+        env:
+          WTC_DECISIONS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   # Unit tests only: the pinned runtime and Docker trials run in the Linux job.
   test-macos:
     runs-on: macos-latest

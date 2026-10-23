@@ -62,6 +62,11 @@
         "minimum": 0,
         "description": "How often collections with an open pull request are looked at while nobody has their card open. 0 looks only when a card does."
       },
+      "decisionModel": {
+        "type": "string",
+        "default": "gpt-6-luna",
+        "description": "The OpenAI decision model the card's project suggestion asks, with the key in WTC_DECISIONS_OPENAI_API_KEY in the gateway's environment, while the gateway's OpenClaw has no decision models of its own. A decision model the gateway selects (agents.defaults.decisionModel) comes first."
+      },
       "defaultHarness": {
         "type": "string",
         "description": "The default wtc project: chooses between projects whose registries list the repositories a new collection adds, and stands in when none lists them (as the only configured project does). A project that lists them beats it; a repository the chosen project does not list is asked about."

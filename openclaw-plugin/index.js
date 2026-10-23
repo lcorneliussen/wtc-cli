@@ -215,6 +215,120 @@ export function pullRequestWatch(file, now = Date.now) {
   };
 }
 
+// Words that say nothing about where to work.
+const STOPWORDS = new Set("a an and are as at be but by can do for from get go have help i in into is it its lets let's look make me my need of on or our please should so some start that the this to up us want we what when where which will with work working would you".split(" "));
+const wordsOf = (text) => String(text ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOPWORDS.has(w));
+
+// Where a message asks to work, by its words: the wtc project whose
+// repositories' names, then roles, it names, and those repositories. A
+// repository's name counts three times its role; one that scores less than
+// half of its project's best is left out. null when nothing matches.
+export function matchProjects(text, projects) {
+  const words = new Set(wordsOf(text));
+  if (words.size === 0) return null;
+  let best = null;
+  for (const p of projects ?? []) {
+    // A repository counts by what sets it apart in its project ("wtc" names
+    // every repository of project wtc), each word once.
+    const shared = new Set(wordsOf(p.name));
+    const scored = (p.repos ?? []).map((r) => {
+      const hits = (text) => new Set(wordsOf(text).filter((w) => words.has(w) && !shared.has(w))).size;
+      // A repository named just like its project still has its name.
+      const own = wordsOf(r.name).every((w) => shared.has(w));
+      const name = own ? new Set(wordsOf(r.name).filter((w) => words.has(w))).size : hits(r.name);
+      const role = hits(r.role);
+      return { name: r.name, role: r.role ?? "", score: 3 * name + role };
+    }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score);
+    // Naming the project itself counts too.
+    const named = wordsOf(p.name).some((w) => words.has(w)) ? 1 : 0;
+    const top = (scored[0]?.score ?? 0) + named;
+    // Only a project with a repository to start in can be the answer.
+    if (scored.length && (!best || top > best.score)) {
+      best = { project: p.name, repos: scored.filter((r) => r.score * 2 >= scored[0].score).map((r) => r.name), score: top };
+    }
+  }
+  return best ? { project: best.project, repos: best.repos, source: "match" } : null;
+}
+
+// The same through a decision model (the gateway's, or openaiDecisions): one
+// choice among every project's repositories, and "none". Repositories within
+// half of the chosen one's probability, in its project, come along. null when
+// there is no decision model or it is unavailable; { none: true } when it
+// found the message to be about none of them.
+export async function decideProjects(decisions, agentId, text, projects) {
+  if (!decisions?.evaluate && !decisions?.evaluateV2) return null;
+  const criteria = { none: "The message is not about working on any of these repositories" };
+  const where = {};
+  for (const p of projects ?? []) {
+    for (const r of p.repos ?? []) {
+      const label = `${p.name}/${r.name}`;
+      criteria[label] = `Work on ${r.name}${r.role ? `: ${r.role}` : ""} (wtc project ${p.name})`;
+      where[label] = { project: p.name, repo: r.name };
+    }
+  }
+  if (Object.keys(where).length === 0) return null;
+  const message = String(text).slice(0, 2000);
+  const questions = { where: { type: "choice", instructions: "Which repository does this message ask to work on, look into or change?", criteria } };
+  const options = { agentId, purpose: "wtc.suggest-project", rubricVersion: "1", timeoutMs: 3000 };
+  let outcome;
+  try {
+    // Contract 2 takes typed evidence; contract 1 any JSON, which a
+    // classifier reads as text, so the message goes as plain text.
+    outcome = decisions.evaluateV2
+      ? await decisions.evaluateV2({ state: { type: "text", text: message }, questions }, options)
+      : await decisions.evaluate({ state: message, questions }, options);
+  } catch {
+    return null;
+  }
+  const answer = (outcome?.answers ?? outcome?.result?.answers)?.where;
+  const chosen = answer?.choice;
+  if ((outcome?.status && outcome.status !== "ok") || !chosen) return null;
+  if (chosen === "none") return { none: true };
+  if (!where[chosen]) return null;
+  const { project } = where[chosen];
+  const p = answer.probabilities ?? {};
+  const repos = Object.keys(where)
+    .filter((l) => where[l].project === project && (l === chosen || (p[l] ?? 0) * 2 >= (p[chosen] ?? 1)))
+    .sort((a, b) => (a === chosen ? -1 : b === chosen ? 1 : (p[b] ?? 0) - (p[a] ?? 0)))
+    .map((l) => where[l].repo);
+  return { project, repos, source: "decision" };
+}
+
+// OpenAI's Decisions API, called directly, in the shape of OpenClaw's
+// decisions runtime (evaluateV2), for gateways whose OpenClaw has no decision
+// models yet (#159). Only choice questions, which is all the suggestion asks.
+export function openaiDecisions({ apiKey, model = "gpt-6-luna", baseUrl = "https://api.openai.com/v1", fetchImpl = fetch }) {
+  return {
+    async evaluateV2(batch, options = {}) {
+      const questions = Object.entries(batch.questions).map(([name, q]) => ({
+        type: "choice", name, instructions: q.instructions,
+        choices: Object.entries(q.criteria).map(([value, description]) => ({ value, description })),
+      }));
+      let response;
+      try {
+        response = await fetchImpl(`${baseUrl}/decisions`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+          body: JSON.stringify({ model, input: batch.state?.text ?? "", questions }),
+          signal: AbortSignal.timeout(options.timeoutMs ?? 3000),
+          redirect: "error",
+        });
+      } catch {
+        return { status: "unavailable", reason: "transport" };
+      }
+      if (!response.ok) return { status: "unavailable", reason: response.status === 401 || response.status === 403 ? "authentication" : `http-${response.status}` };
+      const body = await response.json().catch(() => null);
+      const answers = {};
+      for (const [i, [name]] of Object.entries(batch.questions).entries()) {
+        const a = body?.answers?.[i];
+        if (a?.name !== name || a.type !== "choice" || !Array.isArray(a.probabilities)) return { status: "unavailable", reason: "invalid-response" };
+        answers[name] = { type: "choice", choice: a.choice, probabilities: Object.fromEntries(a.probabilities.map((x) => [x.value, x.probability])) };
+      }
+      return { status: "ok", result: { model: body.model ?? model, answers } };
+    },
+  };
+}
+
 // A child that owns a repository has a managed worktree to look at.
 const worktreeOf = (entry) => (entry?.worktree ? entry.workspaceDir || entry.spawnedCwd || null : null);
 
@@ -222,6 +336,9 @@ export default {
   id: PLUGIN_ID,
   name: "Worktree Collection",
   register(api) {
+    // Without a runtime (the openclaw CLI's metadata capture, setup of a
+    // disabled plugin) the session actions and services cannot work.
+    if (api.registrationMode === "cli-metadata" || api.registrationMode === "setup-only") return;
     const run = async (argv, options = {}) => {
       const r = await api.runtime.system.runCommandWithTimeout(argv, { timeoutMs: 60000, killProcessTree: true, ...options });
       return { code: r.code ?? r.exitCode ?? null, stdout: String(r.stdout ?? ""), stderr: String(r.stderr ?? "") };
@@ -445,6 +562,43 @@ export default {
       tell(agentId, parentKey, watch.observe(agentId, parentKey, result.repos));
       return result;
     };
+
+    // The gateway's wtc projects, asked at most once a minute.
+    let projectsCache = { at: 0, projects: null };
+    const gatewayProjects = async () => {
+      if (Date.now() - projectsCache.at > 60000 || !projectsCache.projects) {
+        const r = await run(["wtc", "projects", "--json"], { timeoutMs: 30000, env: { OPENCLAW_SHELL: "exec" } });
+        let projects = [];
+        try {
+          projects = JSON.parse(r.stdout)?.data?.projects ?? [];
+        } catch {}
+        projectsCache = { at: Date.now(), projects };
+      }
+      return projectsCache.projects;
+    };
+
+    // Where the person's latest message asks to work: the gateway's decision
+    // model, else OpenAI's asked directly (WTC_DECISIONS_OPENAI_API_KEY),
+    // else the words' match.
+    api.session.controls.registerSessionAction({
+      id: "suggest",
+      description: "Suggest the wtc project and repositories a conversation's latest message asks to work on.",
+      requiredScopes: ["operator.read"],
+      async handler(action) {
+        const text = String(action.payload?.text ?? "").trim();
+        if (!text) return { ok: true, result: null };
+        const projects = await gatewayProjects();
+        // The gateway's decision model, else OpenAI's called directly with a
+        // key meant for nothing else; its "none" stands, and the words
+        // decide only without either.
+        // A draft not sent yet stays on the gateway: the words only.
+        const draft = action.payload?.draft === true;
+        let decided = draft ? null : await decideProjects(api.runtime.decisions, action.agentId, text, projects);
+        const key = process.env.WTC_DECISIONS_OPENAI_API_KEY;
+        if (!decided && key && !draft) decided = await decideProjects(openaiDecisions({ apiKey: key, model: api.pluginConfig?.decisionModel || undefined }), action.agentId, text, projects);
+        return { ok: true, result: decided?.none ? null : decided ?? matchProjects(text, projects) };
+      },
+    });
 
     api.session.controls.registerSessionAction({
       id: "collection",

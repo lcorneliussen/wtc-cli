@@ -91,14 +91,19 @@ const titled = (node, title) => [...node.all()].find((n) => n.tagName === "BUTTO
 // Every collection request is answered from `collections`, by session;
 // wtc svc requests are recorded in `calls` and answered with `svcResult`.
 const collections = new Map();
+// What each session's chat.history answers.
+const histories = new Map();
 const calls = [];
 let svcResult = { ok: true, result: { message: "done" } };
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
 let personal = null;
+// Methods a test makes fail.
+const failing = new Set();
 // The Bitbucket plugin: absent unless a test installs it with a login (or null).
 let bitbucket;
 const hostRequest = async (method, params) => {
+  if (failing.has(method)) throw new Error(`${method} failed`);
   if (method === "plugins.sessionAction" && params.pluginId === "bitbucket") {
     if (bitbucket === undefined) throw new Error(`unknown plugin session action: bitbucket/${params.actionId}`);
     if (params.actionId === "publish-options") return { ok: true, result: { account: bitbucket } };
@@ -115,6 +120,11 @@ const hostRequest = async (method, params) => {
     return data instanceof Error ? { ok: false, error: data.message } : { ok: true, result: data };
   }
   if (method === "portal.list") return { portals };
+  if (method === "chat.history") return { messages: histories.get(params.sessionKey) ?? [] };
+  if (method === "plugins.sessionAction" && params.actionId === "suggest") {
+    calls.push({ method, ...params });
+    return { ok: true, result: /site/.test(params.payload.text) ? { project: "wtc", repos: ["wtc-site"], source: "match" } : null };
+  }
   calls.push({ method, ...params });
   if (method === "plugins.sessionAction" && params.actionId === "svc") return svcResult;
   if (method === "sessions.github.publish") return { status: "needs_confirmation", requestId: "req-1" };
@@ -123,8 +133,9 @@ const hostRequest = async (method, params) => {
 };
 
 let sessions = 0;
-async function mount(kind, data) {
-  const sessionKey = `agent:main:test:${++sessions}`;
+async function mount(kind, data, history, key) {
+  const sessionKey = key ?? `agent:main:test:${++sessions}`;
+  if (history) histories.set(sessionKey, history);
   collections.set(sessionKey, data);
   const host = container();
   const ctx = { props: { sessionKey, agentId: "main" }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} };
@@ -536,4 +547,183 @@ test("narrow: one header, every fact in its column, the branch below the name", 
   } finally {
     delete globalThis.ResizeObserver;
   }
+});
+
+test("composer: without a collection, the card suggests where the latest message asks to work", async () => {
+  const { latestUserText, startMessage } = await import("../dist/control-ui/v1/index.js");
+  assert.equal(latestUserText([{ role: "user", content: "lets work on the site" }, { role: "assistant", content: "ok" }, { role: "user", content: [{ type: "text", text: "[OpenClaw heartbeat poll]" }] }]), "lets work on the site");
+  assert.equal(latestUserText([]), "");
+  // What Start sent was acted on: nothing to suggest until the person writes again.
+  assert.equal(latestUserText([{ role: "user", content: "the site" }, { role: "user", content: "(wtc) Start this conversation's collection in wtc project wtc with wtc-site: …" }]), "");
+  assert.equal(latestUserText([{ role: "user", content: "lets work on the site\n\n(wtc) Start a new conversation …" }, { role: "user", content: "and the footer" }]), "and the footer");
+  const { host, view } = await mount("composer", collection([]), [{ role: "user", content: [{ type: "text", text: "lets work on the site" }] }]);
+  await settle();
+  const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
+  assert.ok(card(), "a suggestion card");
+  assert.ok(texts(card()).some((t) => /^Work in wtc project /.test(t ?? "")));
+  const ask = calls.find((c) => c.actionId === "suggest");
+  assert.deepEqual(ask.payload, { text: "lets work on the site" });
+  calls.length = 0;
+  await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
+  await settle();
+  assert.deepEqual(calls.find((c) => c.method === "sessions.send"), { method: "sessions.send", key: ask.sessionKey, message: `(wtc) ${startMessage({ project: "wtc", repos: ["wtc-site"] })}` });
+  assert.match(startMessage({ project: "wtc", repos: ["wtc-site"] }), /wtc add-repo wtc-site --project wtc --worktree/);
+  assert.equal(card(), undefined, "gone once started");
+  view.dispose();
+  // ✕ dismisses it until the card is mounted again; Change… is offered.
+  const again = await mount("composer", collection([]), [{ role: "user", content: "the site" }]);
+  await settle();
+  const card2 = () => [...again.host.all()].find((n) => n.className === "wtc-collection-card");
+  assert.ok(card2());
+  const change = [...card2().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Change…");
+  assert.ok(change, "Change… is offered");
+  await [...card2().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "✕").onclick({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(card2(), undefined);
+  again.view.dispose();
+  // A Start that fails puts the card back, saying why.
+  failing.add("sessions.send");
+  const retry = await mount("composer", collection([]), [{ role: "user", content: "the site" }]);
+  await settle();
+  const card3 = () => [...retry.host.all()].find((n) => n.className === "wtc-collection-card");
+  await [...card3().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
+  await settle();
+  failing.clear();
+  assert.ok(card3(), "back after a failed Start");
+  assert.ok(texts(card3()).includes("sessions.send failed"));
+  retry.view.dispose();
+  // A failed load is no empty collection: nothing is suggested.
+  const broken = await mount("composer", new Error("down"), [{ role: "user", content: "the site" }]);
+  await settle();
+  assert.equal([...broken.host.all()].find((n) => n.className === "wtc-collection-card"), undefined);
+  broken.view.dispose();
+  // Nothing to suggest: no card.
+  const quiet = await mount("composer", collection([]), [{ role: "user", content: "hello" }]);
+  await settle();
+  assert.equal([...quiet.host.all()].find((n) => n.className === "wtc-collection-card"), undefined);
+  quiet.view.dispose();
+});
+
+test("composer: the suggestion is asked again only for a new message, and not more than every ten seconds", async () => {
+  const { mock } = await import("node:test");
+  mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  try {
+    const history = [{ role: "user", content: "lets work on the site" }];
+    const { host, view } = await mount("composer", collection([]), history);
+    await settle();
+    const asked = () => calls.filter((c) => c.actionId === "suggest").length;
+    const before = asked();
+    const sessionKey = [...collections.keys()].at(-1);
+    const again = async () => {
+      view.update({ props: { sessionKey, agentId: "main" }, host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} });
+      await settle();
+    };
+    // Within ten seconds: not asked again, whatever the text.
+    mock.timers.tick(5_000);
+    history.push({ role: "user", content: "the invoices" });
+    await again();
+    assert.equal(asked(), before);
+    // Later, with the same text as last time asked: not asked again either.
+    history.pop();
+    mock.timers.tick(11_000);
+    await again();
+    assert.equal(asked(), before);
+    // A new message after ten seconds: asked.
+    history.push({ role: "user", content: "and the site footer" });
+    mock.timers.tick(11_000);
+    await again();
+    assert.equal(asked(), before + 1);
+    view.dispose();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("composer: the draft is suggested about once typing pauses, and Start sends it along", async () => {
+  const { isMainSession, startMessage } = await import("../dist/control-ui/v1/index.js");
+  assert.equal(isMainSession("agent:main:main"), true);
+  assert.equal(isMainSession("agent:main:dashboard:abc"), false);
+  assert.match(startMessage({ project: "wtc", repos: ["wtc-site"] }, true), /^Start a new conversation .*sessions_spawn with visible: true.*wtc add-repo wtc-site --project wtc/);
+  const { mock } = await import("node:test");
+  // settle() waits on setTimeout, which this test fakes.
+  const flush = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+  const { host, view } = await mount("composer", collection([]));
+  await settle();
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const sessionKey = [...collections.keys()].at(-1);
+    let draft = "";
+    const sent = [];
+    const props = () => ({ sessionKey, agentId: "main", draft, setDraft: (d) => { draft = d; }, send: async () => { sent.push(draft); return true; } });
+    const type = async (text) => {
+      draft = text;
+      view.update({ props: props(), host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} });
+      await flush();
+    };
+    calls.length = 0;
+    await type("lets work on the site");
+    assert.equal(calls.filter((c) => c.actionId === "suggest").length, 0, "not while typing");
+    mock.timers.tick(800);
+    await flush();
+    await flush();
+    assert.deepEqual(calls.find((c) => c.actionId === "suggest")?.payload, { text: "lets work on the site", draft: true });
+    const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
+    assert.ok(card(), "suggested from the draft");
+    await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
+    await flush();
+    assert.equal(sent.length, 1);
+    assert.ok(sent[0].startsWith("lets work on the site\n\n(wtc) Start this conversation's collection in wtc project wtc"));
+    assert.equal(calls.some((c) => c.method === "sessions.send"), false, "through the composer's own send");
+    view.dispose();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("composer: in Home, Start asks for a conversation of its own; a refused send gives the draft back", async () => {
+  const { startMessage } = await import("../dist/control-ui/v1/index.js");
+  const { mock } = await import("node:test");
+  const flush = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+  const { host, view } = await mount("composer", collection([]), [], "agent:main:main");
+  await settle();
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    let draft = "";
+    let accept = false;
+    const sent = [];
+    const props = () => ({ sessionKey: "agent:main:main", agentId: "main", draft, setDraft: (d) => { draft = d; }, send: async () => { sent.push(draft); return accept; } });
+    const type = async (text) => { draft = text; view.update({ props: props(), host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} }); await flush(); };
+    await type("lets work on the site");
+    mock.timers.tick(800);
+    await flush();
+    const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
+    assert.ok(texts(card()).some((t) => /^Start a conversation in wtc project /.test(t ?? "")));
+    // Refused: the draft as written comes back, and the card with it.
+    await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
+    await flush();
+    assert.equal(sent[0], `lets work on the site\n\n(wtc) ${startMessage({ project: "wtc", repos: ["wtc-site"] }, true)}`);
+    assert.equal(draft, "lets work on the site");
+    assert.ok(card(), "the card is back after a refused send");
+    // Sent: Home stays open to further suggestions.
+    accept = true;
+    await type("lets work on the site footer");
+    mock.timers.tick(800);
+    await flush();
+    await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
+    await flush();
+    await type("and the site header too");
+    mock.timers.tick(800);
+    await flush();
+    assert.ok(card(), "Home is suggested to again");
+    view.dispose();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("the plugin registers the panel, the composer and a session-menu action, and no header bar", async () => {
+  const { default: ui } = await import("../dist/control-ui/v1/index.js");
+  const actions = [];
+  const noop = () => () => {};
+  ui.activate({ ui: { registerPanel: noop, registerReplacement: noop, registerAction: (a) => { actions.push(a); return () => {}; }, selectReplacement() {} } });
+  assert.deepEqual(actions.map((a) => [a.id, a.placement]), [["open-collection-session", "session"]]);
 });
