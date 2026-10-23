@@ -69,9 +69,9 @@ type PullRequest struct {
 	// Review is the review decision: approved, changes_requested,
 	// review_required, or empty when the repository requires none.
 	Review string `json:"review,omitempty"`
-	// MergedIn says, of a merged pull request, that the checkout already
-	// has its merge commit: a catch-up brought it in.
-	MergedIn bool `json:"mergedIn,omitempty"`
+	// MergedIn says, of a merged pull request whose merge commit is known,
+	// whether the checkout has that commit. Absent otherwise.
+	MergedIn *bool `json:"mergedIn,omitempty"`
 }
 
 // ManagedCollections finds the gateway's collections: the managed worktrees
@@ -261,7 +261,8 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 	pr := &PullRequest{Number: f.Number, URL: f.URL, State: strings.ToLower(f.State), Draft: f.IsDraft, Title: f.Title, Checks: "none",
 		Mergeable: strings.ToLower(f.Merge), Review: strings.ToLower(f.Review)}
 	if pr.State == "merged" && f.Commit != nil && f.Commit.OID != "" {
-		pr.MergedIn = gitOK(dir, "merge-base", "--is-ancestor", f.Commit.OID, "HEAD")
+		in := gitOK(dir, "merge-base", "--is-ancestor", f.Commit.OID, "HEAD")
+		pr.MergedIn = &in
 	}
 	// Check runs report status and conclusion, commit statuses a state.
 	for _, c := range f.Rollup {

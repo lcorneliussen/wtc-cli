@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,12 +67,24 @@ func TestStatusOfAMergedPullRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	pr := CheckoutsStatus([]string{c.Dir}, true).Repos[0].PullRequest
-	if pr == nil || pr.State != "merged" || pr.MergedIn {
-		t.Fatalf("before the catch-up: %+v", pr)
+	// The card reads the JSON: false has to be in it.
+	encoded := func() string {
+		out, err := json.Marshal(CheckoutsStatus([]string{c.Dir}, true).Repos[0].PullRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+	if got := encoded(); !strings.Contains(got, `"state":"merged"`) || !strings.Contains(got, `"mergedIn":false`) {
+		t.Fatalf("before the catch-up: %s", got)
 	}
 	git("merge", "-q", "--ff-only", merge)
-	if pr := CheckoutsStatus([]string{c.Dir}, true).Repos[0].PullRequest; pr == nil || !pr.MergedIn {
-		t.Fatalf("after it: %+v", pr)
+	if got := encoded(); !strings.Contains(got, `"mergedIn":true`) {
+		t.Fatalf("after it: %s", got)
+	}
+	// Without a merge commit to go by, it says nothing.
+	os.WriteFile(filepath.Join(bin, "gh"), []byte(strings.Replace(script, `,"mergeCommit":{"oid":"`+merge+`"}`, "", 1)), 0o755)
+	if got := encoded(); strings.Contains(got, "mergedIn") {
+		t.Fatalf("no merge commit: %s", got)
 	}
 }

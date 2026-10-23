@@ -210,12 +210,16 @@ test("the collection's conversation hears what changed, and is woken for it", as
   services.at(-1).stop();
   mock.timers.reset();
   assert.match(events.at(-1).text, /#2 \(u\) was merged\.\n.*progress.*\nAfter a merge, run wtc catch-up/);
+  // First seen already merged: the catch-up hint too.
+  pr = { ...pr, number: 5, url: "u5", state: "merged" };
+  await look();
+  assert.match(events.at(-1).text, /#5 \(u5\) was opened and merged\.\n.*\nAfter a merge, run wtc catch-up/);
   // queue tells without waking; off says nothing.
   register({ pullRequestEvents: "queue" });
   pr = { ...pr, number: 3, state: "open" };
   await look();
   assert.match(events.at(-1).text, /#3/);
-  assert.equal(wakes.length, 2);
+  assert.equal(wakes.length, 3);
   register({ pullRequestEvents: "off" });
   pr = { ...pr, number: 4 };
   const before = events.length;
