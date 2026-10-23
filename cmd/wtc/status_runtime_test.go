@@ -321,6 +321,8 @@ func TestStatusRuntimeShowsTroubleNow(t *testing.T) {
 	login := wtc.RuntimeItem{Path: "app/web/tailscale", Group: "app/web", Kind: "endpoint", State: "ready", Login: "Tailscale needs a login: tailscale up"}
 	closed := login
 	closed.State = "idle"
+	starting := login
+	starting.State = "running"
 	for _, tc := range []struct {
 		item        wtc.RuntimeItem
 		state, tone string
@@ -328,6 +330,7 @@ func TestStatusRuntimeShowsTroubleNow(t *testing.T) {
 		{ok, "ready", statusToneSuccess},
 		{silent, "no answer", statusToneFailure},
 		{login, "login", statusToneFailure},
+		{starting, "login", statusToneFailure},
 		// A closed tunnel's login waits until it is opened.
 		{closed, "stopped", statusToneDim},
 	} {

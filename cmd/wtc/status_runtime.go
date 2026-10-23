@@ -282,7 +282,8 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 		if styled {
 			repo, name, stateCell = statusTUIStyle(repo, statusToneLabel), statusTUIStyle(name, statusToneLabel), statusTUIStyle(stateCell, tone)
 			// The port takes its service's state colour: grey before it starts,
-			// green while it runs, red when it failed; a link only while it runs.
+			// green while it runs and answers, red when it failed or doesn't
+			// answer now; a link only while it runs.
 			if statusTUIURL(g.local) != "" && g.localLive {
 				local = statusTUIFitANSI(statusTUILinkTone(strings.TrimRight(local, " "), g.local, g.localTone), l.local)
 			} else if g.local != "" {
@@ -354,7 +355,8 @@ func statusRuntimeItems(snapshot wtc.StatusSnapshot, row wtc.StatusRepo) []wtc.R
 	return items
 }
 
-// statusRuntimeMark is one letter for a task, toned by its state. A configured
+// statusRuntimeMark is one letter for a task, toned by its state, and red
+// for a running task that doesn't answer now or needs a provider login. A configured
 // mark wins. Otherwise a service takes the first letter of its service name
 // (w for web), a tunnel the first letter of its own name (t for tunnel), in
 // upper case when it is public, and resource hooks are r.
@@ -390,12 +392,12 @@ func statusRuntimeMark(item wtc.RuntimeItem) (string, string) {
 		}
 		return string(letter), statusToneFailure
 	}
+	if statusRuntimeTrouble(item) {
+		return string(letter), statusToneFailure
+	}
 	switch item.State {
 	case "ready", "provision-hook-completed", "done":
 		tone = statusToneSuccess
-		if statusRuntimeTrouble(item) {
-			tone = statusToneFailure
-		}
 	case "starting", "running", "provision-attempted":
 		tone = statusToneWarning
 	case "absent", "unconfigured", "stopped", "idle", "checking", "unprovisioned":
