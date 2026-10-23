@@ -94,10 +94,11 @@ func TestStatusBuildHookNormalizesCommitAndMarksBuildWithoutNumber(t *testing.T)
 		t.Fatal(err)
 	}
 	row := statusHarnessRow(t, snapshot)
-	if row.Tip == nil || row.Tip.Error != "" || row.Tip.SHA == nil || *row.Tip.SHA != built {
-		t.Fatalf("an uppercase commit should be accepted and normalized: %+v", row.Tip)
+	build := statusSoleBuild(row)
+	if build == nil || build.Error != "" || build.SHA == nil || *build.SHA != built {
+		t.Fatalf("an uppercase commit should be accepted and normalized: %+v", build)
 	}
-	if label := statusBuildLabel(row.Tip); label != "✓ (HEAD not in build)" {
+	if label := statusBuildLabel(build); label != "✓ (HEAD not in build)" {
 		t.Fatalf("a build without a number still says HEAD is outside it: %q", label)
 	}
 }
@@ -117,7 +118,9 @@ func TestStatusBuildTiers(t *testing.T) {
 		repo Repo
 		want string
 	}{
-		{Repo{DefaultRef: "origin/main"}, "tip:main"},
+		{Repo{DefaultRef: "origin/main"}, "prod:main"},
+		{Repo{DefaultRef: "origin/master"}, "prod:master"},
+		{Repo{DefaultRef: "origin/dev"}, "tip:dev prod:master"},
 		{Repo{DefaultRef: "origin/dev", ProductionRef: "origin/master"}, "tip:dev prod:master"},
 		{Repo{DefaultRef: "origin/main", ReleaseRef: "origin/release"}, "tip:main prod:release"},
 		{Repo{DefaultRef: "origin/main", ProductionRef: "origin/main"}, "prod:main"},
@@ -143,6 +146,13 @@ func statusWriteBuildHook(t *testing.T, c *Context, script string) {
 	}
 }
 
+func statusSoleBuild(row StatusRepo) *StatusBuild {
+	if row.Tip != nil {
+		return row.Tip
+	}
+	return row.Prod
+}
+
 func statusHarnessRow(t *testing.T, snapshot StatusSnapshot) StatusRepo {
 	t.Helper()
 	for _, row := range snapshot.Repos {
@@ -162,18 +172,18 @@ func TestStatusBuildAttributesRowsByCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row := statusHarnessRow(t, snapshot); row.Tip == nil || row.Tip.HeadInBuild == nil || !*row.Tip.HeadInBuild {
-		t.Fatalf("a row at the build commit is in the build: %+v", row.Tip)
+	if row := statusHarnessRow(t, snapshot); statusSoleBuild(row) == nil || statusSoleBuild(row).HeadInBuild == nil || !*statusSoleBuild(row).HeadInBuild {
+		t.Fatalf("a row at the build commit is in the build: %+v", statusSoleBuild(row))
 	}
 	fixtureGit(t, "-C", c.Harness, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "ahead")
 	snapshot, err = c.StatusForgePreview()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row := statusHarnessRow(t, snapshot); row.Tip == nil || row.Tip.HeadInBuild == nil || *row.Tip.HeadInBuild {
-		t.Fatalf("a row ahead of the build commit is not in it: %+v", row.Tip)
+	if row := statusHarnessRow(t, snapshot); statusSoleBuild(row) == nil || statusSoleBuild(row).HeadInBuild == nil || *statusSoleBuild(row).HeadInBuild {
+		t.Fatalf("a row ahead of the build commit is not in it: %+v", statusSoleBuild(row))
 	}
-	if label := statusBuildLabel(statusHarnessRow(t, snapshot).Tip); !strings.Contains(label, "HEAD not in build") {
+	if label := statusBuildLabel(statusSoleBuild(statusHarnessRow(t, snapshot))); !strings.Contains(label, "HEAD not in build") {
 		t.Fatalf("Markdown should say the row is outside the build: %q", label)
 	}
 }
@@ -187,8 +197,8 @@ func TestStatusBuildHookCanDeferToDefaultProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row := statusHarnessRow(t, snapshot); row.Tip != nil {
-		t.Fatalf("deferring to the default provider without a forge yields no build: %+v", row.Tip)
+	if row := statusHarnessRow(t, snapshot); row.Tip != nil || row.Prod != nil {
+		t.Fatalf("deferring to the default provider without a forge yields no build: %+v", row)
 	}
 }
 

@@ -91,8 +91,9 @@ func statusRequireBuildError(t *testing.T, c *Context, want string) {
 	}
 	for _, row := range snapshot.Repos {
 		if row.Dir == "harness" {
-			if row.Tip == nil || row.Tip.Checks == nil || *row.Tip.Checks != "ERROR" || !strings.Contains(row.Tip.Error, want) {
-				t.Fatalf("tip build should carry the error %q: %+v", want, row.Tip)
+			build := statusSoleBuild(row)
+			if build == nil || build.Checks == nil || *build.Checks != "ERROR" || !strings.Contains(build.Error, want) {
+				t.Fatalf("build should carry the error %q: %+v", want, build)
 			}
 			return
 		}

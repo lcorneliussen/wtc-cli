@@ -137,10 +137,11 @@ type statusBuildTier struct {
 	Tier, Branch string
 }
 
-// statusBuildTiers maps the registry onto build tiers. The development tip is
-// the test tier; production_ref (or release_ref) is production. When
-// production deploys from the development tip itself, that one branch is
-// reported as production only.
+// statusBuildTiers maps the registry onto build tiers. production_ref, or
+// release_ref, is the branch that deploys. When both are unset, a development
+// ref of dev deploys from master and every other development ref deploys from
+// itself. That one branch is production. A different production ref keeps the
+// development ref as the test tier.
 func statusBuildTiers(repo Repo) []statusBuildTier {
 	tip := strings.TrimPrefix(repo.DefaultRef, "origin/")
 	if tip == "" {
@@ -150,10 +151,14 @@ func statusBuildTiers(repo Repo) []statusBuildTier {
 	if prod == "" {
 		prod = strings.TrimPrefix(repo.ReleaseRef, "origin/")
 	}
-	switch prod {
-	case "":
-		return []statusBuildTier{{"tip", tip}}
-	case tip:
+	if prod == "" {
+		if tip == "dev" {
+			prod = "master"
+		} else {
+			prod = tip
+		}
+	}
+	if prod == tip {
 		return []statusBuildTier{{"prod", tip}}
 	}
 	return []statusBuildTier{{"tip", tip}, {"prod", prod}}
