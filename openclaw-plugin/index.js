@@ -401,7 +401,9 @@ export default {
       // wildcard domain or Tailscale run by the gateway.
       const gateway = (api.runtime?.config?.current?.() ?? api.config)?.gateway;
       result.portalIngress = !!gateway?.portals?.ingress?.domain || ["serve", "funnel"].includes(gateway?.tailscale?.mode);
-      const stale = versionWarning(PLUGIN_VERSION, await wtcVersionOutput());
+      const versionLine = await wtcVersionOutput();
+      result.version = { plugin: PLUGIN_VERSION, wtc: /^wtc version (\S+)/.exec(String(versionLine ?? "").trim())?.[1] ?? null };
+      const stale = versionWarning(PLUGIN_VERSION, versionLine);
       if (stale) result.warnings.push(stale);
       if (children.length === 0) return result;
       // The collection's name is its worktrees' name. wtc status reads

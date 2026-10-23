@@ -171,21 +171,14 @@ const tables = (node) => [...node.all()].filter((n) => n.className === "wtc-tabl
   return rows;
 });
 
-test("panel: an empty collection", async () => {
-  const { host, view } = await mount("panel", collection([]));
+test("panel: no collection yet says what one is, not the conversation's label", async () => {
+  const { host, view } = await mount("panel", { ...collection([]), collection: { label: "[OpenClaw heartbeat poll]", sessionKey: "agent:main:dashboard:new" }, version: { plugin: "0.1.49-dev+317ca2a.202610230912", wtc: "0.1.49-dev+317ca2a.202610230912" } });
   const all = texts(host);
-  assert.ok(all.includes("test collection"));
-  assert.ok(all.includes("0 repositories"));
-  assert.ok(all.some((t) => t.startsWith("No repositories yet")));
-  assert.ok(all.some((t) => t.startsWith("None running")));
-  view.dispose();
-});
-
-test("panel: a new conversation, with no folder yet", async () => {
-  const { host, view } = await mount("panel", { collection: { label: null, sessionKey: "agent:main:dashboard:new" }, repos: [], services: [] });
-  const all = texts(host);
-  assert.ok(all.includes("agent:main:dashboard:new"));
-  assert.ok(!all.includes("null"));
+  assert.ok(all.includes("No collection yet"));
+  assert.ok(all.some((t) => /^A collection is this conversation's worktrees of a wtc project's repositories/.test(t ?? "")));
+  assert.ok(all.includes("Add a repository"));
+  assert.ok(!all.some((t) => /heartbeat poll|^null$|0 repositories|None running/.test(t ?? "")));
+  assert.ok(all.includes("plugin 0.1.49-dev+317ca2a.202610230912, wtc 0.1.49-dev+317ca2a.202610230912"));
   view.dispose();
 });
 
