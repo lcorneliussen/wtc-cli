@@ -2,8 +2,6 @@
 // minimal DOM, so that a view which throws while rendering fails here rather
 // than in someone's browser. Run with `node --test openclaw-plugin/test/`.
 import { test } from "node:test";
-// Methods a test makes fail.
-const failing = new Set();
 import assert from "node:assert/strict";
 
 // Just enough of the DOM for el(), css() and the views: elements with
@@ -100,6 +98,8 @@ let svcResult = { ok: true, result: { message: "done" } };
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
 let personal = null;
+// Methods a test makes fail.
+const failing = new Set();
 // The Bitbucket plugin: absent unless a test installs it with a login (or null).
 let bitbucket;
 const hostRequest = async (method, params) => {
@@ -585,7 +585,6 @@ test("composer: without a collection, the card suggests where the latest message
   await [...card3().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
   await settle();
   failing.clear();
-  await retry.view.update?.({ props: { sessionKey: [...collections.keys()].at(-1), agentId: "main" }, host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} });
   assert.ok(card3(), "back after a failed Start");
   assert.ok(texts(card3()).includes("sessions.send failed"));
   retry.view.dispose();

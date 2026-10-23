@@ -867,9 +867,10 @@ function mountComposer(container, context) {
 
   // A conversation without a collection: where the person's latest message
   // asks to work, suggested by the gateway (its decision model, or the
-  // words), as a card to start the collection from. Asked again when they
-  // write something new, at most every ten seconds; dismissed until the card
-  // is mounted again.
+  // words), as a card to start the collection from. Looked at on each
+  // collection refresh (and not more than every ten seconds), so a new
+  // message is noticed within a refresh; dismissed until the card is mounted
+  // again.
   let suggestion = null;
   let askedAt = 0;
   const dismissed = new Set();
