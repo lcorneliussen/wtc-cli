@@ -601,6 +601,8 @@ func catchUpCheckout(dest, from string, asJSON bool) error {
 	}
 	summary := fmt.Sprintf("%s %s", result.Branch, result.Note)
 	switch {
+	case result.Merged && result.FastForward && result.From == "":
+		summary = fmt.Sprintf("%s is at origin/%s again: nothing of its own on it, nothing to publish", result.Branch, result.Dest)
 	case result.Merged && result.From != "":
 		summary = fmt.Sprintf("merged %s into %s; the person publishes it with ↑ when the task is ready", result.From, result.Branch)
 	case result.Merged:

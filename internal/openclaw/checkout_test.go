@@ -246,13 +246,20 @@ func TestCatchUpMergesAndNeverPushes(t *testing.T) {
 			}
 		}
 	}
+	// Nothing of its own yet: the catch-up fast-forwards to the base.
+	advance("FIRST", "moved\n")
+	result, err := c.CatchUp()
+	if err != nil || !result.Merged || !result.FastForward || git("rev-parse", "HEAD") != git("rev-parse", "origin/main") {
+		t.Fatalf("catch-up of a branch with nothing on it: %+v %v", result, err)
+	}
+
 	write(t, c, "notes.md", "one\n")
 	git("add", ".")
 	git("commit", "-qm", "work")
 
 	advance("UPSTREAM", "moved\n")
-	result, err := c.CatchUp()
-	if err != nil || !result.Merged {
+	result, err = c.CatchUp()
+	if err != nil || !result.Merged || result.FastForward {
 		t.Fatalf("catch-up: %+v %v", result, err)
 	}
 	if got := git("rev-list", "--count", "--merges", "HEAD"); got != "1" {
