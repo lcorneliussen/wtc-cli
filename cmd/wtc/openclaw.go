@@ -150,7 +150,14 @@ pull request with them. One left out keeps what was recorded before.`,
 		} else if proposal, err := checkout.Propose(opt.Title, opt.Body); err != nil {
 			return fmt.Errorf("cannot record the title and description: %w", err)
 		} else if proposal == nil || proposal.Title == "" || proposal.Body == "" {
-			plan.Warnings = append(plan.Warnings, "No title and description are recorded for the pull request yet: pass --title and --body-file (what changed and why, how it was checked, what is left; the repository's pull request template if it has one). Without them the pull request opens as \"Publish "+checkout.Branch()+"\".")
+			what := "No title and description are"
+			switch {
+			case proposal != nil && proposal.Title != "":
+				what = "No description is"
+			case proposal != nil && proposal.Body != "":
+				what = "No title is"
+			}
+			plan.Warnings = append(plan.Warnings, what+" recorded for the pull request yet: pass --title and --body-file (what changed and why, how it was checked, what is left; the repository's pull request template if it has one). Without a title the pull request opens as \"Publish "+checkout.Branch()+"\".")
 		}
 		return printPlan(plan)
 	}

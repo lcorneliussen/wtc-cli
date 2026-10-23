@@ -137,6 +137,10 @@ test("what changed on a pull request, one line each", () => {
     "site: a review requested changes on #2 (https://github.com/o/site/pull/2).",
     "site: pull request #2 (https://github.com/o/site/pull/2) conflicts with its base.",
   ]);
+  const ready = { ...pr, draft: false };
+  assert.deepEqual(changes(ready, pr), ["site: pull request #2 (https://github.com/o/site/pull/2) went back to draft."]);
+  assert.deepEqual(changes(pr, { ...pr, review: "approved" }), ["site: pull request #2 (https://github.com/o/site/pull/2) was approved."]);
+  assert.deepEqual(changes({ ...pr, state: "closed" }, pr), ["site: pull request #2 (https://github.com/o/site/pull/2) was reopened."]);
   assert.deepEqual(changes({ ...pr, checks: "failure" }, { ...pr, checks: "success" }), ["site: checks passed on #2 (https://github.com/o/site/pull/2) again."]);
   // Merged, the rest of it is no longer news.
   assert.deepEqual(changes(pr, { ...pr, state: "merged", checks: "failure" }), ["site: pull request #2 (https://github.com/o/site/pull/2) was merged."]);
@@ -146,7 +150,7 @@ test("what changed on a pull request, one line each", () => {
 
 test("the pull requests seen are kept across restarts, and a failed look is no news", () => {
   const file = path.join(mkdtempSync(path.join(os.tmpdir(), "wtc-watch-")), "pull-requests.json");
-  const pr = { number: 2, url: "u", state: "open", isDraft: false, draft: true, checks: "none" };
+  const pr = { number: 2, url: "u", state: "open", draft: true, checks: "none" };
   const watch = pullRequestWatch(file);
   assert.deepEqual(watch.observe("main", "agent:main:c", [{ path: "/w/site", repo: "site", pullRequest: null }]), []);
   assert.deepEqual(pullRequestWatch(file).observe("main", "agent:main:c", [{ path: "/w/site", repo: "site", pullRequest: pr }]), ["site: pull request #2 (u) opened as a draft."]);

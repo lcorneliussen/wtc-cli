@@ -352,8 +352,8 @@ export default {
     });
 
     // The pull requests of the collections, and how the conversation hears
-    // that one changed: queued for its next turn and, unless the gateway
-    // says otherwise, a turn now.
+    // that one changed, as pullRequestEvents says: queued for its next turn
+    // and, with wake (the default), a turn now.
     const watch = pullRequestWatch(path.join(stateDir, "plugins", PLUGIN_ID, "pull-requests.json"));
     const tell = (agentId, sessionKey, lines) => {
       const mode = api.pluginConfig?.pullRequestEvents ?? "wake";
