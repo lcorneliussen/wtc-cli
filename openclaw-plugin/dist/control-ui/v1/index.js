@@ -866,8 +866,8 @@ function mountComposer(container, context) {
   });
 
   // A conversation without a collection: where the person's latest message
-  // asks to work, suggested by the gateway (its decision model, or the
-  // words), as a card to start the collection from. Looked at on each
+  // asks to work, suggested by the gateway (its decision model, OpenAI's
+  // asked directly, or the words), as a card to start the collection from. Looked at on each
   // collection refresh (and not more than every ten seconds), so a new
   // message is noticed within a refresh; dismissed until the card is mounted
   // again.

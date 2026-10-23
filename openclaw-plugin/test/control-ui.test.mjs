@@ -599,3 +599,38 @@ test("composer: without a collection, the card suggests where the latest message
   assert.equal([...quiet.host.all()].find((n) => n.className === "wtc-collection-card"), undefined);
   quiet.view.dispose();
 });
+
+test("composer: the suggestion is asked again only for a new message, and not more than every ten seconds", async () => {
+  const { mock } = await import("node:test");
+  mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  try {
+    const history = [{ role: "user", content: "lets work on the site" }];
+    const { host, view } = await mount("composer", collection([]), history);
+    await settle();
+    const asked = () => calls.filter((c) => c.actionId === "suggest").length;
+    const before = asked();
+    const sessionKey = [...collections.keys()].at(-1);
+    const again = async () => {
+      view.update({ props: { sessionKey, agentId: "main" }, host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} });
+      await settle();
+    };
+    // Within ten seconds: not asked again, whatever the text.
+    mock.timers.tick(5_000);
+    history.push({ role: "user", content: "the invoices" });
+    await again();
+    assert.equal(asked(), before);
+    // Later, with the same text as last time asked: not asked again either.
+    history.pop();
+    mock.timers.tick(11_000);
+    await again();
+    assert.equal(asked(), before);
+    // A new message after ten seconds: asked.
+    history.push({ role: "user", content: "and the site footer" });
+    mock.timers.tick(11_000);
+    await again();
+    assert.equal(asked(), before + 1);
+    view.dispose();
+  } finally {
+    mock.timers.reset();
+  }
+});
