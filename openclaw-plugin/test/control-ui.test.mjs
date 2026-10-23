@@ -344,6 +344,7 @@ test("composer: a new pull request opens with the title and description the agen
   const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
   const push = (what) => [...card().all()].find((n) => n.tagName === "BUTTON" && n.title.startsWith(what));
   assert.match(push("1 file to push").title, /Title: "Add a web preview", with the agent's description\./);
+  assert.match([...card().all()].find((n) => n.tagName === "BUTTON" && /Bitbucket/.test(n.title)).title, /Title: "Add a web preview"\.$/);
   assert.match(push("1 commit to push. Commit what is pending, push the branch and open a draft pull request, with your own GitHub").title, /proposed no title or description/);
   assert.doesNotMatch(push("1 commit to push. Commit what is pending and push it to #7").title, /Title|proposed/);
   calls.length = 0;

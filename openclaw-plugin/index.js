@@ -189,8 +189,9 @@ export function pullRequestWatch(file, now = Date.now) {
         if (!r.path || r.error) continue;
         const prev = c.repos[r.path];
         const cur = prFacts(r.pullRequest);
-        // A pull request does not go away: none means the forge could not
-        // be asked this time.
+        // A pull request does not go away: none after one was seen means
+        // the forge could not be asked this time. (wtc status reports both
+        // that and no pull request yet as none.)
         if (!cur && prev) continue;
         lines.push(...pullRequestChanges(r.repo ?? r.project ?? path.basename(r.path), prev, cur));
         c.repos[r.path] = cur;

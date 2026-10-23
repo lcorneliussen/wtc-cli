@@ -108,7 +108,9 @@ const bitbucketAccount = (c) => c?.name ? `${c.name} (${c.account})` : c?.accoun
 async function publishBitbucket(host, agentId, r, say, dest) {
   const name = r.repo ?? r.project;
   say(`Asking to push ${name}…`);
-  // Its publish takes a title, not yet a description.
+  // Its publish takes a title, not yet a description. Its rows carry no
+  // pull request, so the title goes with every push; the Bitbucket plugin
+  // uses it only when it creates the pull request.
   const title = proposalOf(r)?.title;
   const out = await bitbucketAction(host, agentId, r, "publish", { draft: true, ...(dest ? { dest } : {}), ...(title ? { title } : {}) });
   if (out?.status === "not_connected") {
@@ -291,8 +293,10 @@ const proposalOf = (r) => (r.pullRequest ? null : r.proposal?.title || r.proposa
 const proposalTitle = (r) => {
   if (r.pullRequest) return "";
   const p = proposalOf(r);
-  if (!p) return " The agent proposed no title or description: ask it to run wtc publish with them, or the pull request opens as \"Publish <branch>\".";
-  return p.title ? ` Title: "${p.title}"${p.body ? ", with the agent's description" : ""}.` : " With the agent's description.";
+  // Bitbucket's publish takes a title, not yet a description.
+  const body = r.forge !== BITBUCKET && p?.body;
+  if (!p?.title && !body) return " The agent proposed no title or description: ask it to run wtc publish with them, or the pull request opens as \"Publish <branch>\".";
+  return p.title ? ` Title: "${p.title}"${body ? ", with the agent's description" : ""}.` : " With the agent's description.";
 };
 
 // Services. wtc svc starts, stops and restarts them (one, or all without a
