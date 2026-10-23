@@ -119,6 +119,10 @@ type SpawnArgs struct {
 	WorktreeName    string `json:"worktreeName"`
 	WorktreeBaseRef string `json:"worktreeBaseRef,omitempty"`
 	Visible         bool   `json:"visible"`
+	// ExpectsCompletionMessage false spares the requester a turn when the
+	// child finishes: an owner that only holds its worktree has nothing to
+	// report. Unset keeps OpenClaw's default, a completion handoff.
+	ExpectsCompletionMessage *bool `json:"expectsCompletionMessage,omitempty"`
 }
 
 // PublishArgs are the github_publish arguments. The gateway takes repository,
@@ -187,7 +191,8 @@ func ProjectSource(arg string) (name, project, gitURL string, err error) {
 // The owner of a project's worktree is a hidden subagent: the collection's
 // session works in the worktree itself, and the owner only holds it for
 // publication. The gateway clones a repository only for a visible session, so
-// a gitURL makes the owner a conversation of its own.
+// a gitURL makes the owner a conversation of its own. Either way the owner
+// does not report back when it has started (see Worker for one that does).
 func AddRepo(repo, project, gitURL, worktree, baseRef, task string) (Intent, error) {
 	if (project == "") == (gitURL == "") {
 		return Intent{}, fmt.Errorf("add-repo %s: give an OpenClaw project or a GitHub URL", repo)
@@ -198,7 +203,20 @@ func AddRepo(repo, project, gitURL, worktree, baseRef, task string) (Intent, err
 	return intent(ActionAddRepo, ActorParent, repo, ToolSessionsSpawn, SpawnArgs{
 		Task: task, Label: worktree + " " + repo, ProjectID: project, ProjectGitURL: gitURL,
 		Worktree: true, WorktreeName: worktree, WorktreeBaseRef: baseRef, Visible: gitURL != "",
+		ExpectsCompletionMessage: &quiet,
 	}), nil
+}
+
+var quiet = false
+
+// Worker is a worker's add-repo intent: a worker takes part of the task, so
+// its completion comes back to the session that asked for it.
+func Worker(in Intent) Intent {
+	if a, ok := in.Args.(SpawnArgs); ok {
+		a.ExpectsCompletionMessage = nil
+		in.Args = a
+	}
+	return in
 }
 
 // Publish asks the session that owns repo to publish its branch as a draft
