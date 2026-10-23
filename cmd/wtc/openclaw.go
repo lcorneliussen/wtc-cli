@@ -358,7 +358,7 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 	}
 	// A repository counts by its registry name, or by a URL or owner/name
 	// that is a registered remote.
-	h, err := openclaw.ChooseHarness(cfg, flag, recorded, repos, func(h openclaw.Harness, r string) bool {
+	lists := func(h openclaw.Harness, r string) bool {
 		reg := registryOf(h)
 		if _, ok := reg.find(r); ok {
 			return true
@@ -369,7 +369,8 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 		}
 		_, ok := reg.findRemote(gitURL)
 		return ok
-	})
+	}
+	h, err := openclaw.ChooseHarness(cfg, flag, recorded, repos, lists)
 	if err != nil || h == nil {
 		return plain(), nil, err
 	}
@@ -418,7 +419,20 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 	// A worker takes part of the task, whose session already decided about
 	// its repositories.
 	if len(unlisted) > 0 && !adHoc && !worker {
-		return nil, nil, unlistedError(*h, worktree, repos, unlisted, recorded == "", reg.worktree != "")
+		// Another wtc project may list them: work on it belongs in a
+		// conversation of its own there, never in this collection.
+		elsewhere := map[string][]string{}
+		for _, other := range cfg.Harnesses {
+			if other.Name == h.Name {
+				continue
+			}
+			for _, r := range unlisted {
+				if lists(other, r) {
+					elsewhere[other.Name] = append(elsewhere[other.Name], r)
+				}
+			}
+		}
+		return nil, nil, unlistedError(*h, worktree, repos, unlisted, recorded == "", reg.worktree != "", elsewhere)
 	}
 	return adds, h, nil
 }
@@ -433,7 +447,10 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 // worktree of it, then, after the registry edit, every repository. 3 adds
 // the unlisted ones to another collection, whose name the person picks for
 // <another-name>, and the listed ones here.
-func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string, unrecorded, hasWorktree bool) error {
+//
+// elsewhere names the other wtc projects that list some of them, by project:
+// 4 suggests working on those there, in a conversation of its own.
+func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string, unrecorded, hasWorktree bool, elsewhere map[string][]string) error {
 	here := " --worktree " + worktree
 	if unrecorded {
 		here += " --project " + h.Name
@@ -453,11 +470,24 @@ func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string
 	if len(listed) > 0 {
 		separate += fmt.Sprintf(", and here wtc add-repo %s%s", strings.Join(listed, " "), here)
 	}
-	return fmt.Errorf("wtc project %s does not list %s. Ask the person which they want:\n"+
+	err := fmt.Errorf("wtc project %s does not list %s. Ask the person which they want:\n"+
 		"  1. ad hoc beside the project's repositories, in this collection: wtc add-repo %s%s --ad-hoc\n"+
 		"  2. registered in the project: %sadd it to .harness-repos.yml in the collection's worktree of its harness %s and commit that (it is published like any repository), then wtc add-repo %s%s\n"+
 		"  3. a collection of its own, in an ad-hoc wtc project: %s",
 		h.Name, strings.Join(unlisted, ", "), all, here, register, h.Name, all, here, separate)
+	if len(elsewhere) > 0 {
+		var projects []string
+		for p := range elsewhere {
+			projects = append(projects, p)
+		}
+		sort.Strings(projects)
+		var in []string
+		for _, p := range projects {
+			in = append(in, fmt.Sprintf("in a new conversation for wtc project %s, which lists %s: the person starts it, and there wtc add-repo %s --worktree <name>", p, strings.Join(elsewhere[p], ", "), strings.Join(elsewhere[p], " ")))
+		}
+		err = fmt.Errorf("%w\n  4. usually the right one for work on that project: %s", err, strings.Join(in, "; or "))
+	}
+	return err
 }
 
 // harnessRegistry is a harness's registry as a collection sees it: from its

@@ -330,7 +330,12 @@ A collection works in at most one wtc project:
   registered in the project first (an entry in `.harness-repos.yml` in the
   collection's worktree of the harness, published like any change), or a
   collection of its own in an ad-hoc project (`--project none` and another
-  name).
+  name). When another configured project lists it, a fourth choice suggests
+  a new conversation for that project instead.
+- **One project per conversation.** Every configured project can be listed,
+  so that the right one is picked, but a collection never reads from or
+  writes to another project's repositories unless the person added them ad
+  hoc.
 - **A worktree like the others.** The first `wtc add-repo` of a collection
   adds a managed worktree of the harness, on the collection's branch, so a
   task can change the harness and publish that like any repository.

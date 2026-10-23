@@ -88,7 +88,14 @@ choices. Put them to the person and run the one they pick: ad hoc beside the
 project's repositories (`--ad-hoc`), registered in the project first (an
 entry in `.harness-repos.yml` in the collection's worktree of the harness,
 committed there), or a collection of its own in an ad-hoc project
-(`--project none` and another name).
+(`--project none` and another name). When another wtc project lists it, a
+fourth choice says so: work on that project belongs in a new conversation
+for it, which the person starts.
+
+A conversation works in one wtc project, and projects stay apart: never read
+or change another project's repositories from this collection, unless the
+person added them here ad hoc. All of the gateway's projects can be listed;
+that is for choosing one, not for borrowing from it.
 
 The collection's folder says which wtc project it works in:
 `$OPENCLAW_STATE_DIR/wtc/<project>/<name>`, or `wtc/ad-hoc/<name>`.

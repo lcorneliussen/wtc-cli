@@ -32,9 +32,13 @@ Read that before the first `wtc` command of a task and follow it. In short:
   picked, and a worktree of its harness comes first. Read the harness's
   `AGENTS.md` (`wtc status` shows where it is) right away: it says which
   other repositories a task needs, so add them too.
-- When `wtc add-repo` asks which wtc project, ask the person, then pass
-  `--project <name>`. When it says the project does not list a repository,
-  put its three choices to the person and run the one they pick.
+- A conversation works in one wtc project. When `wtc add-repo` asks which,
+  ask the person, then pass `--project <name>`. When it says the project
+  does not list a repository, put its choices to the person and run the one
+  they pick. When another wtc project lists it, suggest working on that in a
+  new conversation for that project. Never read or change another
+  project's repositories from this collection unless the person added them
+  here ad hoc.
 - `wtc status <name>` shows the collection folder; edit, build, test and
   commit in `<folder>/<repo>`.
 - **Pushing is the person's.** When work is committed, write the pull

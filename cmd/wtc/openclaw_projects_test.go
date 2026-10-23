@@ -47,3 +47,19 @@ func TestAddRepoTakesProject(t *testing.T) {
 		t.Errorf("--project none: %s %v", summary(intents), err)
 	}
 }
+
+// A repository another wtc project lists belongs in a conversation of its
+// own in that project: add-repo suggests that beside the usual choices.
+func TestAddRepoSuggestsTheProjectThatListsIt(t *testing.T) {
+	_, _ = harnessGateway(t)
+	withGatewayConfig(t, `{"harnesses": [{"name": "platform", "remote": "https://github.com/example-org/platform-harness"}, {"name": "ops", "remote": "git@github.com:example-org/ops-harness.git"}]}`)
+	_, err := addRepoPlan(t, "api", "infra", "--worktree", "50-x", "--project", "platform")
+	if err == nil || !strings.Contains(err.Error(), "  4. usually the right one for work on that project: in a new conversation for wtc project ops, which lists infra: the person starts it, and there wtc add-repo infra --worktree <name>") {
+		t.Fatalf("%v", err)
+	}
+	// Listed nowhere else: the three choices only.
+	_, err = addRepoPlan(t, "tools", "--worktree", "51-x", "--project", "platform")
+	if err == nil || strings.Contains(err.Error(), "  4. ") || !strings.Contains(err.Error(), "  3. ") {
+		t.Fatalf("listed nowhere else: %v", err)
+	}
+}

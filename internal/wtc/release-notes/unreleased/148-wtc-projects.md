@@ -15,3 +15,9 @@
   matches what they named with `wtc projects`, and adds the other
   repositories the project's AGENTS.md names for the task
   ([#148](https://github.com/lcorneliussen/wtc-cli/issues/148)).
+- **Another project's repository suggests its own conversation.** When the
+  collection's wtc project doesn't list a repository and another configured
+  project does, `wtc add-repo` adds a fourth choice: work on it in a new
+  conversation for that project. Projects stay apart: a collection never
+  reads from another project's repositories unless they were added ad hoc
+  ([#148](https://github.com/lcorneliussen/wtc-cli/issues/148)).
