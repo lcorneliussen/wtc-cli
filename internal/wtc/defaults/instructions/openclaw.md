@@ -155,7 +155,9 @@ as a system event starting with `wtc: pull request news`, usually with a
 turn of its own. Update the task's progress with it. For a failure, a review
 or a conflict, read it (`gh pr checks <n>`, `gh pr view <n> --comments`) and
 tell the person what you will do. Fix in `<folder>/<repo>` and commit, and
-they push again. Don't answer review comments on the forge yourself.
+they push again. After a merge, run `wtc catch-up` in `<folder>/<repo>` so
+the checkout continues from the merge. Don't answer review comments on the
+forge yourself.
 
 ## Catching up
 

@@ -1,6 +1,9 @@
 package openclaw
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -47,5 +50,41 @@ func TestCheckProposal(t *testing.T) {
 		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 			t.Errorf("%.20q: %v, want %q", tc.title, err, tc.want)
 		}
+	}
+}
+
+// A merged pull request says whether the checkout has its merge commit yet,
+// so that the card can offer the catch-up that brings it in.
+func TestStatusOfAMergedPullRequest(t *testing.T) {
+	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
+	write(t, c, "notes.md", "one\n")
+	git("add", ".")
+	git("commit", "-qm", "Add notes")
+	merge := git("commit-tree", "-p", "origin/main", "-p", "HEAD", "-m", "Merge pull request #1", "HEAD^{tree}")
+	bin := t.TempDir()
+	script := "#!/bin/sh\nprintf '%s' '[{\"number\":1,\"url\":\"u\",\"state\":\"MERGED\",\"isDraft\":false,\"title\":\"t\",\"statusCheckRollup\":[],\"mergeable\":\"UNKNOWN\",\"reviewDecision\":\"\",\"mergeCommit\":{\"oid\":\"" + merge + "\"}}]'\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// The card reads the JSON: false has to be in it.
+	encoded := func() string {
+		out, err := json.Marshal(CheckoutsStatus([]string{c.Dir}, true).Repos[0].PullRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+	if got := encoded(); !strings.Contains(got, `"state":"merged"`) || !strings.Contains(got, `"mergedIn":false`) {
+		t.Fatalf("before the catch-up: %s", got)
+	}
+	git("merge", "-q", "--ff-only", merge)
+	if got := encoded(); !strings.Contains(got, `"mergedIn":true`) {
+		t.Fatalf("after it: %s", got)
+	}
+	// Without a merge commit to go by, it says nothing.
+	os.WriteFile(filepath.Join(bin, "gh"), []byte(strings.Replace(script, `,"mergeCommit":{"oid":"`+merge+`"}`, "", 1)), 0o755)
+	if got := encoded(); strings.Contains(got, "mergedIn") {
+		t.Fatalf("no merge commit: %s", got)
 	}
 }

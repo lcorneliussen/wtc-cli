@@ -477,6 +477,13 @@ function collectionTables(v) {
   // or, before its first pull request, everything ahead of the base.
   const toPush = (r) => r.unpublished || (!r.pullRequest ? r.ahead ?? 0 : 0);
   const pushable = (r) => !r.error && (r.dirty || toPush(r) > 0);
+  // A merged pull request whose merge the worktree does not have yet: its
+  // base was not fetched since, so it does not count as behind.
+  const unmerged = (r) => !r.error && r.pullRequest?.state === "merged" && r.pullRequest.mergedIn === false;
+  const toCatchUp = (r) => r.behind > 0 || unmerged(r);
+  const catchUpCell = (r) => r.behind
+    ? count(`↓ ${r.behind}`, `${r.behind} new on ${baseOf(r)}. Catch up: merge them in; never rebases, never pushes`, TONE.pending, () => catchUp([r]))
+    : count("↓", `#${r.pullRequest.number} was merged. Catch up: fetch ${baseOf(r)} and merge it in, to continue from the merge; never rebases, never pushes`, TONE.pending, () => catchUp([r]));
   const nameOf = (r) => r.repo ?? r.project ?? r.label;
   const baseOf = (r) => (r.base ? r.base.replace(/^origin\//, "") : "base");
   // Pushes waiting for the person's confirmation, by owner session.
@@ -674,7 +681,7 @@ function collectionTables(v) {
         : css(el("code", { textContent: r.branch ?? `at ${baseOf(r)}`, title: r.branch ? `${r.branch}, ${r.ahead ?? 0} ahead of ${baseOf(r)}` : "No branch yet: the first push creates one" }), "font-size:12px;color:var(--muted, #888)"),
       r.dirty ? toned(String(r.dirty), TONE.pending, `${plural(r.dirty, "file")} changed, not committed yet`) : null,
       busy.has(r.sessionKey) ? working() : pushCell(r, n),
-      catching.has(r.sessionKey) ? working() : r.behind ? count(`↓ ${r.behind}`, `${r.behind} new on ${baseOf(r)}. Catch up: merge them in; never rebases, never pushes`, TONE.pending, () => catchUp([r])) : null,
+      catching.has(r.sessionKey) ? working() : toCatchUp(r) ? catchUpCell(r) : null,
       pr ? css(el("span", { title: pr.title ?? "" }, link(`#${pr.number}`, pr.url), pr.draft && open ? muted("draft") : pr.state !== "open" ? muted(pr.state) : null), "display:inline-flex;gap:4px") : null,
       ci, conflict, review,
     ];
@@ -735,7 +742,7 @@ function collectionTables(v) {
     const files = repos.reduce((n, r) => n + (r.dirty ?? 0), 0);
     const ready = repos.filter((r) => pushable(r) && PUSHES.has(r.forge) && mine[r.forge] !== false);
     const commits = ready.reduce((n, r) => n + toPush(r), 0);
-    const behind = repos.filter((r) => r.behind > 0);
+    const behind = repos.filter(toCatchUp);
     const prs = repos.filter((r) => r.pullRequest?.state === "open");
     const worst = prs.map((r) => r.pullRequest).sort((a, b) => [TONE.failure, TONE.pending, TONE.success, TONE.none].indexOf(prTone(a)) - [TONE.failure, TONE.pending, TONE.success, TONE.none].indexOf(prTone(b)))[0];
     const out = [
@@ -743,7 +750,7 @@ function collectionTables(v) {
       slot("↑", ready.some((r) => busy.has(r.sessionKey)) ? working() : ready.length
         ? count(commits ? `↑ ${commits}` : "↑", `Push ${ready.map(nameOf).join(", ")}, each to its pull request or a new draft one`, TONE.pending, () => pushAll(ready)) : null),
       slot("↓", behind.some((r) => catching.has(r.sessionKey)) ? working() : behind.length
-        ? count(`↓ ${behind.reduce((n, r) => n + r.behind, 0)}`, `Catch up ${behind.map((r) => `${nameOf(r)} (${r.behind})`).join(", ")}: merge the base in; never rebases, never pushes`, TONE.pending, () => catchUp(behind)) : null),
+        ? count(behind.some((r) => r.behind) ? `↓ ${behind.reduce((n, r) => n + (r.behind ?? 0), 0)}` : "↓", `Catch up ${behind.map((r) => `${nameOf(r)} (${r.behind || `#${r.pullRequest.number} merged`})`).join(", ")}: merge the base in; never rebases, never pushes`, TONE.pending, () => catchUp(behind)) : null),
       slot("PR", prs.length ? toned(`${prs.length}${worst && prTone(worst) === TONE.failure ? " ✗" : worst && prTone(worst) === TONE.success ? " ✓" : ""}`, prTone(worst),
         prs.map((r) => `${nameOf(r)} #${r.pullRequest.number}: ${[r.pullRequest.title, ...prState(r.pullRequest)].filter(Boolean).join(", ")}`).join("\n")) : null),
     ];

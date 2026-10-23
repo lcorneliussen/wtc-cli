@@ -103,6 +103,12 @@ ready or went back to draft, was merged, closed or reopened, failed or passed
 its checks, was approved, got a request for changes, or conflicts with its
 base.
 
+The event also says what to do with the news: bring the task's progress up
+to date, catch up after a merge, and tell the person only what they need to
+act on. On the card, a merged pull request whose merge the checkout doesn't
+have yet offers ↓: `wtc status` reports `mergedIn` for it, since a base that
+was never fetched doesn't count as behind.
+
 It looks whenever a card loads, and every `pullRequestPollMinutes` (default 5)
 at collections with an open pull request. What it saw is kept in
 `$OPENCLAW_STATE_DIR/plugins/wtc/pull-requests.json`, so a restart doesn't

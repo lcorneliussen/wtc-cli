@@ -482,6 +482,23 @@ test("composer: collapsed, the same facts summed", async () => {
   view.dispose();
 });
 
+test("composer: after a merge, ↓ brings the merge in", async () => {
+  const merged = (mergedIn) => ({ number: 2, state: "merged", url: "https://github.com/octo/site/pull/2", checks: "success", mergedIn });
+  const { host, view } = await mount("composer", collection([repo("site", { pullRequest: merged(false) }), repo("docs", { pullRequest: merged(true) })]));
+  await settle();
+  const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
+  const downs = [...card.all()].filter((n) => n.tagName === "BUTTON" && n.textContent === "↓");
+  assert.ok(downs.some((n) => n.title === "#2 was merged. Catch up: fetch main and merge it in, to continue from the merge; never rebases, never pushes"));
+  // Collapsed, the summary offers it too; one that has the merge needs none.
+  assert.ok(downs.some((n) => n.title.startsWith("Catch up site (#2 merged)")));
+  assert.ok(!downs.some((n) => /docs/.test(n.title)));
+  calls.length = 0;
+  await downs.find((n) => n.title.startsWith("#2 was merged")).onclick();
+  await settle();
+  assert.ok(calls.some((c) => c.actionId === "catch-up" && c.sessionKey === "agent:main:owner:site"));
+  view.dispose();
+});
+
 test("narrow: one header, every fact in its column, the branch below the name", async () => {
   // A ResizeObserver whose width the test sets.
   const observers = [];
