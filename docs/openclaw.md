@@ -316,8 +316,15 @@ of a conversation without a collection suggests one: "Work in wtc project
 the conversation to run `wtc add-repo` for it. **Change…** opens the panel,
 and ✕ dismisses it. The suggestion comes from the gateway's decision model
 when one is selected (`agents.defaults.decisionModel`), as one choice among
-the projects' repositories by name and role. Without one, it comes from
-matching the message's words against those names and roles.
+the projects' repositories by name and role. No OpenClaw release has decision
+models yet, so meanwhile the plugin asks OpenAI's Decisions API itself when
+the gateway's environment has `WTC_DECISIONS_OPENAI_API_KEY` (the plugin's
+`decisionModel` setting picks the model, `gpt-6-luna` by default). Give the
+key that name only: OpenClaw's own OpenAI provider reads `OPENAI_API_KEY`,
+and the chat model could then use it. Without either, the suggestion comes
+from matching the message's words against the names and roles
+([#159](https://github.com/lcorneliussen/wtc-cli/issues/159) tracks moving
+to OpenClaw's decision models).
 
 OpenAI's decision model (`openai/gpt-6-luna`, which needs an OpenAI Platform
 API key; a ChatGPT or Codex subscription doesn't authorize it) suits this

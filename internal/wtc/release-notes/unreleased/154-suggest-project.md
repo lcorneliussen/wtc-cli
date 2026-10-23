@@ -4,7 +4,9 @@
   collection, the card reads the person's latest message and suggests a wtc
   project and its repositories: "Work in wtc project wtc with wtc-site?".
   **Start** asks the conversation to start that collection. The gateway's
-  decision model makes the suggestion when one is selected; otherwise the
+  decision model makes the suggestion when one is selected. Until OpenClaw
+  releases decision models, the plugin asks OpenAI's Decisions API itself
+  when the gateway has `WTC_DECISIONS_OPENAI_API_KEY`. Otherwise the
   message's words are matched against the repositories' names and roles
   ([#154](https://github.com/lcorneliussen/wtc-cli/issues/154)).
 - **The `openclaw` CLI no longer reports the wtc plugin failing to

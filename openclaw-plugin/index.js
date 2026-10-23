@@ -256,7 +256,7 @@ export function matchProjects(text, projects) {
 // there is no decision model or it is unavailable; { none: true } when it
 // found the message to be about none of them.
 export async function decideProjects(decisions, agentId, text, projects) {
-  if (!decisions?.evaluate) return null;
+  if (!decisions?.evaluate && !decisions?.evaluateV2) return null;
   const criteria = { none: "The message is not about working on any of these repositories" };
   const where = {};
   for (const p of projects ?? []) {
@@ -292,6 +292,41 @@ export async function decideProjects(decisions, agentId, text, projects) {
     .sort((a, b) => (a === chosen ? -1 : b === chosen ? 1 : (p[b] ?? 0) - (p[a] ?? 0)))
     .map((l) => where[l].repo);
   return { project, repos, source: "decision" };
+}
+
+// OpenAI's Decisions API, called directly, in the shape of OpenClaw's
+// decisions runtime (evaluateV2), for gateways whose OpenClaw has no decision
+// models yet (#159). Only choice questions, which is all the suggestion asks.
+export function openaiDecisions({ apiKey, model = "gpt-6-luna", baseUrl = "https://api.openai.com/v1", fetchImpl = fetch }) {
+  return {
+    async evaluateV2(batch, options = {}) {
+      const questions = Object.entries(batch.questions).map(([name, q]) => ({
+        type: "choice", name, instructions: q.instructions,
+        choices: Object.entries(q.criteria).map(([value, description]) => ({ value, description })),
+      }));
+      let response;
+      try {
+        response = await fetchImpl(`${baseUrl}/decisions`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+          body: JSON.stringify({ model, input: batch.state?.text ?? "", questions }),
+          signal: AbortSignal.timeout(options.timeoutMs ?? 3000),
+          redirect: "error",
+        });
+      } catch {
+        return { status: "unavailable", reason: "transport" };
+      }
+      if (!response.ok) return { status: "unavailable", reason: response.status === 401 || response.status === 403 ? "authentication" : `http-${response.status}` };
+      const body = await response.json().catch(() => null);
+      const answers = {};
+      for (const [i, [name]] of Object.entries(batch.questions).entries()) {
+        const a = body?.answers?.[i];
+        if (a?.name !== name || a.type !== "choice" || !Array.isArray(a.probabilities)) return { status: "unavailable", reason: "invalid-response" };
+        answers[name] = { type: "choice", choice: a.choice, probabilities: Object.fromEntries(a.probabilities.map((x) => [x.value, x.probability])) };
+      }
+      return { status: "ok", result: { model: body.model ?? model, answers } };
+    },
+  };
 }
 
 // A child that owns a repository has a managed worktree to look at.
@@ -552,8 +587,12 @@ export default {
         const text = String(action.payload?.text ?? "").trim();
         if (!text) return { ok: true, result: null };
         const projects = await gatewayProjects();
-        // The decision model's "none" stands; the words decide only without it.
-        const decided = await decideProjects(api.runtime.decisions, action.agentId, text, projects);
+        // The gateway's decision model, else OpenAI's called directly with a
+        // key meant for nothing else; its "none" stands, and the words
+        // decide only without either.
+        let decided = await decideProjects(api.runtime.decisions, action.agentId, text, projects);
+        const key = process.env.WTC_DECISIONS_OPENAI_API_KEY;
+        if (!decided && key) decided = await decideProjects(openaiDecisions({ apiKey: key, model: api.pluginConfig?.decisionModel || undefined }), action.agentId, text, projects);
         return { ok: true, result: decided?.none ? null : decided ?? matchProjects(text, projects) };
       },
     });

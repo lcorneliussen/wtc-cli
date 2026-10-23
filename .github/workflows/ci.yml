@@ -30,6 +30,9 @@ jobs:
       - run: go build ./cmd/wtc
       - name: Control UI render tests
         run: node --test openclaw-plugin/test/*.test.mjs
+        env:
+          # The live decision test runs when the repository has this secret.
+          WTC_DECISIONS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   # Unit tests only: the pinned runtime and Docker trials run in the Linux job.
   test-macos:
     runs-on: macos-latest
