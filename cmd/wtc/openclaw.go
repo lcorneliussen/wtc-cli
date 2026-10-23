@@ -162,6 +162,7 @@ pull request with them. One left out keeps what was recorded before.`,
 		return printPlan(plan)
 	}
 	root.AddCommand(publish)
+	addProjectsCommand(root, asJSON)
 }
 
 // addRepoIntents is add-repo under OpenClaw: one sessions_spawn intent per

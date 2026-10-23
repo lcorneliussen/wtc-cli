@@ -194,6 +194,14 @@ test("composer: the wtc tooltip names the plugin's and the gateway's versions", 
   view.dispose();
 });
 
+test("panel: the collection's wtc project", async () => {
+  for (const [project, want] of [["wtc", "wtc project wtc"], ["ad-hoc", "ad-hoc wtc project"]]) {
+    const { host, view } = await mount("panel", { ...busy, collection: { ...busy.collection, project } });
+    assert.ok(texts(host).includes(want), want);
+    view.dispose();
+  }
+});
+
 test("panel: a busy collection", async () => {
   const { host, view } = await mount("panel", busy);
   const all = texts(host);

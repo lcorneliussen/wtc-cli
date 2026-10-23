@@ -285,11 +285,16 @@ checkout, exchanging work through git (#106).
 The Collection panel does not group workers under their task yet; it shows
 each worker's collection as its own.
 
-## Harnesses
+## wtc projects
 
-A gateway can work in one or more harnesses, the repositories that hold a
-workspace's registry, instructions and skills. They are configuration, set
-by whoever maintains the gateway:
+A **wtc project** is a named set of repositories that belong together, with
+the instructions for working in them. On a gateway each one is a configured
+harness: a repository whose `.harness-repos.yml` lists the project's
+repositories and whose `AGENTS.md` holds its instructions. A collection is
+one task's worktrees of a project's repositories. An **ad-hoc** collection
+works without a project and takes any repository. The projects are
+configuration, set by whoever maintains the gateway (the keys keep the
+harness name):
 
 ```json
 "plugins": { "entries": { "wtc": { "config": {
@@ -300,26 +305,32 @@ by whoever maintains the gateway:
 } } } }
 ```
 
-Each harness must also be a project on the gateway, like the repositories
-its registry names: **Add repository** in the Collection panel, or the
-gateway's own project settings. `ref` defaults to `main`.
+`wtc projects` lists them with their repositories and roles, so that the
+agent can match what the person asks to work on before `wtc add-repo` starts
+the collection.
 
-A collection works in at most one harness:
+Each harness must also be cloned on the gateway (an OpenClaw project), like
+the repositories its registry names: **Add repository** in the Collection
+panel, or the gateway's own project settings. `ref` defaults to `main`.
 
-- **Which one.** The collection keeps the harness it started with. A new
-  collection takes `--harness <name>` if given; otherwise the registries
-  decide: the harness that lists the repositories asked for, by name, URL
-  or `owner/name` (of several that list some, the ones that list all; of
+A collection works in at most one wtc project:
+
+- **Which one.** The collection keeps the project it started with. A new
+  collection takes `--project <name>` if given (`--harness` is the same
+  flag under its earlier name); otherwise the registries decide: the
+  project that lists the repositories asked for, by name, URL or
+  `owner/name` (of several that list some, the ones that list all; of
   several still, `defaultHarness`). When none lists them, `defaultHarness`
-  or the only configured harness. Otherwise `wtc add-repo` asks the agent
-  to ask the person; `--harness none` starts a collection without one.
-  Without harnesses configured, every collection is ad hoc, as before.
-- **A repository the harness does not list** is the person's choice, even
-  with a default harness. `wtc add-repo` stops and the agent asks: ad hoc
-  beside the harness in this collection (`--ad-hoc`), registered in the
-  harness first (an entry in `.harness-repos.yml` in the collection's
-  worktree of the harness, published like any change), or a collection of
-  its own without a harness (`--harness none` and another name).
+  or the only configured project. Otherwise `wtc add-repo` asks the agent
+  to ask the person; `--project none` starts an ad-hoc collection. Without
+  projects configured, every collection is ad hoc, as before.
+- **A repository the project does not list** is the person's choice, even
+  with a default project. `wtc add-repo` stops and the agent asks: ad hoc
+  beside the project's repositories in this collection (`--ad-hoc`),
+  registered in the project first (an entry in `.harness-repos.yml` in the
+  collection's worktree of the harness, published like any change), or a
+  collection of its own in an ad-hoc project (`--project none` and another
+  name).
 - **A worktree like the others.** The first `wtc add-repo` of a collection
   adds a managed worktree of the harness, on the collection's branch, so a
   task can change the harness and publish that like any repository.
@@ -329,11 +340,15 @@ A collection works in at most one harness:
   the gateway's clone at `ref`. `--base` still wins. A URL or `owner/name`
   that is in the registry resolves to its entry; one that is not is the
   person's choice (above).
-- **Instructions.** `wtc status` shows the harness and its worktree; the
-  agent reads its `AGENTS.md` from there.
+- **Instructions.** `wtc status` shows the project and the worktree of its
+  harness; the agent reads its `AGENTS.md` from there, and it says which
+  other repositories a task needs.
+- **Every task starts one.** The skill has the agent start a collection
+  whenever the person wants to work on a repository, also only to read or
+  analyze it, rather than work from memory or another collection.
 
 Not yet: hooks, secret links and mise pins from a harness do not run on a
-gateway, and herdr layouts do not apply. Several harnesses in one collection,
+gateway, and herdr layouts do not apply. Several projects in one collection,
 stacked rather than merged, are tracked in
 [#100](https://github.com/lcorneliussen/wtc-cli/issues/100).
 
@@ -455,7 +470,7 @@ instead. An agent asked to set wtc up starts with `wtc docs setup.md`.
    says so the first time it needs one.
 6. **Repositories** the gateway clones itself: **Add repository** in the
    Collection panel, or the gateway's own project settings. With a harness,
-   add it the same way and configure it (see [Harnesses](#harnesses)).
+   add it the same way and configure it (see [wtc projects](#wtc-projects)).
 7. **Each agent's `AGENTS.md`** says that the gateway works in collections.
    The plugin's `wtc` skill only comes up when an agent already thinks of
    wtc; `AGENTS.md` is what it reads in every conversation. Append the

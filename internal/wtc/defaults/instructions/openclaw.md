@@ -51,40 +51,52 @@ based on your branch where you have one, so it builds on your groundwork.
 - Readers (review, research, a test run) need no worker: they can read your
   checkouts.
 
-## The collection's harness
+## wtc projects
 
-A gateway can be configured with harnesses: repositories with a registry of
-the repositories that belong together, their default branches, and the
-instructions for working in them. A collection works in at most one. Its
-first `wtc add-repo` adds a worktree of the harness too, and a name like
-`api` resolves through the harness's `.harness-repos.yml`: that entry's
-remote, based on its `default_ref` unless `--base` says otherwise.
+A **wtc project** is a named set of repositories that belong together: a
+harness the gateway is configured with, whose `.harness-repos.yml` lists the
+repositories, their default branches, and whose `AGENTS.md` holds the
+instructions for working in them. A **collection** is one task's worktrees
+of the repositories it needs, in one wtc project, or in an ad-hoc one, which
+takes any repository. `wtc projects` lists the gateway's projects and their
+repositories.
 
-`wtc add-repo` takes the collection's harness when it has one. Otherwise the
-registries decide: the harness that lists the repositories asked for, by
+Work on a repository happens in a collection, also when it is only reading
+or analyzing. When the person names something to work on ("the site", "the
+CLI") and the conversation has no collection, match it with `wtc projects`
+and start one with `wtc add-repo`. Never work in another conversation's
+collection folder or a clone of your own.
+
+A collection's first `wtc add-repo` adds a worktree of the project's harness
+too, and a name like `api` resolves through its `.harness-repos.yml`: that
+entry's remote, based on its `default_ref` unless `--base` says otherwise.
+Read the harness's `AGENTS.md` right away: it says which other repositories
+a task needs.
+
+`wtc add-repo` takes the collection's wtc project when it has one. Otherwise
+the registries decide: the project that lists the repositories asked for, by
 name, URL or `owner/name`; between several that list some, the ones that list
-all; between several still, the gateway's default. When none
-lists them, the default or the only harness configured. When that does not
-settle it, it says so: ask the person which harness the task belongs to, then
-pass `--harness <name>`, or `--harness none` for a collection without one.
-One collection never mixes harnesses; work in another one is another
-collection.
+all; between several still, the gateway's default. When none lists them, the
+default or the only project configured. When that does not settle it, it says
+so: ask the person which wtc project the task belongs to, then pass
+`--project <name>`, or `--project none` for an ad-hoc collection (`--harness`
+is the same flag under its earlier name). One collection never mixes
+projects; work in another one is another collection.
 
-A repository the harness does not list stops `wtc add-repo` with three
+A repository the project does not list stops `wtc add-repo` with three
 choices. Put them to the person and run the one they pick: ad hoc beside the
-harness (`--ad-hoc`), registered in the harness first (an entry in
-`.harness-repos.yml` in the collection's worktree of the harness, committed
-there), or a collection of its own (`--harness none` and another name).
+project's repositories (`--ad-hoc`), registered in the project first (an
+entry in `.harness-repos.yml` in the collection's worktree of the harness,
+committed there), or a collection of its own in an ad-hoc project
+(`--project none` and another name).
 
-The collection's folder says which harness it works in:
-`$OPENCLAW_STATE_DIR/wtc/<harness>/<name>`, or `wtc/ad-hoc/<name>` without
-one.
+The collection's folder says which wtc project it works in:
+`$OPENCLAW_STATE_DIR/wtc/<project>/<name>`, or `wtc/ad-hoc/<name>`.
 
-`wtc status <name>` shows the harness and its worktree. Read its `AGENTS.md`
-and the instructions it points to before working in the collection: they are
-the environment's rules, and they win over general habits. Changes to the
-harness itself are work like any other: commit in its worktree, and the
-person publishes them.
+`wtc status <name>` shows the project and the worktree of its harness. Its
+`AGENTS.md` and the instructions it points to are the environment's rules,
+and they win over general habits. Changes to the harness itself are work like
+any other: commit in its worktree, and the person publishes them.
 
 Never `wtc init` or `wtc new` under OpenClaw (wtc refuses): the gateway can
 neither see nor publish a folder collection of its own.

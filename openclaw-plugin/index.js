@@ -422,6 +422,9 @@ export default {
           checkouts.push(...(col.repos ?? []));
           result.services.push(...(col.services ?? []));
           if (col.folder) result.collection.folder = col.folder;
+          // The wtc project it works in: its harness, or ad hoc.
+          if (col.harness?.name) result.collection.project = col.harness.name;
+          else if (col.folder && path.basename(path.dirname(col.folder)) === "ad-hoc") result.collection.project = "ad-hoc";
           if (col.error) result.warnings.push(`collection folder: ${col.error}`);
         } catch {
           result.warnings.push(`wtc status failed (exit ${status.code}): ${(status.stderr || status.stdout).trim().slice(0, 300) || "is wtc on the gateway's PATH?"}`);
