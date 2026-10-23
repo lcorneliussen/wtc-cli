@@ -4,8 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/Masterminds/semver/v3"
 )
 
 func TestWriteOpenClawPluginStampsTheVersion(t *testing.T) {
@@ -32,8 +36,8 @@ func TestWriteOpenClawPluginStampsTheVersion(t *testing.T) {
 	if err := writeOpenClawPlugin(devDir, "dev"); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(devDir, "package.json")); !strings.Contains(string(data), `"version": "0.0.0-dev"`) {
-		t.Errorf("a dev build is not stamped 0.0.0-dev:\n%s", data)
+	if data, _ := os.ReadFile(filepath.Join(devDir, "package.json")); !regexp.MustCompile(`"version": "\d+\.\d+\.\d+-dev[+"]`).Match(data) {
+		t.Errorf("a dev build is not stamped with a -dev version:\n%s", data)
 	}
 	skill, _ := os.ReadFile(filepath.Join(dir, "skills/wtc/SKILL.md"))
 	if !strings.Contains(string(skill), "wtc docs instructions/openclaw.md") {
@@ -132,5 +136,34 @@ func TestOpenClawInstallFlagsAndErrors(t *testing.T) {
 	}
 	if out, err := fail("reload"); err != nil || !strings.Contains(out, "restart the gateway") {
 		t.Fatalf("a failing reload should install and ask for a restart: %s %v", out, err)
+	}
+}
+
+// A build without a release version says which release it follows, its
+// commit and when, and whether it had local changes.
+func TestDescribeBuild(t *testing.T) {
+	info := func(settings ...debug.BuildSetting) func() (*debug.BuildInfo, bool) {
+		return func() (*debug.BuildInfo, bool) { return &debug.BuildInfo{Settings: settings}, true }
+	}
+	got := describeBuild(info(debug.BuildSetting{Key: "vcs.revision", Value: "317ca2a9b1c2"}, debug.BuildSetting{Key: "vcs.time", Value: "2026-10-23T09:12:44Z"}, debug.BuildSetting{Key: "vcs.modified", Value: "true"}))
+	if !regexp.MustCompile(`^\d+\.\d+\.\d+-dev\+g317ca2a\.20261023\.0912\.dirty$`).MatchString(got) {
+		t.Errorf("with vcs info: %s", got)
+	}
+	if _, err := semver.NewVersion(got); err != nil {
+		t.Errorf("%s is no semantic version: %v", got, err)
+	}
+	if got := describeBuild(func() (*debug.BuildInfo, bool) { return nil, false }); !regexp.MustCompile(`^\d+\.\d+\.\d+-dev$`).MatchString(got) {
+		t.Errorf("without: %s", got)
+	}
+	// wtc --version of an unversioned build is that description; a release
+	// is itself.
+	if got := versionLabel(); !regexp.MustCompile(`^\d+\.\d+\.\d+-dev`).MatchString(got) {
+		t.Errorf("wtc --version of a test build: %s", got)
+	}
+	was := version
+	t.Cleanup(func() { version = was })
+	version = "1.2.3"
+	if got := versionLabel(); got != "1.2.3" {
+		t.Errorf("a release: %s", got)
 	}
 }

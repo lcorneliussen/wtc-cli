@@ -27,10 +27,14 @@ const PLUGIN_VERSION = (() => {
   }
 })();
 
+// The version wtc --version names, or null.
+export const wtcVersionOf = (output) => /^wtc version (\S+)/.exec(String(output ?? "").trim())?.[1] ?? null;
+
 // What to say when the wtc on the gateway's PATH is a release other than the
 // one this plugin came from, as after upgrading wtc without reinstalling the
-// plugin. A dev build on either side says nothing: a dev wtc stamps the
-// plugin 0.0.0-dev.
+// plugin. A dev build on either side says nothing: a wtc without a release
+// version stamps the plugin with a -dev version (describeBuild in cmd/wtc),
+// or 0.0.0-dev.
 export function versionWarning(pluginVersion, wtcVersionOutput) {
   const m = /^wtc version v?(\d+\.\d+\.\d+)$/.exec(String(wtcVersionOutput ?? "").trim());
   if (!m || !/^\d+\.\d+\.\d+$/.test(String(pluginVersion ?? "")) || m[1] === pluginVersion) return null;
@@ -223,8 +227,10 @@ export default {
       return { code: r.code ?? r.exitCode ?? null, stdout: String(r.stdout ?? ""), stderr: String(r.stderr ?? "") };
     };
 
-    // The collection around a session: itself when it has repository
-    // children, otherwise its parent.
+    // The collection around a session: itself, unless it is a repository's
+    // own session, whose collection is its parent's. A new conversation has
+    // a parent too (the dashboard's, often the main session) and no
+    // repositories yet: it is a collection of its own, still empty.
     const collectionOf = (agentId, sessionKey) => {
       const all = [...api.runtime.agent.session.listSessionEntries({ agentId })];
       const entryOf = new Map(all.map((s) => [s.sessionKey, s.entry]));
@@ -232,7 +238,7 @@ export default {
       let parentKey = sessionKey;
       let children = childrenOf(parentKey);
       const parentOfSelf = entryOf.get(sessionKey)?.parentSessionKey;
-      if (children.length === 0 && parentOfSelf) {
+      if (children.length === 0 && parentOfSelf && worktreeOf(entryOf.get(sessionKey))) {
         parentKey = parentOfSelf;
         children = childrenOf(parentKey);
       }
@@ -399,7 +405,9 @@ export default {
       // wildcard domain or Tailscale run by the gateway.
       const gateway = (api.runtime?.config?.current?.() ?? api.config)?.gateway;
       result.portalIngress = !!gateway?.portals?.ingress?.domain || ["serve", "funnel"].includes(gateway?.tailscale?.mode);
-      const stale = versionWarning(PLUGIN_VERSION, await wtcVersionOutput());
+      const versionLine = await wtcVersionOutput();
+      result.version = { plugin: PLUGIN_VERSION, wtc: wtcVersionOf(versionLine) };
+      const stale = versionWarning(PLUGIN_VERSION, versionLine);
       if (stale) result.warnings.push(stale);
       if (children.length === 0) return result;
       // The collection's name is its worktrees' name. wtc status reads

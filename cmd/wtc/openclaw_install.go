@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
 
 	openclawplugin "github.com/lcorneliussen/wtc-cli/openclaw-plugin"
@@ -94,10 +95,14 @@ another host or in an image build.`,
 var manifestVersion = regexp.MustCompile(`("version":\s*)"[^"]*"`)
 
 // writeOpenClawPlugin writes the embedded plugin into dir, stamped with this
-// binary's version so that the gateway lists which wtc it came from. A dev
-// build stamps 0.0.0-dev, which the plugin does not compare with anything.
+// binary's version so that the gateway lists which wtc it came from. A build
+// without a release version stamps what it describes itself as (a -dev
+// version, which the plugin does not compare with anything), or 0.0.0-dev.
 func writeOpenClawPlugin(dir, version string) error {
 	stamp := strings.TrimPrefix(version, "v")
+	if stamp == "dev" {
+		stamp = describeBuild(debug.ReadBuildInfo)
+	}
 	if stamp == "dev" || stamp == "" {
 		stamp = "0.0.0-dev"
 	}

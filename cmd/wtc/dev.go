@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/charmbracelet/x/term"
@@ -73,7 +76,52 @@ func versionLabel() string {
 	if delegatedFrom != "" {
 		return version + " (dev build, in place of " + delegatedFrom + ")"
 	}
+	if version == "dev" {
+		return describeBuild(debug.ReadBuildInfo)
+	}
 	return version
+}
+
+// describeBuild names a build without a release version (a plain go build),
+// similar to wtc dev install: below the next patch release after the newest
+// release it embeds notes for, with its commit, the commit's time and .dirty
+// for uncommitted changes, as far as Go recorded them.
+func describeBuild(readInfo func() (*debug.BuildInfo, bool)) string {
+	base := ""
+	if notes, err := wtc.EmbeddedReleaseNotes(); err == nil {
+		var newest *semver.Version
+		for _, n := range notes {
+			if v, err := semver.NewVersion(n.Version); err == nil && (newest == nil || v.GreaterThan(newest)) {
+				newest = v
+			}
+		}
+		if newest != nil {
+			base = fmt.Sprintf("%d.%d.%d-dev", newest.Major(), newest.Minor(), newest.Patch()+1)
+		}
+	}
+	if base == "" {
+		return "dev"
+	}
+	meta := []string{}
+	if info, ok := readInfo(); ok {
+		settings := map[string]string{}
+		for _, s := range info.Settings {
+			settings[s.Key] = s.Value
+		}
+		if rev := settings["vcs.revision"]; len(rev) >= 7 {
+			meta = append(meta, "g"+rev[:7])
+		}
+		if at, err := time.Parse(time.RFC3339, settings["vcs.time"]); err == nil {
+			meta = append(meta, at.UTC().Format("20060102.1504"))
+		}
+		if settings["vcs.modified"] == "true" {
+			meta = append(meta, "dirty")
+		}
+	}
+	if len(meta) == 0 {
+		return base
+	}
+	return base + "+" + strings.Join(meta, ".")
 }
 
 func addDevCommands(root *cobra.Command, asJSON *bool) {

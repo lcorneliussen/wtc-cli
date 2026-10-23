@@ -454,8 +454,10 @@ function newTunnel(g, svc, data = {}, { compact = false } = {}) {
 }
 
 // "wtc Collection", wtc linking to the project.
-const brand = (size) => css(el("span", {},
-  css(el("a", { textContent: "wtc", href: HOME, target: "_blank", rel: "noopener noreferrer", title: "wtc — worktree collections (opens on GitHub)" }),
+// version is what the collection reports: the plugin's and the gateway's wtc.
+const versionText = (v) => (v?.plugin || v?.wtc ? `plugin ${v.plugin ?? "?"}, wtc ${v.wtc ?? "?"}` : "");
+const brand = (size, version) => css(el("span", {},
+  css(el("a", { textContent: "wtc", href: HOME, target: "_blank", rel: "noopener noreferrer", title: `wtc — worktree collections (opens on GitHub)${version ? `\n${versionText(version)}` : ""}` }),
     "color:var(--accent, inherit);text-decoration:none;font-weight:700"),
   el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
 
@@ -857,7 +859,7 @@ function mountComposer(container, context) {
     }
     const groups = serviceGroups(entry.data.services ?? []);
     summary.replaceChildren(
-      brand("14px"),
+      brand("14px", entry.data.version),
       css(el("span", {}, ...(card.open ? [] : tables.totals(repos, groups))), "flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding-left:6px"),
       // What an action is doing or why it failed shows here.
       css(el("span", {}, note ? css(el("span", { textContent: note, title: note }), "color:var(--muted, #888);font-size:12px;max-width:22em;overflow:hidden;text-overflow:ellipsis") : null,
@@ -1174,6 +1176,8 @@ function mountCollection(container, context) {
     return css(el("div", {}, input, results), "display:grid;gap:6px");
   })();
 
+  // Which plugin and wtc the gateway runs, for telling builds apart.
+  const footer = (data) => (versionText(data.version) ? muted(versionText(data.version), "font-size:11px;display:block") : null);
   function render() {
     if (!entry?.data) {
       header.replaceChildren(css(el("div", { textContent: entry?.error ? `The collection could not be loaded: ${entry.error}` : "Loading…" }), "color:var(--muted, #888)"));
@@ -1185,13 +1189,27 @@ function mountCollection(container, context) {
     const services = data.services ?? [];
     const branch = collectionBranch(repos);
     const groups = serviceGroups(services);
+    if (repos.length === 0 && groups.length === 0) {
+      // No collection yet: the conversation's label says nothing about one.
+      header.replaceChildren(
+        row(brand("12px", data.version)),
+        row(css(el("span", { textContent: "No collection yet" }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit)"),
+          css(el("span", {}, iconButton("↻", "Refresh", () => void watch?.refresh())), "margin-left:auto;display:flex;align-items:center;gap:2px")),
+        muted("A collection is this conversation's worktrees of a wtc project's repositories, for one task. Ask the conversation to work on a repository, or add one below.", "font-size:13px;display:block;margin-top:4px"),
+      );
+      const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
+      body.replaceChildren(...[css(el("div", {}, heading("Add a repository"), adder), "display:grid;gap:10px"), ...warnings, footer(data)].filter(Boolean));
+      log.textContent = note;
+      return;
+    }
     header.replaceChildren(
-      row(brand("12px")),
+      row(brand("12px", data.version)),
       row(css(el("span", { textContent: data.collection.label ?? data.collection.sessionKey }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit)"),
         css(el("span", {}, muted(`Updated ${ago(entry.at)}`), iconButton("↻", "Refresh", () => void watch?.refresh())), "margin-left:auto;display:flex;align-items:center;gap:2px")),
       row(branch ? mono(branch, "The collection's branch; a repository on another one shows its own") : null, branch ? muted("·") : null,
         muted(`${repos.length} ${repos.length === 1 ? "repository" : "repositories"}${groups.length ? ` · ${groups.filter((g) => g.running).length}/${plural(groups.length, "service")} running` : ""}`)),
-      data.collection.folder ? css(el("div", {}, mono(data.collection.folder, "The collection's folder: one link per repository to its worktree")), "display:flex;margin-top:2px") : null,
+      // Not when there is no folder: replaceChildren writes a null as "null".
+      ...(data.collection.folder ? [css(el("div", {}, mono(data.collection.folder, "The collection's folder: one link per repository to its worktree")), "display:flex;margin-top:2px")] : []),
     );
 
     const repoSection = css(el("div", {}, heading("Repositories")), "display:grid;gap:10px");
@@ -1209,7 +1227,7 @@ function mountCollection(container, context) {
     else serviceSection.append(tables.serviceTable(groups, data, narrow));
 
     const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
-    body.replaceChildren(...[repoSection, prSection, serviceSection, ...warnings].filter(Boolean));
+    body.replaceChildren(...[repoSection, prSection, serviceSection, ...warnings, footer(data)].filter(Boolean));
     log.textContent = note;
   }
 

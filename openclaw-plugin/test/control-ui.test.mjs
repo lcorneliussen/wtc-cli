@@ -171,13 +171,26 @@ const tables = (node) => [...node.all()].filter((n) => n.className === "wtc-tabl
   return rows;
 });
 
-test("panel: an empty collection", async () => {
-  const { host, view } = await mount("panel", collection([]));
+test("panel: no collection yet says what one is, not the conversation's label", async () => {
+  const { host, view } = await mount("panel", { ...collection([]), collection: { label: "[OpenClaw heartbeat poll]", sessionKey: "agent:main:dashboard:new" }, version: { plugin: "0.1.50-dev+g317ca2a.20261023.0912", wtc: "0.1.50-dev+g317ca2a.20261023.0912" } });
   const all = texts(host);
-  assert.ok(all.includes("test collection"));
-  assert.ok(all.includes("0 repositories"));
-  assert.ok(all.some((t) => t.startsWith("No repositories yet")));
-  assert.ok(all.some((t) => t.startsWith("None running")));
+  assert.ok(all.includes("No collection yet"));
+  assert.ok(all.some((t) => /^A collection is this conversation's worktrees of a wtc project's repositories/.test(t ?? "")));
+  assert.ok(all.includes("Add a repository"));
+  assert.ok(!all.some((t) => /heartbeat poll|^null$|0 repositories|None running/.test(t ?? "")));
+  assert.ok(all.includes("plugin 0.1.50-dev+g317ca2a.20261023.0912, wtc 0.1.50-dev+g317ca2a.20261023.0912"));
+  view.dispose();
+  // Without versions, no footer, and no "null" for it.
+  const bare = await mount("panel", collection([]));
+  assert.ok(!texts(bare.host).some((t) => t === "null" || /^plugin /.test(t ?? "")));
+  bare.view.dispose();
+});
+
+test("composer: the wtc tooltip names the plugin's and the gateway's versions", async () => {
+  const { host, view } = await mount("composer", { ...busy, version: { plugin: "1.2.3", wtc: "1.2.4-dev+gabc1234" } });
+  await settle();
+  const wtcLink = [...host.all()].find((n) => n.tagName === "A" && n.textContent === "wtc");
+  assert.match(wtcLink.title, /\nplugin 1\.2\.3, wtc 1\.2\.4-dev\+gabc1234$/);
   view.dispose();
 });
 
