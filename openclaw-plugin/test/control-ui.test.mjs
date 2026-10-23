@@ -746,6 +746,8 @@ test("panel: a ready service that doesn't answer, and a tunnel whose provider ne
   assert.ok(!nodes.some((n) => /not answering|⚠/.test(n.textContent ?? "") || /^ready: /.test(n.title ?? "")), "nothing marked as failing");
   assert.ok(nodes.some((n) => n.tagName === "BUTTON" && /Open the tailscale tunnel again .*First: Tailscale needs a login: tailscale up/.test(n.title)));
   quiet.view.dispose();
+});
+
 test("composer: a repository with nothing on its branch shows its base", async () => {
   const { host, view } = await mount("composer", collection([
     repo("wtc-site"),
