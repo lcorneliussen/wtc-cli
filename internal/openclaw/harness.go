@@ -28,7 +28,8 @@ type GatewayConfig struct {
 	DefaultHarness string    `json:"defaultHarness,omitempty"`
 }
 
-// NoHarness is what --harness takes for a collection without one.
+// NoHarness is what --project (or --harness) takes for an ad-hoc collection,
+// without a wtc project.
 const NoHarness = "none"
 
 // AdHocFolder is the folder of collections without a harness, beside one
@@ -130,11 +131,12 @@ func (c GatewayConfig) names() string {
 	return strings.Join(names, ", ")
 }
 
-// ChooseHarness decides the harness of a collection, or nil for none. flag is
-// --harness, recorded the harness the collection already has, and names the
+// ChooseHarness decides the harness, the wtc project, of a collection, or nil
+// for none. flag is --project, recorded the harness the collection already
+// has, and names the
 // repositories add-repo was given, by name or URL; has says whether a
 // harness's registry lists one. A collection keeps the harness it recorded,
-// or none, and refuses another --harness; a new collection takes the one
+// or none, and refuses another --project; a new collection takes the one
 // given. Otherwise the registries decide: the harness that lists the
 // repositories (of several that list some, the ones that list all); of
 // several still, the default, or the person when none of them is. When none

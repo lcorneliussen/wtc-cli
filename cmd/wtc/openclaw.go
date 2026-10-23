@@ -483,7 +483,7 @@ func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string
 		sort.Strings(projects)
 		var in []string
 		for _, p := range projects {
-			in = append(in, fmt.Sprintf("in a new conversation for wtc project %s, which lists %s: the person starts it, and there wtc add-repo %s --worktree <name>", p, strings.Join(elsewhere[p], ", "), strings.Join(elsewhere[p], " ")))
+			in = append(in, fmt.Sprintf("in a new conversation for wtc project %s, which lists %s: the person starts it, and there wtc add-repo %s --worktree <name> --project %s", p, strings.Join(elsewhere[p], ", "), strings.Join(elsewhere[p], " "), p))
 		}
 		err = fmt.Errorf("%w\n  4. usually the right one for work on that project: %s", err, strings.Join(in, "; or "))
 	}
