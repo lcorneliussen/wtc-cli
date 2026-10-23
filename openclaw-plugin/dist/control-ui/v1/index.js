@@ -1208,7 +1208,7 @@ function mountCollection(container, context) {
         css(el("span", {}, muted(`Updated ${ago(entry.at)}`), iconButton("↻", "Refresh", () => void watch?.refresh())), "margin-left:auto;display:flex;align-items:center;gap:2px")),
       row(branch ? mono(branch, "The collection's branch; a repository on another one shows its own") : null, branch ? muted("·") : null,
         muted(`${repos.length} ${repos.length === 1 ? "repository" : "repositories"}${groups.length ? ` · ${groups.filter((g) => g.running).length}/${plural(groups.length, "service")} running` : ""}`)),
-      // Not before its first repository: replaceChildren writes a null as "null".
+      // Not when there is no folder: replaceChildren writes a null as "null".
       ...(data.collection.folder ? [css(el("div", {}, mono(data.collection.folder, "The collection's folder: one link per repository to its worktree")), "display:flex;margin-top:2px")] : []),
     );
 
