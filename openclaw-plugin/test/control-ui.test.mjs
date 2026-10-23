@@ -180,6 +180,18 @@ test("panel: no collection yet says what one is, not the conversation's label", 
   assert.ok(!all.some((t) => /heartbeat poll|^null$|0 repositories|None running/.test(t ?? "")));
   assert.ok(all.includes("plugin 0.1.49-dev+317ca2a.202610230912, wtc 0.1.49-dev+317ca2a.202610230912"));
   view.dispose();
+  // Without versions, no footer, and no "null" for it.
+  const bare = await mount("panel", collection([]));
+  assert.ok(!texts(bare.host).some((t) => t === "null" || /^plugin /.test(t ?? "")));
+  bare.view.dispose();
+});
+
+test("composer: the wtc tooltip names the plugin's and the gateway's versions", async () => {
+  const { host, view } = await mount("composer", { ...busy, version: { plugin: "1.2.3", wtc: "1.2.4-dev+gabc1234" } });
+  await settle();
+  const wtcLink = [...host.all()].find((n) => n.tagName === "A" && n.textContent === "wtc");
+  assert.match(wtcLink.title, /\nplugin 1\.2\.3, wtc 1\.2\.4-dev\+gabc1234$/);
+  view.dispose();
 });
 
 test("panel: a busy collection", async () => {

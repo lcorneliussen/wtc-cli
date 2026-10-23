@@ -1,7 +1,7 @@
 // The gateway side of the plugin, where it needs no gateway.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import plugin, { collectionFolder, pullRequestChanges, pullRequestWatch, versionWarning } from "../index.js";
+import plugin, { collectionFolder, pullRequestChanges, pullRequestWatch, versionWarning, wtcVersionOf } from "../index.js";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +17,13 @@ test("the panel warns when the gateway's wtc is not the release the plugin came 
   assert.equal(versionWarning("0.0.0-dev", "wtc version 0.1.43"), null);
   assert.equal(versionWarning("0.1.42", ""), null);
   assert.equal(versionWarning(null, "wtc version 0.1.43"), null);
+});
+
+test("the collection names the gateway's wtc version", () => {
+  assert.equal(wtcVersionOf("wtc version 0.1.49\n"), "0.1.49");
+  assert.equal(wtcVersionOf("wtc version 0.1.50-dev+gb8e3804.20261023.0644"), "0.1.50-dev+gb8e3804.20261023.0644");
+  assert.equal(wtcVersionOf(""), null);
+  assert.equal(wtcVersionOf(null), null);
 });
 
 test("overlapping collection requests share one wtc --version", async () => {
@@ -44,6 +51,7 @@ test("overlapping collection requests share one wtc --version", async () => {
   const results = await Promise.all([collection(), collection(), collection()]);
   assert.equal(asked, 1);
   for (const r of results) assert.match(r.result.warnings[0], /runs wtc 99\.0\.0/);
+  assert.equal(results[0].result.version.wtc, "99.0.0");
 });
 
 test("a new conversation is a collection of its own, not its parent's", async () => {
