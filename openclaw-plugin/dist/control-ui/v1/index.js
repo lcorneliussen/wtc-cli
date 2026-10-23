@@ -792,6 +792,20 @@ function collectionTables(v) {
     table(narrow ? REPO_COLUMNS.map((c, i) => (i === 0 ? { ...c, width: "minmax(0,1fr)" } : c)) : REPO_COLUMNS, repos.map(repoRow), narrow), serviceTable, totals, prTable };
 }
 
+// The text of the latest message the person wrote, from chat.history.
+// Heartbeat polls and system events are not theirs.
+export function latestUserText(messages) {
+  for (const m of [...(messages ?? [])].reverse()) {
+    if (m?.role !== "user") continue;
+    const text = typeof m.content === "string" ? m.content
+      : Array.isArray(m.content) ? m.content.filter((c) => c?.type === "text").map((c) => c.text ?? "").join("\n") : "";
+    if (text.trim() && !/^\[OpenClaw heartbeat poll\]|^wtc: pull request news/.test(text.trim())) return text.trim();
+  }
+  return "";
+}
+// What Start asks the conversation to do.
+export const startMessage = (s) => `Start this conversation's collection in wtc project ${s.project} with ${s.repos.join(", ")}: wtc add-repo ${s.repos.join(" ")} --project ${s.project} --worktree <a short name for this task>. Then read the project's AGENTS.md and add what else the task needs.`;
+
 function mountComposer(container, context) {
   let ctx = context;
   let watch = null;
@@ -850,11 +864,65 @@ function mountComposer(container, context) {
     refresh: () => watch?.refresh(), pause: (on) => watch?.pause(on), rerender: () => entry && render(entry),
   });
 
+  // A conversation without a collection: where the person's latest message
+  // asks to work, suggested by the gateway (its decision model, or the
+  // words), as a card to start the collection from. Asked again when they
+  // write something new, at most every ten seconds; dismissed for good.
+  let suggestion = null;
+  let askedAt = 0;
+  const dismissed = new Set();
+  async function suggestFor(sessionKey) {
+    if (dismissed.has(sessionKey) || Date.now() - askedAt < 10000) return;
+    askedAt = Date.now();
+    try {
+      const history = await ctx.host.request("chat.history", { sessionKey, limit: 20 });
+      const text = latestUserText(history?.messages);
+      if (!text || (suggestion?.key === sessionKey && suggestion.text === text)) return;
+      const res = await ctx.host.request("plugins.sessionAction", { pluginId: PLUGIN_ID, actionId: "suggest", sessionKey, ...(agentOf(ctx) ? { agentId: agentOf(ctx) } : {}), payload: { text } });
+      if (sessionKey !== key) return;
+      suggestion = { key: sessionKey, text, result: res?.ok === false ? null : res?.result ?? null };
+      if (entry) render(entry);
+    } catch { /* no suggestion: the conversation still can */ }
+  }
+  const pill = (text, title, run, strong) => {
+    const b = css(el("button", { type: "button", textContent: text, title }),
+      `border:1px solid var(--border, rgba(128,128,128,.3));background:${strong ? "var(--accent, #2563eb)" : "transparent"};color:${strong ? "var(--accent-foreground, #fff)" : "inherit"};cursor:pointer;font:inherit;font-size:12px;padding:2px 10px;border-radius:999px`);
+    b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); run(); };
+    return b;
+  };
+  function renderSuggestion(s) {
+    const what = css(el("span", {}, "Work in wtc project ", el("strong", { textContent: s.project }), ` with ${s.repos.join(", ")}?`),
+      "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
+    what.title = `${s.source === "decision" ? "The decision model's" : "The words'"} suggestion for: ${suggestion.text}`;
+    summary.replaceChildren(
+      brand("14px", entry?.data?.version),
+      what,
+      css(el("span", {}, note ? css(el("span", { textContent: note }), "color:var(--muted, #888);font-size:12px") : null,
+        pill("Start", "Ask the conversation to start this collection", () => {
+          dismissed.add(key);
+          note = "";
+          card.remove();
+          void askConversation(ctx.host, key, startMessage(s)).catch((err) => { dismissed.delete(key); say(String(err?.message ?? err)); });
+        }, true),
+        pill("Change…", "Pick another wtc project or repositories in the Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
+        iconButton("✕", "Not now", () => { dismissed.add(key); card.remove(); })),
+      "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:6px;white-space:nowrap"),
+    );
+    detail.replaceChildren();
+    if (card.parentNode !== container) container.prepend(card);
+  }
+
   function render(next) {
     entry = next;
     const repos = entry?.data?.repos ?? [];
-    if (!ctx.presented || ctx.signal.aborted || repos.length === 0) {
+    if (!ctx.presented || ctx.signal.aborted) {
       card.remove();
+      return;
+    }
+    if (repos.length === 0) {
+      void suggestFor(key);
+      if (suggestion?.key === key && suggestion.result && !dismissed.has(key)) renderSuggestion(suggestion.result);
+      else card.remove();
       return;
     }
     const groups = serviceGroups(entry.data.services ?? []);

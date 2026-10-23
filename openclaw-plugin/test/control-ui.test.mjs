@@ -91,6 +91,8 @@ const titled = (node, title) => [...node.all()].find((n) => n.tagName === "BUTTO
 // Every collection request is answered from `collections`, by session;
 // wtc svc requests are recorded in `calls` and answered with `svcResult`.
 const collections = new Map();
+// What each session's chat.history answers.
+const histories = new Map();
 const calls = [];
 let svcResult = { ok: true, result: { message: "done" } };
 let portals = [];
@@ -115,6 +117,11 @@ const hostRequest = async (method, params) => {
     return data instanceof Error ? { ok: false, error: data.message } : { ok: true, result: data };
   }
   if (method === "portal.list") return { portals };
+  if (method === "chat.history") return { messages: histories.get(params.sessionKey) ?? [] };
+  if (method === "plugins.sessionAction" && params.actionId === "suggest") {
+    calls.push({ method, ...params });
+    return { ok: true, result: /site/.test(params.payload.text) ? { project: "wtc", repos: ["wtc-site"], source: "match" } : null };
+  }
   calls.push({ method, ...params });
   if (method === "plugins.sessionAction" && params.actionId === "svc") return svcResult;
   if (method === "sessions.github.publish") return { status: "needs_confirmation", requestId: "req-1" };
@@ -123,8 +130,9 @@ const hostRequest = async (method, params) => {
 };
 
 let sessions = 0;
-async function mount(kind, data) {
+async function mount(kind, data, history) {
   const sessionKey = `agent:main:test:${++sessions}`;
+  if (history) histories.set(sessionKey, history);
   collections.set(sessionKey, data);
   const host = container();
   const ctx = { props: { sessionKey, agentId: "main" }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} };
@@ -536,4 +544,29 @@ test("narrow: one header, every fact in its column, the branch below the name", 
   } finally {
     delete globalThis.ResizeObserver;
   }
+});
+
+test("composer: without a collection, the card suggests where the latest message asks to work", async () => {
+  const { latestUserText, startMessage } = await import("../dist/control-ui/v1/index.js");
+  assert.equal(latestUserText([{ role: "user", content: "lets work on the site" }, { role: "assistant", content: "ok" }, { role: "user", content: [{ type: "text", text: "[OpenClaw heartbeat poll]" }] }]), "lets work on the site");
+  assert.equal(latestUserText([]), "");
+  const { host, view } = await mount("composer", collection([]), [{ role: "user", content: [{ type: "text", text: "lets work on the site" }] }]);
+  await settle();
+  const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
+  assert.ok(card(), "a suggestion card");
+  assert.ok(texts(card()).some((t) => /^Work in wtc project /.test(t ?? "")));
+  const ask = calls.find((c) => c.actionId === "suggest");
+  assert.deepEqual(ask.payload, { text: "lets work on the site" });
+  calls.length = 0;
+  await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
+  await settle();
+  assert.deepEqual(calls.find((c) => c.method === "sessions.send"), { method: "sessions.send", key: ask.sessionKey, message: startMessage({ project: "wtc", repos: ["wtc-site"] }) });
+  assert.match(startMessage({ project: "wtc", repos: ["wtc-site"] }), /wtc add-repo wtc-site --project wtc --worktree/);
+  assert.equal(card(), undefined, "gone once started");
+  view.dispose();
+  // Nothing to suggest: no card.
+  const quiet = await mount("composer", collection([]), [{ role: "user", content: "hello" }]);
+  await settle();
+  assert.equal([...quiet.host.all()].find((n) => n.className === "wtc-collection-card"), undefined);
+  quiet.view.dispose();
 });

@@ -309,6 +309,17 @@ harness name):
 agent can match what the person asks to work on before `wtc add-repo` starts
 the collection.
 
+A conversation starts without a collection, wherever OpenClaw's New session
+put it, and often only its first messages say where the work is. So the card
+of a conversation without a collection suggests one: "Work in wtc project
+**wtc** with wtc-site?", from the person's latest message. **Start** asks
+the conversation to run `wtc add-repo` for it. **Change…** opens the panel,
+and ✕ dismisses it. The suggestion comes from the gateway's decision model
+when one is selected (`agents.defaults.decisionModel`, for example the local
+ONNX classifiers), as one choice among the projects' repositories by name and
+role. Without one, it comes from matching the message's words against those
+names and roles.
+
 Each harness must also be cloned on the gateway (an OpenClaw project), like
 the repositories its registry names: **Add repository** in the Collection
 panel, or the gateway's own project settings. `ref` defaults to `main`.

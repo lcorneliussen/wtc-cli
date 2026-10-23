@@ -1,7 +1,7 @@
 // The gateway side of the plugin, where it needs no gateway.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import plugin, { collectionFolder, pullRequestChanges, pullRequestWatch, versionWarning, wtcVersionOf } from "../index.js";
+import plugin, { collectionFolder, decideProjects, matchProjects, pullRequestChanges, pullRequestWatch, versionWarning, wtcVersionOf } from "../index.js";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -287,5 +287,72 @@ test("the collection names its wtc project: its harness, or ad hoc by its folder
     });
     const r = await actions.get("collection").handler({ sessionKey: "agent:main:c", agentId: "main", payload: {} });
     assert.equal(r.result.collection.project, want, JSON.stringify(col));
+  }
+});
+
+const PROJECTS = [
+  { name: "wtc", repos: [
+    { name: "wtc-site", role: "The official wtc site; what it says about wtc comes from wtc-cli." },
+    { name: "wtc-cli", role: "The wtc CLI and OpenClaw plugin, what the site describes." },
+  ] },
+  { name: "shop", repos: [{ name: "storefront", role: "The web shop" }, { name: "billing", role: "Invoices and payments" }] },
+];
+
+test("a first message's words suggest a project and its repositories", () => {
+  assert.deepEqual(matchProjects("lets work on the site", PROJECTS), { project: "wtc", repos: ["wtc-site"], source: "match" });
+  assert.deepEqual(matchProjects("the invoices are wrong", PROJECTS), { project: "shop", repos: ["billing"], source: "match" });
+  assert.deepEqual(matchProjects("fix the cli", PROJECTS).repos, ["wtc-cli"]);
+  assert.equal(matchProjects("hello there", PROJECTS), null);
+  assert.equal(matchProjects("", PROJECTS), null);
+});
+
+test("the decision model chooses when the gateway selected one", async () => {
+  const asked = [];
+  const decisions = {
+    evaluate: async (batch, opts) => {
+      asked.push({ batch, opts });
+      return { status: "ok", answers: { where: { choice: "shop/storefront", probabilities: { none: 0.05, "wtc/wtc-site": 0.02, "wtc/wtc-cli": 0.01, "shop/storefront": 0.6, "shop/billing": 0.32 } } } };
+    },
+  };
+  assert.deepEqual(await decideProjects(decisions, "main", "the checkout page breaks", PROJECTS), { project: "shop", repos: ["storefront", "billing"], source: "decision" });
+  const { batch, opts } = asked[0];
+  assert.equal(batch.questions.where.type, "choice");
+  assert.ok("none" in batch.questions.where.criteria && "wtc/wtc-site" in batch.questions.where.criteria);
+  assert.equal(opts.agentId, "main");
+  // None chosen, unavailable, failing or absent: no suggestion from it.
+  assert.equal(await decideProjects({ evaluate: async () => ({ status: "ok", answers: { where: { choice: "none", probabilities: {} } } }) }, "main", "hi", PROJECTS), null);
+  assert.equal(await decideProjects({ evaluate: async () => ({ status: "unavailable", reason: "no model" }) }, "main", "site", PROJECTS), null);
+  assert.equal(await decideProjects({ evaluate: async () => { throw new Error("down"); } }, "main", "site", PROJECTS), null);
+  assert.equal(await decideProjects(undefined, "main", "site", PROJECTS), null);
+});
+
+test("the suggest action asks wtc projects once a minute, the decision model first", async () => {
+  const actions = new Map();
+  let projectRuns = 0;
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      state: { resolveStateDir: () => "/nonexistent" },
+      agent: { session: { listSessionEntries: () => [], getSessionEntry: async () => undefined } },
+      system: { runCommandWithTimeout: async (argv) => {
+        if (argv[1] === "projects") projectRuns += 1;
+        return { code: 0, stdout: argv[1] === "projects" ? JSON.stringify({ ok: true, data: { projects: PROJECTS } }) : "", stderr: "" };
+      } },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const suggest = (text) => actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text } });
+  assert.deepEqual((await suggest("work on the site")).result, { project: "wtc", repos: ["wtc-site"], source: "match" });
+  assert.equal((await suggest("hello")).result, null);
+  assert.equal((await suggest("")).result, null);
+  assert.equal(projectRuns, 1);
+});
+
+test("without a runtime (CLI metadata, setup) the plugin registers nothing", () => {
+  for (const registrationMode of ["cli-metadata", "setup-only"]) {
+    plugin.register({ registrationMode, get runtime() { throw new Error("runtime is intentionally unavailable"); }, session: { controls: { registerSessionAction() { throw new Error("registered"); } } } });
   }
 });

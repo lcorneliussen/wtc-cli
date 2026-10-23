@@ -215,6 +215,71 @@ export function pullRequestWatch(file, now = Date.now) {
   };
 }
 
+// Words that say nothing about where to work.
+const STOPWORDS = new Set("a an and are as at be but by can do for from get go have help i in into is it its let lets let's look make me my need of on or our please should so some start that the this to up us want we what when where which will with work working would you".split(" "));
+const wordsOf = (text) => String(text ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOPWORDS.has(w));
+
+// Where a first message asks to work, by its words: the wtc project whose
+// repositories' names, then roles, it names, and those repositories. A
+// repository's name counts three times its role; one that scores less than
+// half of the best is left out. null when nothing matches.
+export function matchProjects(text, projects) {
+  const words = new Set(wordsOf(text));
+  if (words.size === 0) return null;
+  let best = null;
+  for (const p of projects ?? []) {
+    const scored = (p.repos ?? []).map((r) => {
+      const name = wordsOf(r.name).filter((w) => words.has(w)).length;
+      const role = wordsOf(r.role).filter((w) => words.has(w)).length;
+      return { name: r.name, role: r.role ?? "", score: 3 * name + role };
+    }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score);
+    // Naming the project itself counts too.
+    const named = wordsOf(p.name).some((w) => words.has(w)) ? 1 : 0;
+    const top = (scored[0]?.score ?? 0) + named;
+    if (top > 0 && (!best || top > best.score)) {
+      best = { project: p.name, repos: scored.filter((r) => r.score * 2 >= scored[0].score).map((r) => r.name), score: top };
+    }
+  }
+  return best && best.repos.length ? { project: best.project, repos: best.repos, source: "match" } : null;
+}
+
+// The same through the gateway's decision model, when one is selected: one
+// choice among every project's repositories, and "none". Repositories within
+// half of the chosen one's probability, in its project, come along. null when
+// there is no decision model, it is unavailable, or it chose none.
+export async function decideProjects(decisions, agentId, text, projects) {
+  if (!decisions?.evaluate) return null;
+  const criteria = { none: "The message is not about working on any of these repositories" };
+  const where = {};
+  for (const p of projects ?? []) {
+    for (const r of p.repos ?? []) {
+      const label = `${p.name}/${r.name}`;
+      criteria[label] = `Work on ${r.name}${r.role ? `: ${r.role}` : ""} (wtc project ${p.name})`;
+      where[label] = { project: p.name, repo: r.name };
+    }
+  }
+  if (Object.keys(where).length === 0) return null;
+  let outcome;
+  try {
+    outcome = await decisions.evaluate(
+      { state: { message: String(text).slice(0, 2000) }, questions: { where: { type: "choice", instructions: "Which repository does this message ask to work on, look into or change?", criteria } } },
+      { agentId, purpose: "wtc.suggest-project", rubricVersion: "1", timeoutMs: 3000 },
+    );
+  } catch {
+    return null;
+  }
+  const answer = (outcome?.answers ?? outcome?.result?.answers)?.where;
+  const chosen = answer?.choice;
+  if ((outcome?.status && outcome.status !== "ok") || !chosen || !where[chosen]) return null;
+  const { project } = where[chosen];
+  const p = answer.probabilities ?? {};
+  const repos = Object.keys(where)
+    .filter((l) => where[l].project === project && (l === chosen || (p[l] ?? 0) * 2 >= (p[chosen] ?? 1)))
+    .sort((a, b) => (a === chosen ? -1 : b === chosen ? 1 : (p[b] ?? 0) - (p[a] ?? 0)))
+    .map((l) => where[l].repo);
+  return { project, repos, source: "decision" };
+}
+
 // A child that owns a repository has a managed worktree to look at.
 const worktreeOf = (entry) => (entry?.worktree ? entry.workspaceDir || entry.spawnedCwd || null : null);
 
@@ -222,6 +287,9 @@ export default {
   id: PLUGIN_ID,
   name: "Worktree Collection",
   register(api) {
+    // Without a runtime (the openclaw CLI's metadata capture, setup of a
+    // disabled plugin) there is nothing to register: no commands, no channel.
+    if (api.registrationMode === "cli-metadata" || api.registrationMode === "setup-only") return;
     const run = async (argv, options = {}) => {
       const r = await api.runtime.system.runCommandWithTimeout(argv, { timeoutMs: 60000, killProcessTree: true, ...options });
       return { code: r.code ?? r.exitCode ?? null, stdout: String(r.stdout ?? ""), stderr: String(r.stderr ?? "") };
@@ -445,6 +513,35 @@ export default {
       tell(agentId, parentKey, watch.observe(agentId, parentKey, result.repos));
       return result;
     };
+
+    // The gateway's wtc projects, asked at most once a minute.
+    let projectsCache = { at: 0, projects: null };
+    const gatewayProjects = async () => {
+      if (Date.now() - projectsCache.at > 60000 || !projectsCache.projects) {
+        const r = await run(["wtc", "projects", "--json"], { timeoutMs: 30000, env: { OPENCLAW_SHELL: "exec" } });
+        let projects = [];
+        try {
+          projects = JSON.parse(r.stdout)?.data?.projects ?? [];
+        } catch {}
+        projectsCache = { at: Date.now(), projects };
+      }
+      return projectsCache.projects;
+    };
+
+    // Where a conversation's first message asks to work: the decision model's
+    // answer when the gateway selected one, else the words' match.
+    api.session.controls.registerSessionAction({
+      id: "suggest",
+      description: "Suggest the wtc project and repositories a conversation's first message asks to work on.",
+      requiredScopes: ["operator.read"],
+      async handler(action) {
+        const text = String(action.payload?.text ?? "").trim();
+        if (!text) return { ok: true, result: null };
+        const projects = await gatewayProjects();
+        const suggestion = (await decideProjects(api.runtime.decisions, action.agentId, text, projects)) ?? matchProjects(text, projects);
+        return { ok: true, result: suggestion };
+      },
+    });
 
     api.session.controls.registerSessionAction({
       id: "collection",
