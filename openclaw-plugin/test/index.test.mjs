@@ -337,6 +337,29 @@ test("the decision model chooses when the gateway selected one", async () => {
   assert.equal(await decideProjects(undefined, "main", "site", PROJECTS), null);
 });
 
+test("a draft not sent yet never reaches the gateway's decision runtime", async () => {
+  const actions = new Map();
+  let asked = 0;
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      decisions: { evaluateV2: async () => { asked += 1; return { status: "ok", result: { answers: { where: { choice: "none", probabilities: {} } } } }; } },
+      state: { resolveStateDir: () => "/nonexistent" },
+      agent: { session: { listSessionEntries: () => [], getSessionEntry: async () => undefined } },
+      system: { runCommandWithTimeout: async (argv) => ({ code: 0, stdout: argv[1] === "projects" ? JSON.stringify({ ok: true, data: { projects: PROJECTS } }) : "", stderr: "" }) },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const r = await actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text: "work on the site", draft: true } });
+  assert.equal(r.result.source, "match");
+  assert.equal(asked, 0);
+  await actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text: "work on the site" } });
+  assert.equal(asked, 1);
+});
+
 test("the suggest action asks wtc projects once a minute, the decision model first", async () => {
   const actions = new Map();
   let projectRuns = 0;

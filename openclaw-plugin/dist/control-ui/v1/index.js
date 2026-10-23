@@ -800,7 +800,11 @@ export function latestUserText(messages) {
     if (m?.role !== "user") continue;
     const text = typeof m.content === "string" ? m.content
       : Array.isArray(m.content) ? m.content.filter((c) => c?.type === "text").map((c) => c.text ?? "").join("\n") : "";
-    if (text.trim() && !/^\[OpenClaw heartbeat poll\]|^wtc: pull request news/.test(text.trim())) return text.trim();
+    if (!text.trim() || /^\[OpenClaw heartbeat poll\]|^wtc: pull request news/.test(text.trim())) continue;
+    // What Start sent (marked "(wtc) ") was acted on: nothing to suggest
+    // until the person writes again.
+    if (/(^|\n)\(wtc\) /.test(text)) return "";
+    return text.trim();
   }
   return "";
 }
@@ -930,9 +934,10 @@ function mountComposer(container, context) {
       css(el("span", {}, note ? css(el("span", { textContent: note }), "color:var(--muted, #888);font-size:12px") : null,
         pill("Start", main ? "Ask the agent to start a conversation for this task in that wtc project" : "Ask the conversation to start this collection", () => {
           const fromDraft = suggestion?.fromDraft === true;
-          // Home never becomes a collection: it can be suggested to again.
-          if (main) suggestion = null;
-          else dismissed.add(key);
+          dismissed.add(key);
+          // Home never becomes a collection: once Start went out, it can be
+          // suggested to again.
+          const done = () => { if (main) { dismissed.delete(key); suggestion = null; } };
           note = "";
           card.remove();
           const draft = String(ctx.props?.draft ?? "").trim();
@@ -946,10 +951,10 @@ function mountComposer(container, context) {
           if (fromDraft && draft && ctx.props?.setDraft && ctx.props?.send) {
             try {
               ctx.props.setDraft(`${draft}\n\n(wtc) ${startMessage(s, main)}`);
-              void Promise.resolve(ctx.props.send()).then((sent) => { if (sent === false) fail(new Error("The message was not sent.")); }, fail);
+              void Promise.resolve(ctx.props.send()).then((sent) => { if (sent === false) fail(new Error("The message was not sent.")); else done(); }, fail);
             } catch (err) { fail(err); }
           } else {
-            void askConversation(ctx.host, key, startMessage(s, main)).catch(fail);
+            void askConversation(ctx.host, key, `(wtc) ${startMessage(s, main)}`).then(done, fail);
           }
         }, true),
         pill("Change…", "Pick another wtc project or repositories in the Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),

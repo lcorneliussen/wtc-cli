@@ -553,6 +553,9 @@ test("composer: without a collection, the card suggests where the latest message
   const { latestUserText, startMessage } = await import("../dist/control-ui/v1/index.js");
   assert.equal(latestUserText([{ role: "user", content: "lets work on the site" }, { role: "assistant", content: "ok" }, { role: "user", content: [{ type: "text", text: "[OpenClaw heartbeat poll]" }] }]), "lets work on the site");
   assert.equal(latestUserText([]), "");
+  // What Start sent was acted on: nothing to suggest until the person writes again.
+  assert.equal(latestUserText([{ role: "user", content: "the site" }, { role: "user", content: "(wtc) Start this conversation's collection in wtc project wtc with wtc-site: …" }]), "");
+  assert.equal(latestUserText([{ role: "user", content: "lets work on the site\n\n(wtc) Start a new conversation …" }, { role: "user", content: "and the footer" }]), "and the footer");
   const { host, view } = await mount("composer", collection([]), [{ role: "user", content: [{ type: "text", text: "lets work on the site" }] }]);
   await settle();
   const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
@@ -563,7 +566,7 @@ test("composer: without a collection, the card suggests where the latest message
   calls.length = 0;
   await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
   await settle();
-  assert.deepEqual(calls.find((c) => c.method === "sessions.send"), { method: "sessions.send", key: ask.sessionKey, message: startMessage({ project: "wtc", repos: ["wtc-site"] }) });
+  assert.deepEqual(calls.find((c) => c.method === "sessions.send"), { method: "sessions.send", key: ask.sessionKey, message: `(wtc) ${startMessage({ project: "wtc", repos: ["wtc-site"] })}` });
   assert.match(startMessage({ project: "wtc", repos: ["wtc-site"] }), /wtc add-repo wtc-site --project wtc --worktree/);
   assert.equal(card(), undefined, "gone once started");
   view.dispose();
@@ -699,6 +702,7 @@ test("composer: in Home, Start asks for a conversation of its own; a refused sen
     await flush();
     assert.equal(sent[0], `lets work on the site\n\n(wtc) ${startMessage({ project: "wtc", repos: ["wtc-site"] }, true)}`);
     assert.equal(draft, "lets work on the site");
+    assert.ok(card(), "the card is back after a refused send");
     // Sent: Home stays open to further suggestions.
     accept = true;
     await type("lets work on the site footer");
