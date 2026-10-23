@@ -295,8 +295,8 @@ type CatchUp struct {
 	// From is the worker branch merged in, instead of Dest.
 	From   string `json:"from,omitempty"`
 	Merged bool   `json:"merged"`
-	// FastForward says the checkout had nothing of its own: it now is the
-	// ref it took in, with no merge commit and nothing to publish.
+	// FastForward says the checkout had nothing the ref lacked: it now is the
+	// ref, and no merge commit was made.
 	FastForward bool   `json:"fastForward,omitempty"`
 	Head        string `json:"head"`
 	Note        string `json:"note,omitempty"`

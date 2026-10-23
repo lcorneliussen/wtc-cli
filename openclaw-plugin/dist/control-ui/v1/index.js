@@ -241,8 +241,8 @@ function repoTitle(r, size = "14px") {
 // A gateway worktree is on its own branch from the start; until something is
 // on it, it is its base, as a detached worktree is in a local collection.
 const untouched = (r) => !!r.branch && !r.ahead && !r.dirty && !r.published && !r.pullRequest;
-// The branch most of a collection's repositories are on: shown once, and per
-// repository only where it differs.
+// The branch most of a collection's repositories with work on them are on:
+// shown once, and per repository only where it differs.
 const collectionBranch = (repos) => {
   const counts = new Map();
   for (const r of repos) if (r.branch && !untouched(r)) counts.set(r.branch, (counts.get(r.branch) ?? 0) + 1);
