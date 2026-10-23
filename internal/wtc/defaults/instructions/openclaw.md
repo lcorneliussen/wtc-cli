@@ -99,7 +99,7 @@ the args, and do not do the work some other way.
 |---|---|---|
 | add a repository | `wtc add-repo <repo> --worktree <name>` | call `sessions_spawn` once per intent |
 | see the collection | `wtc status [<name>]` | — |
-| check before publishing | `wtc publish --title "<what changed>"` in `<folder>/<repo>` | — |
+| check before publishing | `wtc publish --title "<what changed>" --body-file <file>` in `<folder>/<repo>` | — |
 | publish | nothing: tell the person it is ready. They push it with **↑** for the repository in the collection card, as themselves, after confirming | — |
 | take in upstream changes | `wtc catch-up` in `<folder>/<repo>` | publish again to send the merge |
 | run a service | `wtc svc add <name> --port-env <VAR> -- <cmd>` in the folder | `wtc svc` shows it; the panel too |
@@ -120,6 +120,15 @@ publish the wrong thing:
   worktree, so read the plan's `pending` list before you call the tool:
   anything that is not part of the work has to be removed or ignored first.
 
+**Describe the pull request.** `--title` (one line, at most 256 characters)
+and `--body` or `--body-file` (Markdown, at most 8192) are recorded for the
+branch in the worktree's git directory, never committed. The card's ↑ opens
+the pull request with them, so write the description a reviewer needs: what
+changed and why, how it was checked, what is left. Follow the repository's
+pull request template when it has one. The gateway takes the text only when
+it opens the pull request; later pushes keep it. One you leave out keeps
+what was recorded before. Bitbucket's publish takes the title only.
+
 **Pushing is the person's.** The collection card's ↑ has the gateway push
 the repository with their own GitHub or Bitbucket account, after they
 confirm. On GitHub the gateway commits what is pending first, so the
@@ -136,6 +145,17 @@ arrives in the session without a new turn. On another forge the intent has a
 `forge` and no `tool`: commit first, then hand the plan to that forge's
 skill. If the skill says the gateway keeps logins out of your commands, you
 cannot push there: the person pushes from the card. Never force-push.
+
+## Pull request news
+
+The wtc plugin tells the collection's conversation when one of its pull
+requests changes: opened, ready for review, merged or closed, checks failed
+or passed, approved, changes requested, conflicting with its base. It comes
+as a system event starting with `wtc: pull request news`, usually with a
+turn of its own. Update the task's progress with it. For a failure, a review
+or a conflict, read it (`gh pr checks <n>`, `gh pr view <n> --comments`) and
+tell the person what you will do. Fix in `<folder>/<repo>` and commit, and
+they push again. Don't answer review comments on the forge yourself.
 
 ## Catching up
 

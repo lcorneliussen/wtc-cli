@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,15 @@ import (
 )
 
 func currentHost() openclaw.HostKind { return openclaw.DetectHost(os.Getenv) }
+
+// readBodyFile reads a pull request description from path, or from stdin
+// for -.
+func readBodyFile(path string) ([]byte, error) {
+	if path == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	return os.ReadFile(path)
+}
 
 // printPlan writes the plan to stdout as the command's whole output, and what
 // to do with it to stderr, where it reaches the agent without getting in the
@@ -93,11 +103,17 @@ request through a forge skill elsewhere.
 
 It refuses when history that was already published has been rewritten, when a
 merge or rebase is unfinished, when files that look like credentials would be
-committed, and outside a gateway-managed worktree.`,
+committed, and outside a gateway-managed worktree.
+
+--title and --body (or --body-file) are recorded for the branch, in the
+worktree's git directory: the person's push from the collection card opens the
+pull request with them. One left out keeps what was recorded before.`,
 		Args: cobra.NoArgs,
 	}
-	publish.Flags().StringVar(&opt.Title, "title", "", "Pull request title")
-	publish.Flags().StringVar(&opt.Body, "body", "", "Pull request description")
+	var bodyFile string
+	publish.Flags().StringVar(&opt.Title, "title", "", "Pull request title, one line")
+	publish.Flags().StringVar(&opt.Body, "body", "", "Pull request description (Markdown)")
+	publish.Flags().StringVar(&bodyFile, "body-file", "", "Read the pull request description from a file, - for stdin")
 	publish.Flags().StringVar(&dest, "dest", "", "Branch the pull request goes into (default: origin's default branch)")
 	publish.Flags().BoolVar(&opt.AllowSensitive, "allow-sensitive", false, "Publish uncommitted files even when their names look like credentials")
 	publish.RunE = func(cmd *cobra.Command, args []string) error {
@@ -108,6 +124,19 @@ committed, and outside a gateway-managed worktree.`,
 		if err != nil {
 			return err
 		}
+		if bodyFile != "" {
+			if opt.Body != "" {
+				return fmt.Errorf("pass --body or --body-file, not both")
+			}
+			data, err := readBodyFile(bodyFile)
+			if err != nil {
+				return err
+			}
+			opt.Body = string(data)
+		}
+		if err := openclaw.CheckProposal(strings.TrimSpace(opt.Title), strings.TrimSpace(opt.Body)); err != nil {
+			return err
+		}
 		checkout, err := openclaw.OpenCheckout(cwd, dest)
 		if err != nil {
 			return err
@@ -115,6 +144,20 @@ committed, and outside a gateway-managed worktree.`,
 		plan, err := checkout.PlanPublish(opt)
 		if err != nil {
 			return err
+		}
+		if checkout.Private {
+			plan.Warnings = append(plan.Warnings, "A sandbox's copy cannot record the title and description for the collection card: give them to github_publish when the person asks you to publish.")
+		} else if proposal, err := checkout.Propose(opt.Title, opt.Body); err != nil {
+			return fmt.Errorf("cannot record the title and description: %w", err)
+		} else if proposal == nil || proposal.Title == "" || proposal.Body == "" {
+			what := "No title and description are"
+			switch {
+			case proposal != nil && proposal.Title != "":
+				what = "No description is"
+			case proposal != nil && proposal.Body != "":
+				what = "No title is"
+			}
+			plan.Warnings = append(plan.Warnings, what+" recorded for the pull request yet: pass --title and --body-file (what changed and why, how it was checked, what is left; the repository's pull request template if it has one). Without a title the pull request opens as \"Publish "+checkout.Branch()+"\".")
 		}
 		return printPlan(plan)
 	}

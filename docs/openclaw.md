@@ -40,7 +40,7 @@ digits and hyphens, at most 64 characters.
 |---|---|---|
 | add a repository | `wtc add-repo <repo> --worktree <name>` | calls `sessions_spawn` with each intent's `args` |
 | see the collection | `wtc status [<name>]` | reads it: folder, repositories, pull requests, services |
-| check a publication | `wtc publish --title "…"` in `<folder>/<repo>` | tells the person it is ready: they push it with ↑ in the card. Only when they ask the agent to publish does the owner call `github_publish` |
+| check a publication | `wtc publish --title "…" --body-file <file>` in `<folder>/<repo>` | tells the person it is ready: they push it with ↑ in the card, which opens the pull request with that title and description. Only when they ask the agent to publish does the owner call `github_publish` |
 | catch up | `wtc catch-up` in `<folder>/<repo>` | publishes again to send the merge |
 
 `<repo>` names a project on the gateway, or a GitHub repository as
@@ -79,6 +79,36 @@ given to `wtc add-repo`.
 After `github_publish` the gateway commits what is pending as its GitHub
 identity, pushes the session's branch and opens or updates a **draft** pull
 request, once the turn that asked has ended. People merge.
+
+## The pull request's title and description
+
+`wtc publish` records `--title` and `--body` (or `--body-file`, `-` for
+stdin) for the branch, in the worktree's git directory, so nothing is
+committed. `wtc status --json` reports them per repository as `proposal`, and
+the card's ↑ hands them to `sessions.github.publish` and shows the title
+before the push. The gateway's limits apply: one line of at most 256
+characters, a description of at most 8192. The gateway uses them only when it
+opens the pull request. Without a proposal, it opens as "Publish
+openclaw/<name>". Bitbucket's publish takes the title only.
+
+## Pull request news in the conversation
+
+The card's ↑ runs outside the agent's turn, and a merge or a review happens
+on the forge. The plugin compares each look at a collection's pull requests
+with the one before and tells the collection's conversation what changed. It
+queues one system event (`wtc: pull request news for this collection`, a line
+per change) and asks for a turn, so the agent updates its progress without
+waiting for the person. It reports a pull request that was opened, became
+ready or went back to draft, was merged, closed or reopened, failed or passed
+its checks, was approved, got a request for changes, or conflicts with its
+base.
+
+It looks whenever a card loads, and every `pullRequestPollMinutes` (default 5)
+at collections with an open pull request. What it saw is kept in
+`$OPENCLAW_STATE_DIR/plugins/wtc/pull-requests.json`, so a restart doesn't
+repeat news. `pullRequestEvents` is `wake` (the default), `queue` (told on
+the conversation's next turn) or `off`. Pull requests come from `gh`, so this
+covers GitHub.
 
 ## What `wtc publish` refuses
 
