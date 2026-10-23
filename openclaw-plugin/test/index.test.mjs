@@ -429,6 +429,10 @@ test("the suggest action calls OpenAI itself with WTC_DECISIONS_OPENAI_API_KEY, 
     // Its "none" stands over the words.
     assert.equal((await suggest()).result, null);
     assert.deepEqual(models, ["gpt-6-test"]);
+    // A draft not sent yet never leaves the gateway: the words only.
+    const fromDraft = await actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text: "work on the site", draft: true } });
+    assert.equal(fromDraft.result.source, "match");
+    assert.deepEqual(models, ["gpt-6-test"]);
   } finally {
     globalThis.fetch = realFetch;
     if (was === undefined) delete process.env.WTC_DECISIONS_OPENAI_API_KEY; else process.env.WTC_DECISIONS_OPENAI_API_KEY = was;

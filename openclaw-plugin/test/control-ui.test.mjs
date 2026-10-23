@@ -133,8 +133,8 @@ const hostRequest = async (method, params) => {
 };
 
 let sessions = 0;
-async function mount(kind, data, history) {
-  const sessionKey = `agent:main:test:${++sessions}`;
+async function mount(kind, data, history, key) {
+  const sessionKey = key ?? `agent:main:test:${++sessions}`;
   if (history) histories.set(sessionKey, history);
   collections.set(sessionKey, data);
   const host = container();
@@ -662,7 +662,7 @@ test("composer: the draft is suggested about once typing pauses, and Start sends
     mock.timers.tick(800);
     await flush();
     await flush();
-    assert.deepEqual(calls.find((c) => c.actionId === "suggest")?.payload, { text: "lets work on the site" });
+    assert.deepEqual(calls.find((c) => c.actionId === "suggest")?.payload, { text: "lets work on the site", draft: true });
     const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
     assert.ok(card(), "suggested from the draft");
     await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
@@ -674,4 +674,52 @@ test("composer: the draft is suggested about once typing pauses, and Start sends
   } finally {
     mock.timers.reset();
   }
+});
+
+test("composer: in Home, Start asks for a conversation of its own; a refused send gives the draft back", async () => {
+  const { startMessage } = await import("../dist/control-ui/v1/index.js");
+  const { mock } = await import("node:test");
+  const flush = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+  const { host, view } = await mount("composer", collection([]), [], "agent:main:main");
+  await settle();
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    let draft = "";
+    let accept = false;
+    const sent = [];
+    const props = () => ({ sessionKey: "agent:main:main", agentId: "main", draft, setDraft: (d) => { draft = d; }, send: async () => { sent.push(draft); return accept; } });
+    const type = async (text) => { draft = text; view.update({ props: props(), host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} }); await flush(); };
+    await type("lets work on the site");
+    mock.timers.tick(800);
+    await flush();
+    const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
+    assert.ok(texts(card()).some((t) => /^Start a conversation in wtc project /.test(t ?? "")));
+    // Refused: the draft as written comes back, and the card with it.
+    await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
+    await flush();
+    assert.equal(sent[0], `lets work on the site\n\n(wtc) ${startMessage({ project: "wtc", repos: ["wtc-site"] }, true)}`);
+    assert.equal(draft, "lets work on the site");
+    // Sent: Home stays open to further suggestions.
+    accept = true;
+    await type("lets work on the site footer");
+    mock.timers.tick(800);
+    await flush();
+    await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
+    await flush();
+    await type("and the site header too");
+    mock.timers.tick(800);
+    await flush();
+    assert.ok(card(), "Home is suggested to again");
+    view.dispose();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("the plugin registers the panel, the composer and a session-menu action, and no header bar", async () => {
+  const { default: ui } = await import("../dist/control-ui/v1/index.js");
+  const actions = [];
+  const noop = () => () => {};
+  ui.activate({ ui: { registerPanel: noop, registerReplacement: noop, registerAction: (a) => { actions.push(a); return () => {}; }, selectReplacement() {} } });
+  assert.deepEqual(actions.map((a) => [a.id, a.placement]), [["open-collection-session", "session"]]);
 });

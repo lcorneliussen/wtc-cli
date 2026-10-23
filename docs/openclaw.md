@@ -312,17 +312,23 @@ the collection.
 A conversation starts without a collection, wherever OpenClaw's New session
 put it, and often only its first messages say where the work is. So the card
 of a conversation without a collection suggests one: "Work in wtc project
-**wtc** with wtc-site?", from the person's latest message. **Start** asks
-the conversation to run `wtc add-repo` for it. **Change…** opens the panel,
-and ✕ dismisses it. The suggestion comes from the gateway's decision model
-when one is selected (`agents.defaults.decisionModel`), as one choice among
-the projects' repositories by name and role. No OpenClaw release has decision
+**wtc** with wtc-site?". It suggests from what the person types, once they
+pause, and from their latest message. **Start** asks the conversation to run
+`wtc add-repo` for it, sending a draft along with that request. In the
+agent's main session (Home) it asks for a new conversation for the task
+instead. **Change…** opens the panel, and ✕ dismisses it.
+
+A draft that has not been sent is matched by its words only, on the
+gateway. Only a sent message goes to a decision model: the gateway's, when
+one is selected (`agents.defaults.decisionModel`), as one choice among the
+projects' repositories by name and role. No OpenClaw release has decision
 models yet, so meanwhile the plugin asks OpenAI's Decisions API itself when
 the gateway's environment has `WTC_DECISIONS_OPENAI_API_KEY` (the plugin's
 `decisionModel` setting picks the model, `gpt-6-luna` by default). Give the
 key that name only: OpenClaw's own OpenAI provider reads `OPENAI_API_KEY`,
-and the chat model could then use it. Without either, the suggestion comes
-from matching the message's words against the names and roles
+and the chat model could then use it. With the key, the person's sent
+message goes to OpenAI. Without either, the suggestion comes from matching
+the message's words against the names and roles
 ([#159](https://github.com/lcorneliussen/wtc-cli/issues/159) tracks moving
 to OpenClaw's decision models).
 

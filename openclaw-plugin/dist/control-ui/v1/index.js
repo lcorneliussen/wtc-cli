@@ -884,7 +884,9 @@ function mountComposer(container, context) {
   async function ask(sessionKey, text, fromDraft) {
     if (!text || dismissed.has(sessionKey) || (suggestion?.key === sessionKey && suggestion.text === text)) return;
     try {
-      const res = await ctx.host.request("plugins.sessionAction", { pluginId: PLUGIN_ID, actionId: "suggest", sessionKey, ...(agentOf(ctx) ? { agentId: agentOf(ctx) } : {}), payload: { text } });
+      // A draft is matched by its words on the gateway; only a sent message
+      // may go to a decision model.
+      const res = await ctx.host.request("plugins.sessionAction", { pluginId: PLUGIN_ID, actionId: "suggest", sessionKey, ...(agentOf(ctx) ? { agentId: agentOf(ctx) } : {}), payload: { text, ...(fromDraft ? { draft: true } : {}) } });
       if (sessionKey !== key) return;
       suggestion = { key: sessionKey, text, fromDraft, result: res?.ok === false ? null : res?.result ?? null };
       if (entry) render(entry);
@@ -927,13 +929,21 @@ function mountComposer(container, context) {
       what,
       css(el("span", {}, note ? css(el("span", { textContent: note }), "color:var(--muted, #888);font-size:12px") : null,
         pill("Start", main ? "Ask the agent to start a conversation for this task in that wtc project" : "Ask the conversation to start this collection", () => {
-          dismissed.add(key);
+          const fromDraft = suggestion?.fromDraft === true;
+          // Home never becomes a collection: it can be suggested to again.
+          if (main) suggestion = null;
+          else dismissed.add(key);
           note = "";
           card.remove();
-          const fail = (err) => { dismissed.delete(key); say(String(err?.message ?? err)); };
           const draft = String(ctx.props?.draft ?? "").trim();
+          const fail = (err) => {
+            dismissed.delete(key);
+            // The draft as the person wrote it, without what Start added.
+            if (draft) { try { ctx.props?.setDraft?.(draft); } catch {} }
+            say(String(err?.message ?? err));
+          };
           // A draft goes along with what Start asks, through the composer's own send.
-          if (suggestion.fromDraft && draft && ctx.props?.setDraft && ctx.props?.send) {
+          if (fromDraft && draft && ctx.props?.setDraft && ctx.props?.send) {
             try {
               ctx.props.setDraft(`${draft}\n\n(wtc) ${startMessage(s, main)}`);
               void Promise.resolve(ctx.props.send()).then((sent) => { if (sent === false) fail(new Error("The message was not sent.")); }, fail);

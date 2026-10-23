@@ -337,7 +337,7 @@ export default {
   name: "Worktree Collection",
   register(api) {
     // Without a runtime (the openclaw CLI's metadata capture, setup of a
-    // disabled plugin) there is nothing to register: no commands, no channel.
+    // disabled plugin) the session actions and services cannot work.
     if (api.registrationMode === "cli-metadata" || api.registrationMode === "setup-only") return;
     const run = async (argv, options = {}) => {
       const r = await api.runtime.system.runCommandWithTimeout(argv, { timeoutMs: 60000, killProcessTree: true, ...options });
@@ -591,9 +591,11 @@ export default {
         // The gateway's decision model, else OpenAI's called directly with a
         // key meant for nothing else; its "none" stands, and the words
         // decide only without either.
-        let decided = await decideProjects(api.runtime.decisions, action.agentId, text, projects);
+        // A draft not sent yet stays on the gateway: the words only.
+        const draft = action.payload?.draft === true;
+        let decided = draft ? null : await decideProjects(api.runtime.decisions, action.agentId, text, projects);
         const key = process.env.WTC_DECISIONS_OPENAI_API_KEY;
-        if (!decided && key) decided = await decideProjects(openaiDecisions({ apiKey: key, model: api.pluginConfig?.decisionModel || undefined }), action.agentId, text, projects);
+        if (!decided && key && !draft) decided = await decideProjects(openaiDecisions({ apiKey: key, model: api.pluginConfig?.decisionModel || undefined }), action.agentId, text, projects);
         return { ok: true, result: decided?.none ? null : decided ?? matchProjects(text, projects) };
       },
     });
