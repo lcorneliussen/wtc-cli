@@ -418,6 +418,14 @@ func (c *Context) Tunnel(opt TunnelOptions) (RuntimeResult, error) {
 	if opt.Provider == "" && len(tunnels) != 1 {
 		return RuntimeResult{}, fmt.Errorf("name the provider: tailscale, cloudflare, ngrok or devtunnel")
 	}
+	provider := opt.Provider
+	if provider == "" {
+		provider = tunnels[0].Provider
+	}
+	// A client that is not signed in starts a host that cannot serve.
+	if missing := runtimeLoginCheck(provider); missing != "" {
+		return RuntimeResult{}, fmt.Errorf("%s; then open the tunnel again", missing)
+	}
 	if len(tunnels) == 0 {
 		if service.PortEnv == "" {
 			return RuntimeResult{}, fmt.Errorf("%s has no port variable; enlist it with --port-env or set x-wtc port_env", service.Path)

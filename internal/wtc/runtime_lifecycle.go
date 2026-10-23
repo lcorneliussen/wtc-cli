@@ -458,7 +458,7 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 			deadline := time.Now().Add(wait)
 			reachable := map[string]bool{}
 			for {
-				items := c.RuntimeStatus()
+				items := c.runtimeStatusOnly()
 				ready, pending := true, ""
 				observed := map[string]bool{}
 				for _, item := range items {

@@ -43,6 +43,14 @@ type RuntimeItem struct {
 	Signal   *int   `json:"signal,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Error    string `json:"error,omitempty"`
+	// Answering is what a live look at a ready task's address found: "yes",
+	// or "no" with AnswerDetail saying what came back. Readiness is only a
+	// startup probe; this is now.
+	Answering    string `json:"answering,omitempty"`
+	AnswerDetail string `json:"answer_detail,omitempty"`
+	// Login says why the tunnel provider's client cannot serve (logged out,
+	// stopped, awaiting approval, an expired key), and how to fix it.
+	Login string `json:"login,omitempty"`
 }
 
 type runtimeTask struct {
@@ -250,6 +258,17 @@ func runtimeTaskPath(path string) bool {
 // RuntimeStatus only queries an existing runner. It never renders configuration,
 // sources shell env, starts a runner, or executes repository hooks.
 func (c *Context) RuntimeStatus() []RuntimeItem {
+	items := c.runtimeStatusOnly()
+	// What people are shown is also looked at now: whether each ready
+	// address answers, and whether each tunnel's provider can serve.
+	runtimeTunnelLogins(items, runtimeLoginCheck)
+	runtimeAnswering(items, runtimeAnswerCheck)
+	return items
+}
+
+// runtimeStatusOnly is the runner's view, without looking at addresses: what
+// up's own wait loop polls, with its own reachability check and deadline.
+func (c *Context) runtimeStatusOnly() []RuntimeItem {
 	m, err := c.runtimeManifest()
 	if err != nil {
 		return []RuntimeItem{{Collection: filepath.Base(c.Collection), Path: "runtime", State: "unknown", Error: err.Error()}}
