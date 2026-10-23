@@ -48,3 +48,8 @@ Read that before the first `wtc` command of a task and follow it. In short:
   `wtc catch-up --from <name>` in `<folder>/<repo>` to merge one in.
 - `wtc catch-up` in `<folder>/<repo>` merges the base in; it never rebases
   and never pushes.
+- In a sandbox with `WTC_GATEWAY_GIT` set, `wtc catch-up` in the checkout
+  merges the base in there, with full history, and hands the branch, your
+  commits included, to the gateway. On a conflict, resolve it with git,
+  `git add` each file, then `wtc catch-up --continue`. There it takes no
+  other flags: `--from` runs in a session outside the sandbox.

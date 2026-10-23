@@ -159,9 +159,59 @@ GitHub token. There:
   there: `tools.sandbox.tools.alsoAllow: ["github_publish"]`. The tool runs on
   the gateway, so this gives the sandbox no credential.
   `tools.github.allowInSandbox` is not needed and would put the token inside.
-- `wtc catch-up` cannot fetch. Catch up from the repository's session outside
-  the sandbox.
+- Without the gateway's git service (below), `wtc catch-up` cannot fetch.
+  Catch up from the repository's session outside the sandbox.
 - A repository on another forge cannot be published from a sandbox.
+
+### The gateway's git service
+
+The private copy is one commit deep, and the commits made in it stay there:
+only its files reach the managed worktree. The plugin can serve the gateway's
+clones to the sandboxes, read-only, so that an agent there reads history and
+catches up with Git's own merge state, and its commits reach the gateway:
+
+```sh
+openclaw config set plugins.entries.wtc.config.sandboxGit '{"port":18790}' --strict-json
+openclaw config set agents.defaults.sandbox.docker.network wtc-sandboxes
+openclaw config set agents.defaults.sandbox.docker.env \
+  '{"WTC_GATEWAY_GIT":"http://<gateway>:18790"}' --strict-json
+```
+
+The gateway and its sandboxes share the Docker network (`wtc-sandboxes`
+here; the gateway's container joins it too), and `<gateway>` is the gateway's
+address or container name on it. A bridge network also routes out to the
+internet: restricting that is the network's job, not wtc's. Sandboxes
+already running keep their settings until `openclaw sandbox recreate`.
+
+The service answers only sandbox containers of this gateway. It takes a
+connection's address, finds the sandbox container that has it, the managed
+worktree that container works on and the session that owns it, and serves
+that session's collection: each repository's collection branches and what
+origin has on the gateway. Other collections' branches stay hidden and
+cannot be fetched, a push is refused, and no forge credential enters the
+sandbox. Then, in the sandbox:
+
+- The checkout gets a `gateway` remote: the collection's branches as
+  `gateway/openclaw/…`, origin's as `origin/…`, with all their history.
+  The first fetch deepens the copy. Other repositories of the collection
+  clone from `$WTC_GATEWAY_GIT/<repo>`.
+- `wtc catch-up` merges `origin/<base>` there, as the gateway last fetched it
+  (at most five minutes old). A conflict stops the merge for the agent to
+  resolve as in any checkout, with `git log --merge` and the stages; then
+  `wtc catch-up --continue`. Uncommitted edits are set aside around the merge
+  and put back after.
+- Then the gateway takes the session's branch, the sandbox's commits and the
+  merge included, if it extends the gateway's branch, merges only origin's
+  commits and leaves no conflict markers. The commits keep the sandbox's
+  author; one that carries a `Co-authored-by` trailer or the publication
+  marker is refused, since [credit](#credit-for-the-people-who-asked) is the
+  gateway's to add. Its branch and index move to it;
+  the files arrive from the sandbox, as every edit does. Publishing stays the
+  person's: ↑ in the card.
+- If the gateway committed since (a publication), the sandbox's history
+  starts over from the gateway's branch, with the files unchanged.
+- `wtc doctor` reports `fetch: read-only from the gateway` and fails when a
+  credential that could push is in the sandbox.
 
 For a gateway that people with different rights share, sandbox the agents
 that do development work. Each repository then gets its own conversation

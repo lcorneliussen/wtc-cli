@@ -9,12 +9,13 @@ import (
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 func addCatchUpCommand(root *cobra.Command, asJSON *bool) {
 	var opt wtc.CatchUpOptions
 	var repos, dest, from string
-	var harnessOnly bool
+	var harnessOnly, cont bool
 	cmd := &cobra.Command{Use: "catch-up [collection ...]", Short: "Catch up selected worktree collections"}
 	cmd.Flags().BoolVar(&opt.All, "all", false, "Select every collection in the workspace (clean only)")
 	cmd.Flags().StringVar(&repos, "repos", "", "Comma-separated sibling or registry names")
@@ -29,7 +30,24 @@ func addCatchUpCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&opt.NoSecrets, "no-secrets", false, "Skip secret links")
 	cmd.Flags().StringVar(&dest, "dest", "", "Under OpenClaw: branch to merge in (default: origin's default branch)")
 	cmd.Flags().StringVar(&from, "from", "", "Under OpenClaw: merge a worker's branch (openclaw/<task>--<worker>) instead, with no fetch")
+	cmd.Flags().BoolVar(&cont, "continue", false, "In an OpenClaw sandbox: finish a catch-up that stopped on conflicts, once they are resolved")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if gw := openclaw.GatewayFromEnv(os.Getenv); gw != nil {
+			// In a sandbox, catch-up merges the session's base, and only that.
+			var other []string
+			cmd.Flags().Visit(func(f *pflag.Flag) {
+				if f.Name != "continue" && f.Name != "json" {
+					other = append(other, "--"+f.Name)
+				}
+			})
+			if len(other) > 0 || len(args) > 0 {
+				return fmt.Errorf("in an OpenClaw sandbox, catch-up merges the session's base and takes only --continue (got %s): merge a worker's branch, or another base, from the repository's session outside the sandbox", strings.Join(append(other, args...), " "))
+			}
+			return sandboxCatchUp(gw, cont, *asJSON)
+		}
+		if cont {
+			return fmt.Errorf("--continue is for a catch-up in an OpenClaw sandbox (%s set)", openclaw.GatewayGitEnv)
+		}
 		if currentHost() == openclaw.HostOpenClaw {
 			return catchUpCheckout(dest, from, *asJSON)
 		}
