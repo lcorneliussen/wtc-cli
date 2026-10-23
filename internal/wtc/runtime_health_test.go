@@ -136,3 +136,24 @@ func TestRuntimeTextSaysWhatIsWrongNow(t *testing.T) {
 		}
 	}
 }
+
+// Status as people see it carries the live look; up's wait loop polls
+// without it, so its deadline holds.
+func TestRuntimeStatusWiring(t *testing.T) {
+	c := runtimeFixture(t)
+	runtimeLoginCheck = func(string) string { return "Tailscale needs a login: tailscale up" }
+	called := 0
+	runtimeAnswerCheck = func(string) (bool, string) { called++; return false, "HTTP 502" }
+	items := []RuntimeItem{{Path: "a", Kind: "endpoint", Provider: "tailscale", State: "ready", URL: "https://a.example"}}
+	runtimeTunnelLogins(items, runtimeLoginCheck)
+	runtimeAnswering(items, runtimeAnswerCheck)
+	if items[0].Login == "" || items[0].Answering != "no" || items[0].AnswerDetail != "HTTP 502" || called != 1 {
+		t.Fatalf("%+v", items[0])
+	}
+	// Without a runner both views are the same, and the quiet one asks nothing.
+	called = 0
+	_ = c.runtimeStatusOnly()
+	if called != 0 {
+		t.Fatal("up's wait loop looked at addresses")
+	}
+}
