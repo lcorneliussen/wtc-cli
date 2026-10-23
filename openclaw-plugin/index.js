@@ -222,7 +222,7 @@ const wordsOf = (text) => String(text ?? "").toLowerCase().split(/[^a-z0-9]+/).f
 // Where a message asks to work, by its words: the wtc project whose
 // repositories' names, then roles, it names, and those repositories. A
 // repository's name counts three times its role; one that scores less than
-// half of the best is left out. null when nothing matches.
+// half of its project's best is left out. null when nothing matches.
 export function matchProjects(text, projects) {
   const words = new Set(wordsOf(text));
   if (words.size === 0) return null;
