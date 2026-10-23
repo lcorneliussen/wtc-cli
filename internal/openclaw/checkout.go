@@ -295,8 +295,11 @@ type CatchUp struct {
 	// From is the worker branch merged in, instead of Dest.
 	From   string `json:"from,omitempty"`
 	Merged bool   `json:"merged"`
-	Head   string `json:"head"`
-	Note   string `json:"note,omitempty"`
+	// FastForward says the checkout had nothing the ref lacked: it now is the
+	// ref, and no merge commit was made.
+	FastForward bool   `json:"fastForward,omitempty"`
+	Head        string `json:"head"`
+	Note        string `json:"note,omitempty"`
 }
 
 // CatchUp fetches the destination branch and merges it. It never rebases and
@@ -387,7 +390,9 @@ func (c *Checkout) merge(result CatchUp, ref, label string) (CatchUp, error) {
 		result.Note = "already contains " + label
 		return result, nil
 	}
+	result.FastForward = gitOK(c.Dir, "merge-base", "--is-ancestor", "HEAD", ref)
 	if _, mergeErr := git(c.Dir, "merge", "--no-edit", "--quiet", ref); mergeErr != nil {
+		result.FastForward = false
 		conflicts, _ := git(c.Dir, "diff", "--name-only", "--diff-filter=U", "--ignore-submodules=dirty")
 		if c.inProgress() != "" {
 			_, _ = git(c.Dir, "merge", "--abort")

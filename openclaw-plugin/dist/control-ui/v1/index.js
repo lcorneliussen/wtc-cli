@@ -241,11 +241,14 @@ function repoTitle(r, size = "14px") {
   label.style.cssText = `text-decoration:none;color:inherit;font-size:${size};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0`;
   return css(el("span", {}, forgeIcon(r.forge), label), "display:inline-flex;align-items:center;gap:6px;min-width:0");
 }
-// The branch most of a collection's repositories are on: shown once, and per
-// repository only where it differs.
+// A gateway worktree is on its own branch from the start; until something is
+// on it, it is its base, as a detached worktree is in a local collection.
+const untouched = (r) => !!r.branch && !r.ahead && !r.dirty && !r.published && !r.pullRequest;
+// The branch most of a collection's repositories with work on them are on:
+// shown once, and per repository only where it differs.
 const collectionBranch = (repos) => {
   const counts = new Map();
-  for (const r of repos) if (r.branch) counts.set(r.branch, (counts.get(r.branch) ?? 0) + 1);
+  for (const r of repos) if (r.branch && !untouched(r)) counts.set(r.branch, (counts.get(r.branch) ?? 0) + 1);
   return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 };
 const serviceName = (s) => s.label || String(s.group ?? s.path ?? "?").split("/").pop();
@@ -686,7 +689,9 @@ function collectionTables(v) {
     return [
       repoName(r),
       r.error ? toned(r.error, TONE.failure, r.error)
-        : css(el("code", { textContent: r.branch ?? `at ${baseOf(r)}`, title: r.branch ? `${r.branch}, ${r.ahead ?? 0} ahead of ${baseOf(r)}` : "No branch yet: the first push creates one" }), "font-size:12px;color:var(--muted, #888)"),
+        : untouched(r)
+          ? css(el("code", { textContent: baseOf(r), title: `At ${baseOf(r)}: nothing on ${r.branch} yet, which the first commit there starts` }), "font-size:12px;color:var(--muted, #888)")
+          : css(el("code", { textContent: r.branch ?? `at ${baseOf(r)}`, title: r.branch ? `${r.branch}, ${r.ahead ?? 0} ahead of ${baseOf(r)}` : "No branch yet: the first push creates one" }), "font-size:12px;color:var(--muted, #888)"),
       r.dirty ? toned(String(r.dirty), TONE.pending, `${plural(r.dirty, "file")} changed, not committed yet`) : null,
       busy.has(r.sessionKey) ? working() : pushCell(r, n),
       catching.has(r.sessionKey) ? working() : toCatchUp(r) ? catchUpCell(r) : null,

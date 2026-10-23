@@ -233,9 +233,10 @@ test("panel: a busy collection", async () => {
 
 test("panel: repositories on different branches", async () => {
   const { host, view } = await mount("panel", collection([
-    repo("api"), repo("web"), repo("docs", { branch: "release" }),
+    repo("api", { ahead: 1 }), repo("web", { ahead: 1 }), repo("docs", { branch: "release", ahead: 1 }), repo("site"),
   ]));
-  assert.deepEqual(tables(host)[0].slice(1).map((r) => r[1]), ["openclaw/test", "openclaw/test", "release"]);
+  // One with nothing on its branch yet shows its base.
+  assert.deepEqual(tables(host)[0].slice(1).map((r) => r[1]), ["openclaw/test", "openclaw/test", "release", "main"]);
   view.dispose();
 });
 
@@ -745,4 +746,19 @@ test("panel: a ready service that doesn't answer, and a tunnel whose provider ne
   assert.ok(!nodes.some((n) => /not answering|⚠/.test(n.textContent ?? "") || /^ready: /.test(n.title ?? "")), "nothing marked as failing");
   assert.ok(nodes.some((n) => n.tagName === "BUTTON" && /Open the tailscale tunnel again .*First: Tailscale needs a login: tailscale up/.test(n.title)));
   quiet.view.dispose();
+test("composer: a repository with nothing on its branch shows its base", async () => {
+  const { host, view } = await mount("composer", collection([
+    repo("wtc-site"),
+    repo("wtc-cli", { ahead: 1, unpublished: 1 }),
+  ]));
+  await settle();
+  const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
+  card.open = true;
+  for (const fn of card.listeners.toggle) fn();
+  const codes = [...card.all()].filter((n) => n.tagName === "CODE");
+  const site = codes.find((n) => n.textContent === "main");
+  assert.ok(site, "the untouched one shows its base");
+  assert.match(site.title, /nothing on openclaw\/test yet/);
+  assert.ok(codes.some((n) => n.textContent === "openclaw/test"), "the one with a commit shows its branch");
+  view.dispose();
 });
