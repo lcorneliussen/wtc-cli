@@ -228,7 +228,12 @@ autostart tasks; explicitly name a group to wait for all its tasks. `restart`
 requires a running runner. A readiness failure remains visible in status and
 logs, and the failed command's output includes the last lines of each failed
 or unready task's log, so a build error is in the failure itself. **Ready
-means a startup probe passed**, not continuous health checking.
+means a startup probe passed**, not continuous health checking. So `wtc svc`
+and `wtc status` also look at each ready task's address as they report: one
+that gives no answer, or a 5xx such as a tunnel's 502 while the service
+behind it restarts, shows `not answering now`. A tunnel whose provider's
+client is not signed in (Tailscale, devtunnel) shows how to sign it in, and
+`wtc svc tunnel` refuses to open one until it is.
 No `wtc start` runtime command is introduced; the session orientation skill
 keeps its existing meaning.
 

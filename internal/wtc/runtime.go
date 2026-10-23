@@ -43,6 +43,14 @@ type RuntimeItem struct {
 	Signal   *int   `json:"signal,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Error    string `json:"error,omitempty"`
+	// Answering is what a live look at a ready task's address found: "yes",
+	// or "no" with AnswerDetail saying what came back. Readiness is only a
+	// startup probe; this is now.
+	Answering    string `json:"answering,omitempty"`
+	AnswerDetail string `json:"answer_detail,omitempty"`
+	// Login says that the tunnel provider's client is not signed in, and how
+	// to sign it in.
+	Login string `json:"login,omitempty"`
 }
 
 type runtimeTask struct {
@@ -341,6 +349,8 @@ func (c *Context) runtimeStatus(m *runtimeManifest) []RuntimeItem {
 		for i := range m.Tasks {
 			runtimeTunnelExposure(&items[i], tailscale)
 		}
+		runtimeTunnelLogins(items[:len(m.Tasks)], runtimeLoginCheck)
+		runtimeAnswering(items[:len(m.Tasks)], runtimeProbe)
 	}()
 	data, err := runtimeCommand(m, false, "ls")
 	var response struct {

@@ -727,3 +727,13 @@ test("the plugin registers the panel, the composer and a session-menu action, an
   ui.activate({ ui: { registerPanel: noop, registerReplacement: noop, registerAction: (a) => { actions.push(a); return () => {}; }, selectReplacement() {} } });
   assert.deepEqual(actions.map((a) => [a.id, a.placement]), [["open-collection-session", "session"]]);
 });
+
+test("panel: a ready service that doesn't answer, and a tunnel whose provider needs a login", async () => {
+  const web = { group: "api/web", path: "api/web/main", repo: "api", kind: "service", label: "preview", state: "ready", url: "http://127.0.0.1:42201", answering: "no", answer_detail: "HTTP 502" };
+  const tunnel = { group: "api/web", path: "api/web/tailscale", repo: "api", kind: "endpoint", provider: "tailscale", state: "ready", url: "https://host.example.ts.net:42201", login: "Tailscale needs a login: tailscale up" };
+  const { host, view } = await mount("panel", { ...collection([repo("api")], [web, tunnel]), tunnelProviders: ["tailscale"] });
+  const all = [...host.all()];
+  assert.ok(all.some((n) => /not answering now \(HTTP 502\)/.test(n.title ?? "") || /not answering now \(HTTP 502\)/.test(n.textContent ?? "")), "the service says it isn't answering");
+  assert.ok(all.some((n) => n.textContent === "⚠" && /Tailscale needs a login: tailscale up/.test(n.title)), "the tunnel says it needs a login");
+  view.dispose();
+});
