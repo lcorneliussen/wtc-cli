@@ -170,10 +170,10 @@ func TestAddRepoResolvesThroughTheHarness(t *testing.T) {
 	if got, want := summary(intents), "web@web:origin/develop"; got != want {
 		t.Errorf("from the harness worktree: %s, want %s", got, want)
 	}
-	if h := gatewayHarness(folder, []string{wt}); h == nil || h.Name != "platform" || h.Path != wt || h.String() != "harness platform at "+wt+": read its AGENTS.md" {
+	if h := gatewayHarness(folder, []string{wt}); h == nil || h.Name != "platform" || h.Path != wt || h.String() != "wtc project platform, harness at "+wt+": read its AGENTS.md" {
 		t.Errorf("status shows the harness: %+v", h)
 	}
-	if h := gatewayHarness(folder, nil); h == nil || h.String() != "harness platform, no worktree yet" {
+	if h := gatewayHarness(folder, nil); h == nil || h.String() != "wtc project platform, no worktree of its harness yet" {
 		t.Errorf("status before the harness worktree: %+v", h)
 	}
 	// --base still wins over the registry's default branch.
@@ -181,7 +181,7 @@ func TestAddRepoResolvesThroughTheHarness(t *testing.T) {
 		t.Errorf("--base: %s %v", summary(intents), err)
 	}
 	// A collection has one harness.
-	if _, err := addRepoPlan(t, "api", "--worktree", "12-paging", "--harness", "ops"); err == nil || !strings.Contains(err.Error(), "uses harness platform") {
+	if _, err := addRepoPlan(t, "api", "--worktree", "12-paging", "--harness", "ops"); err == nil || !strings.Contains(err.Error(), "is in wtc project platform") {
 		t.Errorf("another harness: %v", err)
 	}
 }
@@ -206,7 +206,7 @@ func TestAddRepoAsksWhichHarnessWhenItIsNotClear(t *testing.T) {
 		t.Errorf("a URL platform lists: %s %v", summary(intents), err)
 	}
 	for _, args := range [][]string{{"example-org/elsewhere", "--worktree", "8-y"}, {"api", "infra", "--worktree", "9-x"}} {
-		if _, err := addRepoPlan(t, args...); err == nil || !strings.Contains(err.Error(), "Ask the person which harness") || !strings.Contains(err.Error(), "platform, ops") {
+		if _, err := addRepoPlan(t, args...); err == nil || !strings.Contains(err.Error(), "Ask the person which wtc project") || !strings.Contains(err.Error(), "platform, ops") {
 			t.Errorf("%v: %v", args, err)
 		}
 	}
@@ -216,7 +216,7 @@ func TestAddRepoAsksWhichHarnessWhenItIsNotClear(t *testing.T) {
 	if intents, err := addRepoPlan(t, "api", "--worktree", "11-x", "--harness", "platform"); err != nil || !strings.HasPrefix(summary(intents), "platform-harness@") {
 		t.Errorf("--harness platform: %s %v", summary(intents), err)
 	}
-	if _, err := addRepoPlan(t, "api", "--worktree", "12-x", "--harness", "nope"); err == nil || !strings.Contains(err.Error(), "no harness nope") {
+	if _, err := addRepoPlan(t, "api", "--worktree", "12-x", "--harness", "nope"); err == nil || !strings.Contains(err.Error(), "no wtc project nope") {
 		t.Errorf("unknown harness: %v", err)
 	}
 }
@@ -232,7 +232,7 @@ func TestAddRepoAsksAboutAnUnlistedRepository(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%v: no question", args)
 		}
-		for _, want := range []string{"does not list infra", "--ad-hoc", ".harness-repos.yml", "--harness none"} {
+		for _, want := range []string{"does not list infra", "--ad-hoc", ".harness-repos.yml", "--project none"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("%v: %v, want %q", args, err, want)
 			}
@@ -271,7 +271,7 @@ func TestAddRepoAsksAboutAnUnlistedRepository(t *testing.T) {
 	} else if intents, _ := addRepoPlan(t, "api", "--worktree", "23-x"); summary(intents) != "api@api:" {
 		t.Errorf("after --harness none: %s", summary(intents))
 	}
-	if _, err := addRepoPlan(t, "api", "--worktree", "23-x", "--harness", "platform"); err == nil || !strings.Contains(err.Error(), "without a harness") {
+	if _, err := addRepoPlan(t, "api", "--worktree", "23-x", "--harness", "platform"); err == nil || !strings.Contains(err.Error(), "without a wtc project") {
 		t.Errorf("a harness for a collection without one: %v", err)
 	}
 	if h := gatewayHarness(openclaw.CollectionFolder(state, "23-x"), nil); h != nil {
@@ -345,7 +345,7 @@ func TestAddRepoHarnessEdgeCases(t *testing.T) {
 
 	// A harness that is not on the gateway, or has no registry.
 	withGatewayConfig(t, `{"harnesses": [{"name": "gone", "remote": "https://github.com/example-org/gone-harness"}]}`)
-	if _, err := addRepoPlan(t, "api", "--worktree", "5-x"); err == nil || !strings.Contains(err.Error(), "harness gone is not on the gateway yet") {
+	if _, err := addRepoPlan(t, "api", "--worktree", "5-x"); err == nil || !strings.Contains(err.Error(), "wtc project gone is not on the gateway yet") {
 		t.Errorf("harness not on the gateway: %v", err)
 	}
 	withGatewayConfig(t, `{"harnesses": [{"name": "web", "remote": "https://github.com/example-org/web"}]}`)

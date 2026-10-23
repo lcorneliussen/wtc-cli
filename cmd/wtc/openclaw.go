@@ -435,7 +435,7 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string, unrecorded, hasWorktree bool) error {
 	here := " --worktree " + worktree
 	if unrecorded {
-		here += " --harness " + h.Name
+		here += " --project " + h.Name
 	}
 	all := strings.Join(repos, " ")
 	register := fmt.Sprintf("run `wtc add-repo %s%s` first, then ", h.Remote, here)
@@ -448,14 +448,14 @@ func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string
 			listed = append(listed, r)
 		}
 	}
-	separate := fmt.Sprintf("wtc add-repo %s --worktree <another-name> --harness %s", strings.Join(unlisted, " "), openclaw.NoHarness)
+	separate := fmt.Sprintf("wtc add-repo %s --worktree <another-name> --project %s", strings.Join(unlisted, " "), openclaw.NoHarness)
 	if len(listed) > 0 {
 		separate += fmt.Sprintf(", and here wtc add-repo %s%s", strings.Join(listed, " "), here)
 	}
-	return fmt.Errorf("harness %s does not list %s. Ask the person which they want:\n"+
-		"  1. ad hoc beside the harness, in this collection: wtc add-repo %s%s --ad-hoc\n"+
-		"  2. registered in the harness: %sadd it to .harness-repos.yml in the collection's worktree of %s and commit that (it is published like any repository), then wtc add-repo %s%s\n"+
-		"  3. a collection of its own without a harness: %s",
+	return fmt.Errorf("wtc project %s does not list %s. Ask the person which they want:\n"+
+		"  1. ad hoc beside the project's repositories, in this collection: wtc add-repo %s%s --ad-hoc\n"+
+		"  2. registered in the project: %sadd it to .harness-repos.yml in the collection's worktree of its harness %s and commit that (it is published like any repository), then wtc add-repo %s%s\n"+
+		"  3. a collection of its own, in an ad-hoc wtc project: %s",
 		h.Name, strings.Join(unlisted, ", "), all, here, register, h.Name, all, here, separate)
 }
 
@@ -500,7 +500,7 @@ func readHarnessRegistry(h openclaw.Harness, worktree string) harnessRegistry {
 	if r.worktree == "" {
 		dir := openclaw.GatewayProjectDir(gatewayStateDir(), openclaw.ParseOrigin(h.Remote))
 		if dir == "" {
-			r.err = fmt.Errorf("harness %s is not on the gateway yet. Ask the person to add %s with Add repository in the Collection panel, then run this again", h.Name, h.Remote)
+			r.err = fmt.Errorf("the harness of wtc project %s is not on the gateway yet. Ask the person to add %s with Add repository in the Collection panel, then run this again", h.Name, h.Remote)
 			return r
 		}
 		if data, r.err = openclaw.FileAt(dir, "origin/"+h.Ref, ".harness-repos.yml"); r.err != nil {
@@ -508,7 +508,7 @@ func readHarnessRegistry(h openclaw.Harness, worktree string) harnessRegistry {
 		}
 	}
 	if r.err != nil {
-		r.err = fmt.Errorf("harness %s has no .harness-repos.yml to read at %s, so it is not a harness wtc can use; check %s.harnesses: %w", h.Name, h.Ref, openclaw.PluginConfigKey, r.err)
+		r.err = fmt.Errorf("the harness of wtc project %s has no .harness-repos.yml to read at %s, so wtc cannot use it; check %s.harnesses: %w", h.Name, h.Ref, openclaw.PluginConfigKey, r.err)
 		return r
 	}
 	reg, err := wtc.ParseRegistry(data)
@@ -718,9 +718,9 @@ func gatewayWorkers(task string, all map[string][]string) []gatewayWorker {
 
 func (h *gatewayHarnessStatus) String() string {
 	if h.Path == "" {
-		return "harness " + h.Name + ", no worktree yet"
+		return "wtc project " + h.Name + ", no worktree of its harness yet"
 	}
-	return "harness " + h.Name + " at " + h.Path + ": read its AGENTS.md"
+	return "wtc project " + h.Name + ", harness at " + h.Path + ": read its AGENTS.md"
 }
 
 // gatewayHarness is the harness recorded for the collection folder, with its

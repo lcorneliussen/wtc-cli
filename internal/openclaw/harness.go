@@ -142,20 +142,20 @@ func (c GatewayConfig) names() string {
 // and add-repo asks the person what to do with a repository it does not
 // list.
 func ChooseHarness(cfg GatewayConfig, flag, recorded string, names []string, has func(Harness, string) bool) (*Harness, error) {
-	ask := fmt.Sprintf("Ask the person which harness this collection works in (%s), then pass --harness <name>, or --harness %s for a collection without one", cfg.names(), NoHarness)
+	ask := fmt.Sprintf("Ask the person which wtc project this collection works in (%s; wtc projects lists their repositories), then pass --project <name>, or --project %s for an ad-hoc one", cfg.names(), NoHarness)
 	switch {
 	case recorded == NoHarness:
 		if flag != "" && flag != NoHarness {
-			return nil, fmt.Errorf("this collection works without a harness; a collection has one harness or none. Start another collection for work in %s", flag)
+			return nil, fmt.Errorf("this collection is ad hoc, without a wtc project; a collection is in one wtc project or none. Start another collection for work in %s", flag)
 		}
 		return nil, nil
 	case recorded != "":
 		h := cfg.Find(recorded)
 		if h == nil {
-			return nil, fmt.Errorf("this collection uses harness %s, which the gateway no longer configures. Ask the person to configure it again under %s.harnesses", recorded, PluginConfigKey)
+			return nil, fmt.Errorf("this collection is in wtc project %s, which the gateway no longer configures. Ask the person to configure its harness again under %s.harnesses", recorded, PluginConfigKey)
 		}
 		if flag != "" && flag != recorded {
-			return nil, fmt.Errorf("this collection uses harness %s; a collection has one harness. Start another collection for work in %s", recorded, flag)
+			return nil, fmt.Errorf("this collection is in wtc project %s; a collection is in one. Start another collection for work in %s", recorded, flag)
 		}
 		return h, nil
 	case flag == NoHarness:
@@ -164,9 +164,9 @@ func ChooseHarness(cfg GatewayConfig, flag, recorded string, names []string, has
 		h := cfg.Find(flag)
 		if h == nil {
 			if len(cfg.Harnesses) == 0 {
-				return nil, fmt.Errorf("the gateway configures no harnesses, so there is no harness %s", flag)
+				return nil, fmt.Errorf("the gateway configures no wtc projects, so there is no wtc project %s", flag)
 			}
-			return nil, fmt.Errorf("the gateway configures no harness %s. %s", flag, ask)
+			return nil, fmt.Errorf("the gateway configures no wtc project %s. %s", flag, ask)
 		}
 		return h, nil
 	case len(cfg.Harnesses) == 0:
@@ -178,7 +178,7 @@ func ChooseHarness(cfg GatewayConfig, flag, recorded string, names []string, has
 		if len(cfg.Harnesses) == 1 {
 			return &cfg.Harnesses[0], nil
 		}
-		return nil, fmt.Errorf("which harness? %s", ask)
+		return nil, fmt.Errorf("which wtc project? %s", ask)
 	}
 	var some, all []*Harness
 	for i, h := range cfg.Harnesses {
@@ -206,7 +206,7 @@ func ChooseHarness(cfg GatewayConfig, flag, recorded string, names []string, has
 	case len(fits) == 0 && len(cfg.Harnesses) == 1:
 		return &cfg.Harnesses[0], nil
 	case len(fits) == 0:
-		return nil, fmt.Errorf("which harness? None lists %s. %s", strings.Join(names, ", "), ask)
+		return nil, fmt.Errorf("which wtc project? None lists %s. %s", strings.Join(names, ", "), ask)
 	case len(fits) == 1:
 		return fits[0], nil
 	}
@@ -215,7 +215,7 @@ func ChooseHarness(cfg GatewayConfig, flag, recorded string, names []string, has
 			return h, nil
 		}
 	}
-	return nil, fmt.Errorf("which harness? Several list these repositories. %s", ask)
+	return nil, fmt.Errorf("which wtc project? Several list these repositories. %s", ask)
 }
 
 // FileAt is the content of path at ref in the repository at dir, read with
