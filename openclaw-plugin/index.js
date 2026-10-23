@@ -216,7 +216,7 @@ export function pullRequestWatch(file, now = Date.now) {
 }
 
 // Words that say nothing about where to work.
-const STOPWORDS = new Set("a an and are as at be but by can do for from get go have help i in into is it its let lets let's look make me my need of on or our please should so some start that the this to up us want we what when where which will with work working would you".split(" "));
+const STOPWORDS = new Set("a an and are as at be but by can do for from get go have help i in into is it its lets let's look make me my need of on or our please should so some start that the this to up us want we what when where which will with work working would you".split(" "));
 const wordsOf = (text) => String(text ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOPWORDS.has(w));
 
 // Where a first message asks to work, by its words: the wtc project whose
@@ -228,9 +228,13 @@ export function matchProjects(text, projects) {
   if (words.size === 0) return null;
   let best = null;
   for (const p of projects ?? []) {
+    // A repository counts by what sets it apart in its project ("wtc" names
+    // every repository of project wtc), each word once.
+    const shared = new Set(wordsOf(p.name));
     const scored = (p.repos ?? []).map((r) => {
-      const name = wordsOf(r.name).filter((w) => words.has(w)).length;
-      const role = wordsOf(r.role).filter((w) => words.has(w)).length;
+      const hits = (text) => new Set(wordsOf(text).filter((w) => words.has(w) && !shared.has(w))).size;
+      const name = hits(r.name);
+      const role = hits(r.role);
       return { name: r.name, role: r.role ?? "", score: 3 * name + role };
     }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score);
     // Naming the project itself counts too.
@@ -246,7 +250,8 @@ export function matchProjects(text, projects) {
 // The same through the gateway's decision model, when one is selected: one
 // choice among every project's repositories, and "none". Repositories within
 // half of the chosen one's probability, in its project, come along. null when
-// there is no decision model, it is unavailable, or it chose none.
+// there is no decision model or it is unavailable; { none: true } when it
+// found the message to be about none of them.
 export async function decideProjects(decisions, agentId, text, projects) {
   if (!decisions?.evaluate) return null;
   const criteria = { none: "The message is not about working on any of these repositories" };
@@ -270,7 +275,9 @@ export async function decideProjects(decisions, agentId, text, projects) {
   }
   const answer = (outcome?.answers ?? outcome?.result?.answers)?.where;
   const chosen = answer?.choice;
-  if ((outcome?.status && outcome.status !== "ok") || !chosen || !where[chosen]) return null;
+  if ((outcome?.status && outcome.status !== "ok") || !chosen) return null;
+  if (chosen === "none") return { none: true };
+  if (!where[chosen]) return null;
   const { project } = where[chosen];
   const p = answer.probabilities ?? {};
   const repos = Object.keys(where)
@@ -538,8 +545,9 @@ export default {
         const text = String(action.payload?.text ?? "").trim();
         if (!text) return { ok: true, result: null };
         const projects = await gatewayProjects();
-        const suggestion = (await decideProjects(api.runtime.decisions, action.agentId, text, projects)) ?? matchProjects(text, projects);
-        return { ok: true, result: suggestion };
+        // The decision model's "none" stands; the words decide only without it.
+        const decided = await decideProjects(api.runtime.decisions, action.agentId, text, projects);
+        return { ok: true, result: decided?.none ? null : decided ?? matchProjects(text, projects) };
       },
     });
 

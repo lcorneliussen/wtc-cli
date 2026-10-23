@@ -793,7 +793,8 @@ function collectionTables(v) {
 }
 
 // The text of the latest message the person wrote, from chat.history.
-// Heartbeat polls and system events are not theirs.
+// Heartbeat polls and wtc's pull request news arrive as user messages too,
+// and are not theirs.
 export function latestUserText(messages) {
   for (const m of [...(messages ?? [])].reverse()) {
     if (m?.role !== "user") continue;
@@ -919,9 +920,11 @@ function mountComposer(container, context) {
       card.remove();
       return;
     }
+    // Only a collection that loaded and has nothing yet: a failed load is
+    // no reason to start another one.
     if (repos.length === 0) {
-      void suggestFor(key);
-      if (suggestion?.key === key && suggestion.result && !dismissed.has(key)) renderSuggestion(suggestion.result);
+      if (entry?.data) void suggestFor(key);
+      if (entry?.data && suggestion?.key === key && suggestion.result && !dismissed.has(key)) renderSuggestion(suggestion.result);
       else card.remove();
       return;
     }

@@ -302,6 +302,8 @@ test("a first message's words suggest a project and its repositories", () => {
   assert.deepEqual(matchProjects("lets work on the site", PROJECTS), { project: "wtc", repos: ["wtc-site"], source: "match" });
   assert.deepEqual(matchProjects("the invoices are wrong", PROJECTS), { project: "shop", repos: ["billing"], source: "match" });
   assert.deepEqual(matchProjects("fix the cli", PROJECTS).repos, ["wtc-cli"]);
+  // The project's own name sets no repository of it apart.
+  assert.deepEqual(matchProjects("fix the wtc cli", PROJECTS), { project: "wtc", repos: ["wtc-cli"], source: "match" });
   assert.equal(matchProjects("hello there", PROJECTS), null);
   assert.equal(matchProjects("", PROJECTS), null);
 });
@@ -320,7 +322,7 @@ test("the decision model chooses when the gateway selected one", async () => {
   assert.ok("none" in batch.questions.where.criteria && "wtc/wtc-site" in batch.questions.where.criteria);
   assert.equal(opts.agentId, "main");
   // None chosen, unavailable, failing or absent: no suggestion from it.
-  assert.equal(await decideProjects({ evaluate: async () => ({ status: "ok", answers: { where: { choice: "none", probabilities: {} } } }) }, "main", "hi", PROJECTS), null);
+  assert.deepEqual(await decideProjects({ evaluate: async () => ({ status: "ok", answers: { where: { choice: "none", probabilities: {} } } }) }, "main", "hi", PROJECTS), { none: true });
   assert.equal(await decideProjects({ evaluate: async () => ({ status: "unavailable", reason: "no model" }) }, "main", "site", PROJECTS), null);
   assert.equal(await decideProjects({ evaluate: async () => { throw new Error("down"); } }, "main", "site", PROJECTS), null);
   assert.equal(await decideProjects(undefined, "main", "site", PROJECTS), null);
@@ -329,9 +331,12 @@ test("the decision model chooses when the gateway selected one", async () => {
 test("the suggest action asks wtc projects once a minute, the decision model first", async () => {
   const actions = new Map();
   let projectRuns = 0;
+  let decide = null;
+  const agents = [];
   plugin.register({
     pluginConfig: {},
     runtime: {
+      decisions: { evaluate: async (batch, opts) => { agents.push(opts.agentId); return decide; } },
       state: { resolveStateDir: () => "/nonexistent" },
       agent: { session: { listSessionEntries: () => [], getSessionEntry: async () => undefined } },
       system: { runCommandWithTimeout: async (argv) => {
@@ -345,7 +350,14 @@ test("the suggest action asks wtc projects once a minute, the decision model fir
     logger: {},
   });
   const suggest = (text) => actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text } });
-  assert.deepEqual((await suggest("work on the site")).result, { project: "wtc", repos: ["wtc-site"], source: "match" });
+  // The model's choice wins over the words, and its "none" stands.
+  decide = { status: "ok", answers: { where: { choice: "shop/billing", probabilities: { "shop/billing": 0.9 } } } };
+  assert.deepEqual((await suggest("work on the site")).result, { project: "shop", repos: ["billing"], source: "decision" });
+  decide = { status: "ok", answers: { where: { choice: "none", probabilities: {} } } };
+  assert.equal((await suggest("work on the site")).result, null);
+  assert.deepEqual(agents, ["main", "main"]);
+  // Unavailable: the words.
+  decide = { status: "unavailable", reason: "no model" };
   assert.equal((await suggest("hello")).result, null);
   assert.equal((await suggest("")).result, null);
   assert.equal(projectRuns, 1);

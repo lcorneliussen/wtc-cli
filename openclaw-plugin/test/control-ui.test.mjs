@@ -564,6 +564,19 @@ test("composer: without a collection, the card suggests where the latest message
   assert.match(startMessage({ project: "wtc", repos: ["wtc-site"] }), /wtc add-repo wtc-site --project wtc --worktree/);
   assert.equal(card(), undefined, "gone once started");
   view.dispose();
+  // ✕ dismisses it for good; Change… opens the panel.
+  const again = await mount("composer", collection([]), [{ role: "user", content: "the site" }]);
+  await settle();
+  const card2 = () => [...again.host.all()].find((n) => n.className === "wtc-collection-card");
+  assert.ok(card2());
+  await [...card2().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "✕").onclick({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(card2(), undefined);
+  again.view.dispose();
+  // A failed load is no empty collection: nothing is suggested.
+  const failing = await mount("composer", new Error("down"), [{ role: "user", content: "the site" }]);
+  await settle();
+  assert.equal([...failing.host.all()].find((n) => n.className === "wtc-collection-card"), undefined);
+  failing.view.dispose();
   // Nothing to suggest: no card.
   const quiet = await mount("composer", collection([]), [{ role: "user", content: "hello" }]);
   await settle();
