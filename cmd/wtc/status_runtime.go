@@ -237,8 +237,19 @@ func statusRuntimeState(item wtc.RuntimeItem) string {
 	case item.State == "absent" || item.State == "idle":
 		// No runner, or a task it is not running: stopped, in plain words.
 		return "stopped"
+	case statusRuntimeTrouble(item) && item.Answering == "no":
+		return "no answer"
+	case statusRuntimeTrouble(item):
+		return "login"
 	}
 	return item.State
+}
+
+// statusRuntimeTrouble is a ready task that doesn't answer now, or a running
+// tunnel whose provider client cannot serve: ready is only a startup probe.
+func statusRuntimeTrouble(item wtc.RuntimeItem) bool {
+	running := item.State == "ready" || item.State == "running"
+	return running && (item.Answering == "no" || item.Login != "")
 }
 
 // statusTUIRuntimeLines draws one line per service in the style of the PR
@@ -382,6 +393,9 @@ func statusRuntimeMark(item wtc.RuntimeItem) (string, string) {
 	switch item.State {
 	case "ready", "provision-hook-completed", "done":
 		tone = statusToneSuccess
+		if statusRuntimeTrouble(item) {
+			tone = statusToneFailure
+		}
 	case "starting", "running", "provision-attempted":
 		tone = statusToneWarning
 	case "absent", "unconfigured", "stopped", "idle", "checking", "unprovisioned":
@@ -465,7 +479,11 @@ func statusRuntimeHover(item wtc.RuntimeItem) string {
 			parts[2] = "provisioned: created by the repo's provision hook, kept by down, removed by teardown or retire"
 		}
 	}
-	for _, extra := range []string{item.Label, item.URL, item.Reason, item.Error} {
+	answer := ""
+	if item.Answering == "no" {
+		answer = "not answering now: " + item.AnswerDetail
+	}
+	for _, extra := range []string{item.Label, item.URL, item.Reason, item.Error, answer, item.Login} {
 		if extra != "" {
 			parts = append(parts, extra)
 		}
