@@ -324,6 +324,12 @@ test("the decision model chooses when the gateway selected one", async () => {
   assert.equal(batch.questions.where.type, "choice");
   assert.ok("none" in batch.questions.where.criteria && "wtc/wtc-site" in batch.questions.where.criteria);
   assert.equal(opts.agentId, "main");
+  assert.equal(batch.state, "the checkout page breaks");
+  // Contract 2: typed evidence.
+  let v2;
+  await decideProjects({ evaluateV2: async (b) => { v2 = b; return { status: "ok", result: { answers: { where: { type: "choice", choice: "wtc/wtc-site", probabilities: { "wtc/wtc-site": 0.9 } } } } }; }, evaluate: async () => { throw new Error("v1 used"); } }, "main", "the site", PROJECTS)
+    .then((r) => assert.deepEqual(r, { project: "wtc", repos: ["wtc-site"], source: "decision" }));
+  assert.deepEqual(v2.state, { type: "text", text: "the site" });
   // None chosen, unavailable, failing or absent: no suggestion from it.
   assert.deepEqual(await decideProjects({ evaluate: async () => ({ status: "ok", answers: { where: { choice: "none", probabilities: {} } } }) }, "main", "hi", PROJECTS), { none: true });
   assert.equal(await decideProjects({ evaluate: async () => ({ status: "unavailable", reason: "no model" }) }, "main", "site", PROJECTS), null);

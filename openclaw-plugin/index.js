@@ -267,12 +267,16 @@ export async function decideProjects(decisions, agentId, text, projects) {
     }
   }
   if (Object.keys(where).length === 0) return null;
+  const message = String(text).slice(0, 2000);
+  const questions = { where: { type: "choice", instructions: "Which repository does this message ask to work on, look into or change?", criteria } };
+  const options = { agentId, purpose: "wtc.suggest-project", rubricVersion: "1", timeoutMs: 3000 };
   let outcome;
   try {
-    outcome = await decisions.evaluate(
-      { state: { message: String(text).slice(0, 2000) }, questions: { where: { type: "choice", instructions: "Which repository does this message ask to work on, look into or change?", criteria } } },
-      { agentId, purpose: "wtc.suggest-project", rubricVersion: "1", timeoutMs: 3000 },
-    );
+    // Contract 2 takes typed evidence; contract 1 any JSON, which a
+    // classifier reads as text, so the message goes as plain text.
+    outcome = decisions.evaluateV2
+      ? await decisions.evaluateV2({ state: { type: "text", text: message }, questions }, options)
+      : await decisions.evaluate({ state: message, questions }, options);
   } catch {
     return null;
   }
