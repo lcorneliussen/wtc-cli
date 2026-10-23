@@ -1,6 +1,6 @@
 ---
 name: wtc
-description: "Worktree collections under OpenClaw: one task across several repositories, driven from one conversation. Use when a task names an issue, spans repositories, or the person mentions wtc, a collection, the Collection panel or its card; before adding a repository, publishing, catching up or running a service for it."
+description: "wtc projects and their collections under OpenClaw: work on one or more repositories, driven from one conversation. Use whenever the person wants to work on, look into, analyze or change a repository, a product or site built from one, or a wtc project; when a task names an issue; or when they mention wtc, a collection, the Collection panel or its card. Also before adding a repository, publishing, catching up or running a service."
 metadata: { "openclaw": { "emoji": "🗂️", "requires": { "bins": ["wtc", "git"] } } }
 ---
 
@@ -16,16 +16,29 @@ wtc docs instructions/openclaw.md
 
 Read that before the first `wtc` command of a task and follow it. In short:
 
-- `wtc add-repo <repo> --worktree <issue-id>-<slug>` creates nothing: it
-  prints `sessions_spawn` intents. Call `sessions_spawn` once per intent,
-  with its `args` unchanged.
-- A gateway with harnesses resolves repository names through the
-  collection's harness, and adds a worktree of the harness first. When
-  `wtc add-repo` asks which harness, ask the person, then pass
-  `--harness <name>`. When it says the harness does not list a repository,
-  put its three choices to the person and run the one they pick. Read the
-  harness's `AGENTS.md` (`wtc status` shows where it is) before working in
-  the collection: it says which other repositories a task may need.
+- A **wtc project** is a named set of repositories (a harness the gateway is
+  configured with); a **collection** is this conversation's worktrees of the
+  repositories one task needs. An ad-hoc collection works without a project.
+- **Work happens in this conversation's collection**, even when it is only
+  reading or analyzing. When the person wants to work on something and the
+  conversation has no collection yet, run `wtc projects` to match what they
+  named ("the site", "the CLI") to a project's repositories, then start one
+  with `wtc add-repo`. Never work in another conversation's collection
+  folder, the workspace or a clone of your own, and don't answer from memory
+  what the repositories can tell.
+- `wtc add-repo <repo> [...] --worktree <issue-id>-<slug>` creates nothing:
+  it prints `sessions_spawn` intents. Call `sessions_spawn` once per intent,
+  with its `args` unchanged. The wtc project whose repositories these are is
+  picked, and a worktree of its harness comes first. Read the harness's
+  `AGENTS.md` (`wtc status` shows where it is) right away: it says which
+  other repositories a task needs, so add them too.
+- A conversation works in one wtc project. When `wtc add-repo` asks which,
+  ask the person, then pass `--project <name>`. When it says the project
+  does not list a repository, put its choices to the person and run the one
+  they pick. When another wtc project lists it, suggest working on that in a
+  new conversation for that project. Never read or change another
+  project's repositories from this collection unless the person added them
+  here ad hoc.
 - `wtc status <name>` shows the collection folder; edit, build, test and
   commit in `<folder>/<repo>`.
 - **Pushing is the person's.** When work is committed, write the pull

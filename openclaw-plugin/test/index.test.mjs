@@ -261,3 +261,31 @@ test("the collection's conversation hears what changed, and is woken for it", as
   await look();
   assert.equal(events.length, before);
 });
+
+test("the collection names its wtc project: its harness, or ad hoc by its folder", async () => {
+  for (const [col, want] of [
+    [{ harness: { name: "wtc", path: "/w" }, folder: "/state/wtc/wtc/9-x" }, "wtc"],
+    [{ folder: "/state/wtc/ad-hoc/9-x" }, "ad-hoc"],
+    [{ folder: "/state/wtc-collections/9-x" }, undefined],
+  ]) {
+    const actions = new Map();
+    const entries = [
+      { sessionKey: "agent:main:c", entry: {} },
+      { sessionKey: "agent:main:repo:site", entry: { parentSessionKey: "agent:main:c", projectId: "site", worktree: { id: "w1", branch: "openclaw/9-x" }, workspaceDir: "/worktrees/w1" } },
+    ];
+    plugin.register({
+      pluginConfig: {},
+      runtime: {
+        state: { resolveStateDir: () => "/nonexistent" },
+        agent: { session: { listSessionEntries: () => entries, getSessionEntry: async () => undefined } },
+        system: { runCommandWithTimeout: async (argv) => ({ code: 0, stdout: argv[1] === "status" ? JSON.stringify({ "9-x": { repos: [], ...col } }) : "", stderr: "" }) },
+      },
+      session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+      registerHttpRoute() {},
+      on() {},
+      logger: {},
+    });
+    const r = await actions.get("collection").handler({ sessionKey: "agent:main:c", agentId: "main", payload: {} });
+    assert.equal(r.result.collection.project, want, JSON.stringify(col));
+  }
+});

@@ -227,10 +227,11 @@ export default {
       return { code: r.code ?? r.exitCode ?? null, stdout: String(r.stdout ?? ""), stderr: String(r.stderr ?? "") };
     };
 
-    // The collection around a session: itself, unless it is a repository's
-    // own session, whose collection is its parent's. A new conversation has
-    // a parent too (the dashboard's, often the main session) and no
-    // repositories yet: it is a collection of its own, still empty.
+    // The collection around a session: itself when it has repository
+    // children; otherwise its parent's when it is a repository's own session
+    // (it has a worktree). A new conversation has a parent too (the
+    // dashboard's, often the main session) and no repositories yet: it is a
+    // collection of its own, still empty.
     const collectionOf = (agentId, sessionKey) => {
       const all = [...api.runtime.agent.session.listSessionEntries({ agentId })];
       const entryOf = new Map(all.map((s) => [s.sessionKey, s.entry]));
@@ -422,6 +423,9 @@ export default {
           checkouts.push(...(col.repos ?? []));
           result.services.push(...(col.services ?? []));
           if (col.folder) result.collection.folder = col.folder;
+          // The wtc project it works in: its harness, or ad hoc.
+          if (col.harness?.name) result.collection.project = col.harness.name;
+          else if (col.folder && path.basename(path.dirname(col.folder)) === "ad-hoc") result.collection.project = "ad-hoc";
           if (col.error) result.warnings.push(`collection folder: ${col.error}`);
         } catch {
           result.warnings.push(`wtc status failed (exit ${status.code}): ${(status.stderr || status.stdout).trim().slice(0, 300) || "is wtc on the gateway's PATH?"}`);

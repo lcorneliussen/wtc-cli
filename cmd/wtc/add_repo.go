@@ -28,10 +28,13 @@ func addAddRepoCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().StringVar(&target, "target", "", "Ad-hoc: development branch and PR target for a new repository (default: ask, or the remote's default)")
 	cmd.Flags().StringVar(&worktree, "worktree", "", "Under OpenClaw: the managed worktree name (default: this session's, or $WTC_COLLECTION)")
 	cmd.Flags().StringVar(&base, "base", "", "Under OpenClaw: base ref for the new worktree (default: the gateway's)")
-	cmd.Flags().StringVar(&harness, "harness", "", "Under OpenClaw: the configured harness this collection works in, or none (default: the collection's, or the only clear one)")
+	cmd.Flags().StringVar(&harness, "project", "", "Under OpenClaw: the wtc project (a configured harness) this collection works in, or none for an ad-hoc one (default: the collection's, or the one whose repositories these are; wtc projects lists them)")
+	// The earlier name of --project.
+	cmd.Flags().StringVar(&harness, "harness", "", "Same as --project")
+	_ = cmd.Flags().MarkHidden("harness")
 	cmd.Flags().StringVar(&worker, "worker", "", "Under OpenClaw: spawn a worker session for part of the task, in collection <worktree>--<worker>, starting from the task's branch where it has one")
 	cmd.Flags().StringVar(&work, "work", "", "Under OpenClaw, with --worker: the part of the task the worker takes")
-	cmd.Flags().BoolVar(&adHoc, "ad-hoc", false, "Under OpenClaw: add repositories the collection's harness does not list, as ad hoc ones beside it, once the person chose that")
+	cmd.Flags().BoolVar(&adHoc, "ad-hoc", false, "Under OpenClaw: add repositories the collection's wtc project does not list, as ad hoc ones beside it, once the person chose that")
 	cmd.Flags().BoolVar(&separate, "separate", false, "Under OpenClaw: a GitHub repository the gateway has not cloned yet becomes a conversation of its own")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if currentHost() == openclaw.HostOpenClaw {
