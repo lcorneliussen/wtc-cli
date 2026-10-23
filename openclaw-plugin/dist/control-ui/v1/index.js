@@ -31,8 +31,9 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${M
 const isRunning = (s) => s.state === "ready" || s.state === "running";
 // Ready is only a startup probe: wtc also looks at the address now, and at
 // whether the tunnel provider's client is signed in.
-const isFailed = (s) => s.state === "failed" || (s.state === "exited" && s.exit_code > 0) || s.answering === "no" || !!s.login;
-const serviceState = (s) => `${s.state ?? "?"}${s.exit_code > 0 ? ` (exit ${s.exit_code})` : ""}${s.answering === "no" ? `, not answering now (${s.answer_detail ?? "no answer"})` : ""}${s.login ? `: ${s.login}` : ""}`;
+// A closed tunnel's provider login matters only once it is opened again.
+const isFailed = (s) => s.state === "failed" || (s.state === "exited" && s.exit_code > 0) || s.answering === "no" || (!!s.login && isRunning(s));
+const serviceState = (s) => `${s.state ?? "?"}${s.exit_code > 0 ? ` (exit ${s.exit_code})` : ""}${s.answering === "no" ? `, not answering now (${s.answer_detail ?? "no answer"})` : ""}${s.login && isRunning(s) ? `: ${s.login}` : ""}`;
 
 // Pushing is the person's, through the gateway, never the agent's: the
 // gateway publishes an owner's worktree (pushes the branch, opens or updates
@@ -409,7 +410,7 @@ function tunnelNode(g, t, svc, { label, opener } = {}) {
   if (svc.busy(`${g.group}:${name}`)) return css(el("span", { textContent: label ? "…" : `${name} …` }), "color:var(--muted, #888)");
   // A closed tunnel is an action: open it again.
   if (!isRunning(t)) {
-    const title = `Open the ${name} tunnel again${pub ? ": anyone with the link can use it" : ""} (${serviceState(t)})`;
+    const title = `Open the ${name} tunnel again${pub ? ": anyone with the link can use it" : ""} (${serviceState(t)})${t.login ? `. First: ${t.login}` : ""}`;
     const again = () => svc.run({ op: "tunnel", group: g.group, provider: name, public: pub }, `Opening the ${name} tunnel…`, `${g.group}:${name}`);
     return opener ? opener(title, again) : pill(`▶ ${name}`, title, again);
   }

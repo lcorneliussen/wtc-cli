@@ -48,8 +48,8 @@ type RuntimeItem struct {
 	// startup probe; this is now.
 	Answering    string `json:"answering,omitempty"`
 	AnswerDetail string `json:"answer_detail,omitempty"`
-	// Login says that the tunnel provider's client is not signed in, and how
-	// to sign it in.
+	// Login says why the tunnel provider's client cannot serve (logged out,
+	// stopped, awaiting approval, an expired key), and how to fix it.
 	Login string `json:"login,omitempty"`
 }
 
@@ -350,7 +350,7 @@ func (c *Context) runtimeStatus(m *runtimeManifest) []RuntimeItem {
 			runtimeTunnelExposure(&items[i], tailscale)
 		}
 		runtimeTunnelLogins(items[:len(m.Tasks)], runtimeLoginCheck)
-		runtimeAnswering(items[:len(m.Tasks)], runtimeProbe)
+		runtimeAnswering(items[:len(m.Tasks)], runtimeAnswerCheck)
 	}()
 	data, err := runtimeCommand(m, false, "ls")
 	var response struct {

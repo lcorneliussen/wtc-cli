@@ -733,7 +733,16 @@ test("panel: a ready service that doesn't answer, and a tunnel whose provider ne
   const tunnel = { group: "api/web", path: "api/web/tailscale", repo: "api", kind: "endpoint", provider: "tailscale", state: "ready", url: "https://host.example.ts.net:42201", login: "Tailscale needs a login: tailscale up" };
   const { host, view } = await mount("panel", { ...collection([repo("api")], [web, tunnel]), tunnelProviders: ["tailscale"] });
   const all = [...host.all()];
-  assert.ok(all.some((n) => /not answering now \(HTTP 502\)/.test(n.title ?? "") || /not answering now \(HTTP 502\)/.test(n.textContent ?? "")), "the service says it isn't answering");
+  assert.ok(all.some((n) => n.textContent !== "⚠" && /^ready, not answering now \(HTTP 502\)/.test(n.title ?? n.textContent ?? "")), "the service says it isn't answering");
   assert.ok(all.some((n) => n.textContent === "⚠" && /Tailscale needs a login: tailscale up/.test(n.title)), "the tunnel says it needs a login");
   view.dispose();
+  // A closed tunnel's provider login leaves a healthy service healthy; the
+  // button that opens it again says what to do first.
+  const fine = { ...web, answering: "yes", answer_detail: undefined };
+  const closed = { ...tunnel, state: "idle" };
+  const quiet = await mount("panel", { ...collection([repo("api")], [fine, closed]), tunnelProviders: ["tailscale"] });
+  const nodes = [...quiet.host.all()];
+  assert.ok(!nodes.some((n) => /not answering|⚠/.test(n.textContent ?? "") || /^ready: /.test(n.title ?? "")), "nothing marked as failing");
+  assert.ok(nodes.some((n) => n.tagName === "BUTTON" && /Open the tailscale tunnel again .*First: Tailscale needs a login: tailscale up/.test(n.title)));
+  quiet.view.dispose();
 });

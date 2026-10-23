@@ -13,6 +13,11 @@ import (
 
 func runtimeFixture(t *testing.T) *Context {
 	t.Helper()
+	// Never this machine's tunnel clients or network: status looks at both.
+	login, answer := runtimeLoginCheck, runtimeAnswerCheck
+	t.Cleanup(func() { runtimeLoginCheck, runtimeAnswerCheck = login, answer })
+	runtimeLoginCheck = func(string) string { return "" }
+	runtimeAnswerCheck = func(string) (bool, string) { return true, "" }
 	c := fixture(t)
 	fixtureGit(t, "-C", c.Harness, "init", "-q", "-b", "main")
 	fixtureGit(t, "-C", c.Harness, "remote", "add", "origin", "https://example.invalid/harness-example.git")

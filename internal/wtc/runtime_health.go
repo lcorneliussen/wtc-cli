@@ -14,8 +14,9 @@ import (
 )
 
 // runtimeProbe looks at an address now: any HTTP answer below 500 counts,
-// so a login page or a redirect is an answer; 5xx from a tunnel means the
-// service behind it is not there.
+// so a login page or a redirect is an answer; a 5xx, a refusal or no answer
+// within two seconds is not (a tunnel answers 502 while the service behind
+// it is down).
 func runtimeProbe(raw string) (bool, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -63,8 +64,9 @@ func runtimeAnswering(items []RuntimeItem, probe func(string) (bool, string)) {
 	wg.Wait()
 }
 
-// runtimeTunnelLogins marks the endpoints whose provider client is not
-// signed in, asking each provider once.
+// runtimeTunnelLogins marks the endpoints whose provider client cannot serve
+// (logged out, stopped, awaiting approval, an expired key), asking each
+// provider once. Closed endpoints are marked too: opening them would fail.
 func runtimeTunnelLogins(items []RuntimeItem, login func(string) string) {
 	asked := map[string]string{}
 	for i := range items {
@@ -151,5 +153,9 @@ func devtunnelLogin(out string) string {
 	return ""
 }
 
-// runtimeLoginCheck is runtimeProviderLogin; tests replace it.
-var runtimeLoginCheck = runtimeProviderLogin
+// runtimeLoginCheck and runtimeAnswerCheck are runtimeProviderLogin and
+// runtimeProbe; tests replace them.
+var (
+	runtimeLoginCheck  = runtimeProviderLogin
+	runtimeAnswerCheck = runtimeProbe
+)

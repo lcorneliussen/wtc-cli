@@ -124,3 +124,15 @@ func TestTunnelRefusedWithoutProviderLogin(t *testing.T) {
 		t.Fatal("a refused tunnel was written")
 	}
 }
+
+func TestRuntimeTextSaysWhatIsWrongNow(t *testing.T) {
+	out := RuntimeText([]RuntimeItem{
+		{Collection: "c", Repo: "app", Group: "app/web", Path: "app/web/main", Kind: "service", State: "ready", URL: "http://127.0.0.1:43001", Answering: "no", AnswerDetail: "HTTP 502"},
+		{Collection: "c", Repo: "app", Group: "app/web", Path: "app/web/tailscale", Kind: "endpoint", State: "idle", Provider: "tailscale", Login: "Tailscale needs a login: tailscale up"},
+	})
+	for _, want := range []string{"ready = startup probe passed, then looked at now", "not answering now: HTTP 502", "Tailscale needs a login: tailscale up"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
