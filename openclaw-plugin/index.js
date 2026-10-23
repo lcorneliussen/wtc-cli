@@ -250,7 +250,7 @@ export function matchProjects(text, projects) {
   return best ? { project: best.project, repos: best.repos, source: "match" } : null;
 }
 
-// The same through the gateway's decision model, when one is selected: one
+// The same through a decision model (the gateway's, or openaiDecisions): one
 // choice among every project's repositories, and "none". Repositories within
 // half of the chosen one's probability, in its project, come along. null when
 // there is no decision model or it is unavailable; { none: true } when it
@@ -577,8 +577,9 @@ export default {
       return projectsCache.projects;
     };
 
-    // Where the person's latest message asks to work: the decision model's
-    // answer when the gateway selected one, else the words' match.
+    // Where the person's latest message asks to work: the gateway's decision
+    // model, else OpenAI's asked directly (WTC_DECISIONS_OPENAI_API_KEY),
+    // else the words' match.
     api.session.controls.registerSessionAction({
       id: "suggest",
       description: "Suggest the wtc project and repositories a conversation's latest message asks to work on.",
