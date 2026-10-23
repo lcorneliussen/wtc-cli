@@ -46,6 +46,33 @@ test("overlapping collection requests share one wtc --version", async () => {
   for (const r of results) assert.match(r.result.warnings[0], /runs wtc 99\.0\.0/);
 });
 
+test("a new conversation is a collection of its own, not its parent's", async () => {
+  const actions = new Map();
+  const entries = [
+    { sessionKey: "agent:main:main", entry: { label: "[OpenClaw heartbeat poll]" } },
+    { sessionKey: "agent:main:repo:api", entry: { parentSessionKey: "agent:main:main", projectId: "api", worktree: { id: "w1", branch: "openclaw/old" }, workspaceDir: "/worktrees/w1" } },
+    { sessionKey: "agent:main:dashboard:new", entry: { parentSessionKey: "agent:main:main" } },
+  ];
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      state: { resolveStateDir: () => "/nonexistent" },
+      agent: { session: { listSessionEntries: () => entries, getSessionEntry: async () => undefined } },
+      system: { runCommandWithTimeout: async () => ({ code: 1, stdout: "", stderr: "" }) },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const collection = async (sessionKey) => (await actions.get("collection").handler({ sessionKey, agentId: "main", payload: {} })).result;
+  const fresh = await collection("agent:main:dashboard:new");
+  assert.deepEqual(fresh.collection, { sessionKey: "agent:main:dashboard:new", label: null });
+  assert.equal(fresh.repos.length, 0);
+  // A repository's own session still shows the collection it belongs to.
+  assert.equal((await collection("agent:main:repo:api")).collection.sessionKey, "agent:main:main");
+});
+
 test("the branches of a gateway project are read outside its clone", async () => {
   const { mkdtempSync, mkdirSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
