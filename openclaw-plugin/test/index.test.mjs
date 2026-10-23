@@ -298,7 +298,7 @@ const PROJECTS = [
   { name: "shop", repos: [{ name: "storefront", role: "The web shop" }, { name: "billing", role: "Invoices and payments" }] },
 ];
 
-test("a first message's words suggest a project and its repositories", () => {
+test("a message's words suggest a project and its repositories", () => {
   assert.deepEqual(matchProjects("lets work on the site", PROJECTS), { project: "wtc", repos: ["wtc-site"], source: "match" });
   assert.deepEqual(matchProjects("the invoices are wrong", PROJECTS), { project: "shop", repos: ["billing"], source: "match" });
   assert.deepEqual(matchProjects("fix the cli", PROJECTS).repos, ["wtc-cli"]);

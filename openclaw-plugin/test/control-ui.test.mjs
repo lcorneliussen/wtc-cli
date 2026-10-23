@@ -2,6 +2,8 @@
 // minimal DOM, so that a view which throws while rendering fails here rather
 // than in someone's browser. Run with `node --test openclaw-plugin/test/`.
 import { test } from "node:test";
+// Methods a test makes fail.
+const failing = new Set();
 import assert from "node:assert/strict";
 
 // Just enough of the DOM for el(), css() and the views: elements with
@@ -101,6 +103,7 @@ let personal = null;
 // The Bitbucket plugin: absent unless a test installs it with a login (or null).
 let bitbucket;
 const hostRequest = async (method, params) => {
+  if (failing.has(method)) throw new Error(`${method} failed`);
   if (method === "plugins.sessionAction" && params.pluginId === "bitbucket") {
     if (bitbucket === undefined) throw new Error(`unknown plugin session action: bitbucket/${params.actionId}`);
     if (params.actionId === "publish-options") return { ok: true, result: { account: bitbucket } };
@@ -564,7 +567,7 @@ test("composer: without a collection, the card suggests where the latest message
   assert.match(startMessage({ project: "wtc", repos: ["wtc-site"] }), /wtc add-repo wtc-site --project wtc --worktree/);
   assert.equal(card(), undefined, "gone once started");
   view.dispose();
-  // ✕ dismisses it for good; Change… opens the panel.
+  // ✕ dismisses it until the card is mounted again; Change… is offered.
   const again = await mount("composer", collection([]), [{ role: "user", content: "the site" }]);
   await settle();
   const card2 = () => [...again.host.all()].find((n) => n.className === "wtc-collection-card");
@@ -574,11 +577,23 @@ test("composer: without a collection, the card suggests where the latest message
   await [...card2().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "✕").onclick({ preventDefault() {}, stopPropagation() {} });
   assert.equal(card2(), undefined);
   again.view.dispose();
-  // A failed load is no empty collection: nothing is suggested.
-  const failing = await mount("composer", new Error("down"), [{ role: "user", content: "the site" }]);
+  // A Start that fails puts the card back, saying why.
+  failing.add("sessions.send");
+  const retry = await mount("composer", collection([]), [{ role: "user", content: "the site" }]);
   await settle();
-  assert.equal([...failing.host.all()].find((n) => n.className === "wtc-collection-card"), undefined);
-  failing.view.dispose();
+  const card3 = () => [...retry.host.all()].find((n) => n.className === "wtc-collection-card");
+  await [...card3().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
+  await settle();
+  failing.clear();
+  await retry.view.update?.({ props: { sessionKey: [...collections.keys()].at(-1), agentId: "main" }, host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} });
+  assert.ok(card3(), "back after a failed Start");
+  assert.ok(texts(card3()).includes("sessions.send failed"));
+  retry.view.dispose();
+  // A failed load is no empty collection: nothing is suggested.
+  const broken = await mount("composer", new Error("down"), [{ role: "user", content: "the site" }]);
+  await settle();
+  assert.equal([...broken.host.all()].find((n) => n.className === "wtc-collection-card"), undefined);
+  broken.view.dispose();
   // Nothing to suggest: no card.
   const quiet = await mount("composer", collection([]), [{ role: "user", content: "hello" }]);
   await settle();

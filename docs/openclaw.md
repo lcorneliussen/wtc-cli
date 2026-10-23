@@ -321,7 +321,9 @@ matching the message's words against those names and roles.
 
 OpenAI's decision model (`openai/gpt-6-luna`, which needs an OpenAI Platform
 API key; a ChatGPT or Codex subscription doesn't authorize it) suits this
-best. On twelve test messages over two projects it chose right eleven times,
+best. In a small comparison
+([#155](https://github.com/lcorneliussen/wtc-cli/pull/155)), on twelve test
+messages over two projects, it chose right eleven times,
 in about 200 ms and a few hundred tokens each. The local ONNX classifiers
 chose right at most six times, mostly the same repository whatever was
 asked, and the word match nine times.
