@@ -219,7 +219,7 @@ export function pullRequestWatch(file, now = Date.now) {
 const STOPWORDS = new Set("a an and are as at be but by can do for from get go have help i in into is it its lets let's look make me my need of on or our please should so some start that the this to up us want we what when where which will with work working would you".split(" "));
 const wordsOf = (text) => String(text ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOPWORDS.has(w));
 
-// Where a first message asks to work, by its words: the wtc project whose
+// Where a message asks to work, by its words: the wtc project whose
 // repositories' names, then roles, it names, and those repositories. A
 // repository's name counts three times its role; one that scores less than
 // half of the best is left out. null when nothing matches.
@@ -233,18 +233,21 @@ export function matchProjects(text, projects) {
     const shared = new Set(wordsOf(p.name));
     const scored = (p.repos ?? []).map((r) => {
       const hits = (text) => new Set(wordsOf(text).filter((w) => words.has(w) && !shared.has(w))).size;
-      const name = hits(r.name);
+      // A repository named just like its project still has its name.
+      const own = wordsOf(r.name).every((w) => shared.has(w));
+      const name = own ? new Set(wordsOf(r.name).filter((w) => words.has(w))).size : hits(r.name);
       const role = hits(r.role);
       return { name: r.name, role: r.role ?? "", score: 3 * name + role };
     }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score);
     // Naming the project itself counts too.
     const named = wordsOf(p.name).some((w) => words.has(w)) ? 1 : 0;
     const top = (scored[0]?.score ?? 0) + named;
-    if (top > 0 && (!best || top > best.score)) {
+    // Only a project with a repository to start in can be the answer.
+    if (scored.length && (!best || top > best.score)) {
       best = { project: p.name, repos: scored.filter((r) => r.score * 2 >= scored[0].score).map((r) => r.name), score: top };
     }
   }
-  return best && best.repos.length ? { project: best.project, repos: best.repos, source: "match" } : null;
+  return best ? { project: best.project, repos: best.repos, source: "match" } : null;
 }
 
 // The same through the gateway's decision model, when one is selected: one
@@ -535,11 +538,11 @@ export default {
       return projectsCache.projects;
     };
 
-    // Where a conversation's first message asks to work: the decision model's
+    // Where the person's latest message asks to work: the decision model's
     // answer when the gateway selected one, else the words' match.
     api.session.controls.registerSessionAction({
       id: "suggest",
-      description: "Suggest the wtc project and repositories a conversation's first message asks to work on.",
+      description: "Suggest the wtc project and repositories a conversation's latest message asks to work on.",
       requiredScopes: ["operator.read"],
       async handler(action) {
         const text = String(action.payload?.text ?? "").trim();

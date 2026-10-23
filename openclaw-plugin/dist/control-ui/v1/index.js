@@ -182,8 +182,8 @@ function watchCollection(host, sessionKey, agentId, onChange) {
 // progress: collapsed, what is not pushed yet, the open pull requests with
 // their CI and the services that run; expanded, each repository on its branch
 // with its Push and Catch up buttons, and each service with its local address
-// and tunnels. It wraps the
-// built-in composer and adds nothing to sessions that are not collections.
+// and tunnels. It wraps the built-in composer. In a session that is not a
+// collection yet it shows only a suggestion of where to start one, if any.
 const OPEN_KEY = "wtc.collectionCard.open";
 const remembered = () => { try { return localStorage.getItem(OPEN_KEY) === "1"; } catch { return false; } };
 const remember = (open) => { try { localStorage.setItem(OPEN_KEY, open ? "1" : "0"); } catch {} };
@@ -868,7 +868,8 @@ function mountComposer(container, context) {
   // A conversation without a collection: where the person's latest message
   // asks to work, suggested by the gateway (its decision model, or the
   // words), as a card to start the collection from. Asked again when they
-  // write something new, at most every ten seconds; dismissed for good.
+  // write something new, at most every ten seconds; dismissed until the card
+  // is mounted again.
   let suggestion = null;
   let askedAt = 0;
   const dismissed = new Set();

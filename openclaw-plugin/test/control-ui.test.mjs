@@ -569,6 +569,8 @@ test("composer: without a collection, the card suggests where the latest message
   await settle();
   const card2 = () => [...again.host.all()].find((n) => n.className === "wtc-collection-card");
   assert.ok(card2());
+  const change = [...card2().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Change…");
+  assert.ok(change, "Change… is offered");
   await [...card2().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "✕").onclick({ preventDefault() {}, stopPropagation() {} });
   assert.equal(card2(), undefined);
   again.view.dispose();

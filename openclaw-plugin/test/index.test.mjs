@@ -304,6 +304,9 @@ test("a first message's words suggest a project and its repositories", () => {
   assert.deepEqual(matchProjects("fix the cli", PROJECTS).repos, ["wtc-cli"]);
   // The project's own name sets no repository of it apart.
   assert.deepEqual(matchProjects("fix the wtc cli", PROJECTS), { project: "wtc", repos: ["wtc-cli"], source: "match" });
+  // A repository named like its project; a project named without a match.
+  assert.deepEqual(matchProjects("fix the shop", [{ name: "shop", repos: [{ name: "shop" }] }]).repos, ["shop"]);
+  assert.deepEqual(matchProjects("wtc payments", PROJECTS), { project: "shop", repos: ["billing"], source: "match" });
   assert.equal(matchProjects("hello there", PROJECTS), null);
   assert.equal(matchProjects("", PROJECTS), null);
 });
@@ -358,6 +361,7 @@ test("the suggest action asks wtc projects once a minute, the decision model fir
   assert.deepEqual(agents, ["main", "main"]);
   // Unavailable: the words.
   decide = { status: "unavailable", reason: "no model" };
+  assert.deepEqual((await suggest("work on the site")).result, { project: "wtc", repos: ["wtc-site"], source: "match" });
   assert.equal((await suggest("hello")).result, null);
   assert.equal((await suggest("")).result, null);
   assert.equal(projectRuns, 1);
