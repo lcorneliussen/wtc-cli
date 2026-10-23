@@ -29,8 +29,12 @@ const PLUGIN_VERSION = (() => {
 
 // What to say when the wtc on the gateway's PATH is a release other than the
 // one this plugin came from, as after upgrading wtc without reinstalling the
-// plugin. A dev build on either side says nothing: a dev wtc stamps the
-// plugin 0.0.0-dev.
+// plugin. A dev build on either side says nothing: a wtc without a release
+// version stamps the plugin with a -dev version (describeBuild in cmd/wtc),
+// or 0.0.0-dev.
+// The version wtc --version names, or null.
+export const wtcVersionOf = (output) => /^wtc version (\S+)/.exec(String(output ?? "").trim())?.[1] ?? null;
+
 export function versionWarning(pluginVersion, wtcVersionOutput) {
   const m = /^wtc version v?(\d+\.\d+\.\d+)$/.exec(String(wtcVersionOutput ?? "").trim());
   if (!m || !/^\d+\.\d+\.\d+$/.test(String(pluginVersion ?? "")) || m[1] === pluginVersion) return null;
@@ -402,7 +406,7 @@ export default {
       const gateway = (api.runtime?.config?.current?.() ?? api.config)?.gateway;
       result.portalIngress = !!gateway?.portals?.ingress?.domain || ["serve", "funnel"].includes(gateway?.tailscale?.mode);
       const versionLine = await wtcVersionOutput();
-      result.version = { plugin: PLUGIN_VERSION, wtc: /^wtc version (\S+)/.exec(String(versionLine ?? "").trim())?.[1] ?? null };
+      result.version = { plugin: PLUGIN_VERSION, wtc: wtcVersionOf(versionLine) };
       const stale = versionWarning(PLUGIN_VERSION, versionLine);
       if (stale) result.warnings.push(stale);
       if (children.length === 0) return result;

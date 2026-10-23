@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/Masterminds/semver/v3"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +8,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/Masterminds/semver/v3"
 )
 
 func TestWriteOpenClawPluginStampsTheVersion(t *testing.T) {
@@ -153,5 +154,16 @@ func TestDescribeBuild(t *testing.T) {
 	}
 	if got := describeBuild(func() (*debug.BuildInfo, bool) { return nil, false }); !regexp.MustCompile(`^\d+\.\d+\.\d+-dev$`).MatchString(got) {
 		t.Errorf("without: %s", got)
+	}
+	// wtc --version of an unversioned build is that description; a release
+	// is itself.
+	if got := versionLabel(); !regexp.MustCompile(`^\d+\.\d+\.\d+-dev`).MatchString(got) {
+		t.Errorf("wtc --version of a test build: %s", got)
+	}
+	was := version
+	t.Cleanup(func() { version = was })
+	version = "1.2.3"
+	if got := versionLabel(); got != "1.2.3" {
+		t.Errorf("a release: %s", got)
 	}
 }
