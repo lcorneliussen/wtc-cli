@@ -283,6 +283,9 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 		if err != nil {
 			return err
 		}
+		if worker != "" {
+			in = openclaw.Worker(in)
+		}
 		intents = append(intents, in)
 		if project != "" && !add.resolved {
 			projects = append(projects, project)

@@ -16,7 +16,7 @@ func TestIntentJSON(t *testing.T) {
 		intent Intent
 		want   string
 	}{
-		{"add-repo", add, `{"host":"openclaw","version":1,"action":"add-repo","actor":"parent","repo":"api","tool":"sessions_spawn","args":{"task":"Work on api","label":"72-openclaw-host api","projectId":"api","worktree":true,"worktreeName":"72-openclaw-host","worktreeBaseRef":"main","visible":false}}`},
+		{"add-repo", add, `{"host":"openclaw","version":1,"action":"add-repo","actor":"parent","repo":"api","tool":"sessions_spawn","args":{"task":"Work on api","label":"72-openclaw-host api","projectId":"api","worktree":true,"worktreeName":"72-openclaw-host","worktreeBaseRef":"main","visible":false,"expectsCompletionMessage":false}}`},
 		{"publish on GitHub", Publish("api", ParseOrigin("https://github.com/example-org/api.git"), "72-openclaw-host", "main", "Add thing", ""),
 			`{"host":"openclaw","version":1,"action":"publish","actor":"repo-session","repo":"api","forge":"github","tool":"github_publish","args":{"title":"Add thing"}}`},
 		{"publish on Bitbucket", Publish("docs", ParseOrigin("git@bitbucket.org:example-ws/docs.git"), "72-openclaw-host", "main", "Add thing", ""),
@@ -98,5 +98,23 @@ func TestParseOrigin(t *testing.T) {
 		if got := ParseOrigin(url); got != want {
 			t.Errorf("%s: got %+v, want %+v", url, got, want)
 		}
+	}
+}
+
+// An owner only holds its worktree and reports nothing; a worker takes part of
+// the task, and its completion comes back.
+func TestOwnersDoNotReportBack(t *testing.T) {
+	in, err := AddRepo("api", "api", "", "72-x", "", "Hold it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := in.Args.(SpawnArgs); a.ExpectsCompletionMessage == nil || *a.ExpectsCompletionMessage {
+		t.Errorf("owner: %+v", a)
+	}
+	if a := Worker(in).Args.(SpawnArgs); a.ExpectsCompletionMessage != nil {
+		t.Errorf("worker: %+v", a)
+	}
+	if a := in.Args.(SpawnArgs); a.ExpectsCompletionMessage == nil {
+		t.Error("Worker changed the owner's intent")
 	}
 }
