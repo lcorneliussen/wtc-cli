@@ -28,11 +28,21 @@ Read that before the first `wtc` command of a task and follow it. In short:
   the collection: it says which other repositories a task may need.
 - `wtc status <name>` shows the collection folder; edit, build, test and
   commit in `<folder>/<repo>`.
-- **Pushing is the person's.** When work is committed, run
-  `wtc publish --title "…"` in `<folder>/<repo>` to check it, and tell the
-  person it is ready: they push it with ↑ for that repository in the card,
-  as themselves, after confirming. Carry out the publish plan yourself only
-  when they explicitly ask you to. Never `git push`.
+- **Pushing is the person's.** When work is committed, write the pull
+  request's description to a file: what changed and why, how it was checked,
+  what is left (the repository's PR template when it has one). Then run
+  `wtc publish --title "…" --body-file <file>` in `<folder>/<repo>`. It checks
+  the work and records the text, and the person's push opens the pull request
+  with it. Tell them it is ready: they push it with ↑ for that repository in
+  the card, as themselves, after confirming. Carry out the publish plan
+  yourself only when they explicitly ask you to. Never `git push`.
+- **A "wtc: pull request news" event** says what happened since: a pull
+  request opened, checks failed or passed, a review was approved or asked for
+  changes, a conflict, or a merge. Update the task's progress with it. For a
+  failure, a review or a conflict, look at it (`gh pr checks`,
+  `gh pr view --comments`) and tell the person what you will do. After a
+  merge, say what is done and what is left. Don't answer review comments on
+  the forge yourself.
 - Parallel parts of a task go to workers, never to two writers in one
   checkout: `wtc add-repo <repo> --worker <name> --work "<part>"`, then
   `wtc catch-up --from <name>` in `<folder>/<repo>` to merge one in.

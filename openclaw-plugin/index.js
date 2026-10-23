@@ -8,7 +8,7 @@
 // Bitbucket repositories use the logins of the Bitbucket plugin
 // (openclaw-bitbucket) when it is installed.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const PLUGIN_ID = "wtc";
@@ -122,6 +122,91 @@ export function collectionFolder(stateDir, name) {
     if (existsSync(dir)) return dir;
   }
   return null;
+}
+
+// What the conversation is told about a pull request: the facts of it that
+// change, as wtc status reports them.
+const prFacts = (pr) => (pr ? {
+  number: pr.number, url: pr.url, state: pr.state, draft: !!pr.draft, checks: pr.checks ?? "none",
+  failed: pr.failed ?? 0, review: pr.review ?? "", mergeable: pr.mergeable ?? "",
+} : null);
+
+// What changed on a repository's pull request between two looks, one line
+// each. prev is undefined before the first look, which has nothing to compare
+// with, and null while there was no pull request.
+export function pullRequestChanges(name, prev, cur) {
+  if (prev === undefined || !cur) return [];
+  const pr = `#${cur.number} (${cur.url})`;
+  if (!prev || prev.number !== cur.number) {
+    const what = cur.state === "merged" ? "was opened and merged" : cur.state === "closed" ? "was opened and closed" : cur.draft ? "opened as a draft" : "opened";
+    return [`${name}: pull request ${pr} ${what}.`];
+  }
+  const lines = [];
+  if (prev.state !== cur.state) {
+    if (cur.state === "merged") lines.push(`${name}: pull request ${pr} was merged.`);
+    else if (cur.state === "closed") lines.push(`${name}: pull request ${pr} was closed without merging.`);
+    else if (cur.state === "open") lines.push(`${name}: pull request ${pr} was reopened.`);
+  }
+  if (cur.state !== "open") return lines;
+  if (prev.draft !== cur.draft) lines.push(`${name}: pull request ${pr} ${cur.draft ? "went back to draft" : "is ready for review"}.`);
+  if (prev.checks !== cur.checks) {
+    if (cur.checks === "failure") lines.push(`${name}: checks failed on ${pr}${cur.failed ? ` (${cur.failed} failed)` : ""}.`);
+    else if (cur.checks === "success") lines.push(`${name}: checks passed on ${pr}${prev.checks === "failure" ? " again" : ""}.`);
+  }
+  if (prev.review !== cur.review) {
+    if (cur.review === "approved") lines.push(`${name}: pull request ${pr} was approved.`);
+    else if (cur.review === "changes_requested") lines.push(`${name}: a review requested changes on ${pr}.`);
+  }
+  if (prev.mergeable !== cur.mergeable && cur.mergeable === "conflicting") lines.push(`${name}: pull request ${pr} conflicts with its base.`);
+  return lines;
+}
+
+// The pull requests seen in each collection, by agent and the collection's
+// session, kept in the gateway's state so that a restart does not tell the
+// same news again. A collection not looked at for a while is forgotten.
+const FORGET_MS = 14 * 24 * 3600 * 1000;
+export function pullRequestWatch(file, now = Date.now) {
+  let seen = {};
+  try {
+    seen = JSON.parse(readFileSync(file, "utf8")) ?? {};
+  } catch {}
+  const save = () => {
+    for (const [key, c] of Object.entries(seen)) if (now() - (c.at ?? 0) > FORGET_MS) delete seen[key];
+    try {
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(`${file}.tmp`, JSON.stringify(seen));
+      renameSync(`${file}.tmp`, file);
+    } catch {}
+  };
+  return {
+    // Records a look at a collection's repositories; returns what changed.
+    observe(agentId, sessionKey, repos) {
+      const key = `${agentId} ${sessionKey}`;
+      const c = (seen[key] ??= { agentId, sessionKey, repos: {} });
+      c.at = now();
+      const lines = [];
+      for (const r of repos) {
+        if (!r.path || r.error) continue;
+        const prev = c.repos[r.path];
+        const cur = prFacts(r.pullRequest);
+        // A pull request does not go away: none means the forge could not
+        // be asked this time.
+        if (!cur && prev) continue;
+        lines.push(...pullRequestChanges(r.repo ?? r.project ?? path.basename(r.path), prev, cur));
+        c.repos[r.path] = cur;
+      }
+      save();
+      return lines;
+    },
+    // The collections with a pull request still open, to look at again.
+    open() {
+      return Object.values(seen).filter((c) => Object.values(c.repos).some((pr) => pr?.state === "open"));
+    },
+    forget(agentId, sessionKey) {
+      delete seen[`${agentId} ${sessionKey}`];
+      save();
+    },
+  };
 }
 
 // A child that owns a repository has a managed worktree to look at.
@@ -266,60 +351,119 @@ export default {
       },
     });
 
+    // The pull requests of the collections, and how the conversation hears
+    // that one changed: queued for its next turn and, unless the gateway
+    // says otherwise, a turn now.
+    const watch = pullRequestWatch(path.join(stateDir, "plugins", PLUGIN_ID, "pull-requests.json"));
+    const tell = (agentId, sessionKey, lines) => {
+      const mode = api.pluginConfig?.pullRequestEvents ?? "wake";
+      if (lines.length === 0 || mode === "off") return;
+      const text = ["wtc: pull request news for this collection", ...lines.map((l) => `- ${l}`)].join("\n");
+      try {
+        api.runtime.system.enqueueSystemEvent(text, { agentId, sessionKey });
+        // Now, as the gateway's own system event with --mode now does: an
+        // "event" wake waits for the agent's next heartbeat to be due. The
+        // turn answers in the conversation, not in the operator's direct
+        // messages.
+        if (mode === "wake") api.runtime.system.requestHeartbeat?.({ source: "other", intent: "immediate", reason: "wtc-pull-request", agentId, sessionKey, heartbeat: { target: "last" } });
+        api.logger?.info?.(`wtc: told ${sessionKey} about ${lines.length} pull request change${lines.length === 1 ? "" : "s"}`);
+      } catch (err) {
+        api.logger?.warn?.(`wtc: cannot tell ${sessionKey} about its pull requests: ${err?.message ?? err}`);
+      }
+    };
+
+    // The collection a session is in, with what wtc status says about it.
+    const loadCollection = async (agentId, sessionKey) => {
+      const { parentKey, parent, children } = collectionOf(agentId, sessionKey);
+      const result = {
+        schema: "wtc.collection/v1",
+        collection: { sessionKey: parentKey, label: parent?.label ?? parent?.displayName ?? null },
+        requestedSessionKey: sessionKey,
+        repos: [],
+        warnings: [],
+      };
+      // The tunnel providers whose client the gateway has, and whether its
+      // tailnet is the team's, so that a Tailscale tunnel is worth offering.
+      result.tunnelProviders = Object.keys(TUNNEL_PROGRAMS).filter((p) => onPath(TUNNEL_PROGRAMS[p]));
+      result.teamTailnet = api.pluginConfig?.teamTailnet === true;
+      // Whether a portal gets an address beyond the gateway's own: a
+      // wildcard domain or Tailscale run by the gateway.
+      const gateway = (api.runtime?.config?.current?.() ?? api.config)?.gateway;
+      result.portalIngress = !!gateway?.portals?.ingress?.domain || ["serve", "funnel"].includes(gateway?.tailscale?.mode);
+      const stale = versionWarning(PLUGIN_VERSION, await wtcVersionOutput());
+      if (stale) result.warnings.push(stale);
+      if (children.length === 0) return result;
+      // The collection's name is its worktrees' name. wtc status reads
+      // them, keeps the collection's folder and reports its services.
+      const names = [...new Set(children.map((c) => String(c.entry.worktree?.branch ?? "").replace(/^openclaw\//, "")).filter(Boolean))];
+      let checkouts = [];
+      result.services = [];
+      for (const name of names) {
+        const status = await run(["wtc", "status", name, "--json"], { env: { OPENCLAW_SHELL: "exec" } });
+        try {
+          const col = JSON.parse(status.stdout)[name] ?? {};
+          checkouts.push(...(col.repos ?? []));
+          result.services.push(...(col.services ?? []));
+          if (col.folder) result.collection.folder = col.folder;
+          if (col.error) result.warnings.push(`collection folder: ${col.error}`);
+        } catch {
+          result.warnings.push(`wtc status failed (exit ${status.code}): ${(status.stderr || status.stdout).trim().slice(0, 300) || "is wtc on the gateway's PATH?"}`);
+        }
+      }
+      const byPath = new Map(checkouts.map((c) => [c.path, c]));
+      result.repos = children
+        .map(({ sessionKey, entry }) => ({
+          sessionKey,
+          label: entry.label ?? entry.displayName ?? null,
+          project: entry.projectId ?? null,
+          // A hidden owner has no conversation of its own.
+          owner: sessionKey.includes(":subagent:") ? "hidden" : "conversation",
+          ...(byPath.get(worktreeOf(entry)) ?? { path: worktreeOf(entry), branch: entry.worktree?.branch ?? null, error: "no status" }),
+        }))
+        .sort((a, b) => String(a.project ?? a.repo).localeCompare(String(b.project ?? b.repo)));
+      tell(agentId, parentKey, watch.observe(agentId, parentKey, result.repos));
+      return result;
+    };
+
     api.session.controls.registerSessionAction({
       id: "collection",
       description: "The repositories of this session's worktree collection: branch, pending changes and pull request of each.",
       requiredScopes: ["operator.read"],
       async handler(action) {
         if (!action.sessionKey || !action.agentId) return { ok: false, error: "sessionKey and agentId are required" };
-        const { parentKey, parent, children } = collectionOf(action.agentId, action.sessionKey);
-        const result = {
-          schema: "wtc.collection/v1",
-          collection: { sessionKey: parentKey, label: parent?.label ?? parent?.displayName ?? null },
-          requestedSessionKey: action.sessionKey,
-          repos: [],
-          warnings: [],
-        };
-        // The tunnel providers whose client the gateway has, and whether its
-        // tailnet is the team's, so that a Tailscale tunnel is worth offering.
-        result.tunnelProviders = Object.keys(TUNNEL_PROGRAMS).filter((p) => onPath(TUNNEL_PROGRAMS[p]));
-        result.teamTailnet = api.pluginConfig?.teamTailnet === true;
-        // Whether a portal gets an address beyond the gateway's own: a
-        // wildcard domain or Tailscale run by the gateway.
-        const gateway = (api.runtime?.config?.current?.() ?? api.config)?.gateway;
-        result.portalIngress = !!gateway?.portals?.ingress?.domain || ["serve", "funnel"].includes(gateway?.tailscale?.mode);
-        const stale = versionWarning(PLUGIN_VERSION, await wtcVersionOutput());
-        if (stale) result.warnings.push(stale);
-        if (children.length === 0) return { ok: true, result };
-        // The collection's name is its worktrees' name. wtc status reads
-        // them, keeps the collection's folder and reports its services.
-        const names = [...new Set(children.map((c) => String(c.entry.worktree?.branch ?? "").replace(/^openclaw\//, "")).filter(Boolean))];
-        let checkouts = [];
-        result.services = [];
-        for (const name of names) {
-          const status = await run(["wtc", "status", name, "--json"], { env: { OPENCLAW_SHELL: "exec" } });
-          try {
-            const col = JSON.parse(status.stdout)[name] ?? {};
-            checkouts.push(...(col.repos ?? []));
-            result.services.push(...(col.services ?? []));
-            if (col.folder) result.collection.folder = col.folder;
-            if (col.error) result.warnings.push(`collection folder: ${col.error}`);
-          } catch {
-            result.warnings.push(`wtc status failed (exit ${status.code}): ${(status.stderr || status.stdout).trim().slice(0, 300) || "is wtc on the gateway's PATH?"}`);
-          }
+        return { ok: true, result: await loadCollection(action.agentId, action.sessionKey) };
+      },
+    });
+
+    // Collections with an open pull request are looked at every few minutes
+    // also while nobody has their card open, so that a merge, a failed check
+    // or a review reaches the conversation.
+    let timer;
+    let polling = false;
+    const poll = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        for (const c of watch.open()) {
+          const known = api.runtime.agent.session.listSessionEntries({ agentId: c.agentId }).some((s) => s.sessionKey === c.sessionKey);
+          if (!known) watch.forget(c.agentId, c.sessionKey);
+          else await loadCollection(c.agentId, c.sessionKey).catch(() => {});
         }
-        const byPath = new Map(checkouts.map((c) => [c.path, c]));
-        result.repos = children
-          .map(({ sessionKey, entry }) => ({
-            sessionKey,
-            label: entry.label ?? entry.displayName ?? null,
-            project: entry.projectId ?? null,
-            // A hidden owner has no conversation of its own.
-            owner: sessionKey.includes(":subagent:") ? "hidden" : "conversation",
-            ...(byPath.get(worktreeOf(entry)) ?? { path: worktreeOf(entry), branch: entry.worktree?.branch ?? null, error: "no status" }),
-          }))
-          .sort((a, b) => String(a.project ?? a.repo).localeCompare(String(b.project ?? b.repo)));
-        return { ok: true, result };
+      } finally {
+        polling = false;
+      }
+    };
+    api.registerService?.({
+      id: "pull-request-watch",
+      start() {
+        const minutes = Number(api.pluginConfig?.pullRequestPollMinutes ?? 5);
+        if (!(minutes > 0) || (api.pluginConfig?.pullRequestEvents ?? "wake") === "off") return;
+        timer = setInterval(() => void poll(), minutes * 60000);
+        timer.unref?.();
+      },
+      stop() {
+        clearInterval(timer);
+        timer = undefined;
       },
     });
 
