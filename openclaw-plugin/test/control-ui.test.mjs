@@ -634,3 +634,44 @@ test("composer: the suggestion is asked again only for a new message, and not mo
     mock.timers.reset();
   }
 });
+
+test("composer: the draft is suggested about once typing pauses, and Start sends it along", async () => {
+  const { isMainSession, startMessage } = await import("../dist/control-ui/v1/index.js");
+  assert.equal(isMainSession("agent:main:main"), true);
+  assert.equal(isMainSession("agent:main:dashboard:abc"), false);
+  assert.match(startMessage({ project: "wtc", repos: ["wtc-site"] }, true), /^Start a new conversation .*sessions_spawn with visible: true.*wtc add-repo wtc-site --project wtc/);
+  const { mock } = await import("node:test");
+  // settle() waits on setTimeout, which this test fakes.
+  const flush = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+  const { host, view } = await mount("composer", collection([]));
+  await settle();
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const sessionKey = [...collections.keys()].at(-1);
+    let draft = "";
+    const sent = [];
+    const props = () => ({ sessionKey, agentId: "main", draft, setDraft: (d) => { draft = d; }, send: async () => { sent.push(draft); return true; } });
+    const type = async (text) => {
+      draft = text;
+      view.update({ props: props(), host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} });
+      await flush();
+    };
+    calls.length = 0;
+    await type("lets work on the site");
+    assert.equal(calls.filter((c) => c.actionId === "suggest").length, 0, "not while typing");
+    mock.timers.tick(800);
+    await flush();
+    await flush();
+    assert.deepEqual(calls.find((c) => c.actionId === "suggest")?.payload, { text: "lets work on the site" });
+    const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
+    assert.ok(card(), "suggested from the draft");
+    await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
+    await flush();
+    assert.equal(sent.length, 1);
+    assert.ok(sent[0].startsWith("lets work on the site\n\n(wtc) Start this conversation's collection in wtc project wtc"));
+    assert.equal(calls.some((c) => c.method === "sessions.send"), false, "through the composer's own send");
+    view.dispose();
+  } finally {
+    mock.timers.reset();
+  }
+});
