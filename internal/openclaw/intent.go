@@ -203,11 +203,9 @@ func AddRepo(repo, project, gitURL, worktree, baseRef, task string) (Intent, err
 	return intent(ActionAddRepo, ActorParent, repo, ToolSessionsSpawn, SpawnArgs{
 		Task: task, Label: worktree + " " + repo, ProjectID: project, ProjectGitURL: gitURL,
 		Worktree: true, WorktreeName: worktree, WorktreeBaseRef: baseRef, Visible: gitURL != "",
-		ExpectsCompletionMessage: &quiet,
+		ExpectsCompletionMessage: new(bool),
 	}), nil
 }
-
-var quiet = false
 
 // Worker is a worker's add-repo intent: a worker takes part of the task, so
 // its completion comes back to the session that asked for it.

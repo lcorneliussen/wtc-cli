@@ -92,6 +92,8 @@ type spawned struct {
 		ProjectGitURL   string `json:"projectGitUrl"`
 		WorktreeName    string `json:"worktreeName"`
 		WorktreeBaseRef string `json:"worktreeBaseRef"`
+		// Absent (nil) keeps OpenClaw's completion handoff.
+		ExpectsCompletionMessage *bool `json:"expectsCompletionMessage"`
 	} `json:"args"`
 }
 
@@ -391,6 +393,21 @@ func TestAddRepoSpawnsAWorker(t *testing.T) {
 	intents, err := addRepoPlan(t, "api", "web", "--worktree", "12-x", "--worker", "a", "--work", "Add paging to the list endpoint.")
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A worker reports back; the task's owners do not.
+	for _, in := range intents {
+		if in.Args.ExpectsCompletionMessage != nil {
+			t.Errorf("worker %s: expectsCompletionMessage %v, want the default", in.Repo, *in.Args.ExpectsCompletionMessage)
+		}
+	}
+	if owners, err := addRepoPlan(t, "web", "--worktree", "13-x"); err != nil || len(owners) == 0 {
+		t.Fatal(owners, err)
+	} else {
+		for _, in := range owners {
+			if in.Args.ExpectsCompletionMessage == nil || *in.Args.ExpectsCompletionMessage {
+				t.Errorf("owner %s reports back", in.Repo)
+			}
+		}
 	}
 	// api has the task's branch, web does not yet: its registry default.
 	if got, want := summary(intents), "api@api:openclaw/12-x web@web:origin/main"; got != want {
