@@ -82,10 +82,10 @@ func versionLabel() string {
 	return version
 }
 
-// describeBuild names a build without a release version (a plain go build)
-// the way wtc dev install does: below the next patch release after the
-// newest release it embeds notes for, with its commit, the commit's time and
-// .dirty for uncommitted changes, as far as Go recorded them.
+// describeBuild names a build without a release version (a plain go build),
+// similar to wtc dev install: below the next patch release after the newest
+// release it embeds notes for, with its commit, the commit's time and .dirty
+// for uncommitted changes, as far as Go recorded them.
 func describeBuild(readInfo func() (*debug.BuildInfo, bool)) string {
 	base := ""
 	if notes, err := wtc.EmbeddedReleaseNotes(); err == nil {
