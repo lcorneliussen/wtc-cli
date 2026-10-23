@@ -312,8 +312,8 @@ func TestStatusTUIReadsServicesWhenSignalledOrDue(t *testing.T) {
 	}
 }
 
-// Ready is only a startup probe: a ready task that doesn't answer now, or a
-// running tunnel whose provider can't serve, is red, and its hover says why.
+// Ready is only a startup probe: a live task that doesn't answer now, or a
+// live tunnel whose provider can't serve, is red, and its hover says why.
 func TestStatusRuntimeShowsTroubleNow(t *testing.T) {
 	ok := wtc.RuntimeItem{Path: "app/web/server", Group: "app/web", Kind: "service", State: "ready", URL: "http://127.0.0.1:1", Answering: "yes"}
 	silent := ok

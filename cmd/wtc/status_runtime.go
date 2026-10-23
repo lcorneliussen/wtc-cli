@@ -245,8 +245,9 @@ func statusRuntimeState(item wtc.RuntimeItem) string {
 	return item.State
 }
 
-// statusRuntimeTrouble is a ready task that doesn't answer now, or a running
-// tunnel whose provider client cannot serve: ready is only a startup probe.
+// statusRuntimeTrouble is a live task (ready or running) that doesn't answer
+// now, or a live tunnel whose provider client cannot serve: ready is only a
+// startup probe.
 func statusRuntimeTrouble(item wtc.RuntimeItem) bool {
 	running := item.State == "ready" || item.State == "running"
 	return running && (item.Answering == "no" || item.Login != "")
@@ -310,9 +311,9 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 				}
 				text := statusTUISafe(statusRuntimeTunnelLabel(item))
 				// Like the port: the state colour, except that a running tunnel on
-				// the internet is warning-toned.
+				// the internet is warning-toned, unless it is in trouble (red).
 				_, tone := statusRuntimeMark(item)
-				if statusRuntimeExposed(item) && statusRuntimeLive(item) {
+				if statusRuntimeExposed(item) && statusRuntimeLive(item) && !statusRuntimeTrouble(item) {
 					tone = statusToneWarning
 				}
 				if styled && statusTUIURL(item.URL) != "" && statusRuntimeLive(item) {
@@ -356,7 +357,7 @@ func statusRuntimeItems(snapshot wtc.StatusSnapshot, row wtc.StatusRepo) []wtc.R
 }
 
 // statusRuntimeMark is one letter for a task, toned by its state, and red
-// for a running task that doesn't answer now or needs a provider login. A configured
+// for a live task that doesn't answer now or needs a provider login. A configured
 // mark wins. Otherwise a service takes the first letter of its service name
 // (w for web), a tunnel the first letter of its own name (t for tunnel), in
 // upper case when it is public, and resource hooks are r.
