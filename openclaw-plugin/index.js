@@ -329,6 +329,19 @@ export function openaiDecisions({ apiKey, model = "gpt-6-luna", baseUrl = "https
   };
 }
 
+// The git identity the agent's own commits get, for a merge the plugin makes
+// on its behalf: its managed GitHub identity's gitAuthor (the agent's, else
+// the system's), else its name as <slug>@localhost, else OpenClaw's.
+export function agentGitIdentity(config, agentId) {
+  const entry = config?.agents?.entries?.[agentId] ?? {};
+  const author = entry.tools?.github ? entry.tools.github.gitAuthor : config?.tools?.github?.gitAuthor;
+  const name = String(entry.identity?.name ?? entry.name ?? "").trim();
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const fallback = slug ? { name, email: `${slug}@localhost` } : { name: "OpenClaw", email: "openclaw@localhost" };
+  const id = { name: author?.name || fallback.name, email: author?.email || fallback.email };
+  return { GIT_AUTHOR_NAME: id.name, GIT_AUTHOR_EMAIL: id.email, GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email };
+}
+
 // A child that owns a repository has a managed worktree to look at.
 const worktreeOf = (entry) => (entry?.worktree ? entry.workspaceDir || entry.spawnedCwd || null : null);
 
@@ -718,8 +731,10 @@ export default {
         const entry = action.sessionKey && api.runtime.agent.session.getSessionEntry({ agentId: action.agentId, sessionKey: action.sessionKey });
         const cwd = worktreeOf(entry);
         if (!cwd) return { ok: false, error: "this session owns no managed worktree" };
-        // wtc reads its host from the environment an agent's shell has.
-        const r = await run(["wtc", "catch-up", "--json"], { cwd, timeoutMs: 120000, env: { OPENCLAW_SHELL: "exec" } });
+        // wtc reads its host from the environment an agent's shell has, and a
+        // merge commit needs the identity that shell would commit with.
+        const config = api.runtime?.config?.current?.() ?? api.config;
+        const r = await run(["wtc", "catch-up", "--json"], { cwd, timeoutMs: 120000, env: { OPENCLAW_SHELL: "exec", ...agentGitIdentity(config, action.agentId) } });
         let json = null;
         try { json = JSON.parse(r.stdout); } catch { /* reported as text below */ }
         return { ok: true, result: { code: r.code, json, message: (json ? "" : r.stdout) + r.stderr } };

@@ -1,7 +1,7 @@
 // The gateway side of the plugin, where it needs no gateway.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import plugin, { collectionFolder, decideProjects, matchProjects, openaiDecisions, pullRequestChanges, pullRequestWatch, versionWarning, wtcVersionOf } from "../index.js";
+import plugin, { agentGitIdentity, collectionFolder, decideProjects, matchProjects, openaiDecisions, pullRequestChanges, pullRequestWatch, versionWarning, wtcVersionOf } from "../index.js";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -460,4 +460,37 @@ test("the suggest action calls OpenAI itself with WTC_DECISIONS_OPENAI_API_KEY, 
     globalThis.fetch = realFetch;
     if (was === undefined) delete process.env.WTC_DECISIONS_OPENAI_API_KEY; else process.env.WTC_DECISIONS_OPENAI_API_KEY = was;
   }
+});
+
+test("a catch-up merges as the agent commits: its gitAuthor, else its name, else OpenClaw", () => {
+  const who = (cfg, id = "main") => { const e = agentGitIdentity(cfg, id); return `${e.GIT_COMMITTER_NAME} <${e.GIT_COMMITTER_EMAIL}>`; };
+  assert.equal(who({ agents: { entries: { main: { name: "Team Claw", identity: { name: "Team Claw" } } } } }), "Team Claw <team-claw@localhost>");
+  assert.equal(who({ tools: { github: { gitAuthor: { name: "Automation User", email: "automation@example.com" } } }, agents: { entries: { main: { name: "Team Claw" } } } }), "Automation User <automation@example.com>");
+  // An agent's own managed identity replaces the system's.
+  assert.equal(who({ tools: { github: { gitAuthor: { name: "System", email: "s@example.com" } } }, agents: { entries: { main: { tools: { github: { gitAuthor: { name: "Review Agent" } } }, name: "Reviewer" } } } }), "Review Agent <reviewer@localhost>");
+  assert.equal(who({}), "OpenClaw <openclaw@localhost>");
+  const e = agentGitIdentity({}, "main");
+  assert.equal(e.GIT_AUTHOR_NAME, e.GIT_COMMITTER_NAME);
+});
+
+test("the card's catch-up runs wtc catch-up with the agent's git identity", async () => {
+  const actions = new Map();
+  let env = null;
+  plugin.register({
+    pluginConfig: {},
+    config: { agents: { entries: { main: { name: "Team Claw" } } } },
+    runtime: {
+      state: { resolveStateDir: () => "/nonexistent" },
+      agent: { session: { listSessionEntries: () => [], getSessionEntry: () => ({ worktree: { branch: "openclaw/9-x" }, workspaceDir: "/worktrees/w1" }) } },
+      system: { runCommandWithTimeout: async (argv, options) => { if (argv[1] === "catch-up") env = options.env; return { code: 0, stdout: "{}", stderr: "" }; } },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  await actions.get("catch-up").handler({ sessionKey: "agent:main:repo:site", agentId: "main", payload: {} });
+  assert.equal(env.OPENCLAW_SHELL, "exec");
+  assert.equal(env.GIT_COMMITTER_EMAIL, "team-claw@localhost");
+  assert.equal(env.GIT_AUTHOR_NAME, "Team Claw");
 });
