@@ -15,7 +15,7 @@ Install a [published release](https://github.com/lcorneliussen/wtc-cli/releases)
 With mise:
 
 ```sh
-mise use -g github:lcorneliussen/wtc-cli@0.1.58
+mise use -g github:lcorneliussen/wtc-cli@0.1.59
 ```
 
 The workspace root is an ordinary folder. Each collection contains a worktree
@@ -59,7 +59,7 @@ or the complete embedded instruction fallback.
 ```sh
 wtc harness init agent-harness \
   --remote git@github.com:example-org/agent-harness.git \
-  --cli-version 0.1.58
+  --cli-version 0.1.59
 ```
 
 The command requires an explicit version, creates six files, and refuses to
