@@ -39,12 +39,21 @@ func InitHarness(opt HarnessInitOptions) (HarnessInitResult, error) {
 		return result, err
 	}
 	result.Directory = dir
+
 	// Parent aliases (such as /tmp on macOS) are ordinary paths. The target
 	// itself and every output filename must not be a symlink or existing file.
 	if info, err := os.Lstat(dir); err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
 		return result, fmt.Errorf("harness target must be a real directory: %s", dir)
 	} else if err != nil && !os.IsNotExist(err) {
 		return result, err
+	}
+	for _, name := range []string{"taba.toml", ".taba-version"} {
+		path := filepath.Join(dir, name)
+		if _, err := os.Lstat(path); err == nil {
+			return result, fmt.Errorf("refusing to shadow existing %s", path)
+		} else if !os.IsNotExist(err) {
+			return result, err
+		}
 	}
 	registry, err := yaml.Marshal(Registry{SchemaVersion: 1, Repos: []Repo{{Name: opt.Name, Remote: opt.Remote, DefaultRef: "origin/main", Role: "Project harness"}}})
 	if err != nil {

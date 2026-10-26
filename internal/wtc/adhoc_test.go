@@ -495,6 +495,28 @@ func TestAdHocNewCreatesSiblingWithSameRegistrations(t *testing.T) {
 	}
 }
 
+func TestTabaConfigCarriesIntoFreshAdHocSibling(t *testing.T) {
+	root := adHocFixture(t)
+	source := adHocSource(t, root, "widget")
+	c := initAdHoc(t, filepath.Join(root, "task"))
+	addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + source})
+	fixtureFile(t, filepath.Join(c.Harness, "taba.toml"), "[status]\nreturn_merged = false\n", 0644)
+	result, err := c.NewCollection(NewOptions{Slug: "next", Repos: []string{"widget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := OpenCollection(result.Collection)
+	if err != nil || next.Config.Status.ReturnMerged == nil || *next.Config.Status.ReturnMerged {
+		t.Fatalf("selected config did not carry over: %+v %v", next, err)
+	}
+	if _, err := os.Stat(filepath.Join(next.Harness, "wtc.toml")); err != nil {
+		t.Fatalf("fresh sibling did not keep the phase-0 output name: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(next.Harness, "taba.toml")); !os.IsNotExist(err) {
+		t.Fatal("fresh sibling wrote the future default name")
+	}
+}
+
 func TestAdHocNewOptionsHooksAndControlRoot(t *testing.T) {
 	root := adHocFixture(t)
 	widget := adHocSource(t, root, "widget")

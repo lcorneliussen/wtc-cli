@@ -55,8 +55,8 @@ every one of those CLIs reads on its own when it opens the collection, which
 makes it the one place shared guidance lands without a per-tool rule file. It
 is authored as `harness/collection-AGENTS.md`, named for where it goes — a
 file actually called `AGENTS.md` in the harness would be read as instructions
-for whoever is editing that folder. Its companion `WTC-SCOPE.md` says what the
-individual collection is for; see
+for whoever is editing that folder. Its companion task scope (`WTC-SCOPE.md`
+when present, otherwise `SCOPE.md`) says what the individual collection is for; see
 [collection-context.md](collection-context.md).
 
 Why the collection root: it is where agents are meant to start (cross-repo

@@ -348,7 +348,7 @@ func stopRetiredStatusWatchers(target string) {
 func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 	files := []string{
 		"HANDOFF.md", ".env.collection", ".env.collection.local", "mise.toml", ".DS_Store",
-		"WTC-SCOPE.md", ".env.toolchain",
+		"WTC-SCOPE.md", "SCOPE.md", ".env.toolchain",
 		".wtc-runtime.lock",
 		".wtc-prs", ".wtc-prs.lock", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
 		".wtc-catch-up.json", ".wtc-catch-up.json.md", ReviewModeFile,

@@ -217,7 +217,10 @@ func (c *Context) load() error {
 		// Preserve harness-specific metadata for commands that understand it.
 		// Unrecognized fields do not make basic env/doctor operations unusable.
 	}
-	cfg := filepath.Join(c.Harness, "wtc.toml")
+	cfg, err := configInput(c.Harness)
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
 	if _, err := os.Stat(cfg); err == nil {
 		if _, err := toml.DecodeFile(cfg, &c.Config); err != nil {
 			return fmt.Errorf("config: %w", err)

@@ -10,8 +10,10 @@ private downstream projects or link to their delivery records. Keep that trackin
 private, and pass the same restriction to every delegated follower.
 # Follow owned work through delivery
 
-Locate the collection via `WTC-SCOPE.md` and its `harness/`, read the affected
-repo's instructions, and identify the assigned PRs. If ownership or the
+Locate the collection via its `harness/` and task scope. Read and edit
+`WTC-SCOPE.md` when present, otherwise existing `SCOPE.md`; if neither exists,
+use `wtc-start` to seed the legacy default. Do not create a second scope file.
+Read the affected repo's instructions, and identify the assigned PRs. If ownership or the
 intended delivery outcome is missing, reconstruct it from the task and PR
 before changing anything. An enlisted PR may be reference material, so its
 presence alone is not authorization to advance it.

@@ -24,6 +24,10 @@ other subdirectories; the full inventory is `harness/.harness-repos.yml`.
 If neither test passes you are in a standalone checkout: work single-repo, do
 not guess at `../` paths, and stop following this skill.
 
+Select the task scope: use `WTC-SCOPE.md` when present, otherwise existing
+`SCOPE.md`. Read and edit that file throughout this session. If neither exists,
+fresh scope files use `WTC-SCOPE.md`; never create it beside existing `SCOPE.md`.
+
 ## 2. Consume the launch note — first action, before anything else
 
 If `HANDOFF.md` exists at the collection root:
@@ -31,7 +35,7 @@ If `HANDOFF.md` exists at the collection root:
 1. Read it.
 2. Turn anything durable into issues, commits, or PR text. Anything that
    matters and is only in that file is currently one `rm` from being lost.
-3. Transcribe the scope into **`WTC-SCOPE.md`** at the collection root — the
+3. Transcribe the scope into **the selected scope file** at the collection root — the
    task in a paragraph, the issue, one line per repo saying why that repo is
    here, and what is deliberately out. That file is what the next session in
    this collection reads instead of the handoff. If the collection predates

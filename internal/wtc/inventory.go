@@ -50,10 +50,14 @@ var envKeyName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 func (c *Context) ListEnv() (EnvInventory, error) {
 	result := EnvInventory{Files: []EnvInventoryFile{}, Variables: []EnvInventoryKey{}}
 	seen := map[string]bool{}
+	machine, err := MachineEnvFile(c.ConfigRoot)
+	if err != nil {
+		return result, err
+	}
 	for _, source := range []struct {
 		path, label, scope string
 	}{
-		{filepath.Join(c.ConfigRoot, "wtc.env"), "wtc.env", "all collections using this control root (workspace defaults)"},
+		{machine, filepath.Base(machine), "all collections using this control root (workspace defaults)"},
 		{filepath.Join(c.Collection, ".env.collection"), ".env.collection", "this collection (generated)"},
 		{filepath.Join(c.Collection, ".env.collection.local"), ".env.collection.local", "this collection (local override)"},
 	} {

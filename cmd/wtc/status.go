@@ -254,7 +254,11 @@ func statusSetting(c *wtc.Context, name string) string {
 	if value, ok := envcompat.LookupEnv(name); ok && value != "" {
 		return value
 	}
-	data, err := os.ReadFile(filepath.Join(c.ConfigRoot, "wtc.env"))
+	path, err := wtc.MachineEnvFile(c.ConfigRoot)
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}

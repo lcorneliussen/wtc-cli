@@ -59,7 +59,7 @@ var compatibilityHeader = regexp.MustCompile(`^\s*\[compatibility\]\s*(#.*)?$`)
 var tomlHeader = regexp.MustCompile(`^\s*\[`)
 var requiresLine = regexp.MustCompile(`^(\s*requires\s*=\s*)"[^"]*"(.*)$`)
 
-// replaceCompatibility rewrites the requires line of wtc.toml's
+// replaceCompatibility rewrites the requires line of the harness config's
 // [compatibility] table and leaves every other line as written.
 func replaceCompatibility(config, requires string) (string, error) {
 	lines := strings.SplitAfter(config, "\n")
@@ -78,7 +78,7 @@ func replaceCompatibility(config, requires string) (string, error) {
 			return strings.Join(lines, ""), nil
 		}
 	}
-	return "", errors.New("wtc.toml has no [compatibility] requires line to update")
+	return "", errors.New("harness configuration has no [compatibility] requires line to update")
 }
 
 // Upgrade moves the harness pin and compatibility range to a newer release,
@@ -89,8 +89,15 @@ func (c *Context) Upgrade(opt UpgradeOptions) (UpgradeResult, error) {
 	if c.AdHoc {
 		return result, errors.New("wtc upgrade needs a harness collection; an ad-hoc collection uses the installed wtc")
 	}
-	pinFile := filepath.Join(c.Harness, ".wtc-cli-version")
-	configFile := filepath.Join(c.Harness, "wtc.toml")
+	pinFile, err := pinInput(c.Harness)
+	if err != nil {
+		return result, err
+	}
+	configFile, err := configInput(c.Harness)
+	if err != nil {
+		return result, err
+	}
+	result.Files = []string{filepath.Base(pinFile), filepath.Base(configFile)}
 	pin, err := os.ReadFile(pinFile)
 	if err != nil {
 		return result, fmt.Errorf("cannot read the harness pin: %w", err)
@@ -126,16 +133,16 @@ func (c *Context) Upgrade(opt UpgradeOptions) (UpgradeResult, error) {
 	}
 	config, err := os.ReadFile(configFile)
 	if err != nil {
-		return result, fmt.Errorf("cannot read wtc.toml: %w", err)
+		return result, fmt.Errorf("cannot read %s: %w", filepath.Base(configFile), err)
 	}
 	updated, err := replaceCompatibility(string(config), result.Requires)
 	if err != nil {
 		return result, err
 	}
-	if dirty, err := gitOutput("-C", c.Harness, "status", "--porcelain", "--", ".wtc-cli-version", "wtc.toml"); err != nil {
+	if dirty, err := gitOutput("-C", c.Harness, "status", "--porcelain", "--", result.Files[0], result.Files[1]); err != nil {
 		return result, err
 	} else if dirty != "" {
-		return result, errors.New("the harness pin or wtc.toml has uncommitted changes; commit or discard them first")
+		return result, fmt.Errorf("the harness pin or %s has uncommitted changes; commit or discard them first", result.Files[1])
 	}
 	if !opt.DryRun {
 		if err := os.WriteFile(pinFile, []byte(result.To+"\n"), 0644); err != nil {

@@ -63,3 +63,21 @@ func TestTabaSettingsKeepEnvironmentBeforeFilePrecedence(t *testing.T) {
 		t.Fatalf("empty new-prefix environment should fall back to file defaults: %d", got)
 	}
 }
+
+func TestTabaMachineDefaultsFile(t *testing.T) {
+	c := &wtc.Context{ConfigRoot: t.TempDir()}
+	t.Setenv("WTC_STATUS_WATCH", "")
+	t.Setenv("TABA_STATUS_WATCH", "")
+	if err := os.WriteFile(filepath.Join(c.ConfigRoot, "taba.env"), []byte("TABA_STATUS_WATCH=19\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusIntervalSetting(c, "WTC_STATUS_WATCH", 30); got != 19 {
+		t.Fatalf("alias defaults file ignored: %d", got)
+	}
+	if err := os.WriteFile(filepath.Join(c.ConfigRoot, "wtc.env"), []byte("WTC_STATUS_WATCH=9\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusIntervalSetting(c, "WTC_STATUS_WATCH", 30); got != 9 {
+		t.Fatalf("legacy defaults file lost authority: %d", got)
+	}
+}

@@ -134,6 +134,80 @@ func TestUpgradeRefusesAdHocCollection(t *testing.T) {
 	}
 }
 
+func TestTabaUpgradePreservesSelectedPinAndConfigNames(t *testing.T) {
+	for _, pinName := range []string{".wtc-cli-version", ".taba-version"} {
+		for _, configName := range []string{"wtc.toml", "taba.toml"} {
+			t.Run(pinName+"/"+configName, func(t *testing.T) {
+				c, _ := upgradeFixture(t)
+				for _, pair := range [][2]string{{".wtc-cli-version", pinName}, {"wtc.toml", configName}} {
+					if pair[0] != pair[1] {
+						fixtureGit(t, "-C", c.Harness, "mv", pair[0], pair[1])
+					}
+				}
+				fixtureGit(t, "-C", c.Harness, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "input names")
+				pin := filepath.Join(c.Harness, pinName)
+				dry, err := c.Upgrade(UpgradeOptions{Version: "0.1.11", DryRun: true})
+				if err != nil || strings.Join(dry.Files, ",") != pinName+","+configName {
+					t.Fatalf("dry-run paths: %+v %v", dry, err)
+				}
+				if data, _ := os.ReadFile(pin); string(data) != "0.1.9\n" {
+					t.Fatal("dry run modified the selected pin")
+				}
+				result, err := c.Upgrade(UpgradeOptions{Version: "0.1.11"})
+				if err != nil || strings.Join(result.Files, ",") != pinName+","+configName {
+					t.Fatalf("upgrade paths: %+v %v", result, err)
+				}
+				if data, _ := os.ReadFile(pin); string(data) != "0.1.11\n" {
+					t.Fatalf("selected pin not updated: %q", data)
+				}
+				if data, _ := os.ReadFile(filepath.Join(c.Harness, configName)); !strings.Contains(string(data), `requires = ">=0.1.11,<0.2"`) {
+					t.Fatalf("selected config not updated: %s", data)
+				}
+				for _, name := range []string{".wtc-cli-version", ".taba-version", "wtc.toml", "taba.toml"} {
+					if name != pinName && name != configName {
+						if _, err := os.Lstat(filepath.Join(c.Harness, name)); !os.IsNotExist(err) {
+							t.Fatalf("upgrade created a shadow file %s", name)
+						}
+					}
+				}
+				if _, err := c.Upgrade(UpgradeOptions{Version: "0.1.12"}); err == nil || !strings.Contains(err.Error(), "uncommitted") {
+					t.Fatalf("dirty selected files were not protected: %v", err)
+				}
+				fixtureGit(t, "-C", c.Harness, "add", "--", pinName, configName)
+				fixtureGit(t, "-C", c.Harness, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "upgraded inputs")
+				original := map[string]string{}
+				for _, name := range []string{pinName, configName} {
+					data, err := os.ReadFile(filepath.Join(c.Harness, name))
+					if err != nil {
+						t.Fatal(err)
+					}
+					original[name] = string(data)
+				}
+				for _, dirty := range []string{pinName, configName} {
+					edited := original[dirty] + "\n# local edit\n"
+					if dirty == pinName {
+						edited = "0.1.10\n"
+					}
+					fixtureFile(t, filepath.Join(c.Harness, dirty), edited, 0644)
+					if _, err := c.Upgrade(UpgradeOptions{Version: "0.1.12"}); err == nil || !strings.Contains(err.Error(), "uncommitted") {
+						t.Fatalf("dirty %s alone was not protected: %v", dirty, err)
+					}
+					for _, name := range []string{pinName, configName} {
+						want := original[name]
+						if name == dirty {
+							want = edited
+						}
+						if data, err := os.ReadFile(filepath.Join(c.Harness, name)); err != nil || string(data) != want {
+							t.Fatalf("refused upgrade modified %s: %q %v", name, data, err)
+						}
+					}
+					fixtureFile(t, filepath.Join(c.Harness, dirty), original[dirty], 0644)
+				}
+			})
+		}
+	}
+}
+
 func TestCatchUpIdleOnlyLeavesBusyAgentsAndInstallsTools(t *testing.T) {
 	c := newWorkspaceFixture(t)
 	for _, slug := range []string{"busy", "stuck", "quiet"} {

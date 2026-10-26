@@ -64,7 +64,7 @@ func addUpgradeCommand(root *cobra.Command, asJSON *bool) {
 		if result.DryRun {
 			verb = "would pin"
 		}
-		fmt.Printf("%s wtc %s (was %s); wtc.toml requires %q\n", verb, result.To, result.From, result.Requires)
+		fmt.Printf("%s wtc %s (was %s); %s requires %q\n", verb, result.To, result.From, result.Files[1], result.Requires)
 		if result.NotInstalled {
 			fmt.Printf("mise not found: wtc %s is pinned but not installed\n", result.To)
 		}

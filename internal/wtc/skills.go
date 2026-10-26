@@ -113,9 +113,13 @@ func (c *Context) RenderSkills(opt SkillRenderOptions) (SkillRenderResult, error
 				return r, err
 			}
 		}
-		if recorded, err := os.ReadFile(filepath.Join(patchRoot, name, ".wtc-base.sha256")); err == nil {
+		digestPath, err := skillBaseInput(filepath.Join(patchRoot, name))
+		if err != nil {
+			return r, err
+		}
+		if recorded, err := os.ReadFile(digestPath); err == nil {
 			if strings.TrimSpace(string(recorded)) != skillDigest(base) {
-				return r, fmt.Errorf("skill %s section patch base has drifted; review and update .wtc-base.sha256", name)
+				return r, fmt.Errorf("skill %s section patch base has drifted; review and update %s", name, filepath.Base(digestPath))
 			}
 		} else if !os.IsNotExist(err) {
 			return r, err
@@ -438,7 +442,10 @@ func safeGeneratedParent(collection, parent string) error {
 }
 
 func (c *Context) seedScope(dryRun bool, r *SkillRenderResult) error {
-	dest := filepath.Join(c.Collection, "WTC-SCOPE.md")
+	dest, err := legacyInput(c.Collection, "WTC-SCOPE.md", "SCOPE.md")
+	if err != nil {
+		return err
+	}
 	if _, err := os.Lstat(dest); err == nil {
 		r.Actions = append(r.Actions, "scope: already present")
 		return nil
