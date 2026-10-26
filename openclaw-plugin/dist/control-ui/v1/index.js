@@ -140,9 +140,10 @@ async function confirmBitbucket(host, agentId, r, pending, say) {
 export const conflictsOf = (message) => (/conflicts in: (.+?)\. The merge was aborted/.exec(message ?? "")?.[1] ?? "")
   .split(/,\s*/).filter(Boolean);
 
-// A conflict is the conversation's to resolve, as on a pull request: wtc
-// left the checkout as it was, so the person is told it went there instead
-// of being told to merge by hand.
+// A conflict is the agent's to resolve, in its own checkout: in a sandbox,
+// wtc catch-up there stops on the conflict with git's merge state, and the
+// gateway takes the resolved branch back; outside one, wtc catch-up says to
+// merge by hand. The gateway's own merge was aborted and changed nothing.
 async function catchUpRepo(host, agentId, r, say, ask) {
   const name = r.repo ?? r.project;
   say(`Catching up ${name}…`);
@@ -150,7 +151,7 @@ async function catchUpRepo(host, agentId, r, say, ask) {
   const conflicts = conflictsOf(out.message);
   if (conflicts.length) {
     const base = r.base ?? "its base";
-    await ask(`Catching up ${name} with ${base} conflicts in ${conflicts.join(", ")}. Merge ${base} into ${name}, resolve the conflicts and commit. Don't rebase, and don't push: pushing is mine, through the gateway.`);
+    await ask(`Catching up ${name} with ${base} conflicts in ${conflicts.join(", ")}. Run wtc catch-up in your checkout of ${name}; where it stops on the conflicts, resolve them there and finish as it says (wtc catch-up --continue in a sandbox). Don't rebase, and don't push: pushing is mine, through the gateway.`);
     say(`${name}: ${conflicts.join(", ")} changed on both sides; the conversation was asked to merge and resolve them.`);
     return;
   }

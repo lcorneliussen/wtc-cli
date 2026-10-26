@@ -302,7 +302,7 @@ test("composer: the actions are on the facts they change", async () => {
   calls.length = 0;
   await named(/^3 new on main\. Catch up/).onclick();
   assert.deepEqual(calls.map((c) => c.actionId ?? c.method), ["catch-up", "sessions.send"]);
-  assert.match(calls[1].message, /conflicts in README\.md, go\.mod\. Merge .* resolve the conflicts and commit\. Don't rebase, and don't push/);
+  assert.match(calls[1].message, /conflicts in README\.md, go\.mod\. Run wtc catch-up in your checkout of api; .*wtc catch-up --continue in a sandbox.*Don't rebase, and don't push/);
   catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
   await named(/^#7 conflicts with main\. Resolve/).onclick();
   assert.match(calls.at(-1).message, /Pull request #7 of api conflicts.*Don't push/);
