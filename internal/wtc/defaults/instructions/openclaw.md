@@ -42,9 +42,14 @@ when this collection turns to something else.
   session spawned one by itself, it is a **sub-session**: the card shows its
   checkout as a sub-row under the repository, compared with yours. ± is its
   uncommitted files (which you have the same, which differ, which only it
-  has), **↑** merges its commits into your checkout, **↓** catches it up with
-  yours, and **✕** discards it. Its work reaches the forge only through your
+  has); a click asks you to review them. **↑** merges its commits into your
+  checkout, **↓** catches it up with yours once it has nothing uncommitted,
+  and **✕** discards it. Its work reaches the forge only through your
   branch.
+- Asked to review what a sub-session left: compare its files with yours (it
+  is in its checkout's path), take over what is still wanted in your own
+  checkout, and say whether it can be discarded. Don't commit in its
+  checkout.
 - `wtc catch-up --from <branch>` in `<folder>/<repo>` merges such a branch,
   by its name, into yours. It never rebases; for a conflict, follow the
   wtc-catch-up skill. `wtc status <name> --sub <worktree>` compares one.
@@ -186,8 +191,9 @@ forge yourself.
 
 The gateway's agents have the wtc skills for this host, installed with the
 plugin by `wtc openclaw install`: **wtc-catch-up** (catching up, merging a
-sub-session's branch, resolving the conflicts), **wtc-pr** (getting a pull request ready
-for the person's push) and **wtc-follow** (acting on pull request news). The
+sub-session's branch, resolving the conflicts), **wtc-pr** (getting a pull
+request ready for the person's push) and **wtc-follow** (acting on pull
+request news). The
 card asks for them by name (`/skill wtc-catch-up …`), so a click there and a
 request in the chat do the same.
 

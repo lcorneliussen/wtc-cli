@@ -559,3 +559,29 @@ test("a sub-session's checkouts are its own, not a second row of the collection'
     assert.equal(refused.ok, false, bad);
   }
 });
+
+test("the collection is the one wtc made, also when a sub-session has as many checkouts", async () => {
+  const actions = new Map();
+  // One checkout of the collection, one of a sub-session spawned with a
+  // worktree: a tie by count. wtc labels the owners it spawns.
+  const entries = [
+    { sessionKey: "agent:main:c", entry: {} },
+    { sessionKey: "agent:main:subagent:site", entry: { parentSessionKey: "agent:main:c", label: "194-subrows site", projectId: "site", worktree: { branch: "openclaw/194-subrows" }, workspaceDir: "/worktrees/w1" } },
+    { sessionKey: "agent:main:subagent:x", entry: { parentSessionKey: "agent:main:c", label: "docs helper", projectId: "site", worktree: { branch: "openclaw/docs" }, workspaceDir: "/worktrees/w2" } },
+  ];
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      state: { resolveStateDir: () => "/nonexistent" },
+      agent: { session: { listSessionEntries: () => entries, getSessionEntry: () => undefined } },
+      system: { runCommandWithTimeout: async (argv) => ({ code: 0, stdout: argv[1] === "status" ? JSON.stringify({ [argv[2]]: { repos: [{ repo: "site", path: argv[2] === "docs" ? "/worktrees/w2" : "/worktrees/w1", branch: `openclaw/${argv[2]}` }] } }) : "", stderr: "" }) },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const { result } = await actions.get("collection").handler({ sessionKey: "agent:main:c", agentId: "main", payload: {} });
+  assert.deepEqual(result.repos.map((r) => r.branch), ["openclaw/194-subrows"]);
+  assert.deepEqual(result.subSessions.map((w) => [w.name, w.repos[0].taskBranch]), [["docs", "openclaw/194-subrows"]]);
+});

@@ -634,15 +634,16 @@ function collectionTables(v) {
       await v.refresh();
     }
   }
-  // A sub-session catches up with the collection's branch: the catch-up in its own
-  // checkout merges its parent, not origin.
+  // A sub-session catches up with the collection's branch, named in the
+  // catch-up in its own checkout: whatever the sub-session's branch is called,
+  // it merges the collection's, not origin's.
   async function catchUpWorker(w, r) {
     const name = nameOf(r);
     catching.add(r.sessionKey);
     v.rerender();
     try {
       v.say(`Catching sub-session ${w.name} up with the collection's ${name}…`);
-      const out = await call(v.host, "catch-up", r.sessionKey, v.agent());
+      const out = await call(v.host, "catch-up", r.sessionKey, v.agent(), r.taskBranch ? { from: r.taskBranch } : undefined);
       const conflicts = conflictsOf(out.message);
       if (conflicts.length) {
         await askSkill(v.host, v.key(), "wtc-catch-up", `${name}: catching sub-session ${w.name} up with the collection (wtc catch-up in its checkout) conflicts in ${conflicts.join(", ")}.`);
@@ -654,6 +655,13 @@ function collectionTables(v) {
       catching.delete(r.sessionKey);
       await v.refresh();
     }
+  }
+  // What a sub-session left uncommitted is the conversation's to sort out:
+  // it can read the checkout, compare and take over what is still wanted.
+  async function reviewSub(w, r) {
+    const differ = (r.uncommitted ?? []).filter((f) => f.state !== "same").map((f) => f.path);
+    await askConversation(v.host, v.key(), `Sub-session ${w.name} left ${plural(r.dirty, "uncommitted file")} in its checkout of ${nameOf(r)} (${r.path}). ${differ.length ? `These differ from yours or only it has them: ${differ.join(", ")}. Compare them with yours and take over what is still wanted, in your checkout.` : "Yours has all of them the same."} Then tell me whether it can be discarded. Don't commit in its checkout, and don't push.`);
+    v.say(`${nameOf(r)}: the conversation was asked to review what sub-session ${w.name} left.`);
   }
   // Discarding a sub-session deletes its sessions; OpenClaw removes their
   // worktrees. It asks again first: the second click within a few seconds
@@ -912,11 +920,17 @@ function collectionTables(v) {
       : r.mergeError ? toned("?", TONE.failure, r.mergeError)
       : r.toMerge > 0 ? count(`↑ ${r.toMerge}`, `${plural(r.toMerge, "commit")} on ${r.branch} not in the collection's ${nameOf(r)}. Merge them in (wtc catch-up --from ${r.branch}); never to the forge, never rebases`, TONE.pending, () => mergeWorker(w, r))
       : null;
+    // Uncommitted files keep a catch-up out (it would refuse): what to do
+    // with them is the conversation's, so ± asks it to review them.
     const down = busyHere ? null
-      : r.behind > 0 ? count(`↓ ${r.behind}`, `${plural(r.behind, "commit")} of the collection's ${nameOf(r)} not on ${r.branch}. Catch the sub-session up with the collection; never rebases`, TONE.pending, () => catchUpWorker(w, r))
-      : null;
+      : !(r.behind > 0) ? null
+      : r.dirty ? toned(`↓ ${r.behind}`, TONE.pending, `${plural(r.behind, "commit")} of the collection's ${nameOf(r)} not on ${r.branch}. It has uncommitted files: review them first (±)`)
+      : r.taskBranch ? count(`↓ ${r.behind}`, `${plural(r.behind, "commit")} of the collection's ${nameOf(r)} not on ${r.branch}. Catch the sub-session up with the collection; never rebases`, TONE.pending, () => catchUpWorker(w, r))
+      : toned(`↓ ${r.behind}`, TONE.pending, `${plural(r.behind, "commit")} of the collection's ${nameOf(r)} not on ${r.branch}`);
+    const files = !r.dirty ? null
+      : count(String(r.dirty), `${filesTitle(r)}\n\nAsk the conversation to compare them with its own and take over what is still wanted`, TONE.pending, () => reviewSub(w, r));
     return [name, css(el("code", { textContent: r.branch ?? "", title: r.branch ?? "" }), "font-size:12px;color:var(--muted, #888)"),
-      r.dirty ? toned(String(r.dirty), TONE.pending, filesTitle(r)) : null, up, down, null, null, null, null];
+      files, up, down, null, null, null, null];
   }
 
   function prTable(repos, narrow = false) {

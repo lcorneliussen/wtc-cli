@@ -883,23 +883,34 @@ test("panel: a failure stays one across a refresh; a sub-session merge that fail
   view.dispose();
 });
 
-test("composer: a sub-session's ↓ catches it up with the collection, and its ± lists its files against the task's", async () => {
-  const data = {
+test("composer: a sub-session with uncommitted files is reviewed by the conversation; a clean one's ↓ merges the collection's branch", async () => {
+  const sub = (fields) => ({
     ...collection([repo("site", { branch: "openclaw/test", ahead: 1 })]),
-    subSessions: [{ name: "docs", collection: "test--docs", repos: [
-      repo("site", { sessionKey: "agent:main:owner:site-docs", branch: "openclaw/test--docs", dirty: 3, toMerge: 0, behind: 2, taskSessionKey: "agent:main:owner:site",
-        uncommitted: [{ path: "a.md", state: "same" }, { path: "b.md", state: "differs" }, { path: "c.mjs", state: "only" }] }),
+    subSessions: [{ name: "nav", collection: "13-docs-nav", repos: [
+      repo("site", { sessionKey: "agent:main:owner:site-nav", branch: "openclaw/13-docs-nav", path: "/worktrees/w5", toMerge: 0, behind: 2,
+        taskSessionKey: "agent:main:owner:site", taskBranch: "openclaw/test", ...fields }),
     ] }],
-  };
-  const { host, view } = await mount("composer", data);
-  const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
-  const [repos] = tables(card);
-  assert.deepEqual(repos[2], ["↳docs✕", "openclaw/test--docs", "3", "·", "↓ 2", "·", "·", "·", "·"]);
-  const files = [...card.all()].find((n) => n.tagName === "SPAN" && /^3 uncommitted files, compared with the collection's site:/.test(n.title ?? ""));
-  assert.equal(files.title, "3 uncommitted files, compared with the collection's site:\ndiffers: b.md\nonly here: c.mjs\nthe same in the collection: a.md");
+  });
+  const dirty = await mount("composer", sub({ dirty: 3,
+    uncommitted: [{ path: "a.md", state: "same" }, { path: "b.md", state: "differs" }, { path: "c.mjs", state: "only" }] }));
+  let card = [...dirty.host.all()].find((n) => n.className === "wtc-collection-card");
+  assert.deepEqual(tables(card)[0][2], ["↳nav✕", "openclaw/13-docs-nav", "3", "·", "↓ 2", "·", "·", "·", "·"]);
+  const buttons = () => [...card.all()].filter((n) => n.tagName === "BUTTON");
+  // With uncommitted files there is no catch-up to click: it would refuse.
+  assert.equal(buttons().find((n) => /^2 commits of the collection's site/.test(n.title)), undefined);
+  const review = buttons().find((n) => /^3 uncommitted files, compared with the collection's site:/.test(n.title));
+  assert.match(review.title, /^3 uncommitted files, compared with the collection's site:\ndiffers: b.md\nonly here: c.mjs\nthe same in the collection: a.md\n\nAsk the conversation/);
   calls.length = 0;
-  await [...card.all()].find((n) => n.tagName === "BUTTON" && /^2 commits of the collection's site not on openclaw\/test--docs/.test(n.title)).onclick();
-  // The catch-up runs in the worker's own checkout, which merges its task.
-  assert.deepEqual(calls.map((c) => [c.actionId, c.sessionKey, c.payload]), [["catch-up", "agent:main:owner:site-docs", undefined]]);
-  view.dispose();
+  await review.onclick();
+  assert.equal(calls.at(-1).method, "sessions.send");
+  assert.match(calls.at(-1).message, /^Sub-session nav left 3 uncommitted files in its checkout of site \(\/worktrees\/w5\)\. These differ from yours or only it has them: b\.md, c\.mjs\..*Don't commit in its checkout/);
+  dirty.view.dispose();
+
+  // Clean, ↓ merges the collection's branch by its name, in the sub-session's checkout.
+  const clean = await mount("composer", sub({}));
+  card = [...clean.host.all()].find((n) => n.className === "wtc-collection-card");
+  calls.length = 0;
+  await buttons().find((n) => /^2 commits of the collection's site not on openclaw\/13-docs-nav/.test(n.title)).onclick();
+  assert.deepEqual(calls.map((c) => [c.actionId, c.sessionKey, c.payload]), [["catch-up", "agent:main:owner:site-nav", { from: "openclaw/test" }]]);
+  clean.view.dispose();
 });

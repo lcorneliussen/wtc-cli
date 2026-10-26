@@ -527,8 +527,8 @@ type WorkerRepo struct {
 	// ToMerge counts the worker's commits the task's branch does not have
 	// yet: 0 once wtc catch-up --from merged them.
 	ToMerge int `json:"toMerge"`
-	// Behind counts the task's commits the worker does not have: what a
-	// catch-up in the worker's checkout brings in.
+	// Behind counts the collection's commits the worktree does not have:
+	// what a catch-up from the collection's branch brings in.
 	Behind int `json:"behind"`
 	// Uncommitted are the worker's uncommitted files, each compared with the
 	// task's checkout of the repository: whether the task has it already.

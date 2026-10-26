@@ -548,13 +548,19 @@ export default {
       // them, keeps the collection's folder and reports its services.
       const collectionName = (entry) => String(entry.worktree?.branch ?? "").replace(/^openclaw\//, "");
       const names = [...new Set(children.map((c) => collectionName(c.entry)).filter(Boolean))];
-      // The collection is the name most of the children work in; a child
-      // whose worktree is another one's is a sub-session (a wtc worker,
-      // <collection>--<worker>, or a session OpenClaw or the agent spawned
-      // with a worktree of its own, named for its change). Its checkouts are
-      // shown under the collection's, not as more of its repositories.
+      // The collection is the one wtc made for this conversation: wtc labels
+      // the owners it spawns "<collection> <repo>". A child whose worktree is
+      // another one's is a sub-session (a wtc worker, <collection>--<worker>,
+      // or a session OpenClaw or the agent spawned with a worktree of its
+      // own, named for its change). Its checkouts are shown under the
+      // collection's, not as more of its repositories, and ✕ may delete it:
+      // a name another one extends with "--" is never taken for one.
       const count = (n) => children.filter((c) => collectionName(c.entry) === n).length;
-      const task = [...names].sort((a, b) => count(b) - count(a) || a.length - b.length)[0];
+      const madeByWtc = (c, n) => c.entry.projectId ? c.entry.label === `${n} ${c.entry.projectId}` : String(c.entry.label ?? "").startsWith(n + " ");
+      const made = names.filter((n) => children.some((c) => collectionName(c.entry) === n && madeByWtc(c, n)));
+      const pool = made.length ? made : names;
+      const extendsAnother = (n) => pool.some((m) => m !== n && n.startsWith(m + WORKER_SEPARATOR));
+      const task = pool.filter((n) => !extendsAnother(n)).sort((a, b) => count(b) - count(a) || a.length - b.length)[0] ?? pool[0];
       const subName = (name) => (name.startsWith(task + WORKER_SEPARATOR) ? name.slice(task.length + WORKER_SEPARATOR.length) : name);
       const subDirs = children.filter((c) => collectionName(c.entry) && collectionName(c.entry) !== task).map((c) => worktreeOf(c.entry)).filter(Boolean);
       const compared = new Map();
@@ -603,8 +609,10 @@ export default {
         const c = compared.get(r.path);
         subs.get(r.sub).repos.push({ ...r, toMerge: c?.toMerge ?? null, mergeError: c?.error ?? null,
           behind: c?.behind ?? null, uncommitted: c?.uncommitted ?? [],
-          // The collection's own checkout of the repository, which a merge goes into.
-          taskSessionKey: result.repos.find((t) => t.repo && t.repo === r.repo)?.sessionKey ?? null });
+          // The collection's own checkout of the repository, which a merge
+          // goes into, and its branch, which ↓ merges into the sub-session.
+          taskSessionKey: result.repos.find((t) => t.repo && t.repo === r.repo)?.sessionKey ?? null,
+          taskBranch: result.repos.find((t) => t.repo && t.repo === r.repo)?.branch ?? null });
       }
       result.subSessions = [...subs.values()].sort((a, b) => a.name.localeCompare(b.name));
       tell(agentId, parentKey, watch.observe(agentId, parentKey, result.repos));
