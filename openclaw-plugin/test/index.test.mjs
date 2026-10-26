@@ -245,7 +245,7 @@ test("the collection's conversation hears what changed, and is woken for it", as
   services.at(-1).stop();
   mock.timers.reset();
   assert.match(events.at(-1).text, /#2 \(u\) was merged\.\nAct on it with the wtc-follow skill/);
-  // First seen already merged: the catch-up hint too.
+  // First seen already merged: the wtc-follow hint too.
   pr = { ...pr, number: 5, url: "u5", state: "merged" };
   await look();
   assert.match(events.at(-1).text, /#5 \(u5\) was opened and merged\.\nAct on it with the wtc-follow skill/);

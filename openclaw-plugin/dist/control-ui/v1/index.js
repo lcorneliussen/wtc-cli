@@ -140,11 +140,13 @@ async function confirmBitbucket(host, agentId, r, pending, say) {
 export const conflictsOf = (message) => (/conflicts in: (.+?)\. The merge was aborted/.exec(message ?? "")?.[1] ?? "")
   .split(/,\s*/).filter(Boolean);
 
+// Asks the conversation to run one of the agent's skills on what the card saw.
+const askSkill = (host, sessionKey, skill, input) => askConversation(host, sessionKey, `/skill ${skill} ${input}`);
+
 // A conflict is the agent's to resolve, in its own checkout, with the
 // wtc-catch-up skill: the card says what it saw and names the skill, so that
 // asking in the chat and clicking here do the same. The gateway's own merge
 // was aborted and changed nothing.
-const askSkill = (host, sessionKey, skill, input) => askConversation(host, sessionKey, `/skill ${skill} ${input}`);
 async function catchUpRepo(host, agentId, r, say, ask) {
   const name = r.repo ?? r.project;
   say(`Catching up ${name}…`);

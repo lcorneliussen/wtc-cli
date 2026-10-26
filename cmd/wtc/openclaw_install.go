@@ -25,7 +25,7 @@ func addOpenClawCommands(root *cobra.Command) {
 	var noConfig bool
 	install := &cobra.Command{
 		Use:   "install",
-		Short: "Install this wtc's OpenClaw plugin on the gateway: the collection card, the Collection panel and the agent's wtc skill",
+		Short: "Install this wtc's OpenClaw plugin on the gateway: the collection card, the Collection panel and the agent's wtc skills",
 		Long: `Run on the gateway host, where wtc and openclaw are on the PATH. The plugin is
 embedded in this binary, so it is always the one that matches this wtc.
 
