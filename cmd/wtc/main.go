@@ -298,6 +298,7 @@ func run() error {
 	addRuntimeCommands(root, &asJSON)
 	addHarnessCommands(root, &asJSON)
 	addReleaseNotesCommand(root, &asJSON)
+	addUpgradeCommand(root, &asJSON)
 	addDevCommands(root, &asJSON)
 	args, err := normalizeStatusWatchArgs(os.Args[1:])
 	if err != nil {

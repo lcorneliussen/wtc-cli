@@ -1,6 +1,7 @@
 package wtc
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -22,9 +23,10 @@ type catchUpWorkspaceList struct {
 type catchUpPaneList struct {
 	Result struct {
 		Panes []struct {
-			Label string          `json:"label"`
-			ID    string          `json:"pane_id"`
-			Agent json.RawMessage `json:"agent"`
+			Label       string          `json:"label"`
+			ID          string          `json:"pane_id"`
+			Agent       json.RawMessage `json:"agent"`
+			AgentStatus string          `json:"agent_status"`
 		} `json:"panes"`
 	} `json:"result"`
 }
@@ -90,6 +92,50 @@ func catchUpPane(c *Context, session, collection string) (string, bool, error) {
 		}
 	}
 	return "", false, nil
+}
+
+// catchUpAgentBusy returns the status of a working or blocked agent in the
+// collection's herdr workspace, or "" when there is none. Without herdr, or
+// without a running session, no agent can be busy.
+func catchUpAgentBusy(session, collection string) (string, error) {
+	if _, err := exec.LookPath("herdr"); err != nil {
+		return "", nil
+	}
+	workspaces, err := catchUpHerdr(session, "workspace", "list")
+	if err != nil {
+		if bytes.Contains(workspaces, []byte(`"server_not_running"`)) {
+			return "", nil
+		}
+		return "", fmt.Errorf("herdr workspace lookup failed")
+	}
+	var ws catchUpWorkspaceList
+	if json.Unmarshal(workspaces, &ws) != nil {
+		return "", fmt.Errorf("herdr workspace lookup failed")
+	}
+	id := ""
+	for _, item := range ws.Result.Workspaces {
+		if item.Label == collection {
+			id = item.ID
+			break
+		}
+	}
+	if id == "" {
+		return "", nil
+	}
+	panes, err := catchUpHerdr(session, "pane", "list", "--workspace", id)
+	if err != nil {
+		return "", fmt.Errorf("herdr pane lookup failed")
+	}
+	var listing catchUpPaneList
+	if json.Unmarshal(panes, &listing) != nil {
+		return "", fmt.Errorf("herdr pane lookup failed")
+	}
+	for _, item := range listing.Result.Panes {
+		if item.AgentStatus == "working" || item.AgentStatus == "blocked" {
+			return item.AgentStatus, nil
+		}
+	}
+	return "", nil
 }
 
 func catchUpForeground(session, pane string) ([]string, error) {

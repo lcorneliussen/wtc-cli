@@ -26,6 +26,11 @@ type CatchUpOptions struct {
 	NoMCP        bool
 	NoEnv        bool
 	NoSecrets    bool
+	// IdleOnly leaves a collection whose herdr agent is working or blocked
+	// to that agent. InstallTools runs mise install after a harness env
+	// refresh, so a new pin is usable at once.
+	IdleOnly     bool
+	InstallTools bool
 }
 
 type CatchUpRow struct {
