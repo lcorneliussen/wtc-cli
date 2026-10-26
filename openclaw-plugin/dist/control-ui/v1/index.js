@@ -153,10 +153,10 @@ const askSkill = (host, sessionKey, skill, input) => askConversation(host, sessi
 // wtc-catch-up skill: the card says what it saw and names the skill, so that
 // asking in the chat and clicking here do the same. The gateway's own merge
 // was aborted and changed nothing.
-async function catchUpRepo(host, agentId, r, say, ask) {
+async function catchUpRepo(host, agentId, r, say, ask, request) {
   const name = r.repo ?? r.project;
   say(`Catching up ${name}…`);
-  const out = await call(host, "catch-up", r.sessionKey, agentId);
+  const out = await (request ? request() : call(host, "catch-up", r.sessionKey, agentId));
   const conflicts = conflictsOf(out.message);
   if (conflicts.length) {
     const base = r.base ?? "its base";
@@ -517,6 +517,50 @@ function collectionTables(v) {
   // Repositories being pushed, and being caught up.
   const busy = new Set();
   const catching = new Set();
+  const acting = new Set();
+  const nextLabel = (s) => ({ "return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", resolve: "Resolve conflicts", merge: "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", push: "Push", "merge-pr": "Open pull request" })[s.step] ?? s.step;
+  const nextRoute = (s) => s.by === "person" && s.step === "merge-pr" ? "pr"
+    : s.by === "wtc" && s.approve === "person" && s.gateway === "github_publish" ? "publish"
+    : s.by === "agent" && (!s.approve || s.approve === "agent") && s.skill ? "agent"
+    : s.by === "wtc" && s.approve === "agent" && s.command?.[0] === "wtc" && s.command?.[1] === "catch-up" ? "agent"
+    : s.by === "wtc" && !s.approve && JSON.stringify(s.command) === JSON.stringify(["wtc", "catch-up"]) ? "run" : null;
+  async function actNext(r) {
+    if (acting.has(r.sessionKey)) return;
+    acting.add(r.sessionKey);
+    v.rerender();
+    try {
+      const out = await call(v.host, "next", v.key(), v.agent(), { ownerSessionKey: r.sessionKey, key: r.next.key });
+      const fresh = out.repo;
+      if (out.performed) {
+        await catchUpRepo(v.host, v.agent(), fresh, v.say, (input) => askSkill(v.host, v.key(), "wtc-catch-up", input), async () => out);
+      } else if (fresh?.next) {
+        const step = fresh.next;
+        switch (nextRoute(step)) {
+          case "publish": await publish(fresh); break;
+          case "agent":
+            await askSkill(v.host, v.key(), step.skill ?? "wtc-catch-up", `${nameOf(fresh)}: ${step.reason}. Work on this repository only; recheck its state before acting.`);
+            v.say(`${nameOf(fresh)}: asked the conversation to ${nextLabel(step).toLowerCase()}.`);
+            break;
+          default: v.say("The next step changed; refresh the collection before acting.", true);
+        }
+      }
+    } catch (err) { v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
+    finally { acting.delete(r.sessionKey); await v.refresh(); }
+  }
+  function nextActions(repos) {
+    const rows = repos.filter((r) => !r.error && r.next);
+    if (!rows.length) return null;
+    return css(el("div", { className: "wtc-next-actions" }, muted("Next actions"), ...rows.map((r) => {
+      const step = r.next;
+      const route = nextRoute(step);
+      const action = route === "pr" && r.pullRequest?.url
+        ? link(nextLabel(step), r.pullRequest.url)
+        : smallButton(acting.has(r.sessionKey) ? "Working…" : route === "agent" ? `Ask agent: ${nextLabel(step).toLowerCase()}` : nextLabel(step), step.reason, () => actNext(r));
+      if (action.tagName === "BUTTON") action.disabled = !route || route === "pr" || acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey);
+      return css(el("div", {}, css(el("strong", { textContent: nameOf(r) }), "font-size:12px"), action,
+        muted(`${step.reason}${step.approve ? ` · ${step.approve} approval` : ` · ${step.by}`}`)), "display:flex;flex-wrap:wrap;align-items:center;gap:6px");
+    })), "display:grid;gap:6px;padding:8px 0");
+  }
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
   const finished = (r) => r.pullRequest?.state === "merged";
@@ -972,7 +1016,7 @@ function collectionTables(v) {
     for (const s of sub.filter((s) => !repos.some((r) => r.repo && r.repo === s.r.repo))) rows.push(subRow(s.w, s.r));
     return rows;
   }
-  return { table, checkAccount, notice, repoTable: (repos, narrow, workers) =>
+  return { table, checkAccount, notice, nextActions, repoTable: (repos, narrow, workers) =>
     // Narrow, the repository (with its branch below) takes the room the
     // branch had.
     table(narrow ? REPO_COLUMNS.map((c, i) => (i === 0 ? { ...c, width: "minmax(0,1fr)" } : c)) : REPO_COLUMNS, repoRows(repos, workers), narrow), serviceTable, totals, prTable };
@@ -1180,7 +1224,7 @@ function mountComposer(container, context) {
       "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
     );
     tables.checkAccount(repos);
-    detail.replaceChildren(...[tables.repoTable(repos, narrow, entry.data.subSessions), tables.notice(),
+    detail.replaceChildren(...[tables.repoTable(repos, narrow, entry.data.subSessions), tables.nextActions(repos), tables.notice(),
       repos.some((r) => r.pullRequests?.length) ? el("div", {}, el("div", { textContent: "Pull requests" }), tables.prTable(repos, narrow)) : null,
       groups.length ? tables.serviceTable(groups, entry.data, narrow) : null].filter(Boolean));
     if (card.parentNode !== container) container.prepend(card);
@@ -1538,6 +1582,8 @@ function mountCollection(container, context) {
     const repoSection = css(el("div", {}, heading("Repositories")), "display:grid;gap:10px");
     if (repos.length === 0 && !data.subSessions?.length) repoSection.append(muted("No repositories yet. Ask in the conversation, or add one below.", "font-size:13px"));
     else repoSection.append(tables.repoTable(repos, narrow, data.subSessions));
+    const nextActions = tables.nextActions(repos);
+    if (nextActions) repoSection.append(nextActions);
     tables.checkAccount(repos);
     const howTo = tables.notice();
     if (howTo) repoSection.append(howTo);

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/mattn/go-runewidth"
@@ -61,6 +62,10 @@ type statusTUIModel struct {
 	showHelp       bool
 	showArchived   bool
 	showLog        bool
+	showNext       bool
+	selectedNext   int
+	nextRunning    bool
+	nextNotice     string
 	progressLog    []string
 	progressStep   string
 	progressKey    string
@@ -249,6 +254,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// full refresh read when it started.
 			live := m.snapshot.Runtime
 			m.snapshot = msg.snapshot
+			m.selectedNext = min(m.selectedNext, max(0, len(statusNextRepos(m.snapshot))-1))
 			if live != nil && m.context != nil && !m.all && !m.procs {
 				m.snapshot.Runtime = live
 			}
@@ -259,7 +265,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case statusTickMsg:
-		if !m.refreshing && !m.nextRefresh.IsZero() && !time.Now().Before(m.nextRefresh) {
+		if !m.refreshing && !m.nextRunning && !m.nextRefresh.IsZero() && !time.Now().Before(m.nextRefresh) {
 			m.startRefresh()
 			return m, tea.Batch(statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge))
 		}
@@ -284,7 +290,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusLogTail()
 			return m, nil
 		}
-		if !m.noClick && !m.procs {
+		if !m.noClick && !m.procs && !m.showNext {
 			if target := m.buildClickTarget(msg.X, msg.Y); target != "" {
 				return m, statusOpenURL(target)
 			}
@@ -293,7 +299,40 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.errorText = msg.err.Error()
 		}
+	case statusNextDoneMsg:
+		m.nextRunning = false
+		m.nextNotice = msg.text
+		if msg.err != nil {
+			m.nextNotice = msg.err.Error() + "\n" + msg.text
+		}
+		if !m.refreshing {
+			m.startRefresh()
+			return m, statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge)
+		}
 	case tea.KeyPressMsg:
+		if m.showNext && msg.String() != "q" && msg.String() != "ctrl+c" {
+			repos := statusNextRepos(m.snapshot)
+			switch msg.String() {
+			case "esc", "n":
+				m.showNext, m.scroll = false, 0
+			case "up", "k":
+				m.selectedNext = max(0, m.selectedNext-1)
+				m.scroll = max(0, 2*m.selectedNext+7-max(1, m.height-2))
+			case "down", "j":
+				m.selectedNext = min(max(0, len(repos)-1), m.selectedNext+1)
+				m.scroll = max(0, 2*m.selectedNext+7-max(1, m.height-2))
+			case "pgup":
+				m.scroll = max(0, m.scroll-max(1, m.height/2))
+			case "pgdown":
+				m.scroll += max(1, m.height/2)
+			case "enter":
+				if !m.refreshing && !m.nextRunning && m.selectedNext < len(repos) {
+					m.nextRunning, m.nextNotice = true, "Rechecking the selected step…"
+					return m, statusNextRun(m.context, repos[m.selectedNext])
+				}
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -301,10 +340,14 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = false
 		case "?":
 			m.showHelp = !m.showHelp
+		case "n":
+			if !m.procs {
+				m.showNext, m.showLog, m.selectedNext, m.scroll = true, false, 0, 0
+			}
 		case "a":
 			m.showArchived = !m.showArchived
 		case "r":
-			if !m.refreshing {
+			if !m.refreshing && !m.nextRunning {
 				m.startRefresh()
 				return m, statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge)
 			}
@@ -1159,7 +1202,7 @@ func (m statusTUIModel) contentLines() []string {
 		lines[1] = statusTUIStyle(statusTUIProgressLine(m.progressStep, elapsed, width), statusToneWarning)
 	}
 	if m.showHelp {
-		keys := "r refresh   l log   a show/hide archived PRs   ? help   q quit"
+		keys := "n next actions   r refresh   l log   a archived PRs   ? help   q quit"
 		if m.procs {
 			keys = "r refresh   l log   ? help   q quit"
 		}
@@ -1171,6 +1214,19 @@ func (m statusTUIModel) contentLines() []string {
 		lines = append(lines, m.progressLog...)
 		return lines
 	}
+	if m.showNext {
+		lines = append(lines, "↑/↓ choose · Enter run or ask agent · Esc back")
+		selected := min(m.selectedNext, max(0, len(statusNextRepos(m.snapshot))-1))
+		lines = append(lines, statusNextLines(m.snapshot, width, true, selected)...)
+		if len(statusNextRepos(m.snapshot)) == 0 {
+			lines = append(lines, "", "No next actions.")
+		}
+		if m.nextNotice != "" {
+			lines = append(lines, "")
+			lines = append(lines, strings.Split(ansi.Wrap(statusTUISafe(m.nextNotice), width, ""), "\n")...)
+		}
+		return lines
+	}
 	if m.procs {
 		lines = append(lines, strings.Split(strings.TrimSuffix(wtc.StatusProcessesText(m.processes), "\n"), "\n")...)
 	} else {
@@ -1180,6 +1236,7 @@ func (m statusTUIModel) contentLines() []string {
 			lines = append(lines, statusTUIPRLines(m.snapshot, width, m.showArchived, true)...)
 		}
 		lines = append(lines, statusTUIRetiredLines(m.snapshot, width, true)...)
+		lines = append(lines, statusNextLines(m.snapshot, width, true, -1)...)
 		if m.snapshot.StaleCount > 0 {
 			lines = append(lines, "", fmt.Sprintf("%d worktree(s) behind the development tip", m.snapshot.StaleCount))
 		}
@@ -1200,7 +1257,7 @@ func (m statusTUIModel) View() tea.View {
 		height = 24
 	}
 	lines := m.contentLines()
-	footer := "r refresh · l log · a archived · ↗ link · ? help · q quit"
+	footer := "n next actions · r refresh · l log · a archived · ↗ link · ? help · q quit"
 	if m.procs {
 		footer = "r refresh · l log · ? help · q quit"
 	}

@@ -138,6 +138,14 @@ retained, and its PR moves from the repository row to the collection's pull
 request list. Follow-up commits must move to a new branch before returning
 to the tip; catch-up refuses to leave them behind.
 
+The collection card and panel show **Next actions** with their reasons and
+required approvals. A click rechecks the repository's current status. A clean
+return to tip or catch-up can run on the gateway; a merge into a live branch
+asks the conversation's `wtc-catch-up` skill to decide. Conflicts, failed
+checks and requested changes ask the corresponding skill. Push uses the
+existing personal account and confirmation flow; merge opens the pull request
+for the person. Refreshing the card alone does not execute these actions.
+
 OpenClaw binds publication to the owner's managed branch. Returning to the
 tip does not rebind that owner or permit publishing an arbitrary new branch:
 another publication round needs a fresh managed worktree and owner. Support

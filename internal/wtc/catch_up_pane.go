@@ -142,6 +142,12 @@ func catchUpAgentBusy(session, collection string) (string, error) {
 	return "", nil
 }
 
+// AgentBusy checks this collection's owner, including when it is also the
+// caller. Status controls must not use catch-up's initiating-agent exemption.
+func (c *Context) AgentBusy() (string, error) {
+	return catchUpAgentBusy(catchUpSession(c), filepath.Base(c.Collection))
+}
+
 func catchUpForeground(session, pane string) ([]string, error) {
 	data, err := catchUpHerdr(session, "pane", "process-info", "--pane", pane)
 	if err != nil {
