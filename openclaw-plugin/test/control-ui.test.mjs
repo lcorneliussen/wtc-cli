@@ -854,3 +854,28 @@ test("composer: a catch-up that fails reads as a failure, without wtc's prefix",
   assert.match(note.style.cssText, /color:var\(--danger/);
   view.dispose();
 });
+
+test("panel: a failure stays one across a refresh; a worker merge that fails reads as one too", async () => {
+  const data = {
+    ...busy,
+    workers: [{ name: "docs", collection: "test--docs", repos: [
+      repo("web", { sessionKey: "agent:main:owner:web-docs", branch: "openclaw/test--docs", toMerge: 1, taskSessionKey: "agent:main:owner:web" }),
+    ] }],
+  };
+  const { host, view } = await mount("panel", data);
+  const button = (re) => [...host.all()].find((n) => n.tagName === "BUTTON" && re.test(n.title));
+  const log = () => [...host.all()].find((n) => n.tagName === "DIV" && /^⚠ /.test(n.textContent ?? ""));
+  catchUpResult = { ok: true, result: { code: 1, json: null, message: "wtc: cannot fetch main from origin\n" } };
+  await button(/^3 new on main\. Catch up/).onclick();
+  assert.equal(log()?.textContent, "⚠ api: cannot fetch main from origin");
+  assert.match(log().style.color, /--danger/);
+  // The refresh after it renders the panel again; the failure stays.
+  await settle();
+  assert.equal(log()?.textContent, "⚠ api: cannot fetch main from origin");
+
+  catchUpResult = { ok: true, result: { code: 1, json: null, message: "wtc: web has no branch openclaw/test--docs\n" } };
+  await button(/^1 commit of worker docs/).onclick();
+  assert.equal(log()?.textContent, "⚠ web: web has no branch openclaw/test--docs");
+  catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
+  view.dispose();
+});

@@ -23,8 +23,9 @@ type Checkout struct {
 	// Private is a checkout without an origin: the copy of the worktree a
 	// sandbox gets. Only the gateway knows its repository and base.
 	Private bool
-	// Detached is a worktree resting at its base, on no branch, as one with
-	// no work yet does. Only catching up opens one.
+	// Detached is a worktree on no branch, as one resting at its base with no
+	// work yet is. Only catching up opens one: it moves to the base's tip when
+	// the base contains it, and is refused with commits of its own.
 	Detached bool
 }
 
@@ -57,7 +58,8 @@ func OpenCheckout(dir, dest string) (*Checkout, error) {
 }
 
 // OpenCatchUpCheckout is OpenCheckout for catching up, which also takes a
-// worktree detached at its base: catching one up moves it to the base's tip.
+// detached worktree: catching one up moves it to the base's tip, or refuses
+// when it has commits the base lacks.
 func OpenCatchUpCheckout(dir, dest string) (*Checkout, error) {
 	return openCheckout(dir, dest, true)
 }
@@ -318,7 +320,8 @@ type CatchUp struct {
 
 // CatchUp fetches the destination branch and merges it. It never rebases and
 // never pushes: published history stays as it is, and the gateway publishes
-// the merge with the next publication. A conflicted merge is aborted.
+// the merge with the next publication. A conflicted merge is aborted. A
+// detached worktree is not merged into but moved to the tip (forward).
 func (c *Checkout) CatchUp() (CatchUp, error) {
 	result := CatchUp{Branch: c.Branch(), Dest: c.Dest}
 	if c.Detached {
