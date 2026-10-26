@@ -25,6 +25,8 @@ func TestStatusNextFromALocalRow(t *testing.T) {
 		{"changes requested", branch(StatusRepo{PR: &StatusPRFacts{Number: "7", Checks: "SUCCESS", Merge: "CLEAN", Review: "changes"}}), "address-review", next.ByAgent},
 		{"approved and green", branch(StatusRepo{PR: &StatusPRFacts{Number: "7", Checks: "SUCCESS", Merge: "CLEAN", Review: "approved"}}), "merge-pr", next.ByPerson},
 		{"a merge in progress", branch(StatusRepo{Operation: "merge", Conflict: true}), "resolve", next.ByAgent},
+		{"a pushed branch behind its base: the agent decides", branch(StatusRepo{Behind: 2}), "catch-up", next.ByWTC},
+		{"uncommitted files: wait", branch(StatusRepo{Ahead: 1, Behind: 2, Changed: 3}), "", ""},
 		{"detached and current: nothing", StatusRepo{Repo: "api", BranchKind: "detached", Branch: "main"}, "", ""},
 	} {
 		got := next.For(statusFacts(tc.row))
@@ -33,6 +35,8 @@ func TestStatusNextFromALocalRow(t *testing.T) {
 			t.Errorf("%s: %+v, want none", tc.name, got)
 		case tc.want != "" && (got == nil || got.Step != tc.want || got.By != tc.by):
 			t.Errorf("%s: %+v, want %s by %s", tc.name, got, tc.want, tc.by)
+		case tc.want == "catch-up" && got.Approve != next.ApproveAgent:
+			t.Errorf("%s: a catch-up onto a branch needs the agent's go: %+v", tc.name, got)
 		}
 	}
 }

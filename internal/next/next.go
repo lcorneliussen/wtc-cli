@@ -16,7 +16,7 @@ const (
 	ByAgent  = "agent"  // needs judgment: a skill the agent follows
 	ByPerson = "person" // only people do it: merging a pull request
 
-	ApprovePerson = "person" // needs the person's authority: a push, a merge
+	ApprovePerson = "person" // needs the person's authority: the gateway's push
 	ApproveAgent  = "agent"  // wtc could do it, but the agent decides when
 )
 
@@ -87,8 +87,8 @@ type Facts struct {
 
 // For is the repository's next step, or nil when nothing waits on anyone.
 // Uncommitted files are work in progress: then only an unfinished merge is
-// a step, and everything else waits for the work. Checks still running are
-// nothing to act on either.
+// a step, and everything else waits for the work. Checks still running
+// hold back only merging the pull request.
 func For(f Facts) *Step {
 	s := &Step{Repo: f.Repo}
 	key := func(parts ...string) string {
@@ -144,9 +144,11 @@ func For(f Facts) *Step {
 		case f.MergeUnknown:
 			s.Reason += "; whether merging conflicts is not known"
 			s.Approve = ApproveAgent
-		case f.Branch != "" && f.Ahead > 0:
-			// A clean merge into work in progress is still the agent's call:
-			// it decides when its branch takes the base in.
+		case f.Branch != "":
+			// A clean merge into a branch is still the agent's call: it
+			// decides when its work takes the base in (and locally a catch-up
+			// pushes the merge to an open pull request). Only a detached
+			// checkout, with no work of its own, just moves.
 			s.Reason += "; merges cleanly"
 			s.Approve = ApproveAgent
 		}

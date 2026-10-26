@@ -668,6 +668,17 @@ func TestStatusNamesTheNextStep(t *testing.T) {
 		t.Fatal("predicting the merge touched the worktree")
 	}
 
+	// Uncommitted work: everything waits for it.
+	write(t, c, "draft.md", "wip\n")
+	git("add", "draft.md")
+	if s = checkoutStatus(c.Dir, false); s.Next != nil {
+		t.Fatalf("work in progress: %+v", s.Next)
+	}
+	git("rm", "-q", "--cached", "draft.md")
+	if err := os.Remove(filepath.Join(c.Dir, "draft.md")); err != nil {
+		t.Fatal(err)
+	}
+
 	// Detached at an older base: wtc moves it, nobody needs to agree.
 	git("checkout", "-q", "--detach", "origin/main~1")
 	s = checkoutStatus(c.Dir, false)
