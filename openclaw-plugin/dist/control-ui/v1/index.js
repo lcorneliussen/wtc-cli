@@ -901,7 +901,8 @@ function collectionTables(v) {
   };
   function workerRow(w, r) {
     const busyHere = catching.has(r.sessionKey);
-    const discard = busyHere ? null
+    // ✕ ends the whole worker: not while any of its checkouts is busy.
+    const discard = w.repos.some((x) => catching.has(x.sessionKey)) ? null
       : armed.has(w.name)
         ? count("discard?", `Click again to discard worker ${w.name}. ${workerFacts(w)}`, TONE.failure, () => discardWorker(w))
         : smallButton("✕", `Discard worker ${w.name}${w.repos.length > 1 ? `, in all its ${w.repos.length} repositories` : ""}: deletes its sessions, and OpenClaw removes its worktrees. ${workerFacts(w)}`, () => discardWorker(w));
@@ -1138,7 +1139,7 @@ function mountComposer(container, context) {
     }
     // Only a collection that loaded and has nothing yet: a failed load is
     // no reason to start another one.
-    if (repos.length === 0) {
+    if (repos.length === 0 && !entry?.data?.workers?.length) {
       if (entry?.data) void suggestFor(key);
       if (entry?.data && suggestion?.key === key && suggestion.result && !dismissed.has(key)) renderSuggestion(suggestion.result);
       else card.remove();
@@ -1511,7 +1512,7 @@ function mountCollection(container, context) {
     );
 
     const repoSection = css(el("div", {}, heading("Repositories")), "display:grid;gap:10px");
-    if (repos.length === 0) repoSection.append(muted("No repositories yet. Ask in the conversation, or add one below.", "font-size:13px"));
+    if (repos.length === 0 && !data.workers?.length) repoSection.append(muted("No repositories yet. Ask in the conversation, or add one below.", "font-size:13px"));
     else repoSection.append(tables.repoTable(repos, narrow, data.workers));
     tables.checkAccount(repos);
     const howTo = tables.notice();

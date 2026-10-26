@@ -121,6 +121,8 @@ func TestCatchUpSummary(t *testing.T) {
 		// A worker catches up with its task.
 		{openclaw.CatchUp{Branch: "openclaw/x--a", Dest: "main", From: "openclaw/x", Merged: true}, "merged the task's openclaw/x into the worker's openclaw/x--a"},
 		{openclaw.CatchUp{Branch: "openclaw/x--a", From: "openclaw/x", Note: "already contains openclaw/x"}, "openclaw/x--a already contains openclaw/x"},
+		// A worker that merged origin's (--dest) still publishes through its task.
+		{openclaw.CatchUp{Branch: "openclaw/x--a", Dest: "main", Merged: true}, "merged origin/main into openclaw/x--a; it reaches the forge through the task"},
 		// A detached worktree has no branch: it moves forward to the tip.
 		{openclaw.CatchUp{Dest: "main", Merged: true, FastForward: true}, "detached at origin/main's tip again: no work of its own, nothing to publish"},
 		{openclaw.CatchUp{Dest: "main", Note: "already contains origin/main"}, "detached, already contains origin/main"},

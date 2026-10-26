@@ -539,6 +539,10 @@ func TestAWorkerAgainstItsTask(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("worker's notes\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A file the task has just like this is the same.
+	if err := os.WriteFile(filepath.Join(dir, "more.md"), []byte("more\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	got := WorkerRepos("72-add-thing", []string{c.Dir}, []string{dir})
 	if len(got) != 1 || got[0].Behind != 1 || got[0].ToMerge != 0 {
 		t.Fatalf("behind: %+v", got)
@@ -547,12 +551,14 @@ func TestAWorkerAgainstItsTask(t *testing.T) {
 	for _, f := range got[0].Uncommitted {
 		files[f.Path] = f.State
 	}
-	if files["draft.md"] != "only" || files["notes.md"] != "differs" || len(files) != 2 {
+	if files["draft.md"] != "only" || files["notes.md"] != "differs" || files["more.md"] != "same" || len(files) != 3 {
 		t.Errorf("uncommitted: %+v", got[0].Uncommitted)
 	}
 	gitIn(t, "-C", dir, "checkout", "-q", "--", "notes.md")
-	if err := os.Remove(filepath.Join(dir, "draft.md")); err != nil {
-		t.Fatal(err)
+	for _, f := range []string{"draft.md", "more.md"} {
+		if err := os.Remove(filepath.Join(dir, f)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	result, err := worker.CatchUpWithTask()
 	if err != nil || !result.Merged || result.From != "openclaw/72-add-thing" {
@@ -563,6 +569,15 @@ func TestAWorkerAgainstItsTask(t *testing.T) {
 	}
 	if got := WorkerRepos("72-add-thing", []string{c.Dir}, []string{dir}); got[0].Behind != 0 {
 		t.Errorf("after: %+v", got)
+	}
+	// A worker of a task with no branch in this repository has nothing to
+	// catch up with.
+	orphan := filepath.Join(t.TempDir(), "73-other--b")
+	git("worktree", "add", "-q", "-b", "openclaw/73-other--b", orphan, "openclaw/72-add-thing")
+	if o, err := OpenCatchUpCheckout(orphan, "main"); err != nil {
+		t.Fatal(err)
+	} else if _, err := o.CatchUpWithTask(); err == nil || !strings.Contains(err.Error(), "has no branch openclaw/73-other") {
+		t.Errorf("a worker without its task's branch: %v", err)
 	}
 	// The task itself has no task to catch up with.
 	if _, err := c.CatchUpWithTask(); err == nil {

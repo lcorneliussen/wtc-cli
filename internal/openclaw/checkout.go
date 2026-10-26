@@ -312,7 +312,8 @@ func (c *Checkout) PlanPublish(opt PublishOptions) (Plan, error) {
 type CatchUp struct {
 	Branch string `json:"branch"`
 	Dest   string `json:"dest"`
-	// From is the worker branch merged in, instead of Dest.
+	// From is the branch merged in instead of Dest: a worker's, merged into
+	// its task, or the task's, merged into a worker.
 	From   string `json:"from,omitempty"`
 	Merged bool   `json:"merged"`
 	// FastForward says the checkout had nothing the ref lacked: it now is the
@@ -506,8 +507,8 @@ type WorkerRepo struct {
 
 // WorkerFile is an uncommitted file of a worker. State is "same" when the
 // task's checkout has the file as the worker has it (or neither has it),
-// "differs" when both have it differently, and "only" when the task's
-// checkout does not have it.
+// "only" when only the worker has it, and "differs" otherwise: both have it
+// differently, or only the task does (the worker deleted it).
 type WorkerFile struct {
 	Path  string `json:"path"`
 	State string `json:"state"`

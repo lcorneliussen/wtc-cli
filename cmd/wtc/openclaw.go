@@ -578,9 +578,10 @@ func gatewayConfig() (openclaw.GatewayConfig, error) {
 	return openclaw.ParseGatewayConfig(out)
 }
 
-// catchUpCheckout is catch-up under OpenClaw: merge the destination branch,
-// or a worker's branch with from, into this session's worktree, or move a
-// detached one to the destination's tip. No rebase and no push.
+// catchUpCheckout is catch-up under OpenClaw: merge a worker's branch with
+// from; in a worker's checkout without --dest, its task's branch; otherwise
+// the destination branch, or move a detached worktree to its tip. No rebase
+// and no push.
 func catchUpCheckout(dest, from string, asJSON bool) error {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -626,6 +627,8 @@ func catchUpSummary(result openclaw.CatchUp) string {
 		return fmt.Sprintf("%s is at origin/%s again: nothing of its own on it, nothing to publish", result.Branch, result.Dest)
 	case result.Merged && result.From != "":
 		return fmt.Sprintf("merged %s into %s; the person publishes it with ↑ when the task is ready", result.From, result.Branch)
+	case result.Merged && openclaw.TaskOf(strings.TrimPrefix(result.Branch, openclaw.BranchPrefix)) != "":
+		return fmt.Sprintf("merged origin/%s into %s; it reaches the forge through the task", result.Dest, result.Branch)
 	case result.Merged:
 		return fmt.Sprintf("merged origin/%s into %s; publish to send the merge (wtc publish)", result.Dest, result.Branch)
 	}
