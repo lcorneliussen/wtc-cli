@@ -78,7 +78,7 @@ func TestUpgradeBumpsPinAndRangeWithPublishedNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.From != "0.1.9" || result.To != "0.1.11" || result.NotesSource != "GitHub releases" ||
+	if result.From != "0.1.9" || result.To != "0.1.11" || result.NotesSource != "GitHub releases" || !result.NotInstalled ||
 		len(result.Notes) != 2 || result.Notes[1].Content != "# wtc 0.1.11\n" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
@@ -116,7 +116,7 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.NotesSource != "wtc 0.1.12 release-notes" || len(result.Notes) != 2 || result.Notes[0].Content != "corrected 0.1.10\n" {
+	if result.NotesSource != "wtc 0.1.12 release-notes" || result.NotInstalled || len(result.Notes) != 2 || result.Notes[0].Content != "corrected 0.1.10\n" {
 		t.Fatalf("target binary notes not used: %+v", result)
 	}
 	data, _ := os.ReadFile(log)

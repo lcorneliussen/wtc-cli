@@ -330,7 +330,8 @@ func (c *Context) TrustMise() error {
 }
 
 // InstallMise installs the tools the collection's mise config pins, such as
-// a newly pinned wtc. A machine without mise has nothing to install.
+// a newly pinned wtc. Without mise it installs nothing and returns nil;
+// callers that must report that check for mise themselves.
 func (c *Context) InstallMise() error {
 	mise, err := exec.LookPath("mise")
 	if err != nil {

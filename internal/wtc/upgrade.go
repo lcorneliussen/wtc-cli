@@ -32,14 +32,17 @@ type UpgradeOptions struct {
 
 // UpgradeResult records one pin transition and the release notes it spans.
 type UpgradeResult struct {
-	From        string        `json:"from"`
-	To          string        `json:"to"`
-	Requires    string        `json:"requires"`
-	Files       []string      `json:"files"`
-	DryRun      bool          `json:"dry_run"`
-	NotesSource string        `json:"notes_source"`
-	NotesError  string        `json:"notes_error,omitempty"`
-	Notes       []ReleaseNote `json:"notes"`
+	From        string   `json:"from"`
+	To          string   `json:"to"`
+	Requires    string   `json:"requires"`
+	Files       []string `json:"files"`
+	DryRun      bool     `json:"dry_run"`
+	NotesSource string   `json:"notes_source"`
+	NotesError  string   `json:"notes_error,omitempty"`
+	// NotInstalled is set when the pin was written on a machine without
+	// mise, so the release itself still has to be installed.
+	NotInstalled bool          `json:"not_installed,omitempty"`
+	Notes        []ReleaseNote `json:"notes"`
 }
 
 // CompatibilityRange is the harness range a pin implies: the pinned release up
@@ -144,7 +147,9 @@ func (c *Context) Upgrade(opt UpgradeOptions) (UpgradeResult, error) {
 		if err := c.refreshEnv(); err != nil {
 			return result, fmt.Errorf("pin updated, but the collection environment was not: %w", err)
 		}
-		if err := c.InstallMise(); err != nil {
+		if _, err := exec.LookPath("mise"); err != nil {
+			result.NotInstalled = true
+		} else if err := c.InstallMise(); err != nil {
 			return result, fmt.Errorf("pin updated, but the new release was not installed: %w", err)
 		}
 	}

@@ -65,6 +65,9 @@ func addUpgradeCommand(root *cobra.Command, asJSON *bool) {
 			verb = "would pin"
 		}
 		fmt.Printf("%s wtc %s (was %s); wtc.toml requires %q\n", verb, result.To, result.From, result.Requires)
+		if result.NotInstalled {
+			fmt.Printf("mise not found: wtc %s is pinned but not installed\n", result.To)
+		}
 		if result.NotesError != "" {
 			fmt.Printf("release notes unavailable (%s); read them with the new binary: wtc release-notes --since %s\n", result.NotesError, result.From)
 		} else {

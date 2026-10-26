@@ -27,8 +27,9 @@ type CatchUpOptions struct {
 	NoEnv        bool
 	NoSecrets    bool
 	// IdleOnly leaves a collection whose herdr agent is working or blocked
-	// to that agent. InstallTools runs mise install once a harness env
-	// refresh succeeded, so a new pin is usable at once.
+	// to that agent. InstallTools runs mise install in each harness target,
+	// so a new pin is usable at once; it is skipped when that target's env
+	// refresh failed, and with NoEnv it installs what mise.toml already pins.
 	IdleOnly     bool
 	InstallTools bool
 }

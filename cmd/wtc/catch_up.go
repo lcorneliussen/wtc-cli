@@ -24,7 +24,7 @@ func addCatchUpCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&opt.DryRun, "dry-run", false, "Plan using local refs without fetching or writing")
 	cmd.Flags().BoolVar(&opt.ReloadStatus, "reload-status", false, "Restart eligible status panes after the harness updates")
 	cmd.Flags().BoolVar(&opt.IdleOnly, "idle-only", false, "Leave collections whose herdr agent is working or blocked with that agent")
-	cmd.Flags().BoolVar(&opt.InstallTools, "install-tools", false, "Run mise install after a harness environment refresh")
+	cmd.Flags().BoolVar(&opt.InstallTools, "install-tools", false, "Run mise install in each harness target (skipped when its environment refresh fails)")
 	cmd.Flags().StringVar(&opt.Report, "report", "", "Also write a JSON report and a readable .md companion")
 	cmd.Flags().BoolVar(&opt.NoSkills, "no-skills", false, "Skip skill refresh")
 	cmd.Flags().BoolVar(&opt.NoMCP, "no-mcp", false, "Skip MCP refresh")
