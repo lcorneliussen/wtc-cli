@@ -585,3 +585,28 @@ test("the collection is the one wtc made, also when a sub-session has as many ch
   assert.deepEqual(result.repos.map((r) => r.branch), ["openclaw/194-subrows"]);
   assert.deepEqual(result.subSessions.map((w) => [w.name, w.repos[0].taskBranch]), [["docs", "openclaw/194-subrows"]]);
 });
+
+test("without wtc's labels the collection is the name others extend, then the most used", async () => {
+  const pick = async (entries) => {
+    const actions = new Map();
+    plugin.register({
+      pluginConfig: {},
+      runtime: {
+        state: { resolveStateDir: () => "/nonexistent" },
+        agent: { session: { listSessionEntries: () => [{ sessionKey: "agent:main:c", entry: {} }, ...entries], getSessionEntry: () => undefined } },
+        system: { runCommandWithTimeout: async (argv) => ({ code: 0, stdout: argv[1] === "status" ? JSON.stringify({ [argv[2]]: { repos: [] } }) : "", stderr: "" }) },
+      },
+      session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+      registerHttpRoute() {},
+      on() {},
+      logger: {},
+    });
+    const { result } = await actions.get("collection").handler({ sessionKey: "agent:main:c", agentId: "main", payload: {} });
+    return result.subSessions.map((w) => w.name);
+  };
+  const child = (key, name, label) => ({ sessionKey: key, entry: { parentSessionKey: "agent:main:c", ...(label ? { label } : {}), worktree: { branch: `openclaw/${name}` }, workspaceDir: `/worktrees/${key}` } });
+  // No labels: a worker's name extends the collection's, so it is never the collection.
+  assert.deepEqual(await pick([child("a", "9-x--docs"), child("b", "9-x--docs"), child("c", "9-x")]), ["docs"]);
+  // A label without a project: the one that starts with its name.
+  assert.deepEqual(await pick([child("a", "9-x", "9-x site"), child("b", "nav", "helper")]), ["nav"]);
+});

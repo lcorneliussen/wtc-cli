@@ -554,7 +554,8 @@ export default {
       // or a session OpenClaw or the agent spawned with a worktree of its
       // own, named for its change). Its checkouts are shown under the
       // collection's, not as more of its repositories, and ✕ may delete it:
-      // a name another one extends with "--" is never taken for one.
+      // so a name another one extends with "--" is never taken for the
+      // collection.
       const count = (n) => children.filter((c) => collectionName(c.entry) === n).length;
       const madeByWtc = (c, n) => c.entry.projectId ? c.entry.label === `${n} ${c.entry.projectId}` : String(c.entry.label ?? "").startsWith(n + " ");
       const made = names.filter((n) => children.some((c) => collectionName(c.entry) === n && madeByWtc(c, n)));

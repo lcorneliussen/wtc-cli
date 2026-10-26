@@ -312,8 +312,9 @@ func (c *Checkout) PlanPublish(opt PublishOptions) (Plan, error) {
 type CatchUp struct {
 	Branch string `json:"branch"`
 	Dest   string `json:"dest"`
-	// From is the branch merged in instead of Dest: a worker's, merged into
-	// its task, or the task's, merged into a worker.
+	// From is the branch merged in instead of Dest: a sub-session's or a
+	// worker's, by its name, merged into the collection's, or the
+	// collection's, merged into a sub-session's or a worker's.
 	From   string `json:"from,omitempty"`
 	Merged bool   `json:"merged"`
 	// FastForward says the checkout had nothing the ref lacked: it now is the
