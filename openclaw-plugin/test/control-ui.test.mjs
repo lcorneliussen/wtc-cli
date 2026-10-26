@@ -602,7 +602,8 @@ test("composer: without a collection, the card suggests where the latest message
   await settle();
   failing.clear();
   assert.ok(card3(), "back after a failed Start");
-  assert.ok(texts(card3()).includes("sessions.send failed"));
+  // A failure reads as one.
+  assert.ok(texts(card3()).includes("⚠ sessions.send failed"));
   retry.view.dispose();
   // A failed load is no empty collection: nothing is suggested.
   const broken = await mount("composer", new Error("down"), [{ role: "user", content: "the site" }]);
@@ -839,5 +840,42 @@ test("composer: a worker's merge conflict goes to the conversation; an unknown m
   assert.deepEqual(calls.map((c) => c.key), ["agent:main:owner:site-docs", "agent:main:owner:harness-docs"]);
   await settle();
   assert.ok([...card.all()].some((n) => /^Worker docs discarded; OpenClaw kept the worktree of harness \(busy, at \/worktrees\/w9\)\.$/.test(n.textContent ?? "")));
+  view.dispose();
+});
+
+test("composer: a catch-up that fails reads as a failure, without wtc's prefix", async () => {
+  const { host, view } = await mount("composer", busy);
+  const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
+  catchUpResult = { ok: true, result: { code: 1, json: null, message: "wtc: cannot fetch main from origin: exit status 128\n" } };
+  await [...card.all()].find((n) => n.tagName === "BUTTON" && /^3 new on main\. Catch up/.test(n.title)).onclick();
+  catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
+  const note = [...card.all()].find((n) => n.tagName === "SPAN" && n.title === "api: cannot fetch main from origin: exit status 128");
+  assert.equal(note.textContent, "⚠ api: cannot fetch main from origin: exit status 128");
+  assert.match(note.style.cssText, /color:var\(--danger/);
+  view.dispose();
+});
+
+test("panel: a failure stays one across a refresh; a worker merge that fails reads as one too", async () => {
+  const data = {
+    ...busy,
+    workers: [{ name: "docs", collection: "test--docs", repos: [
+      repo("web", { sessionKey: "agent:main:owner:web-docs", branch: "openclaw/test--docs", toMerge: 1, taskSessionKey: "agent:main:owner:web" }),
+    ] }],
+  };
+  const { host, view } = await mount("panel", data);
+  const button = (re) => [...host.all()].find((n) => n.tagName === "BUTTON" && re.test(n.title));
+  const log = () => [...host.all()].find((n) => n.tagName === "DIV" && /^⚠ /.test(n.textContent ?? ""));
+  catchUpResult = { ok: true, result: { code: 1, json: null, message: "wtc: cannot fetch main from origin\n" } };
+  await button(/^3 new on main\. Catch up/).onclick();
+  assert.equal(log()?.textContent, "⚠ api: cannot fetch main from origin");
+  assert.match(log().style.color, /--danger/);
+  // The refresh after it renders the panel again; the failure stays.
+  await settle();
+  assert.equal(log()?.textContent, "⚠ api: cannot fetch main from origin");
+
+  catchUpResult = { ok: true, result: { code: 1, json: null, message: "wtc: web has no branch openclaw/test--docs\n" } };
+  await button(/^1 commit of worker docs/).onclick();
+  assert.equal(log()?.textContent, "⚠ web: web has no branch openclaw/test--docs");
+  catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
   view.dispose();
 });
