@@ -231,22 +231,7 @@ func TestCatchUpMergesAndNeverPushes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	advance := func(file, content string) {
-		t.Helper()
-		other := t.TempDir()
-		for _, args := range [][]string{{"clone", "-q", bare, other}, nil, {"-C", other, "add", "."},
-			{"-C", other, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-qm", "upstream " + file}, {"-C", other, "push", "-q", "origin", "main"}} {
-			if args == nil {
-				if err := os.WriteFile(filepath.Join(other, file), []byte(content), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				continue
-			}
-			if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-				t.Fatalf("git %v: %v\n%s", args, err, out)
-			}
-		}
-	}
+	advance := func(file, content string) { t.Helper(); advanceOrigin(t, bare, file, content) }
 	// Nothing of its own yet: the catch-up fast-forwards to the base.
 	advance("FIRST", "moved\n")
 	result, err := c.CatchUp()
@@ -280,6 +265,66 @@ func TestCatchUpMergesAndNeverPushes(t *testing.T) {
 	}
 	if git("rev-parse", "HEAD") != before || git("status", "--porcelain") != "" {
 		t.Fatal("a conflicted catch-up left the checkout changed")
+	}
+}
+
+// advanceOrigin commits file to main in the bare repository, as someone
+// else's push would.
+func advanceOrigin(t *testing.T, bare, file, content string) {
+	t.Helper()
+	other := t.TempDir()
+	for _, args := range [][]string{{"clone", "-q", bare, other}, nil, {"-C", other, "add", "."},
+		{"-C", other, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-qm", "upstream " + file}, {"-C", other, "push", "-q", "origin", "main"}} {
+		if args == nil {
+			if err := os.WriteFile(filepath.Join(other, file), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func TestCatchUpMovesADetachedWorktreeForward(t *testing.T) {
+	c, git := managedWorktree(t, "/dev/null/unused")
+	bare := git("remote", "get-url", "--push", "origin")
+	git("remote", "set-url", "origin", bare)
+	git("checkout", "-q", "--detach", "origin/main")
+	if _, err := OpenCheckout(c.Dir, ""); err == nil {
+		t.Fatal("publishing opened a detached worktree")
+	}
+	c, err := OpenCatchUpCheckout(c.Dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := c.CatchUp(); err != nil || again.Merged || !strings.Contains(again.Note, "already contains") {
+		t.Fatalf("at the tip: %+v %v", again, err)
+	}
+	advanceOrigin(t, bare, "MOVED", "moved\n")
+	result, err := c.CatchUp()
+	if err != nil || !result.Merged || !result.FastForward || result.Branch != "" {
+		t.Fatalf("catch-up of a detached worktree: %+v %v", result, err)
+	}
+	if git("rev-parse", "HEAD") != git("rev-parse", "origin/main") || git("branch", "--show-current") != "" {
+		t.Fatal("not detached at the base's tip")
+	}
+	if _, err := c.MergeWorker("a"); err == nil || !strings.Contains(err.Error(), "detached") {
+		t.Fatalf("a worker merged into a detached worktree: %v", err)
+	}
+
+	// Commits of its own on no branch are not left behind.
+	write(t, c, "notes.md", "mine\n")
+	git("add", ".")
+	git("commit", "-qm", "detached work")
+	before := git("rev-parse", "HEAD")
+	advanceOrigin(t, bare, "AGAIN", "moved\n")
+	if _, err := c.CatchUp(); err == nil || !strings.Contains(err.Error(), "put them on a branch first") {
+		t.Fatalf("detached commits: %v", err)
+	}
+	if git("rev-parse", "HEAD") != before {
+		t.Fatal("the detached commit was left behind")
 	}
 }
 

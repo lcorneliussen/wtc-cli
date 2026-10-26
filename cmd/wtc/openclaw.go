@@ -586,7 +586,7 @@ func catchUpCheckout(dest, from string, asJSON bool) error {
 	if err != nil {
 		return err
 	}
-	checkout, err := openclaw.OpenCheckout(cwd, dest)
+	checkout, err := openclaw.OpenCatchUpCheckout(cwd, dest)
 	if err != nil {
 		return err
 	}
@@ -607,6 +607,10 @@ func catchUpCheckout(dest, from string, asJSON bool) error {
 // worker's commits, even fast-forwarded, are the task's to publish.
 func catchUpSummary(result openclaw.CatchUp) string {
 	switch {
+	case result.Branch == "" && result.Merged:
+		return fmt.Sprintf("detached at origin/%s's tip again: no work of its own, nothing to publish", result.Dest)
+	case result.Branch == "":
+		return fmt.Sprintf("detached, %s", result.Note)
 	case result.Merged && result.FastForward && result.From == "":
 		return fmt.Sprintf("%s is at origin/%s again: nothing of its own on it, nothing to publish", result.Branch, result.Dest)
 	case result.Merged && result.From != "":

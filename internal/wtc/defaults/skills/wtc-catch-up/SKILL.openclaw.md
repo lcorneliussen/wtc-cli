@@ -23,7 +23,10 @@ conflict: you do, in your own checkout of the repository.
      catch-up merges only the base: merge a worker's branch from the
      repository's session outside the sandbox.
 4. **Read what it says.**
-   - Merged, fast-forwarded, or already up to date: done.
+   - Merged, fast-forwarded, moved to the base's tip (a detached worktree
+     with no work yet), or already up to date: done.
+   - **Detached with commits of its own:** put them on a branch first
+     (`git switch -c openclaw/<collection>`), then catch up again.
    - **A conflict in a sandbox** (`WTC_GATEWAY_GIT` set): the merge stops
      with git's merge state in place. Resolve each file (below), `git add`
      it, then `wtc catch-up --continue`. That commits the merge and hands
