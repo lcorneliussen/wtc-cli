@@ -99,6 +99,7 @@ let svcResult = { ok: true, result: { message: "done" } };
 let preserved = {};
 let catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
 let nextResult;
+let githubPublishResult = { status: "needs_confirmation", requestId: "req-1" };
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
 let personal = null;
@@ -106,12 +107,14 @@ let personal = null;
 const failing = new Set();
 // The Bitbucket plugin: absent unless a test installs it with a login (or null).
 let bitbucket;
+let bitbucketRefusedAction;
 const hostRequest = async (method, params) => {
   if (failing.has(method)) throw new Error(`${method} failed`);
   if (method === "plugins.sessionAction" && params.pluginId === "bitbucket") {
     if (bitbucket === undefined) throw new Error(`unknown plugin session action: bitbucket/${params.actionId}`);
     if (params.actionId === "publish-options") return { ok: true, result: { account: bitbucket } };
     calls.push({ method, ...params });
+    if (params.actionId === bitbucketRefusedAction) return { ok: true, result: { status: "blocked", message: "The requested publication is no longer valid." } };
     if (params.actionId === "publish") {
       return { ok: true, result: bitbucket ? { status: "needs_confirmation", requestId: "bb-1", confirmation: { account: bitbucket.user, name: bitbucket.name, requestDigest: "bd1", branch: "openclaw/test", head: "abcdef0123", dest: "main", uncommitted: 0 } } : { status: "not_connected" } };
     }
@@ -134,7 +137,7 @@ const hostRequest = async (method, params) => {
   if (method === "plugins.sessionAction" && params.actionId === "catch-up") return catchUpResult;
   if (method === "plugins.sessionAction" && params.actionId === "next") return nextResult;
   if (method === "sessions.delete") return { ok: true, key: params.key, deleted: true, archived: [], ...(preserved[params.key] ? { worktreePreserved: preserved[params.key] } : {}) };
-  if (method === "sessions.github.publish") return { status: "needs_confirmation", requestId: "req-1" };
+  if (method === "sessions.github.publish") return githubPublishResult;
   if (method === "sessions.github.confirm") return { status: "published", url: "https://github.com/octo/api/pull/7" };
   return {};
 };
@@ -296,6 +299,58 @@ test("next actions: run the rechecked step and hand judgment to the conversation
     assert.deepEqual(calls.map((c) => c.actionId ?? c.method), ["next", "sessions.send"]);
     assert.match(calls[1].message, /^\/skill wtc-catch-up api:/);
     view.dispose();
+  }
+});
+
+test("pending files offer a commit handoff and publication refusal is a visible failure for the selected repository", async () => {
+  for (const kind of ["composer", "panel"]) {
+    const { host, view } = await mount(kind, collection([repo("harness"), repo("site", { dirty: 14 })]));
+    const commit = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Commit changes");
+    assert.ok(commit, "a commit action is visible for pending files");
+    calls.length = 0;
+    commit.onclick({ preventDefault() {}, stopPropagation() {} });
+    await settle();
+    assert.deepEqual(calls.map((c) => c.method), ["sessions.send"]);
+    assert.match(calls[0].message, /^\/skill wtc site: review and commit/);
+    assert.match(host.textContent, /site: asked the conversation to review and commit/);
+    personal = { state: "connected", account: { id: 1, login: "octo" }, generation: "g1" };
+    githubPublishResult = { status: "blocked", message: "The managed branch cannot publish yet. Review and commit its intended changes first." };
+    const push = [...host.all()].find((n) => n.tagName === "BUTTON" && /^14 files to push/.test(n.title));
+    assert.ok(push);
+    calls.length = 0;
+    await push.onclick();
+    await settle();
+    assert.equal(calls.find((c) => c.method === "sessions.github.publish").sessionKey, "agent:main:owner:site");
+    assert.ok([...host.all()].some((n) => (n.role ?? n.attributes.role) === "alert" && /site: blocked/.test(n.textContent)));
+    assert.match(host.textContent, /Review and commit its intended changes first/);
+    personal = null;
+    githubPublishResult = { status: "needs_confirmation", requestId: "req-1" };
+    view.dispose();
+  }
+});
+
+test("Bitbucket publication and confirmation refusals show a full alert without reporting a push", async () => {
+  for (const kind of ["composer", "panel"]) for (const stage of ["publish", "publish-confirm"]) {
+    bitbucket = { user: "ada@example.com", name: "Ada" };
+    bitbucketRefusedAction = stage;
+    const { host, view } = await mount(kind, collection([repo("hooks", { forge: "bitbucket", unpublished: 1 })]));
+    try {
+      const push = [...host.all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push/.test(n.title));
+      await push.onclick();
+      await settle();
+      if (stage === "publish-confirm") {
+        const confirm = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "confirm ↑ 1");
+        assert.ok(confirm);
+        await confirm.onclick();
+        await settle();
+      }
+      assert.ok([...host.all()].some((n) => (n.role ?? n.attributes.role) === "alert" && /hooks: blocked.*no longer valid/.test(n.textContent)));
+      assert.doesNotMatch(host.textContent, /hooks: pushed/);
+    } finally {
+      view.dispose();
+      bitbucket = undefined;
+      bitbucketRefusedAction = undefined;
+    }
   }
 });
 
@@ -547,7 +602,7 @@ test("composer: collapsed, the same facts summed", async () => {
   const { host, view } = await mount("composer", busy);
   const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
   const summary = card.children.find((n) => n.tagName === "SUMMARY");
-  assert.equal(summary.children[1].textContent, "±1↑ 2↓ 3PR1 ✗svc▶1/2");
+  assert.equal(summary.children[1].textContent, "±1↑ 2↓ 3PR1 ✗svc▶1/21 next action");
   // ↑ pushes every repository, ↓ catches every one up.
   assert.ok(titled(summary, "Push api, web, each to its pull request or a new draft one"));
   assert.ok([...summary.all()].some((n) => n.tagName === "BUTTON" && /^Catch up api \(3\)/.test(n.title)));

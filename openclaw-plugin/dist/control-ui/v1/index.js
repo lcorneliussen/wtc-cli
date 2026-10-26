@@ -91,7 +91,7 @@ async function settle(host, target, name, out, say) {
     return { requestId: out.requestId, confirmation: { generation: c.generation, account: c.account, requestDigest: c.requestDigest } };
   }
   if (out?.status === "published") say(`${name}: pushed ${out.url ?? out.pullRequestUrl ?? ""}`.trim());
-  else say(`${name}: ${out?.status ?? "done"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${wtcMessage(out.message)}` : ""}`, !!out?.error);
+  else say(`${name}: ${out?.status ?? "no answer"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${wtcMessage(out.message)}` : ""}`, true);
   return null;
 }
 
@@ -121,7 +121,7 @@ async function publishBitbucket(host, agentId, r, say, dest) {
     return { connect: true };
   }
   const c = out?.confirmation;
-  if (out?.status !== "needs_confirmation" || !c) { say(`${name}: ${out?.status ?? "no answer"}`); return null; }
+  if (out?.status !== "needs_confirmation" || !c) { say(`${name}: ${out?.status ?? "no answer"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${out.message}` : ""}`, true); return null; }
   const left = c.uncommitted ? `; ${plural(c.uncommitted, "uncommitted file")} stay behind` : "";
   say(`${name}: confirm to push ${c.branch} (${String(c.head).slice(0, 7)}) to ${c.dest} as ${bitbucketAccount(c)}${left}.`);
   return { forge: BITBUCKET, requestId: out.requestId, confirmation: c };
@@ -130,6 +130,10 @@ async function confirmBitbucket(host, agentId, r, pending, say) {
   const name = r.repo ?? r.project;
   say(`Pushing ${name}…`);
   const out = await bitbucketAction(host, agentId, r, "publish-confirm", { requestId: pending.requestId, requestDigest: pending.confirmation.requestDigest });
+  if (out?.status !== "published") {
+    say(`${name}: ${out?.status ?? "no answer"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${out.message}` : ""}`, true);
+    return null;
+  }
   say(`${name}: ${out?.created ? "pushed, draft pull request opened" : "pushed"} ${out?.url ?? ""}`.trim());
   return null;
 }
@@ -518,6 +522,18 @@ function collectionTables(v) {
   const busy = new Set();
   const catching = new Set();
   const acting = new Set();
+  const actionable = (r) => !r.error && (r.next || r.dirty > 0);
+  async function askCommit(r) {
+    if (acting.has(r.sessionKey)) return;
+    acting.add(r.sessionKey);
+    v.say(`Asking the conversation to review and commit ${nameOf(r)}…`);
+    v.rerender();
+    try {
+      await askSkill(v.host, v.key(), "wtc", `${nameOf(r)}: review and commit the intended uncommitted changes. Recheck its current state and branch policy first, and report the resulting commit. Leave publication for the person's push action.`);
+      v.say(`${nameOf(r)}: asked the conversation to review and commit the changes.`);
+    } catch (err) { v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
+    finally { acting.delete(r.sessionKey); await v.refresh(); }
+  }
   const nextLabel = (s) => ({ "return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", resolve: "Resolve conflicts", merge: "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", push: "Push", "merge-pr": "Open pull request" })[s.step] ?? s.step;
   const nextRoute = (s) => s.by === "person" && s.step === "merge-pr" ? "pr"
     : s.by === "wtc" && s.approve === "person" && s.gateway === "github_publish" ? "publish"
@@ -548,14 +564,15 @@ function collectionTables(v) {
     finally { acting.delete(r.sessionKey); await v.refresh(); }
   }
   function nextActions(repos) {
-    const rows = repos.filter((r) => !r.error && r.next);
+    const rows = repos.filter(actionable);
     if (!rows.length) return null;
     return css(el("div", { className: "wtc-next-actions" }, muted("Next actions"), ...rows.map((r) => {
-      const step = r.next;
-      const route = nextRoute(step);
+      const commit = !r.next && r.dirty > 0;
+      const step = r.next ?? { step: "commit", by: "agent", reason: `${plural(r.dirty, "uncommitted file")}. Review and commit the intended changes.` };
+      const route = commit ? "commit" : nextRoute(step);
       const action = route === "pr" && r.pullRequest?.url
         ? link(nextLabel(step), r.pullRequest.url)
-        : smallButton(acting.has(r.sessionKey) ? "Working…" : route === "agent" ? `Ask agent: ${nextLabel(step).toLowerCase()}` : nextLabel(step), step.reason, () => actNext(r));
+        : smallButton(acting.has(r.sessionKey) ? "Working…" : commit ? "Commit changes" : route === "agent" ? `Ask agent: ${nextLabel(step).toLowerCase()}` : nextLabel(step), step.reason, () => commit ? askCommit(r) : actNext(r));
       if (action.tagName === "BUTTON") action.disabled = !route || route === "pr" || acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey);
       return css(el("div", {}, css(el("strong", { textContent: nameOf(r) }), "font-size:12px"), action,
         muted(`${step.reason}${step.approve ? ` · ${step.approve} approval` : ` · ${step.by}`}`)), "display:flex;flex-wrap:wrap;align-items:center;gap:6px");
@@ -626,6 +643,7 @@ function collectionTables(v) {
   async function publish(r) {
     if (!PUSHES.has(r.forge) || mine[r.forge] === false) return;
     busy.add(r.sessionKey);
+    v.say(`Preparing to push ${nameOf(r)}…`);
     v.pause(true);
     v.rerender();
     try {
@@ -1016,7 +1034,9 @@ function collectionTables(v) {
     for (const s of sub.filter((s) => !repos.some((r) => r.repo && r.repo === s.r.repo))) rows.push(subRow(s.w, s.r));
     return rows;
   }
-  return { table, checkAccount, notice, nextActions, repoTable: (repos, narrow, workers) =>
+  return { table, checkAccount, notice, nextActions,
+    nextSummary: (repos) => repos.some(actionable) ? smallButton(plural(repos.filter(actionable).length, "next action"), "Show next actions and pending commits", () => { v.reveal?.(); v.rerender(); }) : null,
+    repoTable: (repos, narrow, workers) =>
     // Narrow, the repository (with its branch below) takes the room the
     // branch had.
     table(narrow ? REPO_COLUMNS.map((c, i) => (i === 0 ? { ...c, width: "minmax(0,1fr)" } : c)) : REPO_COLUMNS, repoRows(repos, workers), narrow), serviceTable, totals, prTable };
@@ -1215,7 +1235,7 @@ function mountComposer(container, context) {
     const groups = serviceGroups(entry.data.services ?? []);
     summary.replaceChildren(
       brand("14px", entry.data.version),
-      css(el("span", {}, ...(card.open ? [] : tables.totals(repos, groups))), "flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding-left:6px"),
+      css(el("span", {}, ...(card.open ? [] : [...tables.totals(repos, groups), tables.nextSummary(repos)])), "flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding-left:6px"),
       // What an action is doing or why it failed shows here.
       css(el("span", {}, note ? noteNode(note, noteFailed, "max-width:22em;overflow:hidden;text-overflow:ellipsis") : null,
         iconButton("↻", `Updated ${ago(entry.at)}. Refresh`, () => void watch?.refresh()),
@@ -1224,7 +1244,12 @@ function mountComposer(container, context) {
       "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
     );
     tables.checkAccount(repos);
-    detail.replaceChildren(...[tables.repoTable(repos, narrow, entry.data.subSessions), tables.nextActions(repos), tables.notice(),
+    detail.replaceChildren(...[tables.repoTable(repos, narrow, entry.data.subSessions),
+      note ? css(el("div", { className: "wtc-action-result", role: noteFailed ? "alert" : "status", ariaLive: "polite" },
+        css(el("strong", { textContent: noteFailed ? "Action failed" : "Latest action" }), "font-size:12px"),
+        noteNode(note, noteFailed, "white-space:normal;overflow-wrap:anywhere"),
+        smallButton("Dismiss", "Dismiss the last action result", () => { note = ""; render(entry); })), "display:grid;gap:4px") : null,
+      tables.nextActions(repos), tables.notice(),
       repos.some((r) => r.pullRequests?.length) ? el("div", {}, el("div", { textContent: "Pull requests" }), tables.prTable(repos, narrow)) : null,
       groups.length ? tables.serviceTable(groups, entry.data, narrow) : null].filter(Boolean));
     if (card.parentNode !== container) container.prepend(card);
@@ -1311,6 +1336,8 @@ function mountCollection(container, context) {
     note = text;
     noteFailed = failed;
     log.textContent = failed ? `⚠ ${text}` : text;
+    log.setAttribute("role", failed ? "alert" : "status");
+    log.setAttribute("aria-live", "polite");
     log.style.color = failed ? TONE.failure : "var(--muted, #888)";
     log.style.minHeight = text ? "1em" : "0";
   };
