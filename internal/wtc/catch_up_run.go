@@ -667,12 +667,14 @@ func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt Catch
 	}
 	if !opt.NoEnv {
 		run("env", (*Context).refreshEnv)
-		if opt.InstallTools {
-			if _, err := exec.LookPath("mise"); err != nil {
-				report.add("hook", t.collection, "tools", "skipped", "mise not installed", "", "", "")
-			} else {
-				run("tools", (*Context).InstallMise)
-			}
+	}
+	if opt.InstallTools {
+		if last := report.Outcomes[len(report.Outcomes)-1]; !opt.NoEnv && last.Repo == "env" && last.Outcome == "failed" {
+			report.add("hook", t.collection, "tools", "skipped", "environment refresh failed; nothing installed", "", "", "")
+		} else if _, err := exec.LookPath("mise"); err != nil {
+			report.add("hook", t.collection, "tools", "skipped", "mise not installed", "", "", "")
+		} else {
+			run("tools", (*Context).InstallMise)
 		}
 	}
 	if !opt.NoSkills {

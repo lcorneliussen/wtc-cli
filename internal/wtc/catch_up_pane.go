@@ -3,6 +3,7 @@ package wtc
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -96,14 +97,17 @@ func catchUpPane(c *Context, session, collection string) (string, bool, error) {
 
 // catchUpAgentBusy returns the status of a working or blocked agent in the
 // collection's herdr workspace, or "" when there is none. Without herdr, or
-// without a running session, no agent can be busy.
+// without a running session, no agent can be busy; any other herdr failure is
+// an error, which callers treat as unknown and leave to the owner.
 func catchUpAgentBusy(session, collection string) (string, error) {
 	if _, err := exec.LookPath("herdr"); err != nil {
 		return "", nil
 	}
 	workspaces, err := catchUpHerdr(session, "workspace", "list")
 	if err != nil {
-		if bytes.Contains(workspaces, []byte(`"server_not_running"`)) {
+		// herdr reports a stopped server on stderr.
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && bytes.Contains(exit.Stderr, []byte(`"server_not_running"`)) {
 			return "", nil
 		}
 		return "", fmt.Errorf("herdr workspace lookup failed")

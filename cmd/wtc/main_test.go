@@ -89,3 +89,11 @@ func TestDevBuildVersionsPassTheHarnessRange(t *testing.T) {
 		}
 	}
 }
+
+func TestUpgradeRolloutRefusesVersion(t *testing.T) {
+	cmd := exec.Command("go", "run", ".", "upgrade", "--rollout", "--version", "0.1.1")
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "cannot be combined with --version") {
+		t.Fatalf("--rollout --version accepted: %v %s", err, out)
+	}
+}

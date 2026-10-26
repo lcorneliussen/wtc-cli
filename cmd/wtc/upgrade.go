@@ -28,6 +28,9 @@ func addUpgradeCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&opt.DryRun, "dry-run", false, "Plan without writing; notes come from the published releases")
 	cmd.Flags().BoolVar(&rollout, "rollout", false, "Catch every collection's harness up to the merged pin")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if rollout && opt.Version != "" {
+			return fmt.Errorf("--rollout takes the pin from each harness's development tip; it cannot be combined with --version")
+		}
 		if currentHost() == openclaw.HostOpenClaw {
 			return fmt.Errorf("under OpenClaw, upgrade by installing the new wtc and running `wtc openclaw install`")
 		}
@@ -40,11 +43,7 @@ func addUpgradeCommand(root *cobra.Command, asJSON *bool) {
 			return err
 		}
 		if rollout {
-			if opt.Version != "" {
-				return fmt.Errorf("--rollout takes the pin from each harness's development tip; it cannot be combined with --version")
-			}
-			report, runErr := c.CatchUp(wtc.CatchUpOptions{All: true, Repos: []string{"harness"}, CleanOnly: true,
-				IdleOnly: true, InstallTools: true, DryRun: opt.DryRun})
+			report, runErr := c.CatchUp(wtc.RolloutOptions(opt.DryRun))
 			if *asJSON {
 				if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
 					return err
@@ -66,7 +65,11 @@ func addUpgradeCommand(root *cobra.Command, asJSON *bool) {
 			verb = "would pin"
 		}
 		fmt.Printf("%s wtc %s (was %s); wtc.toml requires %q\n", verb, result.To, result.From, result.Requires)
-		fmt.Printf("release notes %s → %s, from %s:\n\n", result.From, result.To, result.NotesSource)
+		if result.NotesError != "" {
+			fmt.Printf("release notes unavailable (%s); read them with the new binary: wtc release-notes --since %s\n", result.NotesError, result.From)
+		} else {
+			fmt.Printf("release notes %s → %s, from %s:\n\n", result.From, result.To, result.NotesSource)
+		}
 		for i, note := range result.Notes {
 			if i > 0 {
 				fmt.Print("\n---\n\n")

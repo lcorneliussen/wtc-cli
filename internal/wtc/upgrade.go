@@ -38,6 +38,7 @@ type UpgradeResult struct {
 	Files       []string      `json:"files"`
 	DryRun      bool          `json:"dry_run"`
 	NotesSource string        `json:"notes_source"`
+	NotesError  string        `json:"notes_error,omitempty"`
 	Notes       []ReleaseNote `json:"notes"`
 }
 
@@ -148,6 +149,11 @@ func (c *Context) Upgrade(opt UpgradeOptions) (UpgradeResult, error) {
 		}
 	}
 	result.Notes, result.NotesSource, err = upgradeNotes(c.Collection, from, to, opt.DryRun)
+	if err != nil && !opt.DryRun {
+		// The pin is written and installed; missing notes do not undo that.
+		result.NotesError = err.Error()
+		return result, nil
+	}
 	return result, err
 }
 

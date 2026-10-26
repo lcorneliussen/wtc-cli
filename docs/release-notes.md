@@ -22,7 +22,8 @@ and unreleased changes. It cannot be combined with a version or `--list`.
 
 ## Upgrade a harness
 
-`wtc upgrade`, run in a collection of the harness, does the mechanical part:
+`wtc upgrade`, run in a collection of the harness, does the mechanical
+part:
 it resolves the latest release (or `--version`), bumps `.wtc-cli-version` and
 the `wtc.toml` compatibility range together, refreshes the collection's mise
 config, installs the release, and prints that release's notes since the old
@@ -32,9 +33,9 @@ to you. After the harness PR merges, `wtc upgrade --rollout` catches every
 collection's harness up: clean worktrees and idle agents only, with
 `mise install`, reporting the collections left for their owners.
 
-Without the command, read the committed `.wtc-cli-version` and the target release. Run the **target
-binary** with `release-notes --since <old-pin>`: an old binary only contains its
-own archive and cannot fetch future notes. Download the published target binary
+Without the command, read the committed `.wtc-cli-version` and the target
+release. Run the **target binary** with `release-notes --since <old-pin>`: an
+old binary only contains its own archive and cannot fetch future notes. Download the published target binary
 without changing the harness pin first. For a binary that predates this command,
 read its [GitHub release notes](https://github.com/lcorneliussen/wtc-cli/releases).
 

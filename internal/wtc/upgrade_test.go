@@ -136,7 +136,7 @@ func TestUpgradeRefusesAdHocCollection(t *testing.T) {
 
 func TestCatchUpIdleOnlyLeavesBusyAgentsAndInstallsTools(t *testing.T) {
 	c := newWorkspaceFixture(t)
-	for _, slug := range []string{"busy", "quiet"} {
+	for _, slug := range []string{"busy", "stuck", "quiet"} {
 		if _, err := c.NewCollection(NewOptions{Slug: slug}); err != nil {
 			t.Fatal(err)
 		}
@@ -147,11 +147,13 @@ func TestCatchUpIdleOnlyLeavesBusyAgentsAndInstallsTools(t *testing.T) {
 shift 2
 case "$1 $2" in
   'workspace list')
-    if [ -n "$MOCK_HERDR_DOWN" ]; then printf '%s\n' '{"error":{"code":"server_not_running"}}'; exit 1; fi
-    printf '%s\n' '{"result":{"workspaces":[{"label":"main","workspace_id":"w1"},{"label":"busy","workspace_id":"w2"},{"label":"quiet","workspace_id":"w3"}]}}' ;;
+    if [ -n "$MOCK_HERDR_DOWN" ]; then printf '%s\n' '{"error":{"code":"server_not_running"}}' >&2; exit 1; fi
+    if [ -n "$MOCK_HERDR_BROKEN" ]; then printf '%s\n' '{"error":{"code":"internal"}}' >&2; exit 1; fi
+    printf '%s\n' '{"result":{"workspaces":[{"label":"main","workspace_id":"w1"},{"label":"busy","workspace_id":"w2"},{"label":"quiet","workspace_id":"w3"},{"label":"stuck","workspace_id":"w4"}]}}' ;;
   'pane list')
     case "$4" in
-      w2) printf '%s\n' '{"result":{"panes":[{"label":"agent","pane_id":"w2:p1","agent":"claude","agent_status":"working"}]}}' ;;
+      w1|w2) printf '%s\n' '{"result":{"panes":[{"label":"agent","pane_id":"x:p1","agent":"claude","agent_status":"working"}]}}' ;;
+      w4) printf '%s\n' '{"result":{"panes":[{"label":"agent","pane_id":"w4:p1","agent":"codex","agent_status":"blocked"}]}}' ;;
       *) printf '%s\n' '{"result":{"panes":[{"label":"agent","pane_id":"x:p1","agent":"claude","agent_status":"idle"}]}}' ;;
     esac ;;
 esac
@@ -170,9 +172,10 @@ esac
 			t.Fatalf("tools hook failed: %+v", row)
 		}
 	}
-	if !strings.HasPrefix(outcomes["busy"], "needs-owner: agent working") {
-		t.Fatalf("busy agent's collection was not left alone: %v", outcomes)
+	if !strings.HasPrefix(outcomes["busy"], "needs-owner: agent working") || !strings.HasPrefix(outcomes["stuck"], "needs-owner: agent blocked") {
+		t.Fatalf("busy agents' collections were not left alone: %v", outcomes)
 	}
+	// main is the initiating collection: its working agent is the one sweeping.
 	for _, name := range []string{"main", "quiet"} {
 		if strings.HasPrefix(outcomes[name], "needs-owner") || outcomes[name] == "" {
 			t.Fatalf("%s should have been caught up: %v", name, outcomes)
@@ -184,11 +187,80 @@ esac
 	}
 
 	// Without a running herdr session no agent can be busy.
+	quick := CatchUpOptions{Collections: []string{"busy"}, Repos: []string{"harness"}, IdleOnly: true, DryRun: true, NoSkills: true, NoMCP: true, NoSecrets: true, NoEnv: true}
 	t.Setenv("MOCK_HERDR_DOWN", "1")
-	report, _ = c.CatchUp(CatchUpOptions{Collections: []string{"busy"}, Repos: []string{"harness"}, IdleOnly: true, DryRun: true, NoSkills: true, NoMCP: true, NoSecrets: true, NoEnv: true})
+	report, _ = c.CatchUp(quick)
 	for _, row := range report.Outcomes {
 		if row.Kind == "repo" && row.Outcome == "needs-owner" {
 			t.Fatalf("stopped herdr session blocked the sweep: %+v", row)
 		}
+	}
+	// Any other herdr failure leaves the agent's state unknown, so its owner decides.
+	t.Setenv("MOCK_HERDR_DOWN", "")
+	t.Setenv("MOCK_HERDR_BROKEN", "1")
+	report, _ = c.CatchUp(quick)
+	unknown := false
+	for _, row := range report.Outcomes {
+		unknown = unknown || row.Kind == "repo" && row.Outcome == "needs-owner" && strings.HasPrefix(row.Reason, "agent unknown")
+	}
+	if !unknown {
+		t.Fatalf("unknown agent state was not left to the owner: %+v", report.Outcomes)
+	}
+}
+
+func TestCatchUpInstallToolsReportsMissingAndFailedMise(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	if _, err := c.NewCollection(NewOptions{Slug: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	opt := CatchUpOptions{Collections: []string{"other"}, Repos: []string{"harness"}, InstallTools: true, NoSkills: true, NoMCP: true, NoSecrets: true}
+	tools := func() CatchUpRow {
+		report, _ := c.CatchUp(opt)
+		for _, row := range report.Outcomes {
+			if row.Repo == "tools" {
+				return row
+			}
+		}
+		t.Fatalf("no tools row: %+v", report.Outcomes)
+		return CatchUpRow{}
+	}
+	if row := tools(); row.Outcome != "skipped" || row.Reason != "mise not installed" {
+		t.Fatalf("missing mise not reported: %+v", row)
+	}
+	bin := filepath.Join(c.Workspace, "bin")
+	fixtureFile(t, filepath.Join(bin, "mise"), `#!/bin/sh
+[ "$1" = install ] && { echo 'no such release' >&2; exit 1; }
+exit 0
+`, 0755)
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	if row := tools(); row.Outcome != "failed" || !strings.Contains(row.Reason, "no such release") {
+		t.Fatalf("failed install not reported: %+v", row)
+	}
+}
+
+func TestRolloutOptionsSweepHarnessesOfIdleCleanCollections(t *testing.T) {
+	got := RolloutOptions(true)
+	if !got.All || len(got.Repos) != 1 || got.Repos[0] != "harness" || !got.CleanOnly || !got.IdleOnly || !got.InstallTools || !got.DryRun ||
+		got.NoEnv || got.NoSkills || got.NoMCP || got.NoSecrets || len(got.Collections) != 0 {
+		t.Fatalf("unexpected rollout sweep: %+v", got)
+	}
+}
+
+func TestUpgradeKeepsPinWhenNotesAreUnavailable(t *testing.T) {
+	c, bin := upgradeFixture(t)
+	// Releases resolve, but the listing the notes come from fails.
+	fixtureFile(t, filepath.Join(bin, "gh"), `#!/bin/sh
+case "$*" in *releases/latest*) echo v0.1.12 ;; *) exit 1 ;; esac
+`, 0755)
+	result, err := c.Upgrade(UpgradeOptions{})
+	if err != nil || result.To != "0.1.12" || result.NotesError == "" {
+		t.Fatalf("notes failure undid the upgrade: %+v %v", result, err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(c.Harness, ".wtc-cli-version")); string(data) != "0.1.12\n" {
+		t.Fatalf("pin not kept: %q", data)
+	}
+	fixtureGit(t, "-C", c.Harness, "checkout", "--", ".wtc-cli-version", "wtc.toml")
+	if _, err := c.Upgrade(UpgradeOptions{DryRun: true}); err == nil {
+		t.Fatal("a dry run without notes should fail: it has nothing else to show")
 	}
 }
