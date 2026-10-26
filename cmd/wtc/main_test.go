@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +11,42 @@ import (
 
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
+
+func TestTabaEnvironmentConflictKeepsJSONOutputClean(t *testing.T) {
+	collection := filepath.Join(t.TempDir(), "demo")
+	harness := filepath.Join(collection, "harness")
+	if err := os.MkdirAll(harness, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(harness, ".harness-repos.yml"), []byte("repos:\n  - name: widget\n    remote: https://example.invalid/widget.git\n    default_ref: origin/main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(harness, ".wtc-cli-version"), []byte("0.1.1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	legacy, current := filepath.Join(t.TempDir(), "legacy-private-value"), filepath.Join(t.TempDir(), "current-private-value")
+	cmd := exec.Command("go", "run", ".", "env", "setup", "--collection", collection, "--dry-run", "--json")
+	for _, value := range os.Environ() {
+		if !strings.HasPrefix(value, "WTC_CONFIG_ROOT=") && !strings.HasPrefix(value, "TABA_CONFIG_ROOT=") {
+			cmd.Env = append(cmd.Env, value)
+		}
+	}
+	cmd.Env = append(cmd.Env, "WTC_CONFIG_ROOT="+legacy, "TABA_CONFIG_ROOT="+current)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("env preview failed: %v, %s", err, &stderr)
+	}
+	if !json.Valid(stdout.Bytes()) || !strings.Contains(stdout.String(), current) || !strings.Contains(stdout.String(), "WTC_CONFIG_ROOT") || strings.Contains(stdout.String(), "TABA_CONFIG_ROOT") {
+		t.Fatalf("JSON output or phase-0 environment spelling changed: %s", &stdout)
+	}
+	if strings.Count(stderr.String(), "TABA_CONFIG_ROOT and WTC_CONFIG_ROOT differ; using TABA_CONFIG_ROOT") != 1 || strings.Contains(stderr.String(), legacy) || strings.Contains(stderr.String(), current) {
+		t.Fatalf("expected one value-free stderr warning: %s", &stderr)
+	}
+	if _, err := os.Stat(filepath.Join(collection, ".env.collection")); !os.IsNotExist(err) {
+		t.Fatal("dry run wrote the generated environment")
+	}
+}
 
 func TestCompatibility(t *testing.T) {
 	cases := []struct {

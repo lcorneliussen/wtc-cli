@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 )
 
 func statusForgeCacheAge() time.Duration {
-	seconds, err := strconv.Atoi(os.Getenv("WTC_FORGE_CACHE_AGE"))
+	seconds, err := strconv.Atoi(envcompat.Getenv("WTC_FORGE_CACHE_AGE"))
 	if err != nil || seconds < 1 {
 		seconds = 90
 	}
@@ -19,7 +21,7 @@ func statusForgeCacheAge() time.Duration {
 
 func statusMergedCacheAge() time.Duration {
 	// Explicit cache-age overrides apply to both active and merged PRs.
-	if os.Getenv("WTC_FORGE_CACHE_AGE") != "" {
+	if envcompat.Getenv("WTC_FORGE_CACHE_AGE") != "" {
 		return statusForgeCacheAge()
 	}
 	return 24 * time.Hour

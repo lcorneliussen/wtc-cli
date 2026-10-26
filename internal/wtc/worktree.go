@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 )
 
 func gitOutput(args ...string) (string, error) {
@@ -34,7 +36,7 @@ func (c *Context) HarnessRepoName() (string, error) {
 	if c.AdHoc {
 		return "", nil
 	}
-	if name := os.Getenv("WTC_HARNESS_REPO"); name != "" {
+	if name := envcompat.Getenv("WTC_HARNESS_REPO"); name != "" {
 		if _, err := c.Repository(name); err != nil {
 			return "", err
 		}

@@ -438,14 +438,18 @@ test("the suggest action calls OpenAI itself with WTC_DECISIONS_OPENAI_API_KEY, 
   });
   const realFetch = globalThis.fetch;
   const models = [];
+  const authorizations = [];
   globalThis.fetch = async (url, init) => {
     models.push(JSON.parse(init.body).model);
+    authorizations.push(init.headers.authorization);
     return { ok: true, status: 200, json: async () => ({ model: "gpt-6-test", answers: [{ name: "where", type: "choice", choice: "none", probabilities: [{ value: "none", probability: 0.9 }] }] }) };
   };
   const was = process.env.WTC_DECISIONS_OPENAI_API_KEY;
+  const wasCurrent = process.env.TABA_DECISIONS_OPENAI_API_KEY;
   try {
     const suggest = () => actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text: "work on the site" } });
     delete process.env.WTC_DECISIONS_OPENAI_API_KEY;
+    delete process.env.TABA_DECISIONS_OPENAI_API_KEY;
     assert.equal((await suggest()).result.source, "match");
     assert.deepEqual(models, []);
     process.env.WTC_DECISIONS_OPENAI_API_KEY = "sk-test";
@@ -456,9 +460,17 @@ test("the suggest action calls OpenAI itself with WTC_DECISIONS_OPENAI_API_KEY, 
     const fromDraft = await actions.get("suggest").handler({ sessionKey: "s", agentId: "main", payload: { text: "work on the site", draft: true } });
     assert.equal(fromDraft.result.source, "match");
     assert.deepEqual(models, ["gpt-6-test"]);
+    process.env.TABA_DECISIONS_OPENAI_API_KEY = "sk-current-test";
+    assert.equal((await suggest()).result, null);
+    assert.equal(authorizations.at(-1), "Bearer sk-current-test");
+    process.env.TABA_DECISIONS_OPENAI_API_KEY = "";
+    const requests = models.length;
+    assert.equal((await suggest()).result.source, "match");
+    assert.equal(models.length, requests);
   } finally {
     globalThis.fetch = realFetch;
     if (was === undefined) delete process.env.WTC_DECISIONS_OPENAI_API_KEY; else process.env.WTC_DECISIONS_OPENAI_API_KEY = was;
+    if (wasCurrent === undefined) delete process.env.TABA_DECISIONS_OPENAI_API_KEY; else process.env.TABA_DECISIONS_OPENAI_API_KEY = wasCurrent;
   }
 });
 

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -177,7 +178,7 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 		}
 	}
 	if worktree == "" {
-		worktree = os.Getenv("WTC_COLLECTION")
+		worktree = envcompat.Getenv("WTC_COLLECTION")
 	}
 	if worktree == "" {
 		return errors.New("which worktree name? Pass --worktree <issue-id>-<slug>: every repository of the collection gets a worktree of that name, on branch " + openclaw.BranchPrefix + "<name>")

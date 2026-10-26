@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -44,8 +45,11 @@ func TestRuntimeAnswering(t *testing.T) {
 		{Path: "d", State: "ready"},
 	}
 	asked := map[string]bool{}
+	var askedMu sync.Mutex
 	runtimeAnswering(items, func(raw string) (bool, string) {
+		askedMu.Lock()
 		asked[raw] = true
+		askedMu.Unlock()
 		return raw == "https://a.example", "HTTP 502"
 	})
 	if items[0].Answering != "yes" || items[1].Answering != "no" || items[1].AnswerDetail != "HTTP 502" || items[2].Answering != "" || items[3].Answering != "" {

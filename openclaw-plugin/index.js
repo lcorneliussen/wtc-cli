@@ -45,6 +45,21 @@ export function versionWarning(pluginVersion, wtcVersionOutput) {
 
 const onPath = (program) => String(process.env.PATH ?? "").split(path.delimiter).some((dir) => dir && existsSync(path.join(dir, program)));
 
+const warnedEnvConflicts = new Set();
+
+// Read both spellings without exposing values, especially API keys, in warnings.
+export function productEnv(name, env = process.env, warn = console.warn) {
+  const suffix = /^(?:WTC|TABA)_(.+)$/.exec(name)?.[1];
+  if (!suffix || /^(?:TEST_|DEV_)/.test(suffix)) return env[name];
+  const current = `TABA_${suffix}`, legacy = `WTC_${suffix}`;
+  if (!Object.hasOwn(env, current)) return env[legacy];
+  if (Object.hasOwn(env, legacy) && env[current] !== env[legacy] && !warnedEnvConflicts.has(legacy)) {
+    warnedEnvConflicts.add(legacy);
+    warn(`wtc: ${current} and ${legacy} differ; using ${current}`);
+  }
+  return env[current];
+}
+
 // A Bitbucket repository as a person types it: a bitbucket.org URL in https
 // or scp form, or bitbucket.org/<workspace>/<repo>.
 export function parseBitbucketRepo(spec) {
@@ -651,7 +666,7 @@ export default {
         // A draft not sent yet stays on the gateway: the words only.
         const draft = action.payload?.draft === true;
         let decided = draft ? null : await decideProjects(api.runtime.decisions, action.agentId, text, projects);
-        const key = process.env.WTC_DECISIONS_OPENAI_API_KEY;
+        const key = productEnv("WTC_DECISIONS_OPENAI_API_KEY");
         if (!decided && key && !draft) decided = await decideProjects(openaiDecisions({ apiKey: key, model: api.pluginConfig?.decisionModel || undefined }), action.agentId, text, projects);
         return { ok: true, result: decided?.none ? null : decided ?? matchProjects(text, projects) };
       },
