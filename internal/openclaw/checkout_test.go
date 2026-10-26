@@ -686,3 +686,50 @@ func TestStatusNamesTheNextStep(t *testing.T) {
 		t.Fatalf("detached, behind: %+v", s.Next)
 	}
 }
+
+// A squash merge leaves the branch's commits out of the base. Following the
+// step the status names, back to the tip, must not end in a step that asks
+// to move wtc's own merge of the base to a new branch.
+func TestAfterASquashMergeTheNextStepsEnd(t *testing.T) {
+	c, git := managedWorktree(t, "/dev/null/unused")
+	bare := git("remote", "get-url", "--push", "origin")
+	git("remote", "set-url", "origin", bare)
+	write(t, c, "feature.md", "feature\n")
+	git("add", ".")
+	git("commit", "-qm", "the feature")
+	head := git("rev-parse", "HEAD")
+	// The pull request is squash-merged: its content lands on main as one
+	// new commit, and main moves on.
+	advanceOrigin(t, bare, "feature.md", "feature\n")
+	advanceOrigin(t, bare, "OTHER", "later\n")
+	git("fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
+	squash := git("rev-parse", "origin/main~1")
+	merged := func() *PullRequest {
+		in := gitOK(c.Dir, "merge-base", "--is-ancestor", squash, "HEAD")
+		return &PullRequest{Number: 7, State: "merged", Head: head, MergedIn: &in}
+	}
+	step := func() *next.Step {
+		s := checkoutStatus(c.Dir, false)
+		s.PullRequest = merged()
+		return next.For(s.facts(c.Dir))
+	}
+	if got := step(); got == nil || got.Step != "return-to-tip" || got.Approve != "" {
+		t.Fatalf("after the squash merge: %+v", got)
+	}
+	// Catching up merges the base into the branch (on the gateway, until it
+	// returns to the tip itself)...
+	if _, err := c.CatchUp(); err != nil {
+		t.Fatal(err)
+	}
+	// ...and then nothing is left to do: the merge is no work of its own.
+	if got := step(); got != nil {
+		t.Fatalf("after catching up: %+v", got)
+	}
+	// Real work after the merge goes to a new branch.
+	write(t, c, "followup.md", "more\n")
+	git("add", ".")
+	git("commit", "-qm", "follow-up")
+	if got := step(); got == nil || got.Step != "new-branch" || got.By != next.ByAgent {
+		t.Fatalf("a follow-up commit: %+v", got)
+	}
+}

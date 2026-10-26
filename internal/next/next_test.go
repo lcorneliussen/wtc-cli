@@ -28,8 +28,11 @@ func TestFor(t *testing.T) {
 		{"merged, and main moved on: back to the tip, never a merge into it", Facts{Repo: "api", Base: "origin/main", Branch: "12-x", Behind: 21, PR: &PR{Number: 7, State: "merged", MergedIn: &yes}}, "return-to-tip", ByWTC,
 			func(s *Step) bool { return s.Approve == "" }},
 		{"merged, and at the tip: nothing", Facts{Repo: "api", Branch: "12-x", PR: &PR{Number: 7, State: "merged", MergedIn: &yes}}, "", "", nil},
-		{"commits after the merge go to a new branch", Facts{Repo: "api", Branch: "12-x", ToPush: 2, PR: &PR{Number: 7, State: "merged", MergedIn: &yes}}, "new-branch", ByAgent,
-			func(s *Step) bool { return s.Reason == "#7 was merged, but 2 commits came after it: put them on a new branch" }},
+		{"a catch-up's merge after the merge is no work", Facts{Repo: "api", Branch: "12-x", ToPush: 1, PR: &PR{Number: 7, State: "merged", MergedIn: &yes}}, "", "", nil},
+		{"commits after the merge go to a new branch", Facts{Repo: "api", Branch: "12-x", ToPush: 2, AfterMerge: 2, PR: &PR{Number: 7, State: "merged", MergedIn: &yes}}, "new-branch", ByAgent,
+			func(s *Step) bool {
+				return s.Reason == "#7 was merged, but 2 commits came after it: put them on a new branch"
+			}},
 		{"detached with commits of its own: a branch first", Facts{Repo: "api", Ahead: 1, Behind: 3}, "new-branch", ByAgent, nil},
 		{"a conflicting PR is merged by the agent", Facts{Repo: "api", Base: "origin/main", PR: &PR{Number: 7, State: "open", Mergeable: "conflicting"}}, "merge", ByAgent,
 			func(s *Step) bool { return s.Reason == "#7 conflicts with main" }},
@@ -50,7 +53,9 @@ func TestFor(t *testing.T) {
 			func(s *Step) bool { return s.Approve == ApproveAgent }},
 		{"behind with uncommitted files: wait for the work", Facts{Repo: "api", Behind: 2, Dirty: 1}, "", "", nil},
 		{"commits to push on the gateway are the person's", Facts{Repo: "api", Host: HostOpenClaw, ToPush: 2}, "push", ByWTC,
-			func(s *Step) bool { return s.Approve == ApprovePerson && s.Gateway == "github_publish" && s.Reason == "2 commits to push, opening a draft pull request" }},
+			func(s *Step) bool {
+				return s.Approve == ApprovePerson && s.Gateway == "github_publish" && s.Reason == "2 commits to push, opening a draft pull request"
+			}},
 		{"commits to push locally are the agent's", Facts{Repo: "api", Host: HostLocal, ToPush: 2, PR: &PR{Number: 7, State: "open"}}, "push", ByAgent,
 			func(s *Step) bool { return s.Skill == "wtc-draft-pr" && s.Reason == "2 commits to push" }},
 		{"approved and green: people merge", Facts{Repo: "api", PR: &PR{Number: 7, State: "open", Checks: "success", Review: "approved", Mergeable: "mergeable"}}, "merge-pr", ByPerson,

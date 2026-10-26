@@ -82,7 +82,10 @@ type Facts struct {
 	MergeUnknown   bool
 	// ToPush counts the commits a push would send.
 	ToPush int
-	PR     *PR
+	// AfterMerge counts the commits made after the pull request merged:
+	// neither in it nor in the base, and no merges.
+	AfterMerge int
+	PR         *PR
 }
 
 // For is the repository's next step, or nil when nothing waits on anyone.
@@ -114,9 +117,9 @@ func For(f Facts) *Step {
 	// A merged branch is finished: nothing is merged into it any more. It
 	// goes back to the tip, and the next change branches anew; commits made
 	// after the merge are such a change, on the wrong branch.
-	case pr != nil && pr.State == "merged" && f.ToPush > 0:
+	case pr != nil && pr.State == "merged" && f.AfterMerge > 0:
 		s.Step, s.By, s.Skill = "new-branch", ByAgent, "wtc-catch-up"
-		s.Reason = fmt.Sprintf("#%d was merged, but %d commits came after it: put them on a new branch", pr.Number, f.ToPush)
+		s.Reason = fmt.Sprintf("#%d was merged, but %d commits came after it: put them on a new branch", pr.Number, f.AfterMerge)
 		s.Then = []string{"push"}
 		s.Key = key(f.Head)
 	case pr != nil && pr.State == "merged" && (f.Behind > 0 || pr.MergedIn == nil || !*pr.MergedIn):
@@ -124,6 +127,10 @@ func For(f Facts) *Step {
 		s.Reason = fmt.Sprintf("#%d was merged: back to %s's tip; the next change branches anew", pr.Number, baseName(f.Base))
 		s.Command = []string{"wtc", "catch-up"}
 		s.Key = key(fmt.Sprint(pr.Number), f.BaseHead)
+	case pr != nil && pr.State == "merged":
+		// At the tip, with nothing of its own after the merge: nothing is
+		// pushed to a merged branch.
+		return nil
 	case f.Branch == "" && f.Ahead > 0:
 		s.Step, s.By, s.Skill = "new-branch", ByAgent, "wtc-catch-up"
 		s.Reason = fmt.Sprintf("%d commits on no branch: put them on a branch before anything moves", f.Ahead)

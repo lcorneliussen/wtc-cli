@@ -77,6 +77,8 @@ type PullRequest struct {
 	// MergedIn says, of a merged pull request whose merge commit is known,
 	// whether the checkout has that commit. Absent otherwise.
 	MergedIn *bool `json:"mergedIn,omitempty"`
+	// Head is the commit the pull request ended at.
+	Head string `json:"head,omitempty"`
 }
 
 // ManagedCollections finds the gateway's collections: the managed worktrees
@@ -251,8 +253,17 @@ func (s CheckoutStatus) facts(top string) next.Facts {
 		f.ToPush = s.Unpublished
 	}
 	if s.Behind > 0 && s.Base != "" && f.InProgress == "" {
-		f.MergeConflicts, f.MergeUnknown = next.PredictMerge(top, s.Base)
-		f.MergeUnknown = !f.MergeUnknown
+		var ok bool
+		f.MergeConflicts, ok = next.PredictMerge(top, s.Base)
+		f.MergeUnknown = !ok
+	}
+	// Work after a merged pull request: commits neither in it nor in the
+	// base, leaving out merges (a catch-up's merge of the base is no work).
+	// Unknown without the pull request's head, so then none is claimed.
+	if pr := s.PullRequest; pr != nil && pr.State == "merged" && pr.Head != "" && s.Base != "" {
+		if n, err := git(top, "rev-list", "--count", "--no-merges", "HEAD", "^"+pr.Head, "^"+s.Base); err == nil {
+			f.AfterMerge, _ = strconv.Atoi(n)
+		}
 	}
 	if pr := s.PullRequest; pr != nil {
 		f.PR = &next.PR{Number: pr.Number, State: pr.State, Draft: pr.Draft, Checks: pr.Checks, Mergeable: pr.Mergeable, Review: pr.Review, MergedIn: pr.MergedIn}
@@ -266,7 +277,7 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "--repo", origin.Owner+"/"+origin.Repo, "--head", branch,
-		"--state", "all", "--limit", "1", "--json", "number,url,state,isDraft,title,statusCheckRollup,mergeable,reviewDecision,mergeCommit")
+		"--state", "all", "--limit", "1", "--json", "number,url,state,isDraft,title,statusCheckRollup,mergeable,reviewDecision,mergeCommit,headRefOid")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -280,6 +291,7 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 		Title   string `json:"title"`
 		Merge   string `json:"mergeable"`
 		Review  string `json:"reviewDecision"`
+		Head    string `json:"headRefOid"`
 		Commit  *struct {
 			OID string `json:"oid"`
 		} `json:"mergeCommit"`
@@ -294,7 +306,7 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 	}
 	f := found[0]
 	pr := &PullRequest{Number: f.Number, URL: f.URL, State: strings.ToLower(f.State), Draft: f.IsDraft, Title: f.Title, Checks: "none",
-		Mergeable: strings.ToLower(f.Merge), Review: strings.ToLower(f.Review)}
+		Mergeable: strings.ToLower(f.Merge), Review: strings.ToLower(f.Review), Head: f.Head}
 	if pr.State == "merged" && f.Commit != nil && f.Commit.OID != "" {
 		in := gitOK(dir, "merge-base", "--is-ancestor", f.Commit.OID, "HEAD")
 		pr.MergedIn = &in
