@@ -305,10 +305,10 @@ test("composer: the actions are on the facts they change", async () => {
   calls.length = 0;
   await named(/^3 new on main\. Catch up/).onclick();
   assert.deepEqual(calls.map((c) => c.actionId ?? c.method), ["catch-up", "sessions.send"]);
-  assert.match(calls[1].message, /conflicts in README\.md, go\.mod\. Run wtc catch-up in your checkout of api; .*wtc catch-up --continue in a sandbox.*Don't rebase, and don't push/);
+  assert.equal(calls[1].message, "/skill wtc-catch-up api: catching up with origin/main conflicts in README.md, go.mod.");
   catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
   await named(/^#7 conflicts with main\. Resolve/).onclick();
-  assert.match(calls.at(-1).message, /Pull request #7 of api conflicts.*Don't push/);
+  assert.equal(calls.at(-1).message, "/skill wtc-catch-up api: pull request #7 conflicts with main.");
   // Without the Bitbucket plugin's publish, Bitbucket is not pushed from
   // here: pushing is never handed to the agent.
   assert.equal(named(/^1 commit to push/), undefined);
@@ -825,7 +825,7 @@ test("composer: a worker's merge conflict goes to the conversation; an unknown m
   calls.length = 0;
   await named(/^1 commit of worker docs/).onclick();
   assert.deepEqual(calls.map((c) => c.actionId ?? c.method), ["catch-up", "sessions.send"]);
-  assert.match(calls[1].message, /Merging worker docs into site conflicts in index\.md\. Run wtc catch-up --from docs in your checkout of site/);
+  assert.equal(calls[1].message, "/skill wtc-catch-up site: merging worker docs (wtc catch-up --from docs) conflicts in index.md.");
   catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
 
   // The task has no checkout of the harness: nothing says what is merged.

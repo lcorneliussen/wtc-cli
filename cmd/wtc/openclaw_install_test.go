@@ -17,7 +17,9 @@ func TestWriteOpenClawPluginStampsTheVersion(t *testing.T) {
 	if err := writeOpenClawPlugin(dir, "v1.2.3"); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"index.js", "package.json", "openclaw.plugin.json", "dist/control-ui/v1/index.js", "skills/wtc/SKILL.md"} {
+	for _, f := range []string{"index.js", "package.json", "openclaw.plugin.json", "dist/control-ui/v1/index.js", "skills/wtc/SKILL.md",
+		// The wtc skills' OpenClaw variants, under their own names.
+		"skills/wtc-catch-up/SKILL.md", "skills/wtc-pr/SKILL.md", "skills/wtc-follow/SKILL.md"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("%s was not written: %v", f, err)
 		}
@@ -165,5 +167,23 @@ func TestDescribeBuild(t *testing.T) {
 	version = "1.2.3"
 	if got := versionLabel(); got != "1.2.3" {
 		t.Errorf("a release: %s", got)
+	}
+}
+
+func TestOpenClawSkillsAreTheOpenClawVariants(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeOpenClawPlugin(dir, "v1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "skills", "wtc-catch-up", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(data), "---\nname: wtc-catch-up\n") || !strings.Contains(string(data), "wtc catch-up --continue") || strings.Contains(string(data), "herdr") {
+		t.Errorf("wtc-catch-up is not its OpenClaw variant:\n%.400s", data)
+	}
+	// Skills without an OpenClaw variant stay local.
+	if _, err := os.Stat(filepath.Join(dir, "skills", "wtc-open")); err == nil {
+		t.Error("wtc-open has no OpenClaw variant but was installed")
 	}
 }

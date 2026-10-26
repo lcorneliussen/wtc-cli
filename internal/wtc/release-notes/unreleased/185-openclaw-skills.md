@@ -1,0 +1,14 @@
+## OpenClaw: skills
+
+- **The gateway's agents get wtc's skills for OpenClaw.** `wtc openclaw
+  install` now installs wtc-catch-up, wtc-pr and wtc-follow beside the `wtc`
+  skill, in variants written for the gateway: catching up and resolving a
+  conflict in the agent's own checkout (in a sandbox too), getting a pull
+  request ready for the person's push, and acting on pull request news
+  ([#185](https://github.com/lcorneliussen/wtc-cli/issues/185)).
+- **The card asks for a skill, not a procedure.** A conflict from ↓, from
+  merging a worker or on a pull request reaches the conversation as
+  `/skill wtc-catch-up <what the card saw>`, so it goes the same way as
+  asking in the chat. Pull request news names wtc-follow.
+- A skill gets a variant for a host as `SKILL.<host>.md` beside its
+  `SKILL.md`; `wtc docs` lists them.

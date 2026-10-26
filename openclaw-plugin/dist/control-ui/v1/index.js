@@ -140,10 +140,11 @@ async function confirmBitbucket(host, agentId, r, pending, say) {
 export const conflictsOf = (message) => (/conflicts in: (.+?)\. The merge was aborted/.exec(message ?? "")?.[1] ?? "")
   .split(/,\s*/).filter(Boolean);
 
-// A conflict is the agent's to resolve, in its own checkout: in a sandbox,
-// wtc catch-up there stops on the conflict with git's merge state, and the
-// gateway takes the resolved branch back; outside one, wtc catch-up says to
-// merge by hand. The gateway's own merge was aborted and changed nothing.
+// A conflict is the agent's to resolve, in its own checkout, with the
+// wtc-catch-up skill: the card says what it saw and names the skill, so that
+// asking in the chat and clicking here do the same. The gateway's own merge
+// was aborted and changed nothing.
+const askSkill = (host, sessionKey, skill, input) => askConversation(host, sessionKey, `/skill ${skill} ${input}`);
 async function catchUpRepo(host, agentId, r, say, ask) {
   const name = r.repo ?? r.project;
   say(`Catching up ${name}…`);
@@ -151,7 +152,7 @@ async function catchUpRepo(host, agentId, r, say, ask) {
   const conflicts = conflictsOf(out.message);
   if (conflicts.length) {
     const base = r.base ?? "its base";
-    await ask(`Catching up ${name} with ${base} conflicts in ${conflicts.join(", ")}. Run wtc catch-up in your checkout of ${name}; where it stops on the conflicts, resolve them there and finish as it says (wtc catch-up --continue in a sandbox). Don't rebase, and don't push: pushing is mine, through the gateway.`);
+    await ask(`${name}: catching up with ${base} conflicts in ${conflicts.join(", ")}.`);
     say(`${name}: ${conflicts.join(", ")} changed on both sides; the conversation was asked to merge and resolve them.`);
     return;
   }
@@ -592,7 +593,7 @@ function collectionTables(v) {
   async function catchUp(list) {
     list.forEach((r) => catching.add(r.sessionKey));
     v.rerender();
-    try { for (const r of list) await catchUpRepo(v.host, v.agent(), r, v.say, (message) => askConversation(v.host, v.key(), message)); } finally {
+    try { for (const r of list) await catchUpRepo(v.host, v.agent(), r, v.say, (input) => askSkill(v.host, v.key(), "wtc-catch-up", input)); } finally {
       list.forEach((r) => catching.delete(r.sessionKey));
       await v.refresh();
     }
@@ -615,7 +616,7 @@ function collectionTables(v) {
       const out = await call(v.host, "catch-up", r.taskSessionKey, v.agent(), { from: w.name });
       const conflicts = conflictsOf(out.message);
       if (conflicts.length) {
-        await askConversation(v.host, v.key(), `Merging worker ${w.name} into ${name} conflicts in ${conflicts.join(", ")}. Run wtc catch-up --from ${w.name} in your checkout of ${name}, resolve the conflicts there and commit. Don't rebase, and don't push: pushing is mine, through the gateway.`);
+        await askSkill(v.host, v.key(), "wtc-catch-up", `${name}: merging worker ${w.name} (wtc catch-up --from ${w.name}) conflicts in ${conflicts.join(", ")}.`);
         v.say(`${name}: ${conflicts.join(", ")} changed in both; the conversation was asked to merge worker ${w.name} and resolve them.`);
       } else {
         v.say(`${name}: ${out.json?.summary ?? (out.message || "exit " + out.code)}`);
@@ -752,7 +753,7 @@ function collectionTables(v) {
       : null;
     const conflict = open && pr.mergeable === "conflicting"
       ? count("✗", `#${pr.number} conflicts with ${baseOf(r)}. Resolve: ask the conversation to merge the base in and resolve the conflicts`, TONE.failure,
-        () => askConversation(v.host, v.key(), `Pull request #${pr.number} of ${nameOf(r)} conflicts with its base. Merge the base branch into ${nameOf(r)}, resolve the conflicts and commit. Don't push: pushing is mine, through the gateway.`))
+        () => askSkill(v.host, v.key(), "wtc-catch-up", `${nameOf(r)}: pull request #${pr.number} conflicts with ${baseOf(r)}.`))
       : null;
     const review = open ? { approved: toned("✓", TONE.success, "approved"), changes_requested: toned("✗", TONE.failure, "changes requested"), review_required: muted("○", "review required") }[pr.review] ?? null : null;
     return [
