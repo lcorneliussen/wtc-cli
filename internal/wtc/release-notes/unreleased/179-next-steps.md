@@ -2,7 +2,9 @@
 
 - **`wtc status --json` names each repository's next step.** A `next` field
   per repository says what should happen now, read from its state: resolve
-  a merge in progress, catch up (predicting with `git merge-tree` whether
+  a merge in progress, return a merged branch to the tip (the next change
+  branches anew), move commits on no branch or after a merge to a new
+  branch, catch up (predicting with `git merge-tree` whether
   merging the base would conflict), merge a conflicting pull request, fix
   failed checks, address requested changes, push, or merge an approved
   pull request. Each step says who does it (`by`: `wtc`, `agent`, or

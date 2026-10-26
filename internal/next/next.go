@@ -30,8 +30,8 @@ const (
 // Step is a repository's next step.
 type Step struct {
 	Repo string `json:"repo"`
-	// Step names it: resolve, merge, catch-up, fix-checks, address-review,
-	// push, merge-pr.
+	// Step names it: resolve, return-to-tip, new-branch, merge, catch-up,
+	// fix-checks, address-review, push, merge-pr.
 	Step    string `json:"step"`
 	By      string `json:"by"`
 	Approve string `json:"approve,omitempty"`
@@ -111,11 +111,23 @@ func For(f Facts) *Step {
 		s.Key = key(f.Head)
 	case f.Dirty > 0:
 		return nil
-	case pr != nil && pr.State == "merged" && (pr.MergedIn == nil || !*pr.MergedIn):
-		s.Step, s.By = "catch-up", ByWTC
-		s.Reason = fmt.Sprintf("#%d was merged: continue from the merge", pr.Number)
+	// A merged branch is finished: nothing is merged into it any more. It
+	// goes back to the tip, and the next change branches anew; commits made
+	// after the merge are such a change, on the wrong branch.
+	case pr != nil && pr.State == "merged" && f.ToPush > 0:
+		s.Step, s.By, s.Skill = "new-branch", ByAgent, "wtc-catch-up"
+		s.Reason = fmt.Sprintf("#%d was merged, but %d commits came after it: put them on a new branch", pr.Number, f.ToPush)
+		s.Then = []string{"push"}
+		s.Key = key(f.Head)
+	case pr != nil && pr.State == "merged" && (f.Behind > 0 || pr.MergedIn == nil || !*pr.MergedIn):
+		s.Step, s.By = "return-to-tip", ByWTC
+		s.Reason = fmt.Sprintf("#%d was merged: back to %s's tip; the next change branches anew", pr.Number, baseName(f.Base))
 		s.Command = []string{"wtc", "catch-up"}
-		s.Key = key(fmt.Sprint(pr.Number))
+		s.Key = key(fmt.Sprint(pr.Number), f.BaseHead)
+	case f.Branch == "" && f.Ahead > 0:
+		s.Step, s.By, s.Skill = "new-branch", ByAgent, "wtc-catch-up"
+		s.Reason = fmt.Sprintf("%d commits on no branch: put them on a branch before anything moves", f.Ahead)
+		s.Key = key(f.Head)
 	case open && pr.Mergeable == "conflicting":
 		s.Step, s.By, s.Skill = "merge", ByAgent, "wtc-catch-up"
 		s.Reason = fmt.Sprintf("#%d conflicts with %s", pr.Number, baseName(f.Base))
@@ -148,7 +160,8 @@ func For(f Facts) *Step {
 			// A clean merge into a branch is still the agent's call: it
 			// decides when its work takes the base in (and locally a catch-up
 			// pushes the merge to an open pull request). Only a detached
-			// checkout, with no work of its own, just moves.
+			// checkout just moves: one with commits of its own was sent to a
+			// new branch above.
 			s.Reason += "; merges cleanly"
 			s.Approve = ApproveAgent
 		}
