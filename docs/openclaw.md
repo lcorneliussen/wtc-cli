@@ -407,9 +407,10 @@ the task as a whole:
 
   What can be done about a fact is done on it, so actions have their place
   too: the ↑ count pushes, opening a draft pull request when there is none,
-  the ↓ count catches
-  up, a ✗ under **M** asks the conversation to resolve the conflict, and a
-  service's ▶, ■ or ↻ starts, stops or restarts it. The same marks in the
+  the ↓ count catches up (a conflict goes to the agent, which catches up in
+  its own checkout, in a sandbox too, and resolves it there), a ✗ under **M**
+  asks the conversation to resolve the conflict, and a service's ▶, ■ or ↻
+  starts, stops or restarts it. The same marks in the
   header of the services act on all of them, and collapsed, ↑, ↓ and the
   services' mark act on the whole collection.
 

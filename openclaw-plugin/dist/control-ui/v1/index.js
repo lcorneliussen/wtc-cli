@@ -134,10 +134,27 @@ async function confirmBitbucket(host, agentId, r, pending, say) {
   return null;
 }
 
-async function catchUpRepo(host, agentId, r, say) {
+// The files a catch-up's merge stopped on, from wtc's message (Checkout.merge
+// in internal/openclaw/checkout.go, whose test pins the sentence); none when
+// it did not stop on a conflict.
+export const conflictsOf = (message) => (/conflicts in: (.+?)\. The merge was aborted/.exec(message ?? "")?.[1] ?? "")
+  .split(/,\s*/).filter(Boolean);
+
+// A conflict is the agent's to resolve, in its own checkout: in a sandbox,
+// wtc catch-up there stops on the conflict with git's merge state, and the
+// gateway takes the resolved branch back; outside one, wtc catch-up says to
+// merge by hand. The gateway's own merge was aborted and changed nothing.
+async function catchUpRepo(host, agentId, r, say, ask) {
   const name = r.repo ?? r.project;
   say(`Catching up ${name}…`);
   const out = await call(host, "catch-up", r.sessionKey, agentId);
+  const conflicts = conflictsOf(out.message);
+  if (conflicts.length) {
+    const base = r.base ?? "its base";
+    await ask(`Catching up ${name} with ${base} conflicts in ${conflicts.join(", ")}. Run wtc catch-up in your checkout of ${name}; where it stops on the conflicts, resolve them there and finish as it says (wtc catch-up --continue in a sandbox). Don't rebase, and don't push: pushing is mine, through the gateway.`);
+    say(`${name}: ${conflicts.join(", ")} changed on both sides; the conversation was asked to merge and resolve them.`);
+    return;
+  }
   say(`${name}: ${out.json?.summary ?? (out.message || "exit " + out.code)}`);
 }
 
@@ -575,7 +592,7 @@ function collectionTables(v) {
   async function catchUp(list) {
     list.forEach((r) => catching.add(r.sessionKey));
     v.rerender();
-    try { for (const r of list) await catchUpRepo(v.host, v.agent(), r, v.say); } finally {
+    try { for (const r of list) await catchUpRepo(v.host, v.agent(), r, v.say, (message) => askConversation(v.host, v.key(), message)); } finally {
       list.forEach((r) => catching.delete(r.sessionKey));
       await v.refresh();
     }
