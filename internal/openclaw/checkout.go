@@ -16,7 +16,7 @@ import (
 // Checkout is a session's gateway-managed worktree, seen through plain git.
 type Checkout struct {
 	Dir      string
-	Worktree string // the managed worktree's name; the branch is openclaw/<name>
+	Worktree string // the managed worktree's name; the branch is openclaw/<name>. Empty when Detached
 	Origin   Origin
 	Repo     string
 	Dest     string // the branch a pull request goes into
