@@ -254,6 +254,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// full refresh read when it started.
 			live := m.snapshot.Runtime
 			m.snapshot = msg.snapshot
+			m.selectedNext = min(m.selectedNext, max(0, len(statusNextRepos(m.snapshot))-1))
 			if live != nil && m.context != nil && !m.all && !m.procs {
 				m.snapshot.Runtime = live
 			}

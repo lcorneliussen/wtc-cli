@@ -161,6 +161,18 @@ esac
 	fixtureFile(t, filepath.Join(bin, "mise"), "#!/bin/sh\nprintf '%s %s\\n' \"$1\" \"$PWD\" >> \""+log+"\"\n", 0755)
 	t.Setenv("PATH", bin+":/usr/bin:/bin")
 	t.Setenv("HERDR_SESSION", "fixture")
+	// Unlike an agent-initiated sweep, an interactive status action checks
+	// the initiating collection's owner too.
+	if busy, err := c.AgentBusy(); err != nil || busy != "working" {
+		t.Fatalf("initiating owner was not checked: %q, %v", busy, err)
+	}
+	stuck, err := OpenCollection(filepath.Join(c.Workspace, "stuck"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if busy, err := stuck.AgentBusy(); err != nil || busy != "blocked" {
+		t.Fatalf("blocked owner was not checked: %q, %v", busy, err)
+	}
 	opt := CatchUpOptions{All: true, Repos: []string{"harness"}, CleanOnly: true, IdleOnly: true, InstallTools: true, NoSkills: true, NoMCP: true, NoSecrets: true}
 	report, _ := c.CatchUp(opt)
 	outcomes := map[string]string{}

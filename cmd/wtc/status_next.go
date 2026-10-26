@@ -18,6 +18,16 @@ type statusNextDoneMsg struct {
 	err  error
 }
 
+// Keep process boundaries replaceable in tests; state comparison and routing
+// are the same as in the live view.
+type statusNextRunner struct {
+	readStatus func(*wtc.Context) (wtc.StatusSnapshot, error)
+	busy       func(*wtc.Context) (string, error)
+	command    func(*wtc.Context, []string) (string, error)
+	openURL    func(string) error
+	herdr      func(string, ...string) (openHerdrResponse, error)
+}
+
 func statusNextRepos(snapshot wtc.StatusSnapshot) []wtc.StatusRepo {
 	var repos []wtc.StatusRepo
 	for _, r := range snapshot.Repos {
@@ -89,6 +99,25 @@ func statusNextCommand(r wtc.StatusRepo) ([]string, bool) {
 }
 
 func statusNextRun(c *wtc.Context, selected wtc.StatusRepo) tea.Cmd {
+	return statusNextRunWith(c, selected, statusNextRunner{
+		readStatus: (*wtc.Context).StatusForgePreview,
+		busy:       (*wtc.Context).AgentBusy,
+		command: func(owner *wtc.Context, argv []string) (string, error) {
+			binary, err := os.Executable()
+			if err != nil {
+				return "", err
+			}
+			cmd := exec.Command(binary, argv...)
+			cmd.Dir = owner.Collection
+			out, err := cmd.CombinedOutput()
+			return strings.TrimSpace(string(out)), err
+		},
+		openURL: func(target string) error { return statusOpenURL(target)().(statusOpenedMsg).err },
+		herdr:   openHerdr,
+	})
+}
+
+func statusNextRunWith(c *wtc.Context, selected wtc.StatusRepo, run statusNextRunner) tea.Cmd {
 	return func() tea.Msg {
 		failed := func(err error) tea.Msg { return statusNextDoneMsg{err: err} }
 		if c == nil || selected.Collection == "" || selected.Collection == "." || selected.Collection == ".." || filepath.Base(selected.Collection) != selected.Collection {
@@ -98,7 +127,7 @@ func statusNextRun(c *wtc.Context, selected wtc.StatusRepo) tea.Cmd {
 		if err != nil {
 			return failed(err)
 		}
-		fresh, err := owner.StatusForgePreview()
+		fresh, err := run.readStatus(owner)
 		if err != nil {
 			return failed(err)
 		}
@@ -107,22 +136,22 @@ func statusNextRun(c *wtc.Context, selected wtc.StatusRepo) tea.Cmd {
 			return failed(err)
 		}
 		if argv, ok := statusNextCommand(r); ok {
-			binary, err := os.Executable()
+			state, err := run.busy(owner)
 			if err != nil {
 				return failed(err)
 			}
-			cmd := exec.Command(binary, argv...)
-			cmd.Dir = owner.Collection
-			out, err := cmd.CombinedOutput()
-			return statusNextDoneMsg{text: strings.TrimSpace(string(out)), err: err}
+			if state != "" {
+				return failed(fmt.Errorf("the collection's agent is %s; leave the checkout with its owner", state))
+			}
+			out, err := run.command(owner, argv)
+			return statusNextDoneMsg{text: out, err: err}
 		}
 		if r.Next.By == next.ByPerson && r.Next.Step == "merge-pr" && r.PR != nil && r.PR.URL != "" {
 			target := statusTUIURL(r.PR.URL)
 			if target == "" {
 				return failed(fmt.Errorf("the pull request has no web URL"))
 			}
-			opened := statusOpenURL(target)().(statusOpenedMsg)
-			return statusNextDoneMsg{text: "Opened the pull request", err: opened.err}
+			return statusNextDoneMsg{text: "Opened the pull request", err: run.openURL(target)}
 		}
 		skill := r.Next.Skill
 		if r.Next.By == next.ByWTC && r.Next.Approve == next.ApproveAgent && r.Next.Step == "catch-up" {
@@ -136,23 +165,23 @@ func statusNextRun(c *wtc.Context, selected wtc.StatusRepo) tea.Cmd {
 		// A plain terminal provides the exact instruction. In herdr, submit
 		// only to this collection's idle agent, never a running or blocked one.
 		session := openSession(owner, "")
-		workspaces, err := openWorkspaces(session)
+		workspaces, err := run.herdr(session, "workspace", "list")
 		if err != nil {
 			return instruction
 		}
-		for _, workspace := range workspaces {
+		for _, workspace := range workspaces.Result.Workspaces {
 			if workspace.Label != r.Collection {
 				continue
 			}
-			panes, err := openPanes(session, workspace.ID)
+			panes, err := run.herdr(session, "pane", "list", "--workspace", workspace.ID)
 			if err != nil {
 				return failed(err)
 			}
-			pane := openPaneByLabel(panes, "agent")
+			pane := openPaneByLabel(panes.Result.Panes, "agent")
 			if pane.ID == "" || pane.Agent == "" || (pane.AgentStatus != "idle" && pane.AgentStatus != "done") {
 				return instruction
 			}
-			_, err = openHerdr(session, "agent", "prompt", pane.ID, prompt)
+			_, err = run.herdr(session, "agent", "prompt", pane.ID, prompt)
 			return statusNextDoneMsg{text: "Asked the collection's agent to " + strings.ToLower(statusNextLabel(r.Next)), err: err}
 		}
 		return instruction

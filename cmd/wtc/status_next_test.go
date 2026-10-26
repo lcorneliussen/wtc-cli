@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,5 +58,124 @@ func TestStatusNextActions(t *testing.T) {
 	m.nextRunning = true
 	if _, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); cmd != nil {
 		t.Fatal("a second execution started while the first was running")
+	}
+}
+
+func TestStatusNextExecution(t *testing.T) {
+	collection := filepath.Join(t.TempDir(), "task")
+	if err := os.MkdirAll(filepath.Join(collection, "harness"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(collection, "harness", ".harness-repos.yml"), []byte("repos:\n  - name: api\n    remote: https://github.com/example/api.git\n    default_ref: origin/main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := wtc.OpenCollection(collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := wtc.StatusRepo{Collection: "task", Dir: "api", Worktree: filepath.Join(collection, "api"), Next: &next.Step{Step: "catch-up", By: next.ByWTC, Key: "k", Command: []string{"wtc", "catch-up", "task", "--repos", "api"}}}
+	for _, state := range []string{"", "working", "blocked", "unknown"} {
+		t.Run("catch-up/"+state, func(t *testing.T) {
+			executed := false
+			run := statusNextRunner{
+				readStatus: func(*wtc.Context) (wtc.StatusSnapshot, error) {
+					return wtc.StatusSnapshot{Repos: []wtc.StatusRepo{r}}, nil
+				},
+				busy: func(*wtc.Context) (string, error) {
+					if state == "unknown" {
+						return "", errors.New("cannot read agent state")
+					}
+					return state, nil
+				},
+				command: func(owner *wtc.Context, argv []string) (string, error) {
+					executed = true
+					if owner.Collection != collection || strings.Join(argv, " ") != "catch-up task --repos api --clean-only --idle-only" {
+						t.Fatal(owner.Collection, argv)
+					}
+					return "caught up", nil
+				},
+			}
+			result := statusNextRunWith(c, r, run)().(statusNextDoneMsg)
+			if executed != (state == "") || (result.err == nil) != (state == "") {
+				t.Fatal(executed, result)
+			}
+			// Changing facts, even with the old key still selected, must
+			// reject the step before any execution or owner lookup.
+			run.readStatus = func(*wtc.Context) (wtc.StatusSnapshot, error) { return wtc.StatusSnapshot{}, nil }
+			executed = false
+			if result := statusNextRunWith(c, r, run)().(statusNextDoneMsg); result.err == nil || executed {
+				t.Fatal(result, executed)
+			}
+		})
+	}
+	for _, state := range []string{"idle", "working", "blocked", "unavailable"} {
+		t.Run("agent/"+state, func(t *testing.T) {
+			agent := r
+			agent.Next = &next.Step{Step: "fix-checks", By: next.ByAgent, Key: "agent", Skill: "wtc-follow", Reason: "checks failed"}
+			prompted := false
+			run := statusNextRunner{
+				readStatus: func(*wtc.Context) (wtc.StatusSnapshot, error) {
+					return wtc.StatusSnapshot{Repos: []wtc.StatusRepo{agent}}, nil
+				},
+				herdr: func(_ string, argv ...string) (openHerdrResponse, error) {
+					var response openHerdrResponse
+					if state == "unavailable" {
+						return response, errors.New("no herdr")
+					}
+					switch argv[0] {
+					case "workspace":
+						response.Result.Workspaces = []openWorkspaceInfo{{Label: "another", ID: "w0"}, {Label: "task", ID: "w1"}}
+					case "pane":
+						if argv[3] != "w1" {
+							t.Fatal(argv)
+						}
+						response.Result.Panes = []openPaneInfo{{Label: "agent", ID: "p1", Agent: "codex", AgentStatus: state}}
+					case "agent":
+						prompted = true
+						if argv[2] != "p1" || !strings.HasPrefix(argv[3], "/skill wtc-follow api:") {
+							t.Fatal(argv)
+						}
+					default:
+						t.Fatal(argv)
+					}
+					return response, nil
+				},
+			}
+			result := statusNextRunWith(c, agent, run)().(statusNextDoneMsg)
+			if result.err != nil || prompted != (state == "idle") || (!prompted && !strings.Contains(result.text, "/skill wtc-follow api:")) {
+				t.Fatal(result, prompted)
+			}
+		})
+	}
+	pr := r
+	pr.Next = &next.Step{Step: "merge-pr", By: next.ByPerson, Key: "pr"}
+	pr.PR = &wtc.StatusPRFacts{URL: "https://example.invalid/pr/1"}
+	opened := ""
+	run := statusNextRunner{
+		readStatus: func(*wtc.Context) (wtc.StatusSnapshot, error) {
+			return wtc.StatusSnapshot{Repos: []wtc.StatusRepo{pr}}, nil
+		},
+		openURL: func(url string) error { opened = url; return nil },
+	}
+	if result := statusNextRunWith(c, pr, run)().(statusNextDoneMsg); result.err != nil || opened != pr.PR.URL {
+		t.Fatal(result, opened)
+	}
+	pr.PR.URL, opened = "file:///synthetic/private", ""
+	if result := statusNextRunWith(c, pr, run)().(statusNextDoneMsg); result.err == nil || opened != "" {
+		t.Fatal(result, opened)
+	}
+	if result := statusNextRun(nil, r)().(statusNextDoneMsg); result.err == nil {
+		t.Fatal("nil context accepted")
+	}
+
+	m := statusTUIModel{snapshot: wtc.StatusSnapshot{Repos: []wtc.StatusRepo{r, r}}, selectedNext: 1, nextRunning: true}
+	updated, refresh := m.Update(statusNextDoneMsg{text: "caught up"})
+	m = updated.(statusTUIModel)
+	if m.nextRunning || !m.refreshing || refresh == nil || m.nextNotice != "caught up" {
+		t.Fatal(m, refresh)
+	}
+	updated, _ = m.Update(statusLoadedMsg{snapshot: wtc.StatusSnapshot{Repos: []wtc.StatusRepo{r}}})
+	if updated.(statusTUIModel).selectedNext != 0 {
+		t.Fatal("selection did not follow shrinking action list")
 	}
 }
