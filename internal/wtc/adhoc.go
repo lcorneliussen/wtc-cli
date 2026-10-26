@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
 )
@@ -47,7 +48,7 @@ func UserConfigRoot() (string, error) {
 // UserDataRoot holds the per-user owner cache and repo registry shared by
 // every ad-hoc collection.
 func UserDataRoot() (string, error) {
-	if dir := os.Getenv("WTC_DATA_HOME"); dir != "" {
+	if dir := envcompat.Getenv("WTC_DATA_HOME"); dir != "" {
 		return dir, nil
 	}
 	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {

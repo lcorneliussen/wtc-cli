@@ -14,6 +14,14 @@ root** inside the workspace, outside every repo and collection:
 `wtc.env` holds machine-local command defaults so bare `wtc` calls use
 this workspace's preferred behavior. CLI flags still win.
 
+The phase-0 rename groundwork accepts `TABA_` aliases for the product settings
+read by the CLI, including the launch/status defaults below, control-root and
+data-root overrides, and the TWG-site setting. Within a source the new prefix
+wins; environment values still override file defaults. Conflicting values warn
+once per setting on stderr without printing either value. Generated names stay
+as `WTC_` in this increment. See the [environment compatibility guide](https://github.com/lcorneliussen/wtc-cli/blob/main/docs/rename-compatibility.md)
+for the supported settings, empty-value behavior and remaining phase-0 work.
+
 | Variable | Default | Effect |
 |---|---|---|
 | `WTC_AGENT_KIND` | `claude` | agent kind `wtc open` starts |

@@ -17,6 +17,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 )
 
 type ReviewRunOptions struct {
@@ -491,7 +493,7 @@ func launchReviewAgent(bundle, repoDir, prompt, agent, model string, timeout tim
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	var cmd *exec.Cmd
-	custom := os.Getenv("WTC_REVIEW_AGENT_CMD")
+	custom := envcompat.Getenv("WTC_REVIEW_AGENT_CMD")
 	if custom != "" {
 		parts := strings.Fields(custom)
 		cmd = exec.CommandContext(ctx, parts[0], append(parts[1:], agent, model, prompt, bundle)...)

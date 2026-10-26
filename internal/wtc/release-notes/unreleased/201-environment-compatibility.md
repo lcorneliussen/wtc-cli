@@ -1,0 +1,3 @@
+## Rename preparation
+
+- **Product settings accept the `TABA_` prefix alongside `WTC_`.** The new spelling wins within a source, including an explicit empty value; environment settings retain precedence over workspace-file defaults. Conflicting values produce one stderr warning per setting without printing values or disturbing JSON output. The matching OpenClaw plugin also accepts `TABA_DECISIONS_OPENAI_API_KEY`. Generated variables, file names, commands, and internal/test/development transport names keep their existing spellings in this increment. See [the compatibility guide](https://github.com/lcorneliussen/wtc-cli/blob/main/docs/rename-compatibility.md) and [phase 0](https://github.com/lcorneliussen/wtc-cli/issues/201).

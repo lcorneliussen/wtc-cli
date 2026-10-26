@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 )
 
 // CatchUpOptions describes one selected collection sweep. Other collections
@@ -368,7 +370,7 @@ func (c *Context) catchUpHarnessRepo() (string, error) {
 			}
 		}
 	}
-	if name := os.Getenv("WTC_HARNESS_REPO"); name != "" {
+	if name := envcompat.Getenv("WTC_HARNESS_REPO"); name != "" {
 		if _, err := c.Repository(name); err == nil {
 			return name, nil
 		}

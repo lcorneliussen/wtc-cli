@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 )
 
 func statusBBMergeEventTime(raw []byte) string {
@@ -323,7 +325,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 // to off, 0, false or no in the environment of the status process, or
 // return_merged = false under [status] in the harness's wtc.toml.
 func (c *Context) statusReturnMergedEnabled() bool {
-	switch strings.ToLower(os.Getenv("WTC_STATUS_RETURN_MERGED")) {
+	switch strings.ToLower(envcompat.Getenv("WTC_STATUS_RETURN_MERGED")) {
 	case "off", "0", "false", "no":
 		return false
 	}

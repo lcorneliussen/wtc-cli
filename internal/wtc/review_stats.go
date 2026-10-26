@@ -10,13 +10,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 )
 
 // collectReviewStats keeps the launcher-owned usage record when one exists.
 // Built-in agents report usage in their output; their parsers are best effort.
 func collectReviewStats(path, agent, model string, elapsed time.Duration, status string, output []byte) reviewRunStats {
 	stats := reviewRunStats{Agent: agent, Model: model, Seconds: elapsed.Seconds(), Status: status}
-	if os.Getenv("WTC_REVIEW_AGENT_CMD") != "" {
+	if envcompat.Getenv("WTC_REVIEW_AGENT_CMD") != "" {
 		var custom reviewRunStats
 		if data, err := os.ReadFile(path); err == nil && json.Unmarshal(data, &custom) == nil {
 			stats.InputTokens, stats.OutputTokens = custom.InputTokens, custom.OutputTokens

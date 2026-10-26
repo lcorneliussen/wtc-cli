@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 )
 
 var safeName = regexp.MustCompile(`[^a-z0-9_-]`)
@@ -123,7 +125,7 @@ func quotedValue(value string) (string, error) {
 }
 
 func machineTWGSite(root string) (string, error) {
-	if value, exists := os.LookupEnv("WTC_TWG_SITE"); exists {
+	if value, exists := envcompat.LookupEnv("WTC_TWG_SITE"); exists {
 		return value, nil
 	}
 	data, err := os.ReadFile(filepath.Join(root, "wtc.env"))
@@ -133,18 +135,7 @@ func machineTWGSite(root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var value string
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		line = strings.TrimPrefix(line, "export ")
-		if !strings.HasPrefix(line, "WTC_TWG_SITE=") {
-			continue
-		}
-		value = strings.TrimSpace(strings.TrimPrefix(line, "WTC_TWG_SITE="))
-		if len(value) >= 2 && (value[0] == '\'' && value[len(value)-1] == '\'' || value[0] == '"' && value[len(value)-1] == '"') {
-			value = value[1 : len(value)-1]
-		}
-	}
+	value, _ := envcompat.LookupMap("WTC_TWG_SITE", envcompat.Assignments(data))
 	return value, nil
 }
 func (c *Context) RenderEnv() ([]byte, error) {

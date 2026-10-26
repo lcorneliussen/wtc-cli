@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -251,25 +251,14 @@ func statusDigits(value string) bool {
 }
 
 func statusSetting(c *wtc.Context, name string) string {
-	if value, ok := os.LookupEnv(name); ok && value != "" {
+	if value, ok := envcompat.LookupEnv(name); ok && value != "" {
 		return value
 	}
-	file, err := os.Open(filepath.Join(c.ConfigRoot, "wtc.env"))
+	data, err := os.ReadFile(filepath.Join(c.ConfigRoot, "wtc.env"))
 	if err != nil {
 		return ""
 	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	value := ""
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		line = strings.TrimPrefix(line, "export ")
-		key, setting, found := strings.Cut(line, "=")
-		if !found || strings.TrimSpace(key) != name {
-			continue
-		}
-		value = strings.Trim(strings.TrimSpace(setting), "'\"")
-	}
+	value, _ := envcompat.LookupMap(name, envcompat.Assignments(data))
 	return value
 }
 

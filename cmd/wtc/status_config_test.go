@@ -32,3 +32,34 @@ func TestStatusSettingsUseControlRootAndEnvironmentOverride(t *testing.T) {
 		t.Fatalf("environment did not override file: %d", got)
 	}
 }
+
+func TestTabaSettingsKeepEnvironmentBeforeFilePrecedence(t *testing.T) {
+	c := &wtc.Context{ConfigRoot: t.TempDir()}
+	if err := os.WriteFile(filepath.Join(c.ConfigRoot, "wtc.env"), []byte("TABA_STATUS_WATCH='19'\nWTC_STATUS_WATCH=17\nTABA_AGENT_KIND=codex\nWTC_AGENT_KIND=claude\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"WTC_STATUS_WATCH", "TABA_STATUS_WATCH", "WTC_AGENT_KIND", "TABA_AGENT_KIND"} {
+		t.Setenv(key, "")
+	}
+	if err := os.Unsetenv("TABA_STATUS_WATCH"); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusIntervalSetting(c, "WTC_STATUS_WATCH", 30); got != 19 {
+		t.Fatalf("new-prefix file setting = %d", got)
+	}
+	if got := statusSetting(c, "WTC_AGENT_KIND"); got != "codex" {
+		t.Fatalf("agent selection ignored new-prefix default: %q", got)
+	}
+	t.Setenv("WTC_STATUS_WATCH", "9")
+	if got := statusIntervalSetting(c, "WTC_STATUS_WATCH", 30); got != 9 {
+		t.Fatalf("legacy environment must override new-prefix file setting: %d", got)
+	}
+	t.Setenv("TABA_STATUS_WATCH", "7")
+	if got := statusIntervalSetting(c, "WTC_STATUS_WATCH", 30); got != 7 {
+		t.Fatalf("new-prefix environment must override legacy environment: %d", got)
+	}
+	t.Setenv("TABA_STATUS_WATCH", "")
+	if got := statusIntervalSetting(c, "WTC_STATUS_WATCH", 30); got != 19 {
+		t.Fatalf("empty new-prefix environment should fall back to file defaults: %d", got)
+	}
+}

@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 	"gopkg.in/yaml.v3"
 )
 
@@ -225,19 +225,13 @@ func (c *Context) load() error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("config: %w", err)
 	}
-	c.ConfigRoot = os.Getenv("WTC_CONFIG_ROOT")
+	c.ConfigRoot = envcompat.Getenv("WTC_CONFIG_ROOT")
 	if c.ConfigRoot == "" {
 		data, err := os.ReadFile(filepath.Join(c.Collection, ".env.collection"))
 		if err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(line, "WTC_CONFIG_ROOT=") {
-				value := strings.TrimPrefix(line, "WTC_CONFIG_ROOT=")
-				c.ConfigRoot = strings.Trim(value, "'\"")
-				break
-			}
-		}
+		c.ConfigRoot, _ = envcompat.LookupMap("WTC_CONFIG_ROOT", envcompat.Assignments(data))
 	}
 	if c.ConfigRoot == "" && c.AdHoc {
 		// An ad-hoc collection has no workspace; its secrets are per user.

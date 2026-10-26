@@ -3,10 +3,11 @@ package wtc
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 )
 
 type statusPRDetail struct {
@@ -211,7 +212,7 @@ func statusWeekdayHours(start, end time.Time) float64 {
 func statusArchived(mergedOn string, now time.Time) bool {
 	when, err := time.Parse(time.RFC3339, mergedOn)
 	hours := 48.0
-	if configured, parseErr := strconv.ParseFloat(os.Getenv("WTC_PR_ARCHIVE_HOURS"), 64); parseErr == nil && configured > 0 {
+	if configured, parseErr := strconv.ParseFloat(envcompat.Getenv("WTC_PR_ARCHIVE_HOURS"), 64); parseErr == nil && configured > 0 {
 		hours = configured
 	}
 	return err == nil && statusWeekdayHours(when, now) >= hours
