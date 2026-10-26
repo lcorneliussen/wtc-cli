@@ -119,16 +119,41 @@ func TestCatchUpSummary(t *testing.T) {
 		{openclaw.CatchUp{Branch: "openclaw/x", Dest: "main", Merged: true}, "merged origin/main into openclaw/x; publish to send the merge (wtc publish)"},
 		{openclaw.CatchUp{Branch: "openclaw/x", Note: "already contains origin/main"}, "openclaw/x already contains origin/main"},
 		// A worker catches up with its task.
-		{openclaw.CatchUp{Branch: "openclaw/x--a", Dest: "main", From: "openclaw/x", Merged: true}, "merged the task's openclaw/x into the worker's openclaw/x--a"},
-		{openclaw.CatchUp{Branch: "openclaw/x--a", From: "openclaw/x", Note: "already contains openclaw/x"}, "openclaw/x--a already contains openclaw/x"},
+		{openclaw.CatchUp{Branch: "openclaw/x--a", Dest: "main", From: "openclaw/x", Merged: true, Worker: true}, "merged the task's openclaw/x into the worker's openclaw/x--a"},
+		{openclaw.CatchUp{Branch: "openclaw/x--a", From: "openclaw/x", Note: "already contains openclaw/x", Worker: true}, "openclaw/x--a already contains openclaw/x"},
 		// A worker that merged origin's (--dest) still publishes through its task.
-		{openclaw.CatchUp{Branch: "openclaw/x--a", Dest: "main", Merged: true}, "merged origin/main into openclaw/x--a; it reaches the forge through the task"},
+		{openclaw.CatchUp{Branch: "openclaw/x--a", Dest: "main", Merged: true, Worker: true}, "merged origin/main into openclaw/x--a; it reaches the forge through the task"},
+		// A task with "--" in its own name is no worker.
+		{openclaw.CatchUp{Branch: "openclaw/fix--login", Dest: "main", Merged: true}, "merged origin/main into openclaw/fix--login; publish to send the merge (wtc publish)"},
 		// A detached worktree has no branch: it moves forward to the tip.
 		{openclaw.CatchUp{Dest: "main", Merged: true, FastForward: true}, "detached at origin/main's tip again: no work of its own, nothing to publish"},
 		{openclaw.CatchUp{Dest: "main", Note: "already contains origin/main"}, "detached, already contains origin/main"},
 	} {
 		if got := catchUpSummary(tc.result); got != tc.want {
 			t.Errorf("%+v: %q, want %q", tc.result, got, tc.want)
+		}
+	}
+}
+
+func TestRefuseWorkerServices(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"site-work", "site-work--docs", "fix--login"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gateway := func(k string) string { return map[string]string{"OPENCLAW_SHELL": "exec"}[k] }
+	local := func(string) string { return "" }
+	if err := refuseWorkerServices(filepath.Join(root, "site-work--docs"), gateway); err == nil || !strings.Contains(err.Error(), "services run in its task's collection, site-work") {
+		t.Errorf("a worker's collection: %v", err)
+	}
+	// Its task, a task with "--" in its name, and anything off the gateway run them.
+	for _, tc := range []struct {
+		dir    string
+		getenv func(string) string
+	}{{"site-work", gateway}, {"fix--login", gateway}, {"site-work--docs", local}} {
+		if err := refuseWorkerServices(filepath.Join(root, tc.dir), tc.getenv); err != nil {
+			t.Errorf("%s: %v", tc.dir, err)
 		}
 	}
 }

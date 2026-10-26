@@ -227,7 +227,7 @@ type PublishOptions struct {
 // PlanPublish checks that publishing this checkout is safe and returns the
 // intent for it. It reads and never writes: no commit, no fetch, no push.
 func (c *Checkout) PlanPublish(opt PublishOptions) (Plan, error) {
-	if task := TaskOf(c.Worktree); task != "" {
+	if task := c.task(); task != "" {
 		return Plan{}, fmt.Errorf("%s is a worker of %s: a worker's work leaves through the task. Merge it into the task (wtc catch-up --from %s in the task's checkout), and the task publishes it", c.Branch(), task, strings.TrimPrefix(c.Worktree, task+WorkerSeparator))
 	}
 	if what := c.inProgress(); what != "" {
@@ -307,8 +307,8 @@ func (c *Checkout) PlanPublish(opt PublishOptions) (Plan, error) {
 	return plan, nil
 }
 
-// CatchUp is the result of merging the destination branch, or a worker's
-// branch, into the checkout.
+// CatchUp is the result of merging the destination branch, a worker's branch
+// (into its task) or the task's branch (into a worker) into the checkout.
 type CatchUp struct {
 	Branch string `json:"branch"`
 	Dest   string `json:"dest"`
@@ -318,14 +318,17 @@ type CatchUp struct {
 	Merged bool   `json:"merged"`
 	// FastForward says the checkout had nothing the ref lacked: it now is the
 	// ref, and no merge commit was made.
-	FastForward bool   `json:"fastForward,omitempty"`
-	Head        string `json:"head"`
-	Note        string `json:"note,omitempty"`
+	FastForward bool `json:"fastForward,omitempty"`
+	// Worker says the checkout is a worker's: its work reaches the forge
+	// through its task.
+	Worker bool   `json:"worker,omitempty"`
+	Head   string `json:"head"`
+	Note   string `json:"note,omitempty"`
 }
 
 // CatchUp fetches the destination branch and merges it. It never rebases and
 // never pushes: published history stays as it is, and the gateway publishes
-// the merge with the next publication. A conflicted merge is aborted. A
+// the merge with the next publication (a worker's, with its task's). A conflicted merge is aborted. A
 // detached worktree is not merged into but moved to the tip (forward).
 func (c *Checkout) CatchUp() (CatchUp, error) {
 	result := CatchUp{Branch: c.Branch(), Dest: c.Dest}
@@ -355,7 +358,7 @@ func (c *Checkout) CatchUpWithTask() (CatchUp, error) {
 		return result, fmt.Errorf("%s is no worker's branch", c.Branch())
 	}
 	if !HasBranch(c.Dir, Branch(task)) {
-		return result, fmt.Errorf("%s has no branch %s: the task has not started work in this repository yet", c.Repo, Branch(task))
+		return result, fmt.Errorf("%s has no branch %s: no task of that name works in this repository", c.Repo, Branch(task))
 	}
 	if err := c.readyToMerge(); err != nil {
 		return result, err
@@ -399,8 +402,10 @@ func HasRemoteBranch(dir, branch string) bool {
 // openclaw/12-paging--a.
 const WorkerSeparator = "--"
 
-// TaskOf is the task a worker's worktree name belongs to: site-work for
-// site-work--docs. It is empty for a worktree that is no worker.
+// TaskOf is the task a worker's worktree name would belong to: site-work for
+// site-work--docs, or empty for a name that cannot be a worker's. A task may
+// have "--" in its own name, so Checkout.task also checks for the task's
+// branch.
 func TaskOf(worktree string) string {
 	at := strings.LastIndex(worktree, WorkerSeparator)
 	if at <= 0 || at+len(WorkerSeparator) == len(worktree) || !ValidWorktreeName(worktree) {
@@ -408,6 +413,18 @@ func TaskOf(worktree string) string {
 	}
 	return worktree[:at]
 }
+
+// task is the task this checkout is a worker of: the name says so, and the
+// task's branch is in the same clone. Empty for a checkout that is no worker.
+func (c *Checkout) task() string {
+	if task := TaskOf(c.Worktree); task != "" && HasBranch(c.Dir, Branch(task)) {
+		return task
+	}
+	return ""
+}
+
+// IsWorker reports whether the checkout is a worker's: see task.
+func (c *Checkout) IsWorker() bool { return c.task() != "" }
 
 // WorkerWorktree is the worktree name of a worker of task: worker is its
 // short name or the whole one.

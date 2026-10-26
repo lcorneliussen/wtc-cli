@@ -584,3 +584,21 @@ func TestAWorkerAgainstItsTask(t *testing.T) {
 		t.Error("the task caught up with a task")
 	}
 }
+
+func TestATaskWithDashesIsNoWorker(t *testing.T) {
+	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
+	dir := filepath.Join(t.TempDir(), "fix--login")
+	git("worktree", "add", "-q", "-b", "openclaw/fix--login", dir, "openclaw/72-add-thing")
+	task, err := OpenCatchUpCheckout(dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// There is no branch openclaw/fix: fix--login is a task of its own.
+	if task.IsWorker() {
+		t.Fatal("fix--login was taken for a worker of fix")
+	}
+	if _, err := task.PlanPublish(PublishOptions{}); err != nil && strings.Contains(err.Error(), "is a worker of") {
+		t.Errorf("a task with dashes was refused as a worker: %v", err)
+	}
+	_ = c
+}

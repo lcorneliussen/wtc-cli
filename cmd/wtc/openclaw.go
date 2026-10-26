@@ -595,12 +595,13 @@ func catchUpCheckout(dest, from string, asJSON bool) error {
 	switch {
 	case from != "":
 		result, err = checkout.MergeWorker(from)
-	case dest == "" && openclaw.TaskOf(checkout.Worktree) != "":
+	case dest == "" && checkout.IsWorker():
 		// A worker catches up with its task, the branch it merges into.
 		result, err = checkout.CatchUpWithTask()
 	default:
 		result, err = checkout.CatchUp()
 	}
+	result.Worker = checkout.IsWorker()
 	if err != nil {
 		return err
 	}
@@ -612,7 +613,7 @@ func catchUpCheckout(dest, from string, asJSON bool) error {
 // worker's commits, even fast-forwarded, are the task's to publish.
 func catchUpSummary(result openclaw.CatchUp) string {
 	// A worker's catch-up merges its task's branch, which is its own to merge.
-	if task := openclaw.TaskOf(strings.TrimPrefix(result.Branch, openclaw.BranchPrefix)); task != "" && result.From == openclaw.Branch(task) {
+	if task := openclaw.TaskOf(strings.TrimPrefix(result.Branch, openclaw.BranchPrefix)); result.Worker && result.From == openclaw.Branch(task) {
 		if result.Merged {
 			return fmt.Sprintf("merged the task's %s into the worker's %s", result.From, result.Branch)
 		}
@@ -627,7 +628,7 @@ func catchUpSummary(result openclaw.CatchUp) string {
 		return fmt.Sprintf("%s is at origin/%s again: nothing of its own on it, nothing to publish", result.Branch, result.Dest)
 	case result.Merged && result.From != "":
 		return fmt.Sprintf("merged %s into %s; the person publishes it with ↑ when the task is ready", result.From, result.Branch)
-	case result.Merged && openclaw.TaskOf(strings.TrimPrefix(result.Branch, openclaw.BranchPrefix)) != "":
+	case result.Merged && result.Worker:
 		return fmt.Sprintf("merged origin/%s into %s; it reaches the forge through the task", result.Dest, result.Branch)
 	case result.Merged:
 		return fmt.Sprintf("merged origin/%s into %s; publish to send the merge (wtc publish)", result.Dest, result.Branch)
