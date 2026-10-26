@@ -26,9 +26,13 @@ This differs from environment variable spelling: **within the selected source**,
 
 Reads do not create, rename, copy or symlink the selected inputs. When neither path exists, fresh scaffolding and generated output keep their legacy names. Existing `SCOPE.md` task context is preserved by scope seeding. Harness initialization refuses to create legacy files beside existing alternate config/pin files.
 
+The embedded agent instructions and start/follow/add-repo skills read and edit the selected scope file. Harness-authored instruction and skill overrides remain unchanged; update those overrides to the same selection rule before adopting `SCOPE.md`.
+
 An explicit `wtc upgrade` updates the selected pin and configuration **in place**, including alternate filenames. Its dry-run report and dirty-file protection refer to those actual files. It does not create legacy files that would shadow them. Forking an ad-hoc collection carries over the selected configuration's contents but writes the fresh sibling's usual `wtc.toml`.
 
 For user config/data roots, the existing legacy directory likewise wins over an alternate directory. If neither exists, the default stays `wtc`; lookup does not create either directory. Explicit root overrides remain available when a particular location must be selected.
+
+Toolchain caches fingerprint the selected config path and contents, so switching filenames or selecting an older file cannot retain stale tool paths. Older caches without a fingerprint are rebuilt once. The generated `.env.toolchain` filename and `WTC_TOOLCHAIN_PATH` variable stay the same.
 
 ## Later increments
 

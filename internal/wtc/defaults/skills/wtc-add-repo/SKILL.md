@@ -69,8 +69,10 @@ them.
 Which repos were added, on which branches, whether an init hook ran or was
 absent, and whether secrets linked cleanly.
 
-Then **record it in `WTC-SCOPE.md`** — one line saying why that repo is now in
-this collection. Pulling a repo in widens the scope, and a scope file that no
+Then **record it in the selected scope file** (`WTC-SCOPE.md` when present,
+otherwise existing `SCOPE.md`; use `WTC-SCOPE.md` for a fresh file) — one line
+saying why that repo is now in this collection. Pulling a repo in widens the
+scope, and a scope file that no
 longer describes the collection is how one task quietly becomes two
 (`instructions/collection-context.md`).
 

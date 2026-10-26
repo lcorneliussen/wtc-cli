@@ -45,13 +45,15 @@ A default you want changed on this machine belongs in `$WTC_CONFIG_ROOT/wtc.env`
 | File | Kind | Says |
 |---|---|---|
 | `AGENTS.md` | symlink to `harness/collection-AGENTS.md`, versioned | What a collection is, stay inside it, where the instructions live, that nothing durable lives in this folder |
-| `WTC-SCOPE.md` | local copy of `harness/collection-SCOPE.md`, ephemeral | What **this** collection is for: the task, the repos in it, what is deliberately out |
+| `WTC-SCOPE.md` (or existing `SCOPE.md`) | local copy of `harness/collection-SCOPE.md`, ephemeral | What **this** collection is for: the task, the repos in it, what is deliberately out |
 
 `AGENTS.md` is the only file an agent reads by itself when it opens the
 collection root, which is why the shared guidance lives there rather than in a
 per-tool rule file. It is linked, so a catch-up updates it everywhere.
 
-`WTC-SCOPE.md` is seeded — by `wtc new`, or by `/wtc-start` on a
+Read and edit `WTC-SCOPE.md` when present, otherwise existing `SCOPE.md`.
+The files are not combined; do not create a legacy file beside an alternate.
+If neither exists, `WTC-SCOPE.md` is seeded — by `wtc new`, or by `/wtc-start` on a
 collection that predates it (`wtc skills render --seed-scope`) — and then
 filled from `HANDOFF.md` as that note is consumed. It is never linked and
 never overwritten: it is this collection's own answer, and it dies with the
@@ -59,8 +61,8 @@ folder.
 
 **Widening the scope is a deliberate edit.** Pulling in another repo
 (`wtc add-repo`) or taking on an area the scope file does not mention means
-saying so in `WTC-SCOPE.md` first. A collection whose scope file no longer
-describes it has quietly become two tasks, which is how work leaks into a
+saying so in the selected scope file first. A collection whose scope file no
+longer describes it has quietly become two tasks, which is how work leaks into a
 collection sibling.
 
 ## Using the collection

@@ -190,7 +190,9 @@ materializes embedded skills and instruction defaults in the disposable
 collection, links skills into
 `.claude/skills` and `.agents/skills`, and wires `AGENTS.md`, agent hooks,
 `.envrc`, and `.env.toolchain`. `--seed-scope` creates `WTC-SCOPE.md` from the
-harness template only when it is absent. `--dry-run` previews changes, and
+harness template only when neither it nor `SCOPE.md` exists. Existing legacy
+scope takes precedence; otherwise read and edit `SCOPE.md` without creating
+a second file. `--dry-run` previews changes, and
 `--all` explicitly applies them to every collection in the workspace.
 
 Effective instruction files live under `.wtc/instructions/`. A matching file

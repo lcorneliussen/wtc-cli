@@ -15,7 +15,7 @@ a branch.
   <other-collection>/        a COLLECTION SIBLING: someone else's task
   <this-collection>/         the COLLECTION ROOT — you are here
     AGENTS.md                this file (rendered from the pinned CLI or harness override)
-    WTC-SCOPE.md             what THIS collection is for — read it next
+    WTC-SCOPE.md             task context (or existing SCOPE.md) — read it next
     harness/                 project configuration and policy
     <repo>/                  REPO SIBLINGS: worktrees in scope for this task
     HANDOFF.md               only on a fresh collection — /wtc-start, then gone
@@ -35,9 +35,10 @@ also applies to delegated agents and to explanations of a privacy cleanup.
 
 ## Read in this order
 
-1. **`WTC-SCOPE.md`** — the task, the repos that belong to it, what is
-   deliberately out. If it is missing, the collection has not been started
-   yet: run `/wtc-start`.
+1. **Task scope** — read and edit `WTC-SCOPE.md` when present, otherwise
+   `SCOPE.md`. It states the task, the repos that belong to it, and what is
+   deliberately out. If neither exists, run `/wtc-start`; fresh scope files
+   use `WTC-SCOPE.md`. Do not create a legacy file beside existing `SCOPE.md`.
 2. **`harness/AGENTS.md`** if this harness has one — the domain rules for your
    project. Then each sibling's own `AGENTS.md`: branch policy and commit
    restrictions are per repo.
@@ -121,12 +122,12 @@ local receipt. The rendered procedure is at
 
 Needing another repo, another system, another service is normal — doing it
 silently is not. Bring the repo in with `wtc add-repo` and write
-down in `WTC-SCOPE.md` why it is here. A collection whose scope file no longer
-describes it has stopped being one task.
+down in the selected scope file why it is here. A collection whose scope file
+no longer describes it has stopped being one task.
 
 ## Nothing durable lives in this folder
 
-`WTC-SCOPE.md`, `HANDOFF.md`, `.env.collection.local` are local and disposable
+The selected scope file, `HANDOFF.md`, and `.env.collection.local` are disposable
 — `wtc retire` deletes the whole directory when the work lands, and that must
 cost nothing. Durable state goes to **git and the forge**: commits and branches
 in the repo siblings, PRs, and the issue that the branch name points at.

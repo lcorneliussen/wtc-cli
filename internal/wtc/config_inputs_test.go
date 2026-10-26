@@ -154,7 +154,7 @@ func TestTabaMachineDefaultsAndValueFreeInventory(t *testing.T) {
 	}
 }
 
-func TestTabaConfigInvalidatesToolchainCache(t *testing.T) {
+func TestTabaConfigRebuildsUnversionedToolchainCache(t *testing.T) {
 	c := fixture(t)
 	cached, current := filepath.Join(c.Collection, "cached"), filepath.Join(c.Collection, "current")
 	for _, path := range []string{cached, current} {
@@ -192,6 +192,68 @@ func TestTabaScopeIsPreservedWithoutCreatingLegacyScope(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(path); string(data) != "Keep this task context.\n" {
 		t.Fatal("scope seeding overwrote the current task context")
+	}
+}
+
+func TestTabaConfigSelectionInvalidatesOlderToolchainCache(t *testing.T) {
+	for _, transition := range []string{"remove-legacy", "add-legacy", "edit-alternate"} {
+		for _, clearPaths := range []bool{false, true} {
+			t.Run(transition+map[bool]string{false: "/replace", true: "/clear"}[clearPaths], func(t *testing.T) {
+				c := fixture(t)
+				for _, name := range []string{"previous", "current"} {
+					if err := os.Mkdir(filepath.Join(c.Collection, name), 0755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Setenv("PATH", t.TempDir())
+				legacy, alias := filepath.Join(c.Harness, "wtc.toml"), filepath.Join(c.Harness, "taba.toml")
+				before := "[agent_env]\nprepend_paths = ['previous']\n"
+				after := "[agent_env]\nprepend_paths = ['current']\n"
+				want := filepath.Join(c.Collection, "current")
+				if clearPaths {
+					after, want = "[agent_env]\nprepend_paths = []\n", ""
+				}
+				initial := alias
+				if transition == "remove-legacy" {
+					initial = legacy
+					fixtureFile(t, alias, after, 0644)
+				}
+				fixtureFile(t, initial, before, 0644)
+				opened, err := OpenCollection(c.Collection)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got, err := opened.AgentToolchainPath(false); err != nil || got != filepath.Join(c.Collection, "previous") {
+					t.Fatalf("initial toolchain %q %v", got, err)
+				}
+				selected := alias
+				switch transition {
+				case "remove-legacy":
+					if err := os.Remove(legacy); err != nil {
+						t.Fatal(err)
+					}
+				case "add-legacy":
+					selected = legacy
+					fixtureFile(t, selected, after, 0644)
+				case "edit-alternate":
+					fixtureFile(t, selected, after, 0644)
+				}
+				old := time.Now().Add(-time.Hour)
+				if err := os.Chtimes(selected, old, old); err != nil {
+					t.Fatal(err)
+				}
+				opened, err = OpenCollection(c.Collection)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got, err := opened.AgentToolchainPath(false); err != nil || got != want {
+					t.Fatalf("toolchain after selection change = %q %v, want %q", got, err, want)
+				}
+				if got := readToolchainCache(filepath.Join(c.Collection, ".env.toolchain")); got != want {
+					t.Fatalf("stale paths persisted in cache: %q", got)
+				}
+			})
+		}
 	}
 }
 

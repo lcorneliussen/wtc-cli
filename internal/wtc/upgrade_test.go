@@ -173,6 +173,36 @@ func TestTabaUpgradePreservesSelectedPinAndConfigNames(t *testing.T) {
 				if _, err := c.Upgrade(UpgradeOptions{Version: "0.1.12"}); err == nil || !strings.Contains(err.Error(), "uncommitted") {
 					t.Fatalf("dirty selected files were not protected: %v", err)
 				}
+				fixtureGit(t, "-C", c.Harness, "add", "--", pinName, configName)
+				fixtureGit(t, "-C", c.Harness, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "upgraded inputs")
+				original := map[string]string{}
+				for _, name := range []string{pinName, configName} {
+					data, err := os.ReadFile(filepath.Join(c.Harness, name))
+					if err != nil {
+						t.Fatal(err)
+					}
+					original[name] = string(data)
+				}
+				for _, dirty := range []string{pinName, configName} {
+					edited := original[dirty] + "\n# local edit\n"
+					if dirty == pinName {
+						edited = "0.1.10\n"
+					}
+					fixtureFile(t, filepath.Join(c.Harness, dirty), edited, 0644)
+					if _, err := c.Upgrade(UpgradeOptions{Version: "0.1.12"}); err == nil || !strings.Contains(err.Error(), "uncommitted") {
+						t.Fatalf("dirty %s alone was not protected: %v", dirty, err)
+					}
+					for _, name := range []string{pinName, configName} {
+						want := original[name]
+						if name == dirty {
+							want = edited
+						}
+						if data, err := os.ReadFile(filepath.Join(c.Harness, name)); err != nil || string(data) != want {
+							t.Fatalf("refused upgrade modified %s: %q %v", name, data, err)
+						}
+					}
+					fixtureFile(t, filepath.Join(c.Harness, dirty), original[dirty], 0644)
+				}
 			})
 		}
 	}
