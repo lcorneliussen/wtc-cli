@@ -16,13 +16,17 @@ import (
 // Checkout is a session's gateway-managed worktree, seen through plain git.
 type Checkout struct {
 	Dir      string
-	Worktree string // the managed worktree's name; the branch is openclaw/<name>
+	Worktree string // the managed worktree's name; the branch is openclaw/<name>. Empty when Detached
 	Origin   Origin
 	Repo     string
 	Dest     string // the branch a pull request goes into
 	// Private is a checkout without an origin: the copy of the worktree a
 	// sandbox gets. Only the gateway knows its repository and base.
 	Private bool
+	// Detached is a worktree on no branch, as one resting at its base with no
+	// work yet is. Only catching up opens one: it moves to the base's tip when
+	// the base contains it, and is refused with commits of its own.
+	Detached bool
 }
 
 func git(dir string, args ...string) (string, error) {
@@ -50,6 +54,17 @@ func gitOK(dir string, args ...string) bool {
 // branch pull requests go into; empty means the base recorded for the
 // worktree, else origin's default branch.
 func OpenCheckout(dir, dest string) (*Checkout, error) {
+	return openCheckout(dir, dest, false)
+}
+
+// OpenCatchUpCheckout is OpenCheckout for catching up, which also takes a
+// detached worktree: catching one up moves it to the base's tip, or refuses
+// when it has commits the base lacks.
+func OpenCatchUpCheckout(dir, dest string) (*Checkout, error) {
+	return openCheckout(dir, dest, true)
+}
+
+func openCheckout(dir, dest string, detachedOK bool) (*Checkout, error) {
 	top, err := git(dir, "rev-parse", "--show-toplevel")
 	if untrusted := (*UntrustedConfigError)(nil); errors.As(err, &untrusted) {
 		return nil, err
@@ -59,14 +74,15 @@ func OpenCheckout(dir, dest string) (*Checkout, error) {
 	}
 	branch, _ := git(top, "branch", "--show-current")
 	name, managed := strings.CutPrefix(branch, BranchPrefix)
-	if !managed || !ValidWorktreeName(name) {
+	detached := detachedOK && branch == ""
+	if !detached && (!managed || !ValidWorktreeName(name)) {
 		at := "a detached HEAD"
 		if branch != "" {
 			at = "branch " + branch
 		}
 		return nil, fmt.Errorf("%s is on %s, not on an %s<name> branch: the gateway only publishes a session's managed worktree. Ask the collection's session to add this repository", top, at, BranchPrefix)
 	}
-	c := &Checkout{Dir: top, Worktree: name, Dest: dest}
+	c := &Checkout{Dir: top, Worktree: name, Dest: dest, Detached: detached}
 	if url, err := git(top, "remote", "get-url", "origin"); err == nil {
 		c.Origin = ParseOrigin(url)
 	} else {
@@ -304,9 +320,13 @@ type CatchUp struct {
 
 // CatchUp fetches the destination branch and merges it. It never rebases and
 // never pushes: published history stays as it is, and the gateway publishes
-// the merge with the next publication. A conflicted merge is aborted.
+// the merge with the next publication. A conflicted merge is aborted. A
+// detached worktree is not merged into but moved to the tip (forward).
 func (c *Checkout) CatchUp() (CatchUp, error) {
 	result := CatchUp{Branch: c.Branch(), Dest: c.Dest}
+	if c.Detached {
+		result.Branch = ""
+	}
 	if err := c.readyToMerge(); err != nil {
 		return result, err
 	}
@@ -314,7 +334,30 @@ func (c *Checkout) CatchUp() (CatchUp, error) {
 	if _, err := git(c.Dir, fetch...); err != nil {
 		return result, fmt.Errorf("cannot fetch %s from origin: %w", c.Dest, err)
 	}
+	if c.Detached {
+		return c.forward(result, "refs/remotes/origin/"+c.Dest, "origin/"+c.Dest)
+	}
 	return c.merge(result, "refs/remotes/origin/"+c.Dest, "origin/"+c.Dest)
+}
+
+// forward moves a detached worktree to ref, which must contain it: with no
+// branch there is nothing to merge into, and commits of its own would be
+// left behind.
+func (c *Checkout) forward(result CatchUp, ref, label string) (CatchUp, error) {
+	if gitOK(c.Dir, "merge-base", "--is-ancestor", ref, "HEAD") {
+		result.Head, _ = git(c.Dir, "rev-parse", "HEAD")
+		result.Note = "already contains " + label
+		return result, nil
+	}
+	if !gitOK(c.Dir, "merge-base", "--is-ancestor", "HEAD", ref) {
+		return result, fmt.Errorf("%s is detached with commits %s does not have: put them on a branch first (git switch -c %s<name>), then catch up", c.Dir, label, BranchPrefix)
+	}
+	if _, err := git(c.Dir, "checkout", "--quiet", "--detach", ref); err != nil {
+		return result, fmt.Errorf("moving %s to %s, the checkout is as before: %w", c.Dir, label, err)
+	}
+	result.Merged, result.FastForward = true, true
+	result.Head, _ = git(c.Dir, "rev-parse", "HEAD")
+	return result, nil
 }
 
 // HasBranch reports whether the repository at dir has the local branch.
@@ -352,6 +395,9 @@ func WorkerWorktree(task, worker string) (string, error) {
 // so its branch is a local ref and nothing is fetched. Like CatchUp it never
 // rebases and never pushes, and a conflicted merge is aborted.
 func (c *Checkout) MergeWorker(worker string) (CatchUp, error) {
+	if c.Detached {
+		return CatchUp{Dest: c.Dest}, fmt.Errorf("%s is detached: a worker's branch merges into the task's branch, and this repository has none yet", c.Dir)
+	}
 	result := CatchUp{Branch: c.Branch(), Dest: c.Dest}
 	name, err := WorkerWorktree(c.Worktree, worker)
 	if err != nil {

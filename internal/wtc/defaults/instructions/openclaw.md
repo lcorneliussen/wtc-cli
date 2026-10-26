@@ -196,9 +196,11 @@ request in the chat do the same.
 ## Catching up
 
 `wtc catch-up` merges the destination branch into the child's worktree. It
-never rebases and never pushes. A conflict is the agent's to resolve in its
-own checkout: the wtc-catch-up skill. Rebasing a published branch makes it
-unpublishable.
+never rebases and never pushes. A worktree resting detached at its base, with
+no work yet, just moves to the base's new tip; one with commits on no branch
+is refused until they are on a branch. A conflict is the agent's to resolve
+in its own checkout: the wtc-catch-up skill. Rebasing a published branch
+makes it unpublishable.
 
 Never run `git push` yourself, and never `git rebase` or `git commit --amend`
 on commits that were published.

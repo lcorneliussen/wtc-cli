@@ -91,7 +91,7 @@ async function settle(host, target, name, out, say) {
     return { requestId: out.requestId, confirmation: { generation: c.generation, account: c.account, requestDigest: c.requestDigest } };
   }
   if (out?.status === "published") say(`${name}: pushed ${out.url ?? out.pullRequestUrl ?? ""}`.trim());
-  else say(`${name}: ${out?.status ?? "done"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${out.message}` : ""}`);
+  else say(`${name}: ${out?.status ?? "done"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${wtcMessage(out.message)}` : ""}`, !!out?.error);
   return null;
 }
 
@@ -140,6 +140,12 @@ async function confirmBitbucket(host, agentId, r, pending, say) {
 export const conflictsOf = (message) => (/conflicts in: (.+?)\. The merge was aborted/.exec(message ?? "")?.[1] ?? "")
   .split(/,\s*/).filter(Boolean);
 
+// What wtc printed, without its "wtc: " prefix: the card names the repository.
+const wtcMessage = (message) => String(message ?? "").trim().replace(/^wtc: /, "");
+// A note that reports a failure reads as one.
+const noteNode = (text, failed, style) => css(el("span", { textContent: failed ? `⚠ ${text}` : text, title: text }),
+  `color:${failed ? TONE.failure : "var(--muted, #888)"};font-size:12px;${style ?? ""}`);
+
 // Asks the conversation to run one of the agent's skills on what the card saw.
 const askSkill = (host, sessionKey, skill, input) => askConversation(host, sessionKey, `/skill ${skill} ${input}`);
 
@@ -158,7 +164,7 @@ async function catchUpRepo(host, agentId, r, say, ask) {
     say(`${name}: ${conflicts.join(", ")} changed on both sides; the conversation was asked to merge and resolve them.`);
     return;
   }
-  say(`${name}: ${out.json?.summary ?? (out.message || "exit " + out.code)}`);
+  say(`${name}: ${out.json?.summary ?? (wtcMessage(out.message) || "exit " + out.code)}`, out.code !== 0);
 }
 
 // One load of a session's collection, shared by the panel and the card above
@@ -585,7 +591,7 @@ function collectionTables(v) {
         if (next) confirming.set(r.sessionKey, next);
       }
     } catch (err) {
-      v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`);
+      v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true);
     } finally {
       busy.delete(r.sessionKey);
       v.pause(false);
@@ -621,7 +627,7 @@ function collectionTables(v) {
         await askSkill(v.host, v.key(), "wtc-catch-up", `${name}: merging worker ${w.name} (wtc catch-up --from ${w.name}) conflicts in ${conflicts.join(", ")}.`);
         v.say(`${name}: ${conflicts.join(", ")} changed in both; the conversation was asked to merge worker ${w.name} and resolve them.`);
       } else {
-        v.say(`${name}: ${out.json?.summary ?? (out.message || "exit " + out.code)}`);
+        v.say(`${name}: ${out.json?.summary ?? (wtcMessage(out.message) || "exit " + out.code)}`, out.code !== 0);
       }
     } finally {
       keys.forEach((k) => catching.delete(k));
@@ -671,7 +677,7 @@ function collectionTables(v) {
       e?.preventDefault();
       e?.stopPropagation();
       b.disabled = true;
-      try { await run(); } catch (err) { v.say(String(err?.message ?? err)); } finally { b.disabled = false; }
+      try { await run(); } catch (err) { v.say(String(err?.message ?? err), true); } finally { b.disabled = false; }
     };
     return b;
   };
@@ -958,7 +964,8 @@ function mountComposer(container, context) {
     b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); run(); };
     return b;
   };
-  const say = (text) => { note = text; if (entry) render(entry); };
+  let noteFailed = false;
+  const say = (text, failed = false) => { note = text; noteFailed = failed; if (entry) render(entry); };
   // Narrow (a phone, a narrow window), rows wrap into two lines.
   let narrow = false;
   const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([e]) => {
@@ -979,6 +986,7 @@ function mountComposer(container, context) {
         return r;
       } catch (err) {
         note = String(err?.message ?? err);
+        noteFailed = true;
       } finally {
         svcBusy.delete(k);
         await watch?.refresh();
@@ -1050,7 +1058,7 @@ function mountComposer(container, context) {
     summary.replaceChildren(
       brand("14px", entry?.data?.version),
       what,
-      css(el("span", {}, note ? css(el("span", { textContent: note }), "color:var(--muted, #888);font-size:12px") : null,
+      css(el("span", {}, note ? noteNode(note, noteFailed) : null,
         pill("Start", main ? "Ask the agent to start a conversation for this task in that wtc project" : "Ask the conversation to start this collection", () => {
           const fromDraft = suggestion?.fromDraft === true;
           dismissed.add(key);
@@ -1064,7 +1072,7 @@ function mountComposer(container, context) {
             dismissed.delete(key);
             // The draft as the person wrote it, without what Start added.
             if (draft) { try { ctx.props?.setDraft?.(draft); } catch {} }
-            say(String(err?.message ?? err));
+            say(String(err?.message ?? err), true);
           };
           // A draft goes along with what Start asks, through the composer's own send.
           if (fromDraft && draft && ctx.props?.setDraft && ctx.props?.send) {
@@ -1104,7 +1112,7 @@ function mountComposer(container, context) {
       brand("14px", entry.data.version),
       css(el("span", {}, ...(card.open ? [] : tables.totals(repos, groups))), "flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding-left:6px"),
       // What an action is doing or why it failed shows here.
-      css(el("span", {}, note ? css(el("span", { textContent: note, title: note }), "color:var(--muted, #888);font-size:12px;max-width:22em;overflow:hidden;text-overflow:ellipsis") : null,
+      css(el("span", {}, note ? noteNode(note, noteFailed, "max-width:22em;overflow:hidden;text-overflow:ellipsis") : null,
         iconButton("↻", `Updated ${ago(entry.at)}. Refresh`, () => void watch?.refresh()),
         iconButton("⤢", "Open the wtc Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
         css(el("span", { textContent: card.open ? "⌃" : "⌄" }), "color:var(--muted, #888);padding:0 6px")),
@@ -1178,7 +1186,7 @@ function mountCollection(container, context) {
     b.onclick = async () => {
       b.disabled = true;
       b.style.opacity = ".6";
-      try { await run(); } catch (err) { say(String(err?.message ?? err)); } finally { b.disabled = false; b.style.opacity = ""; }
+      try { await run(); } catch (err) { say(String(err?.message ?? err), true); } finally { b.disabled = false; b.style.opacity = ""; }
     };
     return b;
   };
@@ -1194,7 +1202,14 @@ function mountCollection(container, context) {
   const body = css(el("div"), "display:grid;gap:16px");
   root.append(header, log, body);
   let note = "";
-  const say = (text) => { note = text; log.textContent = text; log.style.minHeight = text ? "1em" : "0"; };
+  let noteFailed = false;
+  const say = (text, failed = false) => {
+    note = text;
+    noteFailed = failed;
+    log.textContent = failed ? `⚠ ${text}` : text;
+    log.style.color = failed ? TONE.failure : "var(--muted, #888)";
+    log.style.minHeight = text ? "1em" : "0";
+  };
 
   const sessionKeyOf = () => entry?.data?.collection?.sessionKey ?? ctx.props.sessionKey;
   const svcBusy = new Set();
@@ -1210,7 +1225,7 @@ function mountCollection(container, context) {
         say("");
         return r;
       } catch (err) {
-        say(String(err?.message ?? err));
+        say(String(err?.message ?? err), true);
       } finally {
         svcBusy.delete(k);
         await watch?.refresh();
@@ -1446,7 +1461,7 @@ function mountCollection(container, context) {
       );
       const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
       body.replaceChildren(...[css(el("div", {}, heading("Add a repository"), adder), "display:grid;gap:10px"), ...warnings, footer(data)].filter(Boolean));
-      log.textContent = note;
+      say(note, noteFailed);
       return;
     }
     header.replaceChildren(
@@ -1477,7 +1492,7 @@ function mountCollection(container, context) {
 
     const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
     body.replaceChildren(...[repoSection, workerSection, prSection, serviceSection, ...warnings, footer(data)].filter(Boolean));
-    log.textContent = note;
+    say(note, noteFailed);
   }
 
   const show = (next) => { if (!ctx.signal.aborted) { entry = next; render(); } };

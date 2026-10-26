@@ -118,6 +118,9 @@ func TestCatchUpSummary(t *testing.T) {
 		{openclaw.CatchUp{Branch: "openclaw/x", Dest: "main", From: "openclaw/x--a", Merged: true, FastForward: true}, "merged openclaw/x--a into openclaw/x; the person publishes it with ↑ when the task is ready"},
 		{openclaw.CatchUp{Branch: "openclaw/x", Dest: "main", Merged: true}, "merged origin/main into openclaw/x; publish to send the merge (wtc publish)"},
 		{openclaw.CatchUp{Branch: "openclaw/x", Note: "already contains origin/main"}, "openclaw/x already contains origin/main"},
+		// A detached worktree has no branch: it moves forward to the tip.
+		{openclaw.CatchUp{Dest: "main", Merged: true, FastForward: true}, "detached at origin/main's tip again: no work of its own, nothing to publish"},
+		{openclaw.CatchUp{Dest: "main", Note: "already contains origin/main"}, "detached, already contains origin/main"},
 	} {
 		if got := catchUpSummary(tc.result); got != tc.want {
 			t.Errorf("%+v: %q, want %q", tc.result, got, tc.want)
