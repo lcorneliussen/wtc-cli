@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/lcorneliussen/wtc-cli/internal/next"
 )
 
 func TestDetectHost(t *testing.T) {
@@ -630,5 +632,46 @@ func TestMergeFromASubSessionsBranchByItsName(t *testing.T) {
 	// Its own branch is no branch to merge from.
 	if _, err := c.MergeFrom(c.Branch()); err == nil {
 		t.Error("merged the checkout's own branch into itself")
+	}
+}
+
+func TestStatusNamesTheNextStep(t *testing.T) {
+	c, git := managedWorktree(t, "/dev/null/unused")
+	bare := git("remote", "get-url", "--push", "origin")
+	git("remote", "set-url", "origin", bare)
+	fetch := func() { t.Helper(); git("fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main") }
+
+	// Committed work, nothing new on the base: the person pushes it.
+	write(t, c, "notes.md", "mine\n")
+	git("add", ".")
+	git("commit", "-qm", "work")
+	s := checkoutStatus(c.Dir, false)
+	if s.Next == nil || s.Next.Step != "push" || s.Next.By != next.ByWTC || s.Next.Approve != next.ApprovePerson || s.Next.Gateway != "github_publish" {
+		t.Fatalf("committed work: %+v", s.Next)
+	}
+
+	// The base moves on without touching it: a clean catch-up, the agent's call.
+	advanceOrigin(t, bare, "OTHER", "theirs\n")
+	fetch()
+	s = checkoutStatus(c.Dir, false)
+	if s.Next == nil || s.Next.Step != "catch-up" || s.Next.Approve != next.ApproveAgent || !strings.Contains(s.Next.Reason, "merges cleanly") {
+		t.Fatalf("behind, clean: %+v", s.Next)
+	}
+	// ...and changing the same file: a merge for the agent, naming it.
+	advanceOrigin(t, bare, "notes.md", "theirs\n")
+	fetch()
+	s = checkoutStatus(c.Dir, false)
+	if s.Next == nil || s.Next.Step != "merge" || s.Next.By != next.ByAgent || !strings.Contains(s.Next.Reason, "conflicts in notes.md") {
+		t.Fatalf("behind, conflicting: %+v", s.Next)
+	}
+	if git("status", "--porcelain") != "" {
+		t.Fatal("predicting the merge touched the worktree")
+	}
+
+	// Detached at an older base: wtc moves it, nobody needs to agree.
+	git("checkout", "-q", "--detach", "origin/main~1")
+	s = checkoutStatus(c.Dir, false)
+	if s.Next == nil || s.Next.Step != "catch-up" || s.Next.By != next.ByWTC || s.Next.Approve != "" {
+		t.Fatalf("detached, behind: %+v", s.Next)
 	}
 }

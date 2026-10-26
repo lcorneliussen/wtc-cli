@@ -257,7 +257,8 @@ func statusNext(snapshot *StatusSnapshot) {
 }
 
 // statusFacts is what a local row tells about the next step. Ahead counts
-// against the branch's upstream, so it is what a push would send.
+// against the branch's upstream (the development tip when it has none), so
+// it is what a push would send.
 func statusFacts(r StatusRepo) next.Facts {
 	f := next.Facts{Repo: r.Repo, Host: next.HostLocal, Base: r.baseRef,
 		Ahead: r.Ahead, Behind: r.Behind, Dirty: r.Changed, InProgress: r.Operation}
@@ -285,9 +286,9 @@ func statusFacts(r StatusRepo) next.Facts {
 		f.PR = &next.PR{Number: number, Draft: pr.Draft, State: "open",
 			Checks: map[string]string{"FAILURE": "failure", "SUCCESS": "success", "PENDING": "pending"}[strings.ToUpper(pr.Checks)],
 			Review: map[string]string{"approved": "approved", "changes": "changes_requested"}[pr.Review]}
+		// Rows carry open pull requests only: a merged one is caught up by
+		// wtc catch-up, which returns the branch to the tip.
 		switch strings.ToUpper(pr.Merge) {
-		case "MERGED":
-			f.PR.State = "merged"
 		case "CONFLICTING", "DIRTY":
 			f.PR.Mergeable = "conflicting"
 		case "CLEAN", "MERGEABLE":

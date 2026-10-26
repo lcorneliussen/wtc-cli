@@ -42,8 +42,16 @@ func TestFor(t *testing.T) {
 			func(s *Step) bool { return s.Approve == ApprovePerson && s.Gateway == "github_publish" && s.Reason == "2 commits to push, opening a draft pull request" }},
 		{"commits to push locally are the agent's", Facts{Repo: "api", Host: HostLocal, ToPush: 2, PR: &PR{Number: 7, State: "open"}}, "push", ByAgent,
 			func(s *Step) bool { return s.Skill == "wtc-draft-pr" && s.Reason == "2 commits to push" }},
-		{"approved and green: people merge", Facts{Repo: "api", PR: &PR{Number: 7, State: "open", Checks: "success", Review: "approved", Mergeable: "mergeable"}}, "merge-pr", ByWTC,
-			func(s *Step) bool { return s.Approve == ApprovePerson }},
+		{"approved and green: people merge", Facts{Repo: "api", PR: &PR{Number: 7, State: "open", Checks: "success", Review: "approved", Mergeable: "mergeable"}}, "merge-pr", ByPerson,
+			func(s *Step) bool { return s.Approve == "" && reflect.DeepEqual(s.Then, []string{"catch-up"}) }},
+		{"approved, but local commits not pushed: push first", Facts{Repo: "api", Host: HostOpenClaw, ToPush: 1, PR: &PR{Number: 7, State: "open", Checks: "success", Review: "approved", Mergeable: "mergeable"}}, "push", ByWTC, nil},
+		{"approved, but work in progress: nothing", Facts{Repo: "api", Dirty: 1, PR: &PR{Number: 7, State: "open", Checks: "success", Review: "approved"}}, "", "", nil},
+		{"failed checks while the agent works: nothing yet", Facts{Repo: "api", Dirty: 2, PR: &PR{Number: 7, State: "open", Checks: "failure"}}, "", "", nil},
+		{"a conflicting PR during work: nothing yet", Facts{Repo: "api", Dirty: 1, PR: &PR{Number: 7, State: "open", Mergeable: "conflicting"}}, "", "", nil},
+		{"conflicted files without an operation are resolved", Facts{Repo: "api", Conflicted: 1, Dirty: 1}, "resolve", ByAgent,
+			func(s *Step) bool { return s.Reason == "a merge is not finished in api: 1 conflicted files" }},
+		{"an approved draft is no merge yet", Facts{Repo: "api", PR: &PR{Number: 7, State: "open", Draft: true, Checks: "success", Review: "approved"}}, "", "", nil},
+		{"merged, with work in progress: nothing yet", Facts{Repo: "api", Dirty: 1, PR: &PR{Number: 7, State: "merged"}}, "", "", nil},
 		{"checks running: nothing yet", Facts{Repo: "api", PR: &PR{Number: 7, State: "open", Checks: "pending"}}, "", "", nil},
 	} {
 		got := For(tc.f)

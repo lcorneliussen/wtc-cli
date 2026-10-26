@@ -23,8 +23,7 @@ func TestStatusNextFromALocalRow(t *testing.T) {
 		{"failed checks", branch(StatusRepo{PR: &StatusPRFacts{Number: "7", Checks: "FAILURE", Merge: "CLEAN", Review: "waiting"}}), "fix-checks", next.ByAgent},
 		{"conflicting with its base", branch(StatusRepo{PR: &StatusPRFacts{Number: "7", Checks: "SUCCESS", Merge: "CONFLICTING"}}), "merge", next.ByAgent},
 		{"changes requested", branch(StatusRepo{PR: &StatusPRFacts{Number: "7", Checks: "SUCCESS", Merge: "CLEAN", Review: "changes"}}), "address-review", next.ByAgent},
-		{"approved and green", branch(StatusRepo{PR: &StatusPRFacts{Number: "7", Checks: "SUCCESS", Merge: "CLEAN", Review: "approved"}}), "merge-pr", next.ByWTC},
-		{"merged: catch up", branch(StatusRepo{PR: &StatusPRFacts{Number: "7", Merge: "MERGED", Review: "merged"}}), "catch-up", next.ByWTC},
+		{"approved and green", branch(StatusRepo{PR: &StatusPRFacts{Number: "7", Checks: "SUCCESS", Merge: "CLEAN", Review: "approved"}}), "merge-pr", next.ByPerson},
 		{"a merge in progress", branch(StatusRepo{Operation: "merge", Conflict: true}), "resolve", next.ByAgent},
 		{"detached and current: nothing", StatusRepo{Repo: "api", BranchKind: "detached", Branch: "main"}, "", ""},
 	} {

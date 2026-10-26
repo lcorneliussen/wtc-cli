@@ -12,8 +12,9 @@ import (
 
 // Who does a step, and who must agree to it first.
 const (
-	ByWTC   = "wtc"   // deterministic: a wtc command, or the gateway's own action
-	ByAgent = "agent" // needs judgment: a skill the agent follows
+	ByWTC    = "wtc"    // deterministic: a wtc command, or the gateway's own action
+	ByAgent  = "agent"  // needs judgment: a skill the agent follows
+	ByPerson = "person" // only people do it: merging a pull request
 
 	ApprovePerson = "person" // needs the person's authority: a push, a merge
 	ApproveAgent  = "agent"  // wtc could do it, but the agent decides when
@@ -84,8 +85,10 @@ type Facts struct {
 	PR     *PR
 }
 
-// For is the repository's next step, or nil when nothing waits on anyone:
-// work in progress, or checks still running.
+// For is the repository's next step, or nil when nothing waits on anyone.
+// Uncommitted files are work in progress: then only an unfinished merge is
+// a step, and everything else waits for the work. Checks still running are
+// nothing to act on either.
 func For(f Facts) *Step {
 	s := &Step{Repo: f.Repo}
 	key := func(parts ...string) string {
@@ -106,7 +109,9 @@ func For(f Facts) *Step {
 		}
 		s.Then = []string{"push"}
 		s.Key = key(f.Head)
-	case pr != nil && pr.State == "merged" && (pr.MergedIn == nil || !*pr.MergedIn) && f.Dirty == 0:
+	case f.Dirty > 0:
+		return nil
+	case pr != nil && pr.State == "merged" && (pr.MergedIn == nil || !*pr.MergedIn):
 		s.Step, s.By = "catch-up", ByWTC
 		s.Reason = fmt.Sprintf("#%d was merged: continue from the merge", pr.Number)
 		s.Command = []string{"wtc", "catch-up"}
@@ -131,7 +136,7 @@ func For(f Facts) *Step {
 		s.Reason = fmt.Sprintf("%d new on %s; merging conflicts in %s", f.Behind, baseName(f.Base), strings.Join(f.MergeConflicts, ", "))
 		s.Then = []string{"push"}
 		s.Key = key(f.Head, f.BaseHead)
-	case f.Behind > 0 && f.Dirty == 0:
+	case f.Behind > 0:
 		s.Step, s.By = "catch-up", ByWTC
 		s.Command = []string{"wtc", "catch-up"}
 		s.Reason = fmt.Sprintf("%d new on %s", f.Behind, baseName(f.Base))
@@ -146,7 +151,7 @@ func For(f Facts) *Step {
 			s.Approve = ApproveAgent
 		}
 		s.Key = key(f.Head, f.BaseHead)
-	case f.ToPush > 0 && f.Dirty == 0:
+	case f.ToPush > 0:
 		s.Step = "push"
 		s.Reason = fmt.Sprintf("%d commits to push", f.ToPush)
 		if pr == nil || pr.State != "open" {
@@ -161,7 +166,7 @@ func For(f Facts) *Step {
 		s.Then = []string{"follow"}
 		s.Key = key(f.Head)
 	case open && !pr.Draft && pr.Checks == "success" && pr.Review == "approved" && pr.Mergeable != "conflicting":
-		s.Step, s.By, s.Approve = "merge-pr", ByWTC, ApprovePerson
+		s.Step, s.By = "merge-pr", ByPerson
 		s.Reason = fmt.Sprintf("#%d is approved and green: people merge it", pr.Number)
 		s.Then = []string{"catch-up"}
 		s.Key = key(f.Head)

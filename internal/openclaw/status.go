@@ -244,9 +244,9 @@ func (s CheckoutStatus) facts(top string) next.Facts {
 	if s.Base != "" {
 		f.BaseHead, _ = git(top, "rev-parse", s.Base)
 	}
-	// What ↑ would send: commits since the last publication, or before the
-	// first pull request everything ahead of the base. A detached checkout
-	// has no branch to push.
+	// What ↑ would send: the commits since the gateway's last publication,
+	// or before its first one everything ahead of the base. A detached
+	// checkout has no branch to push.
 	if s.Branch != "" {
 		f.ToPush = s.Unpublished
 	}
