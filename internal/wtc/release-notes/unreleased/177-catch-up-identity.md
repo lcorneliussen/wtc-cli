@@ -8,5 +8,5 @@
 - **A catch-up that stops on a conflict goes to the conversation.** The card
   no longer tells you to merge by hand: it asks the agent to catch up in its
   own checkout and resolve the files there. In a sandbox with the gateway's
-  git service, \`wtc catch-up\` stops on the conflict, and
-  \`wtc catch-up --continue\` hands the resolved branch back to the gateway.
+  git service, `wtc catch-up` stops on the conflict, and
+  `wtc catch-up --continue` hands the resolved branch back to the gateway.
