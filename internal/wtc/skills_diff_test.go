@@ -83,6 +83,51 @@ func TestDiffSkillsCustomAndUnchanged(t *testing.T) {
 	}
 }
 
+func TestTabaSkillDigestInputs(t *testing.T) {
+	for _, sections := range []bool{false, true} {
+		t.Run(map[bool]string{false: "full-overlay", true: "sections"}[sections], func(t *testing.T) {
+			c := fixture(t)
+			base, err := ReadDefault("skills/wtc-customize/SKILL.md")
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join(c.Harness, "overlays", "skills", "wtc-customize")
+			if sections {
+				base = append(base, []byte("\n## Setup\n\nOriginal setup.\n")...)
+				fixtureFile(t, filepath.Join(c.Harness, "skills", "wtc-customize", "SKILL.md"), string(base), 0644)
+				fixtureFile(t, filepath.Join(dir, "sections", "setup.md"), "## Setup\n\nNew setup.\n", 0644)
+			} else {
+				fixtureFile(t, filepath.Join(dir, "SKILL.md"), string(base)+"\nLocal details.\n", 0644)
+			}
+			check := func(want string) {
+				t.Helper()
+				rows, err := c.DiffSkills()
+				if err != nil || len(rows) == 0 || rows[0].Status != want {
+					t.Fatalf("digest status = %+v, %v; want %s", rows, err, want)
+				}
+			}
+			alias := filepath.Join(dir, ".taba-base.sha256")
+			fixtureFile(t, alias, skillDigest(base)+"\n", 0644)
+			check("reviewed")
+			if _, err := c.RenderSkills(SkillRenderOptions{DryRun: true}); err != nil {
+				t.Fatal(err)
+			}
+			fixtureFile(t, alias, strings.Repeat("0", 64)+"\n", 0644)
+			check("drifted")
+			if sections {
+				if _, err := c.RenderSkills(SkillRenderOptions{DryRun: true}); err == nil || !strings.Contains(err.Error(), ".taba-base.sha256") {
+					t.Fatalf("alias drift was not enforced: %v", err)
+				}
+			}
+			fixtureFile(t, filepath.Join(dir, ".wtc-base.sha256"), skillDigest(base)+"\n", 0644)
+			check("reviewed")
+			if _, err := c.RenderSkills(SkillRenderOptions{DryRun: true}); err != nil {
+				t.Fatalf("legacy digest lost authority: %v", err)
+			}
+		})
+	}
+}
+
 func TestDiffSkillsSectionPatchDrift(t *testing.T) {
 	c := fixture(t)
 	dir := filepath.Join(c.Harness, "overlays", "skills", "wtc-customize")

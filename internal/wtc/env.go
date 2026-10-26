@@ -128,7 +128,11 @@ func machineTWGSite(root string) (string, error) {
 	if value, exists := envcompat.LookupEnv("WTC_TWG_SITE"); exists {
 		return value, nil
 	}
-	data, err := os.ReadFile(filepath.Join(root, "wtc.env"))
+	path, err := MachineEnvFile(root)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return "", nil
 	}
@@ -240,7 +244,10 @@ func (c *Context) RenderMise() ([]byte, error) {
 		}
 		tools[name] = version
 	}
-	versionFile := filepath.Join(c.Harness, ".wtc-cli-version")
+	versionFile, err := pinInput(c.Harness)
+	if err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(versionFile)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err

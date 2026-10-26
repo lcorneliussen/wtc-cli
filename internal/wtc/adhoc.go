@@ -36,13 +36,13 @@ var scpRemote = regexp.MustCompile(`^(?:[^@/]+@)?([^:/]+):(.+)$`)
 // collections, used when WTC_CONFIG_ROOT is unset.
 func UserConfigRoot() (string, error) {
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		return filepath.Join(dir, "wtc"), nil
+		return legacyInput(dir, "wtc", "taba")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "wtc"), nil
+	return legacyInput(filepath.Join(home, ".config"), "wtc", "taba")
 }
 
 // UserDataRoot holds the per-user owner cache and repo registry shared by
@@ -52,13 +52,13 @@ func UserDataRoot() (string, error) {
 		return dir, nil
 	}
 	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
-		return filepath.Join(dir, "wtc"), nil
+		return legacyInput(dir, "wtc", "taba")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".local", "share", "wtc"), nil
+	return legacyInput(filepath.Join(home, ".local", "share"), "wtc", "taba")
 }
 
 // userOwnerPath keys the shared owner cache by remote location rather than by
@@ -617,8 +617,12 @@ func (c *Context) newAdHoc(opt NewOptions) (NewResult, error) {
 		}
 	}()
 	// Settings such as [runtime] carry over, as siblings of a harness
-	// collection share its wtc.toml. Hooks stay with their collection.
-	if data, err := os.ReadFile(filepath.Join(c.Harness, "wtc.toml")); err == nil {
+	// collection share its configuration. Hooks stay with their collection.
+	config, err := configInput(c.Harness)
+	if err != nil {
+		return result, err
+	}
+	if data, err := os.ReadFile(config); err == nil {
 		if err := os.WriteFile(filepath.Join(result.Collection, AdHocConfigDir, "wtc.toml"), data, 0644); err != nil {
 			return result, err
 		}

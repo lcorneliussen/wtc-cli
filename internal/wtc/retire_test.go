@@ -15,6 +15,7 @@ func TestRetireCollectionRunsTeardownAndKeepsRemoteRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := result.Collection
+	fixtureFile(t, filepath.Join(target, "SCOPE.md"), "Disposable task context.\n", 0644)
 	fixtureFile(t, filepath.Join(target, ".wtc-prs.lock"), "", 0600)
 	// A dev build is generated and must not keep the folder alive.
 	fixtureFile(t, filepath.Join(target, ".wtc", "dev", "wtc"), "#!/bin/sh\n", 0755)

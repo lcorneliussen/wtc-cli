@@ -32,6 +32,11 @@ to you. After the harness PR merges, `wtc upgrade --rollout` catches every
 collection's harness up: clean worktrees and idle agents only, with `mise
 install`, reporting the collections left for their owners.
 
+The [rename configuration-input groundwork](rename-config-inputs.md) also
+accepts `.taba-version` and `taba.toml`. When only those names exist, upgrade
+updates them in place and applies dirty-file protection to those same files.
+Existing legacy names take precedence when both are present.
+
 Without the command, read the committed `.wtc-cli-version` and the target
 release. Run the **target binary** with `release-notes --since <old-pin>`: an
 old binary only contains its own archive and cannot fetch future notes.

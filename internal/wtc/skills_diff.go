@@ -90,14 +90,18 @@ func (c *Context) DiffSkills() ([]SkillDiff, error) {
 			result = append(result, item)
 			continue
 		}
-		recorded, err := os.ReadFile(filepath.Join(filepath.Dir(path), ".wtc-base.sha256"))
+		digestPath, err := skillBaseInput(filepath.Dir(path))
+		if err != nil {
+			return nil, err
+		}
+		recorded, err := os.ReadFile(digestPath)
 		if err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
 		if err == nil {
 			item.RecordedBase = strings.TrimSpace(string(recorded))
 			if len(item.RecordedBase) != 64 || !isHexDigest(item.RecordedBase) {
-				return nil, fmt.Errorf("invalid base digest in %s", filepath.Join(filepath.Dir(path), ".wtc-base.sha256"))
+				return nil, fmt.Errorf("invalid base digest in %s", digestPath)
 			}
 		}
 		switch {
@@ -145,7 +149,11 @@ func (c *Context) DiffSkills() ([]SkillDiff, error) {
 			return nil, fmt.Errorf("section patches for unknown skill %s", name)
 		}
 		item := SkillDiff{Name: name, Source: filepath.ToSlash(strings.TrimPrefix(patchDir, c.Harness+string(filepath.Separator))), DefaultHash: skillDigest(base)}
-		recorded, err := os.ReadFile(filepath.Join(patchRoot, name, ".wtc-base.sha256"))
+		digestPath, err := skillBaseInput(filepath.Join(patchRoot, name))
+		if err != nil {
+			return nil, err
+		}
+		recorded, err := os.ReadFile(digestPath)
 		if err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}

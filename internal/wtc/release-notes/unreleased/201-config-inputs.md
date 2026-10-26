@@ -1,0 +1,3 @@
+## Rename preparation
+
+- **Accept alternate configuration input names.** `taba.toml`, `.taba-version`, `taba.env`, existing XDG `taba` directories, `SCOPE.md`, and `.taba-base.sha256` are accepted. Existing legacy paths remain authoritative; fresh output keeps legacy names. `wtc upgrade` edits the selected pin/config filenames in place and checks those files for uncommitted changes. No automatic migration or runtime-state namespace change is performed. See [configuration inputs](https://github.com/lcorneliussen/wtc-cli/blob/main/docs/rename-config-inputs.md) for precedence and scope ([#201](https://github.com/lcorneliussen/wtc-cli/issues/201)).

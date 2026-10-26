@@ -128,6 +128,43 @@ func TestDevBuildVersionsPassTheHarnessRange(t *testing.T) {
 	}
 }
 
+func TestTabaConfigInputsAtCLIEntryPoint(t *testing.T) {
+	collection := filepath.Join(t.TempDir(), "demo")
+	harness := filepath.Join(collection, "harness")
+	if err := os.MkdirAll(harness, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{
+		".harness-repos.yml": "repos:\n  - name: widget\n    remote: https://example.invalid/widget.git\n    default_ref: origin/main\n",
+		"taba.toml":          "[herdr]\nsession = 'alias-session'\n",
+		".taba-version":      "0.1.54\n",
+	} {
+		if err := os.WriteFile(filepath.Join(harness, name), []byte(data), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command("go", "run", ".", "env", "setup", "--collection", collection, "--dry-run", "--json")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("alias config preview failed: %v, %s", err, &stderr)
+	}
+	var result struct {
+		Data envResult `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON preview: %s, %v", &stdout, err)
+	}
+	if !result.Data.DryRun || !strings.Contains(result.Data.Mise, `"github:lcorneliussen/wtc-cli" = "0.1.54"`) || !strings.Contains(result.Data.Env, "alias-session") {
+		t.Fatalf("preview did not use selected inputs: %+v", result.Data)
+	}
+	for _, path := range []string{filepath.Join(harness, "wtc.toml"), filepath.Join(harness, ".wtc-cli-version"), filepath.Join(collection, ".env.collection")} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("dry run created %s: %v", path, err)
+		}
+	}
+}
+
 func TestUpgradeRolloutRefusesVersion(t *testing.T) {
 	cmd := exec.Command("go", "run", ".", "upgrade", "--rollout", "--version", "0.1.1")
 	out, err := cmd.CombinedOutput()

@@ -35,7 +35,10 @@ func LinkGatewayCollection(dir string, repos []LinkedRepo) (*Context, error) {
 			return nil, err
 		}
 	}
-	config := filepath.Join(dir, AdHocConfigDir, "wtc.toml")
+	config, err := configInput(filepath.Join(dir, AdHocConfigDir))
+	if err != nil {
+		return nil, err
+	}
 	if _, err := os.Stat(config); os.IsNotExist(err) {
 		if err := os.WriteFile(config, []byte(gatewayRuntimeConfig), 0o644); err != nil {
 			return nil, err
@@ -107,7 +110,11 @@ func RecordGatewayHarness(dir, name, remote string) error {
 	if current != "" {
 		return fmt.Errorf("collection %s already uses harness %s", filepath.Base(dir), current)
 	}
-	f, err := os.OpenFile(filepath.Join(dir, AdHocConfigDir, "wtc.toml"), os.O_APPEND|os.O_WRONLY, 0o644)
+	config, err := configInput(filepath.Join(dir, AdHocConfigDir))
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(config, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
