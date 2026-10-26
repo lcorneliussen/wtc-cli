@@ -441,16 +441,27 @@ func WorkerWorktree(task, worker string) (string, error) {
 	return name, nil
 }
 
-// MergeWorker merges the branch of a worker of this checkout's task. The
-// worker's collection has its worktree in the same clone of the repository,
-// so its branch is a local ref and nothing is fetched. Like CatchUp it never
-// rebases and never pushes, and a conflicted merge is aborted.
-func (c *Checkout) MergeWorker(worker string) (CatchUp, error) {
+// MergeFrom merges another branch of the same clone into this checkout's:
+// a sub-session's branch by its name, or a wtc worker's by its short name.
+// Worktrees of one repository share the gateway's clone, so the branch is a
+// local ref and nothing is fetched. Like CatchUp it never rebases and never
+// pushes, and a conflicted merge is aborted.
+func (c *Checkout) MergeFrom(from string) (CatchUp, error) {
 	if c.Detached {
-		return CatchUp{Dest: c.Dest}, fmt.Errorf("%s is detached: a worker's branch merges into the task's branch, and this repository has none yet", c.Dir)
+		return CatchUp{Dest: c.Dest}, fmt.Errorf("%s is detached: a branch merges into this repository's branch, and it has none yet", c.Dir)
 	}
 	result := CatchUp{Branch: c.Branch(), Dest: c.Dest}
-	name, err := WorkerWorktree(c.Worktree, worker)
+	// A branch by its own name: a sub-session names its branch after its
+	// change, not after this collection.
+	if from != "" && from != result.Branch && HasBranch(c.Dir, from) {
+		result.From = from
+		if err := c.readyToMerge(); err != nil {
+			return result, err
+		}
+		return c.merge(result, "refs/heads/"+from, from)
+	}
+	// Otherwise a wtc worker's short name: openclaw/<collection>--<worker>.
+	name, err := WorkerWorktree(c.Worktree, from)
 	if err != nil {
 		return result, err
 	}
@@ -509,7 +520,9 @@ func (c *Checkout) merge(result CatchUp, ref, label string) (CatchUp, error) {
 // WorkerRepo is a worker's branch in one repository, measured against the
 // task's branch there.
 type WorkerRepo struct {
-	Repo   string `json:"repo"`
+	Repo string `json:"repo"`
+	// Path is the worktree compared.
+	Path   string `json:"path"`
 	Branch string `json:"branch"`
 	// ToMerge counts the worker's commits the task's branch does not have
 	// yet: 0 once wtc catch-up --from merged them.
@@ -566,7 +579,7 @@ func WorkerRepos(task string, taskDirs, workerDirs []string) []WorkerRepo {
 	}
 	var repos []WorkerRepo
 	for _, dir := range workerDirs {
-		w := WorkerRepo{Repo: filepath.Base(filepath.Dir(dir))}
+		w := WorkerRepo{Repo: filepath.Base(filepath.Dir(dir)), Path: dir}
 		if url, err := git(dir, "remote", "get-url", "origin"); err == nil && ParseOrigin(url).Repo != "" {
 			w.Repo = ParseOrigin(url).Repo
 		}

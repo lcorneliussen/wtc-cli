@@ -594,7 +594,7 @@ func catchUpCheckout(dest, from string, asJSON bool) error {
 	var result openclaw.CatchUp
 	switch {
 	case from != "":
-		result, err = checkout.MergeWorker(from)
+		result, err = checkout.MergeFrom(from)
 	case dest == "" && checkout.IsWorker():
 		// A worker catches up with its task, the branch it merges into.
 		result, err = checkout.CatchUpWithTask()
@@ -639,7 +639,7 @@ func catchUpSummary(result openclaw.CatchUp) string {
 // gatewayStatus is status under OpenClaw. A collection there is no folder:
 // it is the managed worktrees of one name, one per repository, each owned by
 // a session of its own. Without a name it shows every collection.
-func gatewayStatus(names []string, asJSON bool) error {
+func gatewayStatus(names, subs []string, asJSON bool) error {
 	all, err := openclaw.ManagedCollections(gatewayStateDir())
 	if err != nil {
 		return err
@@ -657,6 +657,9 @@ func gatewayStatus(names []string, asJSON bool) error {
 		col.Folder, col.Services, col.Error = linkGatewayFolder(name, col.Repos)
 		col.Harness = gatewayHarness(col.Folder, all[name])
 		col.Workers = gatewayWorkers(name, all)
+		if len(subs) > 0 {
+			col.SubSessions = openclaw.WorkerRepos(name, all[name], subs)
+		}
 		result[name] = col
 	}
 	if asJSON {
@@ -728,9 +731,12 @@ type gatewayCollection struct {
 	// instructions apply to the work in it.
 	Harness *gatewayHarnessStatus `json:"harness,omitempty"`
 	// Workers are the collections task--worker of this one's workers.
-	Workers  []gatewayWorker   `json:"workers,omitempty"`
-	Services []wtc.RuntimeItem `json:"services"`
-	Error    string            `json:"error,omitempty"`
+	Workers []gatewayWorker `json:"workers,omitempty"`
+	// SubSessions compares the worktrees given with --sub, a sub-session's
+	// whatever their names, with the collection's checkouts.
+	SubSessions []openclaw.WorkerRepo `json:"subSessions,omitempty"`
+	Services    []wtc.RuntimeItem     `json:"services"`
+	Error       string                `json:"error,omitempty"`
 }
 
 type gatewayHarnessStatus struct {

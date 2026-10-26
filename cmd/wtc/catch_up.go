@@ -29,7 +29,7 @@ func addCatchUpCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&opt.NoEnv, "no-env", false, "Skip environment refresh")
 	cmd.Flags().BoolVar(&opt.NoSecrets, "no-secrets", false, "Skip secret links")
 	cmd.Flags().StringVar(&dest, "dest", "", "Under OpenClaw: branch to merge in (default: origin's default branch)")
-	cmd.Flags().StringVar(&from, "from", "", "Under OpenClaw: merge a worker's branch (openclaw/<task>--<worker>) instead, with no fetch")
+	cmd.Flags().StringVar(&from, "from", "", "Under OpenClaw: merge this branch of the same repository instead (a sub-session's, by its name), with no fetch")
 	cmd.Flags().BoolVar(&cont, "continue", false, "In an OpenClaw sandbox: finish a catch-up that stopped on conflicts, once they are resolved")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if gw := openclaw.GatewayFromEnv(os.Getenv); gw != nil {

@@ -310,7 +310,7 @@ func TestCatchUpMovesADetachedWorktreeForward(t *testing.T) {
 	if git("rev-parse", "HEAD") != git("rev-parse", "origin/main") || git("branch", "--show-current") != "" {
 		t.Fatal("not detached at the base's tip")
 	}
-	if _, err := c.MergeWorker("a"); err == nil || !strings.Contains(err.Error(), "detached") {
+	if _, err := c.MergeFrom("a"); err == nil || !strings.Contains(err.Error(), "detached") {
 		t.Fatalf("a worker merged into a detached worktree: %v", err)
 	}
 
@@ -439,7 +439,7 @@ func TestRecordedBase(t *testing.T) {
 
 // A worker's branch lives in the same clone: the task merges it without a
 // fetch, never rebasing, and status counts what is left to merge.
-func TestMergeWorker(t *testing.T) {
+func TestMergeFrom(t *testing.T) {
 	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
 	write(t, c, "notes.md", "task\n")
 	git("add", ".")
@@ -456,21 +456,21 @@ func TestMergeWorker(t *testing.T) {
 		t.Fatalf("before: %+v", got)
 	}
 	for _, bad := range []string{"", "A", "72-add-thing--"} {
-		if _, err := c.MergeWorker(bad); err == nil || !strings.Contains(err.Error(), "not a worker") {
+		if _, err := c.MergeFrom(bad); err == nil || !strings.Contains(err.Error(), "not a worker") {
 			t.Errorf("worker %q: %v", bad, err)
 		}
 	}
-	if _, err := c.MergeWorker("b"); err == nil || !strings.Contains(err.Error(), "has no branch openclaw/72-add-thing--b") {
+	if _, err := c.MergeFrom("b"); err == nil || !strings.Contains(err.Error(), "has no branch openclaw/72-add-thing--b") {
 		t.Errorf("a worker without a branch: %v", err)
 	}
-	result, err := c.MergeWorker("a")
+	result, err := c.MergeFrom("a")
 	if err != nil || !result.Merged || result.From != "openclaw/72-add-thing--a" {
 		t.Fatalf("merge: %+v %v", result, err)
 	}
 	if _, err := os.Stat(filepath.Join(c.Dir, "a.md")); err != nil {
 		t.Errorf("the worker's file is not merged: %v", err)
 	}
-	if again, err := c.MergeWorker("72-add-thing--a"); err != nil || again.Merged || !strings.Contains(again.Note, "already contains") {
+	if again, err := c.MergeFrom("72-add-thing--a"); err != nil || again.Merged || !strings.Contains(again.Note, "already contains") {
 		t.Errorf("again, by its whole name: %+v %v", again, err)
 	}
 	if got := WorkerRepos("72-add-thing", []string{c.Dir}, []string{worker}); got[0].ToMerge != 0 {
@@ -493,7 +493,7 @@ func TestMergeWorker(t *testing.T) {
 	before := git("rev-parse", "HEAD")
 	// The Control UI card reads the files out of this sentence (conflictsOf
 	// in openclaw-plugin/dist/control-ui/v1/index.js): keep the two in step.
-	if _, err := c.MergeWorker("a"); err == nil || !regexp.MustCompile(`conflicts in: my notes\.md, notes\.md\. The merge was aborted`).MatchString(err.Error()) {
+	if _, err := c.MergeFrom("a"); err == nil || !regexp.MustCompile(`conflicts in: my notes\.md, notes\.md\. The merge was aborted`).MatchString(err.Error()) {
 		t.Errorf("conflict: %v", err)
 	}
 	if git("rev-parse", "HEAD") != before || git("status", "--porcelain") != "" {
@@ -599,5 +599,36 @@ func TestATaskWithDashesIsNoWorker(t *testing.T) {
 	}
 	if _, err := task.PlanPublish(PublishOptions{}); err != nil && strings.Contains(err.Error(), "is a worker of") {
 		t.Errorf("a task with dashes was refused as a worker: %v", err)
+	}
+}
+
+func TestMergeFromASubSessionsBranchByItsName(t *testing.T) {
+	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
+	write(t, c, "notes.md", "groundwork\n")
+	git("add", ".")
+	git("commit", "-qm", "groundwork")
+	// A sub-session names its branch after its change.
+	dir := filepath.Join(t.TempDir(), "nav")
+	git("worktree", "add", "-q", "-b", "13-docs-nav", dir, "openclaw/72-add-thing")
+	if err := os.WriteFile(filepath.Join(dir, "nav.md"), []byte("nav\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, "-C", dir, "add", ".")
+	gitIn(t, "-C", dir, "commit", "-qm", "nav")
+
+	got := WorkerRepos("72-add-thing", []string{c.Dir}, []string{dir})
+	if len(got) != 1 || got[0].Path != dir || got[0].Branch != "13-docs-nav" || got[0].ToMerge != 1 {
+		t.Fatalf("compared: %+v", got)
+	}
+	result, err := c.MergeFrom("13-docs-nav")
+	if err != nil || !result.Merged || result.From != "13-docs-nav" {
+		t.Fatalf("merge by name: %+v %v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Dir, "nav.md")); err != nil {
+		t.Errorf("the sub-session's file is not merged: %v", err)
+	}
+	// Its own branch is no branch to merge from.
+	if _, err := c.MergeFrom(c.Branch()); err == nil {
+		t.Error("merged the checkout's own branch into itself")
 	}
 }

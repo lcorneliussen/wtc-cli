@@ -778,10 +778,10 @@ test("composer: a repository with nothing on its branch shows its base", async (
   view.dispose();
 });
 
-test("composer: a worker has its own rows, merges into the task's checkout, and is discarded after asking again", async () => {
+test("composer: a sub-session has its own rows, merges into the task's checkout, and is discarded after asking again", async () => {
   const data = {
     ...collection([repo("site")]),
-    workers: [{ name: "docs", collection: "test--docs", repos: [
+    subSessions: [{ name: "docs", collection: "test--docs", repos: [
       repo("site", { sessionKey: "agent:main:owner:site-docs", branch: "openclaw/test--docs", dirty: 13, toMerge: 2, taskSessionKey: "agent:main:owner:site" }),
     ] }],
   };
@@ -797,25 +797,25 @@ test("composer: a worker has its own rows, merges into the task's checkout, and 
   const named = (re) => [...card.all()].find((n) => n.tagName === "BUTTON" && re.test(n.title));
 
   calls.length = 0;
-  await named(/^2 commits of worker docs/).onclick();
-  assert.deepEqual(calls.map((c) => [c.actionId, c.sessionKey, c.payload?.from]), [["catch-up", "agent:main:owner:site", "docs"]]);
+  await named(/^2 commits on openclaw\/test--docs not in the collection's site/).onclick();
+  assert.deepEqual(calls.map((c) => [c.actionId, c.sessionKey, c.payload?.from]), [["catch-up", "agent:main:owner:site", "openclaw/test--docs"]]);
 
   // ✕ asks again, naming what would go; the second click deletes the sessions.
   calls.length = 0;
-  named(/^Discard worker docs/).onclick({ preventDefault() {}, stopPropagation() {} });
+  named(/^Discard sub-session docs/).onclick({ preventDefault() {}, stopPropagation() {} });
   await settle();
   assert.equal(calls.length, 0);
-  const again = named(/^Click again to discard worker docs\. It has 13 uncommitted files and 2 commits not merged\.$/);
+  const again = named(/^Click again to discard sub-session docs\. It has 13 uncommitted files and 2 commits not merged\.$/);
   assert.ok(again);
   await again.onclick();
   assert.deepEqual(calls.map((c) => [c.method, c.key]), [["sessions.delete", "agent:main:owner:site-docs"]]);
   view.dispose();
 });
 
-test("composer: a worker's merge conflict goes to the conversation; an unknown merge state is said before discarding", async () => {
+test("composer: a sub-session's merge conflict goes to the conversation; an unknown merge state is said before discarding", async () => {
   const data = {
     ...collection([repo("site")]),
-    workers: [{ name: "docs", collection: "test--docs", repos: [
+    subSessions: [{ name: "docs", collection: "test--docs", repos: [
       repo("site", { sessionKey: "agent:main:owner:site-docs", branch: "openclaw/test--docs", toMerge: 1, taskSessionKey: "agent:main:owner:site" }),
       repo("harness", { sessionKey: "agent:main:owner:harness-docs", branch: "openclaw/test--docs", toMerge: null, taskSessionKey: null }),
     ] }],
@@ -827,22 +827,22 @@ test("composer: a worker's merge conflict goes to the conversation; an unknown m
 
   catchUpResult = { ok: true, result: { code: 1, json: null, message: "wtc: merging openclaw/test--docs into openclaw/test conflicts in: index.md. The merge was aborted and the checkout is as before. Merge by hand with `git merge openclaw/test--docs`, resolve, commit — do not rebase\n" } };
   calls.length = 0;
-  await named(/^1 commit of worker docs/).onclick();
+  await named(/^1 commit on openclaw\/test--docs not in the collection's site/).onclick();
   assert.deepEqual(calls.map((c) => c.actionId ?? c.method), ["catch-up", "sessions.send"]);
-  assert.equal(calls[1].message, "/skill wtc-catch-up site: merging worker docs (wtc catch-up --from docs) conflicts in index.md.");
+  assert.equal(calls[1].message, "/skill wtc-catch-up site: merging sub-session docs's openclaw/test--docs (wtc catch-up --from openclaw/test--docs) conflicts in index.md.");
   catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
 
   // The task has no checkout of the harness: nothing says what is merged.
-  assert.ok(named(/^Discard worker docs, in all its 2 repositories: .*Whether its commits in harness are merged is not known\.$/));
-  named(/^Discard worker docs/).onclick(stop);
+  assert.ok(named(/^Discard sub-session docs, in all its 2 repositories: .*Whether its commits in harness are merged is not known\.$/));
+  named(/^Discard sub-session docs/).onclick(stop);
   await settle();
   calls.length = 0;
   preserved = { "agent:main:owner:harness-docs": { id: "w9", branch: "openclaw/test--docs", path: "/worktrees/w9", reason: "busy" } };
-  await named(/^Click again to discard worker docs/).onclick();
+  await named(/^Click again to discard sub-session docs/).onclick();
   preserved = {};
   assert.deepEqual(calls.map((c) => c.key), ["agent:main:owner:site-docs", "agent:main:owner:harness-docs"]);
   await settle();
-  assert.ok([...card.all()].some((n) => /^Worker docs discarded; OpenClaw kept the worktree of harness \(busy, at \/worktrees\/w9\)\.$/.test(n.textContent ?? "")));
+  assert.ok([...card.all()].some((n) => /^Sub-session docs discarded; OpenClaw kept the worktree of harness \(busy, at \/worktrees\/w9\)\.$/.test(n.textContent ?? "")));
   view.dispose();
 });
 
@@ -858,10 +858,10 @@ test("composer: a catch-up that fails reads as a failure, without wtc's prefix",
   view.dispose();
 });
 
-test("panel: a failure stays one across a refresh; a worker merge that fails reads as one too", async () => {
+test("panel: a failure stays one across a refresh; a sub-session merge that fails reads as one too", async () => {
   const data = {
     ...busy,
-    workers: [{ name: "docs", collection: "test--docs", repos: [
+    subSessions: [{ name: "docs", collection: "test--docs", repos: [
       repo("web", { sessionKey: "agent:main:owner:web-docs", branch: "openclaw/test--docs", toMerge: 1, taskSessionKey: "agent:main:owner:web" }),
     ] }],
   };
@@ -877,16 +877,16 @@ test("panel: a failure stays one across a refresh; a worker merge that fails rea
   assert.equal(log()?.textContent, "⚠ api: cannot fetch main from origin");
 
   catchUpResult = { ok: true, result: { code: 1, json: null, message: "wtc: web has no branch openclaw/test--docs\n" } };
-  await button(/^1 commit of worker docs/).onclick();
+  await button(/^1 commit on openclaw\/test--docs not in the collection's web/).onclick();
   assert.equal(log()?.textContent, "⚠ web: web has no branch openclaw/test--docs");
   catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
   view.dispose();
 });
 
-test("composer: a worker's ↓ catches it up with the task, and its ± lists its files against the task's", async () => {
+test("composer: a sub-session's ↓ catches it up with the collection, and its ± lists its files against the task's", async () => {
   const data = {
     ...collection([repo("site", { branch: "openclaw/test", ahead: 1 })]),
-    workers: [{ name: "docs", collection: "test--docs", repos: [
+    subSessions: [{ name: "docs", collection: "test--docs", repos: [
       repo("site", { sessionKey: "agent:main:owner:site-docs", branch: "openclaw/test--docs", dirty: 3, toMerge: 0, behind: 2, taskSessionKey: "agent:main:owner:site",
         uncommitted: [{ path: "a.md", state: "same" }, { path: "b.md", state: "differs" }, { path: "c.mjs", state: "only" }] }),
     ] }],
@@ -895,10 +895,10 @@ test("composer: a worker's ↓ catches it up with the task, and its ± lists its
   const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
   const [repos] = tables(card);
   assert.deepEqual(repos[2], ["↳docs✕", "openclaw/test--docs", "3", "·", "↓ 2", "·", "·", "·", "·"]);
-  const files = [...card.all()].find((n) => n.tagName === "SPAN" && /^3 uncommitted files, compared with the task's site:/.test(n.title ?? ""));
-  assert.equal(files.title, "3 uncommitted files, compared with the task's site:\ndiffers: b.md\nonly here: c.mjs\nthe same in the task: a.md");
+  const files = [...card.all()].find((n) => n.tagName === "SPAN" && /^3 uncommitted files, compared with the collection's site:/.test(n.title ?? ""));
+  assert.equal(files.title, "3 uncommitted files, compared with the collection's site:\ndiffers: b.md\nonly here: c.mjs\nthe same in the collection: a.md");
   calls.length = 0;
-  await [...card.all()].find((n) => n.tagName === "BUTTON" && /^2 commits of the task's site not in worker docs/.test(n.title)).onclick();
+  await [...card.all()].find((n) => n.tagName === "BUTTON" && /^2 commits of the collection's site not on openclaw\/test--docs/.test(n.title)).onclick();
   // The catch-up runs in the worker's own checkout, which merges its task.
   assert.deepEqual(calls.map((c) => [c.actionId, c.sessionKey, c.payload]), [["catch-up", "agent:main:owner:site-docs", undefined]]);
   view.dispose();

@@ -34,6 +34,11 @@ func addAddRepoCommand(root *cobra.Command, asJSON *bool) {
 	_ = cmd.Flags().MarkHidden("harness")
 	cmd.Flags().StringVar(&worker, "worker", "", "Under OpenClaw: spawn a worker session for part of the task, in collection <worktree>--<worker>, starting from the task's branch where it has one")
 	cmd.Flags().StringVar(&work, "work", "", "Under OpenClaw, with --worker: the part of the task the worker takes")
+	// Parallel work is a collection of its own now; workers still work, for
+	// what started them.
+	for _, f := range []string{"worker", "work"} {
+		_ = cmd.Flags().MarkDeprecated(f, "parallel work is a collection of its own, with its own conversation (wtc docs instructions/openclaw.md)")
+	}
 	cmd.Flags().BoolVar(&adHoc, "ad-hoc", false, "Under OpenClaw: add repositories the collection's wtc project does not list, as ad hoc ones beside it, once the person chose that")
 	cmd.Flags().BoolVar(&separate, "separate", false, "Under OpenClaw: a GitHub repository the gateway has not cloned yet becomes a conversation of its own")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {

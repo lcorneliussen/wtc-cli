@@ -1,13 +1,20 @@
-## OpenClaw: workers
+## OpenClaw: one focus per collection, sub-sessions shown
 
-- **A worker is a sub-row of its repository.** The card and the panel show
-  it under the repository it works on, with the same columns, measured
-  against the task's branch instead of the forge: ± its uncommitted files,
-  with a tooltip saying which the task has the same, which differ and which
-  only the worker has; **↑** merges its commits into the task; **↓** catches
-  it up with the task ([#194](https://github.com/lcorneliussen/wtc-cli/issues/194)).
-- **Workers are merge-only.** `wtc publish` refuses on a worker's branch,
-  and `wtc svc` refuses to start services in a worker's collection: its work
-  reaches the forge through the task. `wtc catch-up` in a worker's checkout merges the task's branch.
-- The skill says that a part needing its own pull request or services is a
-  collection of its own, not a worker.
+- **Parallel work is a collection of its own.** A collection has one branch
+  and one pull request per repository. The skill and the instructions have
+  the agent propose a new conversation with its own collection for parallel
+  work or a second pull request, instead of a worker. `wtc add-repo --worker`
+  still works but is deprecated
+  ([#194](https://github.com/lcorneliussen/wtc-cli/issues/194)).
+- **Sub-sessions show under their repository.** A child session with a
+  worktree of its own, whether a wtc worker or one OpenClaw or the agent
+  spawned, is a sub-row under the repository, compared with the collection's
+  checkout instead of the forge: ± its uncommitted files, with a tooltip
+  saying which the collection has the same, which differ and which only it
+  has; **↑** merges its commits in; **↓** catches it up; **✕** discards it.
+  It never has a pull request.
+- `wtc catch-up --from <branch>` merges another branch of the repository by
+  its name, and `wtc status <name> --sub <worktree>` compares a worktree with
+  the collection's.
+- On a worker's branch `wtc publish` refuses and `wtc svc` won't start
+  services; `wtc catch-up` there merges the collection's branch.

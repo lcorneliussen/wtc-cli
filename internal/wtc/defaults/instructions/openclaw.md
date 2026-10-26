@@ -24,48 +24,36 @@ digits and hyphens. You work in all the worktrees yourself, from the
 gateway has cloned. If it has not, `wtc add-repo` says so: ask the person to
 add it with **Add repository** in the Collection panel, then add it again. A
 separate conversation per repository is only for when the person asks for one
-(`--separate`, or a spawn of your own with `visible: true`). Parallel parts of
-the task go to workers (below).
+(`--separate`, or a spawn of your own with `visible: true`). Parallel work is
+a collection of its own (below).
 
-## Workers: parts of a task in parallel
+## Parallel work: a collection of its own
 
-When parts of a task can go on in parallel, give each part a **worker**: a
-session with checkouts of its own, never yours. Two writers in one checkout
-fight over the index and build each other's half-made state. A worker gets
-the collection `<name>--<worker>`, on branch `openclaw/<name>--<worker>`,
-based on your branch where you have one, so it builds on your groundwork.
+A collection has one focus: per repository one branch, and one pull request.
+Work that should go on in parallel, or a second pull request in a repository
+that already has one, is a **collection of its own**, with its own
+conversation. Propose it to the person (ad hoc, or in this wtc project), with
+a brief of what it should do; they start it. Hand over a branch the same way
+when this collection turns to something else.
 
-    wtc add-repo api --worker paging --work "Add paging to the list endpoint, with tests."
-    # call sessions_spawn once per intent; each worker reports back when it ends
-    wtc status <name>                      # workers, and what is left to merge
-    cd <folder>/api && wtc catch-up --from paging   # merge its branch into yours
-
-- One `--worker` per part, with every repository that part needs. Its
-  sessions work, build, test and commit in their own worktrees, and are told
-  never to publish.
-- `wtc catch-up --from <worker>` merges the worker's branch into yours with
-  no fetch: the worktrees share the gateway's clone. It never rebases; for a
-  conflict, follow the wtc-catch-up skill.
-- A worker is merge-only. Its work leaves through your branch: the person
-  pushes that with ↑, with the workers' work merged in. `wtc publish` refuses
-  on a worker's branch, and `wtc svc` refuses to start services in a
-  worker's collection: services run in yours.
-- `wtc catch-up` in a worker's checkout merges your branch, its parent, into
-  it, not origin's.
-- Readers (review, research, a test run) need no worker: they can read your
-  checkouts.
-- A worker is only for a part that really runs beside yours. Work you would
-  do next anyway goes in your own checkout: a worker you then wait for is a
-  second copy of the repository for nothing.
-- A part that needs its own pull request, its own services or the person's
-  attention is no worker: it is a collection of its own, with its own
-  conversation. Suggest that the person starts one (ad hoc, or in this wtc
-  project).
-- When a worker ends, merge it in, or tell the person what is left. The card
-  shows each worker as a sub-row under its repository: ± its uncommitted
-  files (against yours), **↑** merges its commits into your checkout, **↓**
-  catches it up with yours, and **✕** discards it. None should be left
-  behind.
+- Readers need nothing of their own: a subagent for a review, research or a
+  test run reads your checkouts.
+- Don't give a subagent a worktree to write in. If one has one anyway, or a
+  session spawned one by itself, it is a **sub-session**: the card shows its
+  checkout as a sub-row under the repository, compared with yours. ± is its
+  uncommitted files (which you have the same, which differ, which only it
+  has), **↑** merges its commits into your checkout, **↓** catches it up with
+  yours, and **✕** discards it. Its work reaches the forge only through your
+  branch.
+- `wtc catch-up --from <branch>` in `<folder>/<repo>` merges such a branch,
+  by its name, into yours. It never rebases; for a conflict, follow the
+  wtc-catch-up skill. `wtc status <name> --sub <worktree>` compares one.
+- When a sub-session ends, merge what you want of it, or tell the person
+  what is left: none should be left behind.
+- `wtc add-repo --worker` still makes such a sub-session (collection
+  `<name>--<worker>`), but is deprecated: propose a collection of its own
+  instead. `wtc publish` refuses on a worker's branch, and `wtc svc` won't
+  start services in a worker's collection.
 
 ## wtc projects
 
@@ -198,7 +186,7 @@ forge yourself.
 
 The gateway's agents have the wtc skills for this host, installed with the
 plugin by `wtc openclaw install`: **wtc-catch-up** (catching up, merging a
-worker, resolving the conflicts), **wtc-pr** (getting a pull request ready
+sub-session's branch, resolving the conflicts), **wtc-pr** (getting a pull request ready
 for the person's push) and **wtc-follow** (acting on pull request news). The
 card asks for them by name (`/skill wtc-catch-up …`), so a click there and a
 request in the chat do the same.

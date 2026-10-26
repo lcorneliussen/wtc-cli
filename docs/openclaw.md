@@ -261,43 +261,35 @@ Repository sessions created with `sessions_spawn`, which is what
 people need only talk to the collection's session. This comes from OpenClaw's
 documentation; no test here signs in with a verified GitHub account yet.
 
-## Workers
+## Parallel work and sub-sessions
 
-A task whose parts can go on in parallel gets **workers**: one writer per
-checkout, exchanging work through git (#106).
+A collection has one focus: per repository one branch and one pull request.
+Parallel work, or a second pull request in a repository, is a collection of
+its own with its own conversation, which the agent proposes and the person
+starts. Subagents that only read (review, research, a test run) need no
+worktree.
 
-- `wtc add-repo <repo> ... --worker <w> --work "<part>"` spawns hidden
-  sessions with managed worktrees of collection `<task>--<w>`, on branch
-  `openclaw/<task>--<w>`. Each worktree starts from the task's branch in
-  that repository when there is one, otherwise from the repository's base;
-  `--base` overrides. The worker is told to commit only in its own
-  worktrees and never to publish, and reports to the task's session when it
-  ends.
-- `wtc catch-up --from <w>`, in the task's worktree of a repository, merges
-  the worker's branch: the worktrees are in the same clone, so nothing is
-  fetched. Like catch-up, it never rebases and aborts a conflicted merge.
-- `wtc status <task>` lists the workers and, per repository, how many of
-  each worker's commits the task's branch has not merged yet. `--json` has
-  them under `workers`.
-- A worker uses the task's harness for names and default branches, but gets
-  no worktree of the harness unless its part is the harness.
+A **sub-session** is a child session of the conversation with a worktree of
+its own: one OpenClaw or the agent spawned with a worktree, or a wtc worker
+(`wtc add-repo --worker`, deprecated). wtc does not manage them, but shows
+them so that nothing is lost:
 
-- A worker is merge-only: `wtc publish` refuses on its branch, and in its
-  collection `wtc svc` refuses to start anything (`add`, `up`, `restart`,
-  `provision`, opening a tunnel); stopping, listing and logs still work.
-  Its work reaches the forge through the task's branch.
-  `wtc catch-up` in a worker's checkout merges the task's branch into it.
-- The Collection panel and the card show each worker as a sub-row under its
-  repository, with the repository's columns measured against the task's
-  branch instead of the forge: ± its uncommitted files (the tooltip says
-  which the task has the same, which differ and which only the worker has),
-  **↑** merges its commits into the task's checkout (`wtc catch-up --from`,
-  with the agent's git identity), **↓** catches it up with the task. It has
-  no pull request. **✕** discards the worker after asking again: it deletes
-  the worker's sessions, and OpenClaw removes their worktrees. A conflict
-  goes to the conversation.
-- A part that needs its own pull request or services is no worker but a
-  collection of its own, with its own conversation.
+- The Collection panel and the card show a sub-session's checkout as a
+  sub-row under its repository, compared with the collection's checkout of
+  it: ± its uncommitted files (the tooltip says which the collection has the
+  same, which differ and which only the sub-session has), **↑** merges its
+  commits into the collection's checkout, **↓** catches it up with the
+  collection's. It has no pull request. **✕** discards it after asking
+  again: it deletes the sub-session's sessions, and OpenClaw removes their
+  worktrees. A conflict goes to the conversation.
+- `wtc catch-up --from <branch>`, in the collection's checkout of a
+  repository, merges another branch of it by its name. It fetches nothing:
+  the worktrees share the gateway's clone. `wtc status <name> --sub
+  <worktree>` compares a worktree with the collection's (`subSessions` in
+  `--json`).
+- On a wtc worker's branch (`openclaw/<name>--<worker>`), `wtc publish`
+  refuses, `wtc svc` won't start services in its collection, and
+  `wtc catch-up` merges the collection's branch.
 
 ## wtc projects
 

@@ -548,22 +548,28 @@ export default {
       // them, keeps the collection's folder and reports its services.
       const collectionName = (entry) => String(entry.worktree?.branch ?? "").replace(/^openclaw\//, "");
       const names = [...new Set(children.map((c) => collectionName(c.entry)).filter(Boolean))];
-      // A worker works in the collection <task>--<worker>: its checkouts are
-      // the worker's, not a second copy of the task's repositories.
-      const task = names.find((n) => !names.some((m) => n.startsWith(m + WORKER_SEPARATOR))) ?? names[0];
-      const workerOf = (name) => {
-        const short = name.startsWith(task + WORKER_SEPARATOR) ? name.slice(task.length + WORKER_SEPARATOR.length) : "";
-        return short && !short.includes(WORKER_SEPARATOR) ? short : null;
-      };
-      const toMerge = new Map();
+      // The collection is the name most of the children work in; a child
+      // whose worktree is another one's is a sub-session (a wtc worker,
+      // <collection>--<worker>, or a session OpenClaw or the agent spawned
+      // with a worktree of its own, named for its change). Its checkouts are
+      // shown under the collection's, not as more of its repositories.
+      const count = (n) => children.filter((c) => collectionName(c.entry) === n).length;
+      const task = [...names].sort((a, b) => count(b) - count(a) || a.length - b.length)[0];
+      const subName = (name) => (name.startsWith(task + WORKER_SEPARATOR) ? name.slice(task.length + WORKER_SEPARATOR.length) : name);
+      const subDirs = children.filter((c) => collectionName(c.entry) && collectionName(c.entry) !== task).map((c) => worktreeOf(c.entry)).filter(Boolean);
+      const compared = new Map();
       let checkouts = [];
       result.services = [];
       for (const name of names) {
-        const status = await run(["wtc", "status", name, "--json"], { env: { OPENCLAW_SHELL: "exec" } });
+        // The collection's status also compares the sub-sessions' worktrees
+        // with its own checkouts.
+        const argv = ["wtc", "status", name, "--json", ...(name === task ? subDirs.flatMap((d) => ["--sub", d]) : [])];
+        const status = await run(argv, { env: { OPENCLAW_SHELL: "exec" } });
         try {
           const col = JSON.parse(status.stdout)[name] ?? {};
           checkouts.push(...(col.repos ?? []));
-          if (name === task) for (const w of col.workers ?? []) for (const r of w.repos ?? []) toMerge.set(`${w.name}\n${r.repo}`, r);
+          if (name === task) for (const r of col.subSessions ?? []) compared.set(r.path, r);
+          if (name !== task) continue;
           result.services.push(...(col.services ?? []));
           if (col.folder) result.collection.folder = col.folder;
           // The wtc project it works in: its harness, or ad hoc.
@@ -582,25 +588,25 @@ export default {
           project: entry.projectId ?? null,
           // A hidden owner has no conversation of its own.
           owner: sessionKey.includes(":subagent:") ? "hidden" : "conversation",
-          worker: workerOf(collectionName(entry)),
+          sub: collectionName(entry) && collectionName(entry) !== task ? subName(collectionName(entry)) : null,
           ...(byPath.get(worktreeOf(entry)) ?? { path: worktreeOf(entry), branch: entry.worktree?.branch ?? null, error: "no status" }),
         }))
         .sort((a, b) => String(a.project ?? a.repo).localeCompare(String(b.project ?? b.repo)));
-      result.repos = rows.filter((r) => !r.worker);
-      // Each worker with its checkouts, and per checkout what the task's
-      // branch has not merged from it yet.
-      const workers = new Map();
-      for (const r of rows.filter((r) => r.worker)) {
-        if (!workers.has(r.worker)) workers.set(r.worker, { name: r.worker, collection: task + WORKER_SEPARATOR + r.worker, repos: [] });
-        const merge = toMerge.get(`${r.worker}\n${r.repo}`);
-        // ↓ and the files are against the task, not origin: a worker merges
-        // into the task, and only the task goes to the forge.
-        workers.get(r.worker).repos.push({ ...r, toMerge: merge?.toMerge ?? null, mergeError: merge?.error ?? null,
-          behind: merge?.behind ?? null, uncommitted: merge?.uncommitted ?? [],
-          // The task's own checkout of the repository, which a merge goes into.
+      result.repos = rows.filter((r) => !r.sub);
+      // Each sub-session with its checkouts, and per checkout how it stands
+      // against the collection's: ↑ what the collection lacks, ↓ what it
+      // lacks, its uncommitted files. Not against origin: a sub-session's
+      // work reaches the forge only through the collection.
+      const subs = new Map();
+      for (const r of rows.filter((r) => r.sub)) {
+        if (!subs.has(r.sub)) subs.set(r.sub, { name: r.sub, collection: collectionName({ worktree: { branch: r.branch } }) || r.sub, repos: [] });
+        const c = compared.get(r.path);
+        subs.get(r.sub).repos.push({ ...r, toMerge: c?.toMerge ?? null, mergeError: c?.error ?? null,
+          behind: c?.behind ?? null, uncommitted: c?.uncommitted ?? [],
+          // The collection's own checkout of the repository, which a merge goes into.
           taskSessionKey: result.repos.find((t) => t.repo && t.repo === r.repo)?.sessionKey ?? null });
       }
-      result.workers = [...workers.values()].sort((a, b) => a.name.localeCompare(b.name));
+      result.subSessions = [...subs.values()].sort((a, b) => a.name.localeCompare(b.name));
       tell(agentId, parentKey, watch.observe(agentId, parentKey, result.repos));
       return result;
     };
@@ -754,14 +760,15 @@ export default {
 
     api.session.controls.registerSessionAction({
       id: "catch-up",
-      description: "Merge the destination branch into this session's worktree (wtc catch-up; in a worker's worktree, the task's branch), or with payload.from a worker's branch (wtc catch-up --from). Never rebases, never pushes.",
+      description: "Merge the destination branch into this session's worktree (wtc catch-up; in a worker's worktree, the task's branch), or with payload.from another branch of the repository, a sub-session's (wtc catch-up --from). Never rebases, never pushes.",
       requiredScopes: ["operator.write"],
       async handler(action) {
         const entry = action.sessionKey && api.runtime.agent.session.getSessionEntry({ agentId: action.agentId, sessionKey: action.sessionKey });
         const cwd = worktreeOf(entry);
         if (!cwd) return { ok: false, error: "this session owns no managed worktree" };
+        // A branch of the same repository, by its name: never an option.
         const from = action.payload?.from;
-        if (from !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(String(from))) return { ok: false, error: "from names a worker" };
+        if (from !== undefined && (!/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(String(from)) || /\.\.|\/\/|\/$|\.lock$/.test(String(from)))) return { ok: false, error: "from names a branch" };
         // wtc reads its host from the environment an agent's shell has, and a
         // merge commit needs the identity that shell would commit with.
         const config = api.runtime?.config?.current?.() ?? api.config;
