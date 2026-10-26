@@ -11,6 +11,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	openclawplugin "github.com/lcorneliussen/wtc-cli/openclaw-plugin"
 	"github.com/spf13/cobra"
 )
@@ -24,7 +25,7 @@ func addOpenClawCommands(root *cobra.Command) {
 	var noConfig bool
 	install := &cobra.Command{
 		Use:   "install",
-		Short: "Install this wtc's OpenClaw plugin on the gateway: the collection card, the Collection panel and the agent's wtc skill",
+		Short: "Install this wtc's OpenClaw plugin on the gateway: the collection card, the Collection panel and the agent's wtc skills",
 		Long: `Run on the gateway host, where wtc and openclaw are on the PATH. The plugin is
 embedded in this binary, so it is always the one that matches this wtc.
 
@@ -106,7 +107,7 @@ func writeOpenClawPlugin(dir, version string) error {
 	if stamp == "dev" || stamp == "" {
 		stamp = "0.0.0-dev"
 	}
-	return fs.WalkDir(openclawplugin.Files, ".", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(openclawplugin.Files, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -125,4 +126,36 @@ func writeOpenClawPlugin(dir, version string) error {
 		}
 		return os.WriteFile(target, data, 0o644)
 	})
+	if err != nil {
+		return err
+	}
+	return writeOpenClawSkills(filepath.Join(dir, "skills"))
+}
+
+// writeOpenClawSkills adds the wtc skills that have an OpenClaw variant,
+// skills/<name>/SKILL.openclaw.md among the defaults, to the plugin's skills
+// as <name>/SKILL.md: the gateway's agents get the procedures for their host,
+// from the same binary.
+func writeOpenClawSkills(dir string) error {
+	paths, err := wtc.DefaultPaths()
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		parts := strings.Split(path, "/")
+		if len(parts) != 3 || parts[0] != "skills" || parts[2] != "SKILL.openclaw.md" {
+			continue
+		}
+		data, err := wtc.ReadDefault(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Join(dir, parts[1]), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dir, parts[1], "SKILL.md"), data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }

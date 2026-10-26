@@ -44,8 +44,8 @@ based on your branch where you have one, so it builds on your groundwork.
   sessions work, build, test and commit in their own worktrees, and are told
   never to publish.
 - `wtc catch-up --from <worker>` merges the worker's branch into yours with
-  no fetch: the worktrees share the gateway's clone. It never rebases; a
-  conflict is aborted for you to merge by hand.
+  no fetch: the worktrees share the gateway's clone. It never rebases; for a
+  conflict, follow the wtc-catch-up skill.
 - Publishing stays the task's: the person pushes your branch with ↑, with
   the workers' work merged in. Workers' branches are not published.
 - Readers (review, research, a test run) need no worker: they can read your
@@ -184,11 +184,20 @@ they push again. After a merge, run `wtc catch-up` in `<folder>/<repo>` so
 the checkout continues from the merge. Don't answer review comments on the
 forge yourself.
 
+## Skills
+
+The gateway's agents have the wtc skills for this host, installed with the
+plugin by `wtc openclaw install`: **wtc-catch-up** (catching up, merging a
+worker, resolving the conflicts), **wtc-pr** (getting a pull request ready
+for the person's push) and **wtc-follow** (acting on pull request news). The
+card asks for them by name (`/skill wtc-catch-up …`), so a click there and a
+request in the chat do the same.
+
 ## Catching up
 
 `wtc catch-up` merges the destination branch into the child's worktree. It
-never rebases and never pushes. A conflicted merge is aborted and reported:
-merge by hand, resolve, commit. Rebasing a published branch makes it
+never rebases and never pushes. A conflict is the agent's to resolve in its
+own checkout: the wtc-catch-up skill. Rebasing a published branch makes it
 unpublishable.
 
 Never run `git push` yourself, and never `git rebase` or `git commit --amend`

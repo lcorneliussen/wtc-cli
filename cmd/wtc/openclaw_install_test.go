@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
 
 func TestWriteOpenClawPluginStampsTheVersion(t *testing.T) {
@@ -17,7 +18,9 @@ func TestWriteOpenClawPluginStampsTheVersion(t *testing.T) {
 	if err := writeOpenClawPlugin(dir, "v1.2.3"); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"index.js", "package.json", "openclaw.plugin.json", "dist/control-ui/v1/index.js", "skills/wtc/SKILL.md"} {
+	for _, f := range []string{"index.js", "package.json", "openclaw.plugin.json", "dist/control-ui/v1/index.js", "skills/wtc/SKILL.md",
+		// The wtc skills' OpenClaw variants, under their own names.
+		"skills/wtc-catch-up/SKILL.md", "skills/wtc-pr/SKILL.md", "skills/wtc-follow/SKILL.md"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("%s was not written: %v", f, err)
 		}
@@ -165,5 +168,34 @@ func TestDescribeBuild(t *testing.T) {
 	version = "1.2.3"
 	if got := versionLabel(); got != "1.2.3" {
 		t.Errorf("a release: %s", got)
+	}
+}
+
+func TestOpenClawSkillsAreTheOpenClawVariants(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeOpenClawPlugin(dir, "v1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	// Each is its OpenClaw variant, not the local skill of that name.
+	for name, marker := range map[string]string{
+		"wtc-catch-up": "wtc catch-up --continue",
+		"wtc-pr":       "they push it\n   with ↑",
+		"wtc-follow":   "wtc: pull request news",
+	} {
+		data, err := os.ReadFile(filepath.Join(dir, "skills", name, "SKILL.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(string(data), "---\nname: "+name+"\n") || !strings.Contains(string(data), marker) {
+			t.Errorf("%s is not its OpenClaw variant:\n%.400s", name, data)
+		}
+		// The marker tells the variants apart only while the local skill lacks it.
+		if local, _ := wtc.ReadDefault("skills/" + name + "/SKILL.md"); strings.Contains(string(local), marker) {
+			t.Errorf("the local %s has %q too: pick a marker only its OpenClaw variant has", name, marker)
+		}
+	}
+	// Skills without an OpenClaw variant stay local.
+	if _, err := os.Stat(filepath.Join(dir, "skills", "wtc-open")); err == nil {
+		t.Error("wtc-open has no OpenClaw variant but was installed")
 	}
 }
