@@ -41,7 +41,7 @@ func addCatchUpCommand(root *cobra.Command, asJSON *bool) {
 				}
 			})
 			if len(other) > 0 || len(args) > 0 {
-				return fmt.Errorf("in an OpenClaw sandbox, catch-up merges the session's base and takes only --continue (got %s): merge a worker's branch, or another base, from the repository's session outside the sandbox", strings.Join(append(other, args...), " "))
+				return fmt.Errorf("in an OpenClaw sandbox, catch-up merges the session's base and takes only --continue (got %s): merge another branch of the repository, or another base, from the repository's session outside the sandbox", strings.Join(append(other, args...), " "))
 			}
 			return sandboxCatchUp(gw, cont, *asJSON)
 		}

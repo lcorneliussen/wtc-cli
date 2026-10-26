@@ -611,7 +611,7 @@ function collectionTables(v) {
   }
   // A sub-session's commits go into the collection's checkout of the repository, as a
   // catch-up from its branch; a conflict is the agent's, as on ↓.
-  async function mergeWorker(w, r) {
+  async function mergeSub(w, r) {
     const name = nameOf(r);
     if (!r.taskSessionKey) return v.say(`${name}: the collection has no checkout of it to merge sub-session ${w.name} into`);
     // Both checkouts are busy: the collection's row would offer ↓ in the same
@@ -637,7 +637,7 @@ function collectionTables(v) {
   // A sub-session catches up with the collection's branch, named in the
   // catch-up in its own checkout: whatever the sub-session's branch is called,
   // it merges the collection's, not origin's.
-  async function catchUpWorker(w, r) {
+  async function catchUpSub(w, r) {
     const name = nameOf(r);
     catching.add(r.sessionKey);
     v.rerender();
@@ -667,7 +667,7 @@ function collectionTables(v) {
   // worktrees. It asks again first: the second click within a few seconds
   // discards.
   const armed = new Map();
-  async function discardWorker(w) {
+  async function discardSub(w) {
     if (!armed.has(w.name)) {
       armed.set(w.name, setTimeout(() => { armed.delete(w.name); v.rerender(); }, 5000));
       v.rerender();
@@ -890,7 +890,7 @@ function collectionTables(v) {
   // columns: ± its uncommitted files, ↑ its commits the collection's branch lacks
   // (merged into the collection, never pushed to the forge), ↓ the collection's commits it
   // lacks. A sub-session has no pull request; ✕ discards it.
-  const workerFacts = (w) => {
+  const subFacts = (w) => {
     const dirty = w.repos.reduce((n, r) => n + (r.dirty ?? 0), 0);
     const unmerged = w.repos.reduce((n, r) => n + (r.toMerge ?? 0), 0);
     // Without the collection's status of a checkout, nobody knows what is merged.
@@ -907,25 +907,25 @@ function collectionTables(v) {
       by.differs.length ? `differs: ${by.differs.join(", ")}` : "", by.only.length ? `only here: ${by.only.join(", ")}` : "",
       by.same.length ? `the same in the collection: ${by.same.join(", ")}` : ""].filter(Boolean).join("\n");
   };
-  function workerRow(w, r) {
+  function subRow(w, r) {
     const busyHere = catching.has(r.sessionKey);
     // ✕ ends the whole sub-session: not while any of its checkouts is busy.
     const discard = w.repos.some((x) => catching.has(x.sessionKey)) ? null
       : armed.has(w.name)
-        ? count("discard?", `Click again to discard sub-session ${w.name}. ${workerFacts(w)}`, TONE.failure, () => discardWorker(w))
-        : smallButton("✕", `Discard sub-session ${w.name}${w.repos.length > 1 ? `, in all its ${w.repos.length} repositories` : ""}: deletes its sessions, and OpenClaw removes its worktrees. ${workerFacts(w)}`, () => discardWorker(w));
+        ? count("discard?", `Click again to discard sub-session ${w.name}. ${subFacts(w)}`, TONE.failure, () => discardSub(w))
+        : smallButton("✕", `Discard sub-session ${w.name}${w.repos.length > 1 ? `, in all its ${w.repos.length} repositories` : ""}: deletes its sessions, and OpenClaw removes its worktrees. ${subFacts(w)}`, () => discardSub(w));
     const name = css(el("span", { title: `Sub-session ${w.name}: a session of this conversation that worked in a checkout of its own (${w.collection}). Its work merges into the collection; it never gets a pull request.` },
       muted("↳"), css(el("span", { textContent: w.name }), "font-weight:600"), discard), "display:inline-flex;align-items:center;gap:6px;padding-left:10px;min-width:0");
     const up = busyHere ? working()
       : r.mergeError ? toned("?", TONE.failure, r.mergeError)
-      : r.toMerge > 0 ? count(`↑ ${r.toMerge}`, `${plural(r.toMerge, "commit")} on ${r.branch} not in the collection's ${nameOf(r)}. Merge them in (wtc catch-up --from ${r.branch}); never to the forge, never rebases`, TONE.pending, () => mergeWorker(w, r))
+      : r.toMerge > 0 ? count(`↑ ${r.toMerge}`, `${plural(r.toMerge, "commit")} on ${r.branch} not in the collection's ${nameOf(r)}. Merge them in (wtc catch-up --from ${r.branch}); never to the forge, never rebases`, TONE.pending, () => mergeSub(w, r))
       : null;
     // Uncommitted files keep a catch-up out (it would refuse): what to do
     // with them is the conversation's, so ± asks it to review them.
     const down = busyHere ? null
       : !(r.behind > 0) ? null
       : r.dirty ? toned(`↓ ${r.behind}`, TONE.pending, `${plural(r.behind, "commit")} of the collection's ${nameOf(r)} not on ${r.branch}. It has uncommitted files: review them first (±)`)
-      : r.taskBranch ? count(`↓ ${r.behind}`, `${plural(r.behind, "commit")} of the collection's ${nameOf(r)} not on ${r.branch}. Catch the sub-session up with the collection; never rebases`, TONE.pending, () => catchUpWorker(w, r))
+      : r.taskBranch ? count(`↓ ${r.behind}`, `${plural(r.behind, "commit")} of the collection's ${nameOf(r)} not on ${r.branch}. Catch the sub-session up with the collection; never rebases`, TONE.pending, () => catchUpSub(w, r))
       : toned(`↓ ${r.behind}`, TONE.pending, `${plural(r.behind, "commit")} of the collection's ${nameOf(r)} not on ${r.branch}`);
     const files = !r.dirty ? null
       : count(String(r.dirty), `${filesTitle(r)}\n\nAsk the conversation to compare them with its own and take over what is still wanted`, TONE.pending, () => reviewSub(w, r));
@@ -958,9 +958,9 @@ function collectionTables(v) {
     const rows = [];
     for (const r of repos) {
       rows.push(repoRow(r));
-      for (const s of sub.filter((s) => s.r.repo && s.r.repo === r.repo)) rows.push(workerRow(s.w, s.r));
+      for (const s of sub.filter((s) => s.r.repo && s.r.repo === r.repo)) rows.push(subRow(s.w, s.r));
     }
-    for (const s of sub.filter((s) => !repos.some((r) => r.repo && r.repo === s.r.repo))) rows.push(workerRow(s.w, s.r));
+    for (const s of sub.filter((s) => !repos.some((r) => r.repo && r.repo === s.r.repo))) rows.push(subRow(s.w, s.r));
     return rows;
   }
   return { table, checkAccount, notice, repoTable: (repos, narrow, workers) =>

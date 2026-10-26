@@ -578,11 +578,11 @@ func gatewayConfig() (openclaw.GatewayConfig, error) {
 	return openclaw.ParseGatewayConfig(out)
 }
 
-// catchUpCheckout is catch-up under OpenClaw: merge another branch of the
-// repository by its name with from (a sub-session's, a worker's, or the
-// collection's into a sub-session); in a worker's checkout without --dest, its task's branch; otherwise
-// the destination branch, or move a detached worktree to its tip. No rebase
-// and no push.
+// catchUpCheckout is catch-up under OpenClaw. With from it merges another
+// branch of the repository by its name: a sub-session's, a worker's, or the
+// collection's into a sub-session. In a worker's checkout without --dest it
+// merges the collection's branch. Otherwise it merges the destination branch,
+// or moves a detached worktree to its tip. No rebase and no push.
 func catchUpCheckout(dest, from string, asJSON bool) error {
 	cwd, err := os.Getwd()
 	if err != nil {

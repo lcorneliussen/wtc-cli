@@ -536,7 +536,7 @@ type WorkerRepo struct {
 	Error       string       `json:"error,omitempty"`
 }
 
-// WorkerFile is an uncommitted file of a worker. State is "same" when the
+// WorkerFile is an uncommitted file of a sub-session's checkout. State is "same" when the
 // task's checkout has the file as the worker has it (or neither has it),
 // "only" when only the worker has it, and "differs" otherwise: both have it
 // differently, or only the task does (the worker deleted it).
@@ -545,8 +545,8 @@ type WorkerFile struct {
 	State string `json:"state"`
 }
 
-// workerFiles compares the uncommitted files of the worker's checkout with
-// the task's checkout of the same repository.
+// workerFiles compares the uncommitted files of a sub-session's checkout
+// with the collection's checkout of the same repository.
 func workerFiles(workerDir, taskDir string) []WorkerFile {
 	changes, err := (&Checkout{Dir: workerDir}).pending()
 	if err != nil {
@@ -568,8 +568,9 @@ func workerFiles(workerDir, taskDir string) []WorkerFile {
 	return files
 }
 
-// WorkerRepos describes the worker's checkouts against the task's: each
-// worker worktree is compared in the task's worktree of the same clone.
+// WorkerRepos compares worktrees of sub-sessions (or wtc workers) with the
+// checkouts of the collection named task: each in the collection's worktree
+// of the same clone.
 func WorkerRepos(task string, taskDirs, workerDirs []string) []WorkerRepo {
 	clones := map[string]string{}
 	for _, dir := range taskDirs {

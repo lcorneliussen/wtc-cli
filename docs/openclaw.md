@@ -288,7 +288,8 @@ them so that nothing is lost:
   <worktree>` compares a worktree with the collection's (`subSessions` in
   `--json`).
 - On a wtc worker's branch (`openclaw/<name>--<worker>`), `wtc publish`
-  refuses, `wtc svc` won't start services in its collection, and
+  refuses, `wtc svc` won't add, start or provision services in its
+  collection (stopping, listing and logs still work), and
   `wtc catch-up` merges the collection's branch.
 
 ## wtc projects

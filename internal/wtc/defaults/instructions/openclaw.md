@@ -57,8 +57,8 @@ when this collection turns to something else.
   what is left: none should be left behind.
 - `wtc add-repo --worker` still makes such a sub-session (collection
   `<name>--<worker>`), but is deprecated: propose a collection of its own
-  instead. `wtc publish` refuses on a worker's branch, and `wtc svc` won't
-  start services in a worker's collection.
+  instead. `wtc publish` refuses on a worker's branch, and in a worker's
+  collection `wtc svc` won't add, start or provision services.
 
 ## wtc projects
 
@@ -193,9 +193,8 @@ The gateway's agents have the wtc skills for this host, installed with the
 plugin by `wtc openclaw install`: **wtc-catch-up** (catching up, merging a
 sub-session's branch, resolving the conflicts), **wtc-pr** (getting a pull
 request ready for the person's push) and **wtc-follow** (acting on pull
-request news). The
-card asks for them by name (`/skill wtc-catch-up …`), so a click there and a
-request in the chat do the same.
+request news). The card asks for them by name (`/skill wtc-catch-up …`), so a
+click there and a request in the chat do the same.
 
 ## Catching up
 

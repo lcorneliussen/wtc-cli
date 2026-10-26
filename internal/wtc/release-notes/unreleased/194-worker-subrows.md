@@ -16,5 +16,9 @@
 - `wtc catch-up --from <branch>` merges another branch of the repository by
   its name, and `wtc status <name> --sub <worktree>` compares a worktree with
   the collection's.
-- On a worker's branch `wtc publish` refuses and `wtc svc` won't start
-  services; `wtc catch-up` there merges the collection's branch.
+- On a worker's branch `wtc publish` refuses, and in its collection
+  `wtc svc` won't add, start or provision services; `wtc catch-up` there
+  merges the collection's branch.
+- **A sub-session's uncommitted files go to the conversation.** Clicking
+  their count asks it to compare them with its own checkout and take over
+  what is still wanted. ↓ waits until there are none.
