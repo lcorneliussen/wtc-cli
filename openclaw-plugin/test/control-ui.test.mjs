@@ -107,12 +107,14 @@ let personal = null;
 const failing = new Set();
 // The Bitbucket plugin: absent unless a test installs it with a login (or null).
 let bitbucket;
+let bitbucketRefusedAction;
 const hostRequest = async (method, params) => {
   if (failing.has(method)) throw new Error(`${method} failed`);
   if (method === "plugins.sessionAction" && params.pluginId === "bitbucket") {
     if (bitbucket === undefined) throw new Error(`unknown plugin session action: bitbucket/${params.actionId}`);
     if (params.actionId === "publish-options") return { ok: true, result: { account: bitbucket } };
     calls.push({ method, ...params });
+    if (params.actionId === bitbucketRefusedAction) return { ok: true, result: { status: "blocked", message: "The requested publication is no longer valid." } };
     if (params.actionId === "publish") {
       return { ok: true, result: bitbucket ? { status: "needs_confirmation", requestId: "bb-1", confirmation: { account: bitbucket.user, name: bitbucket.name, requestDigest: "bd1", branch: "openclaw/test", head: "abcdef0123", dest: "main", uncommitted: 0 } } : { status: "not_connected" } };
     }
@@ -324,6 +326,31 @@ test("pending files offer a commit handoff and publication refusal is a visible 
     personal = null;
     githubPublishResult = { status: "needs_confirmation", requestId: "req-1" };
     view.dispose();
+  }
+});
+
+test("Bitbucket publication and confirmation refusals show a full alert without reporting a push", async () => {
+  for (const kind of ["composer", "panel"]) for (const stage of ["publish", "publish-confirm"]) {
+    bitbucket = { user: "ada@example.com", name: "Ada" };
+    bitbucketRefusedAction = stage;
+    const { host, view } = await mount(kind, collection([repo("hooks", { forge: "bitbucket", unpublished: 1 })]));
+    try {
+      const push = [...host.all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push/.test(n.title));
+      await push.onclick();
+      await settle();
+      if (stage === "publish-confirm") {
+        const confirm = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "confirm ↑ 1");
+        assert.ok(confirm);
+        await confirm.onclick();
+        await settle();
+      }
+      assert.ok([...host.all()].some((n) => (n.role ?? n.attributes.role) === "alert" && /hooks: blocked.*no longer valid/.test(n.textContent)));
+      assert.doesNotMatch(host.textContent, /hooks: pushed/);
+    } finally {
+      view.dispose();
+      bitbucket = undefined;
+      bitbucketRefusedAction = undefined;
+    }
   }
 });
 
