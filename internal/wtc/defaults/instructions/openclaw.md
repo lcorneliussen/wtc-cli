@@ -48,8 +48,8 @@ based on your branch where you have one, so it builds on your groundwork.
   conflict, follow the wtc-catch-up skill.
 - A worker is merge-only. Its work leaves through your branch: the person
   pushes that with ↑, with the workers' work merged in. `wtc publish` refuses
-  on a worker's branch, and `wtc svc` in a worker's collection: services run
-  in yours.
+  on a worker's branch, and `wtc svc` refuses to start services in a
+  worker's collection: services run in yours.
 - `wtc catch-up` in a worker's checkout merges your branch, its parent, into
   it, not origin's.
 - Readers (review, research, a test run) need no worker: they can read your

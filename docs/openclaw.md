@@ -282,8 +282,10 @@ checkout, exchanging work through git (#106).
 - A worker uses the task's harness for names and default branches, but gets
   no worktree of the harness unless its part is the harness.
 
-- A worker is merge-only: `wtc publish` refuses on its branch and `wtc svc`
-  in its collection. Its work reaches the forge through the task's branch.
+- A worker is merge-only: `wtc publish` refuses on its branch, and in its
+  collection `wtc svc` refuses to start anything (`add`, `up`, `restart`,
+  `provision`, opening a tunnel); stopping, listing and logs still work.
+  Its work reaches the forge through the task's branch.
   `wtc catch-up` in a worker's checkout merges the task's branch into it.
 - The Collection panel and the card show each worker as a sub-row under its
   repository, with the repository's columns measured against the task's

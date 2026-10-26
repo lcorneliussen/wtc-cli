@@ -754,7 +754,7 @@ export default {
 
     api.session.controls.registerSessionAction({
       id: "catch-up",
-      description: "Merge the destination branch into this session's worktree (wtc catch-up), or with payload.from a worker's branch (wtc catch-up --from). Never rebases, never pushes.",
+      description: "Merge the destination branch into this session's worktree (wtc catch-up; in a worker's worktree, the task's branch), or with payload.from a worker's branch (wtc catch-up --from). Never rebases, never pushes.",
       requiredScopes: ["operator.write"],
       async handler(action) {
         const entry = action.sessionKey && api.runtime.agent.session.getSessionEntry({ agentId: action.agentId, sessionKey: action.sessionKey });
