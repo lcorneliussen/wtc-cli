@@ -95,18 +95,16 @@ func (c *Checkout) returnToTip(result CatchUp, pr *PullRequest) (CatchUp, error)
 			pr.Head == "" || !gitOK(c.Dir, "merge-base", "--is-ancestor", pr.Head, "HEAD") {
 			return result, fmt.Errorf("#%d was merged, but its work is not proven on origin/%s: keep this branch and put any follow-up work on a new branch first", pr.Number, c.Dest)
 		}
-		commits, err := git(c.Dir, "rev-list", "--parents", "HEAD", "^"+pr.Head, "^"+ref)
+		work, err := c.hasFollowUpWork(pr, ref)
 		if err != nil {
 			return result, err
 		}
-		if commits != "" {
+		if work {
 			// Older catch-up merged the base into the completed branch. It
 			// is safe to leave those merges only when they contain no new
 			// work or resolution edits. Compare with each merge's own base,
 			// since origin may have advanced again after the old catch-up.
-			if !c.onlyBaseMerges(commits, ref) {
-				return result, fmt.Errorf("#%d was merged, but this branch has follow-up work: put it on a new branch before returning to the tip", pr.Number)
-			}
+			return result, fmt.Errorf("#%d was merged, but this branch has follow-up work: put it on a new branch before returning to the tip", pr.Number)
 		}
 	}
 	// Keep the PR before moving HEAD, including when checkout later refuses
@@ -121,6 +119,16 @@ func (c *Checkout) returnToTip(result CatchUp, pr *PullRequest) (CatchUp, error)
 	result.Head, _ = git(c.Dir, "rev-parse", "HEAD")
 	result.Note = fmt.Sprintf("#%d is in the pull request list; the next change starts a new branch", pr.Number)
 	return result, nil
+}
+
+// hasFollowUpWork is shared by status and execution: resolution edits in a
+// merge are work too, even when there are no new one-parent commits.
+func (c *Checkout) hasFollowUpWork(pr *PullRequest, base string) (bool, error) {
+	commits, err := git(c.Dir, "rev-list", "--parents", "HEAD", "^"+pr.Head, "^"+base)
+	if err != nil {
+		return false, err
+	}
+	return commits != "" && !c.onlyBaseMerges(commits, base), nil
 }
 
 func (c *Checkout) onlyBaseMerges(commits, base string) bool {

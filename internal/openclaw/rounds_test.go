@@ -129,3 +129,35 @@ func TestCompletedRoundKeepsNonDefaultBase(t *testing.T) {
 		t.Fatalf("lost base: %+v %v", fresh, err)
 	}
 }
+
+func TestResolutionWorkInLegacyMergeGetsANewBranch(t *testing.T) {
+	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
+	bare := git("remote", "get-url", "--push", "origin")
+	git("remote", "set-url", "origin", bare)
+	write(t, c, "feature", "first round\n")
+	git("add", "feature")
+	git("commit", "-qm", "first round")
+	head := git("rev-parse", "HEAD")
+	advanceOrigin(t, bare, "feature", "first round\n")
+	git("fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
+	merge := git("rev-parse", "origin/main")
+	git("merge", "-q", "--no-edit", "origin/main")
+	// Work recorded only in the merge's tree, as manual resolution can do.
+	write(t, c, "resolution", "keep this follow-up work\n")
+	git("add", "resolution")
+	git("commit", "-q", "--amend", "--no-edit")
+	before := git("rev-parse", "HEAD")
+	mergedPRCommand(t, head, merge)
+	git("remote", "set-url", "origin", "https://github.com/example-org/docs.git")
+	s := checkoutStatus(c.Dir, true)
+	if s.Next == nil || s.Next.Step != "new-branch" {
+		t.Fatalf("resolution work: %+v", s.Next)
+	}
+	git("remote", "set-url", "origin", bare)
+	if _, err := c.CatchUp(); err == nil || !strings.Contains(err.Error(), "follow-up work") {
+		t.Fatalf("edited merge was accepted: %v", err)
+	}
+	if git("rev-parse", "HEAD") != before || git("branch", "--show-current") != c.Branch() {
+		t.Fatal("resolution work was moved")
+	}
+}

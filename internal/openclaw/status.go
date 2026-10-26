@@ -274,6 +274,9 @@ func (s CheckoutStatus) facts(top string) next.Facts {
 		if n, err := git(top, "rev-list", "--count", "--no-merges", "HEAD", "^"+pr.Head, "^"+s.Base); err == nil {
 			f.AfterMerge, _ = strconv.Atoi(n)
 		}
+		if f.AfterMerge == 0 {
+			f.NeedsBranch, _ = (&Checkout{Dir: top}).hasFollowUpWork(pr, s.Base)
+		}
 	}
 	if pr := s.PullRequest; pr != nil {
 		f.PR = &next.PR{Number: pr.Number, State: pr.State, Draft: pr.Draft, Checks: pr.Checks, Mergeable: pr.Mergeable, Review: pr.Review, MergedIn: pr.MergedIn}
