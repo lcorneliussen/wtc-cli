@@ -402,7 +402,7 @@ func (c *Checkout) merge(result CatchUp, ref, label string) (CatchUp, error) {
 		}
 		// The Control UI card reads the files from "conflicts in: …. The merge
 		// was aborted" (conflictsOf in the plugin's control-ui bundle).
-		return result, fmt.Errorf("merging %s into %s conflicts in: %s. The merge was aborted and the checkout is as before. Merge by hand with `git merge %s`, resolve, commit — do not rebase", label, c.Branch(), strings.Join(strings.Fields(conflicts), ", "), label)
+		return result, fmt.Errorf("merging %s into %s conflicts in: %s. The merge was aborted and the checkout is as before. Merge by hand with `git merge %s`, resolve, commit — do not rebase", label, c.Branch(), strings.Join(strings.Split(strings.TrimSpace(conflicts), "\n"), ", "), label)
 	}
 	result.Merged = true
 	result.Head, _ = git(c.Dir, "rev-parse", "HEAD")
