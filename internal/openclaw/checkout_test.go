@@ -717,8 +717,8 @@ func TestAfterASquashMergeTheNextStepsEnd(t *testing.T) {
 	if got := step(); got == nil || got.Step != "return-to-tip" || got.Approve != "" {
 		t.Fatalf("after the squash merge: %+v", got)
 	}
-	// Catching up merges the base into the branch (on the gateway, until it
-	// returns to the tip itself)...
+	// The unknown-forge fixture exercises the legacy fallback: its merge of
+	// the base must not be counted as new work.
 	if _, err := c.CatchUp(); err != nil {
 		t.Fatal(err)
 	}

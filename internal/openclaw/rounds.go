@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Completed rounds belong to the worktree, outside the checkout. Their PRs
@@ -94,16 +95,16 @@ func (c *Checkout) returnToTip(result CatchUp, pr *PullRequest) (CatchUp, error)
 			pr.Head == "" || !gitOK(c.Dir, "merge-base", "--is-ancestor", pr.Head, "HEAD") {
 			return result, fmt.Errorf("#%d was merged, but its work is not proven on origin/%s: keep this branch and put any follow-up work on a new branch first", pr.Number, c.Dest)
 		}
-		commits, err := git(c.Dir, "rev-list", "--count", "HEAD", "^"+pr.Head, "^"+ref)
+		commits, err := git(c.Dir, "rev-list", "--parents", "HEAD", "^"+pr.Head, "^"+ref)
 		if err != nil {
 			return result, err
 		}
-		if commits != "0" {
+		if commits != "" {
 			// Older catch-up merged the base into the completed branch. It
-			// is safe to leave those merges only when there is no new work
-			// and their result is exactly the base (no resolution edits).
-			work, err := git(c.Dir, "rev-list", "--count", "--no-merges", "HEAD", "^"+pr.Head, "^"+ref)
-			if err != nil || work != "0" || !gitOK(c.Dir, "diff", "--quiet", ref, "HEAD", "--") {
+			// is safe to leave those merges only when they contain no new
+			// work or resolution edits. Compare with each merge's own base,
+			// since origin may have advanced again after the old catch-up.
+			if !c.onlyBaseMerges(commits, ref) {
 				return result, fmt.Errorf("#%d was merged, but this branch has follow-up work: put it on a new branch before returning to the tip", pr.Number)
 			}
 		}
@@ -120,4 +121,25 @@ func (c *Checkout) returnToTip(result CatchUp, pr *PullRequest) (CatchUp, error)
 	result.Head, _ = git(c.Dir, "rev-parse", "HEAD")
 	result.Note = fmt.Sprintf("#%d is in the pull request list; the next change starts a new branch", pr.Number)
 	return result, nil
+}
+
+func (c *Checkout) onlyBaseMerges(commits, base string) bool {
+	for _, line := range strings.Split(commits, "\n") {
+		p := strings.Fields(line)
+		if len(p) != 3 || !gitOK(c.Dir, "merge-base", "--is-ancestor", p[2], base) {
+			return false
+		}
+		tree, err := git(c.Dir, "rev-parse", p[0]+"^{tree}")
+		if err != nil {
+			return false
+		}
+		if theirs, err := git(c.Dir, "rev-parse", p[2]+"^{tree}"); err == nil && theirs == tree {
+			continue
+		}
+		predicted, err := git(c.Dir, "merge-tree", "--write-tree", "--no-messages", p[1], p[2])
+		if err != nil || predicted != tree {
+			return false
+		}
+	}
+	return true
 }

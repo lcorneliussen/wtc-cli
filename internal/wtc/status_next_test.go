@@ -134,34 +134,40 @@ func TestLocalNextCatchUpLeavesSiblingAlone(t *testing.T) {
 }
 
 func TestStatusNextUsesPullRequestBase(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
-	c := newWorkspaceFixture(t)
-	fixtureGit(t, "-C", c.Harness, "switch", "-qc", "topic")
-	fixtureFile(t, filepath.Join(c.Harness, "README.md"), "ours\n", 0644)
-	fixtureGit(t, "-C", c.Harness, "add", "README.md")
-	fixtureGit(t, "-C", c.Harness, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-qm", "our change")
-	source := filepath.Join(c.Workspace, "source-agent-harness")
-	fixtureGit(t, "-C", source, "switch", "-qc", "release")
-	fixtureFile(t, filepath.Join(source, "README.md"), "theirs\n", 0644)
-	fixtureGit(t, "-C", source, "add", "README.md")
-	fixtureGit(t, "-C", source, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-qm", "release change")
-	fixtureGit(t, "-C", c.Harness, "fetch", "-q", "origin", "+refs/heads/release:refs/remotes/origin/release")
-	c.Registry.Repos[0].Remote = "https://github.com/example/harness.git"
-	if _, err := c.EnlistPR(PRRecord{Repo: "agent-harness", Number: "7", Branch: "topic"}); err != nil {
-		t.Fatal(err)
-	}
-	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nprintf '%s' '{\"number\":7,\"state\":\"OPEN\",\"title\":\"Change\",\"baseRefName\":\"release\"}'\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	snapshot, err := c.statusForgePreview(false, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range snapshot.Repos {
-		if r.Dir == "harness" && (r.baseRef != "origin/release" || r.Next == nil || r.Next.Step != "merge") {
-			t.Fatalf("did not predict against the PR's base: %+v", r)
-		}
+	for _, mode := range []string{"enlisted", "discovered"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir())
+			c := newWorkspaceFixture(t)
+			fixtureGit(t, "-C", c.Harness, "switch", "-qc", "topic")
+			fixtureFile(t, filepath.Join(c.Harness, "README.md"), "ours\n", 0644)
+			fixtureGit(t, "-C", c.Harness, "add", "README.md")
+			fixtureGit(t, "-C", c.Harness, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-qm", "our change")
+			source := filepath.Join(c.Workspace, "source-agent-harness")
+			fixtureGit(t, "-C", source, "switch", "-qc", "release")
+			fixtureFile(t, filepath.Join(source, "README.md"), "theirs\n", 0644)
+			fixtureGit(t, "-C", source, "add", "README.md")
+			fixtureGit(t, "-C", source, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-qm", "release change")
+			fixtureGit(t, "-C", c.Harness, "fetch", "-q", "origin", "+refs/heads/release:refs/remotes/origin/release")
+			c.Registry.Repos[0].Remote = "https://github.com/example/harness.git"
+			if mode == "enlisted" {
+				if _, err := c.EnlistPR(PRRecord{Repo: "agent-harness", Number: "7", Branch: "topic"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bin := t.TempDir()
+			if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nif [ \"$2\" = list ]; then printf '[{\"number\":7,\"headRefName\":\"topic\"}]'; exit; fi\nprintf '%s' '{\"number\":7,\"state\":\"OPEN\",\"title\":\"Change\",\"baseRefName\":\"release\"}'\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			snapshot, err := c.statusForgePreview(false, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, r := range snapshot.Repos {
+				if r.Dir == "harness" && (r.baseRef != "origin/release" || r.Next == nil || r.Next.Step != "merge") {
+					t.Fatalf("did not predict against the PR's base: %+v", r)
+				}
+			}
+		})
 	}
 }

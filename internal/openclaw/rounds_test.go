@@ -22,7 +22,7 @@ func mergedPRCommand(t *testing.T, head, merge string) {
 	if err := os.WriteFile(file, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\ncat \"$WTC_TEST_PR_JSON\"\n"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\ncase \"$*\" in *headRefOid*) ;; *) exit 2 ;; esac\ncat \"$WTC_TEST_PR_JSON\"\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("WTC_TEST_PR_JSON", file)
@@ -30,7 +30,7 @@ func mergedPRCommand(t *testing.T, head, merge string) {
 }
 
 func TestCatchUpReturnsMergedBranchesToTip(t *testing.T) {
-	for _, mode := range []string{"merge", "squash", "already-at-tip", "old-catch-up"} {
+	for _, mode := range []string{"merge", "squash", "already-at-tip", "old-catch-up", "base-advanced-after-old-catch-up"} {
 		t.Run(mode, func(t *testing.T) {
 			c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
 			bare := git("remote", "get-url", "--push", "origin")
@@ -40,7 +40,7 @@ func TestCatchUpReturnsMergedBranchesToTip(t *testing.T) {
 			git("commit", "-qm", "first round")
 			head := git("rev-parse", "HEAD")
 			merge := head
-			if mode == "squash" || mode == "old-catch-up" {
+			if mode == "squash" || mode == "old-catch-up" || mode == "base-advanced-after-old-catch-up" {
 				advanceOrigin(t, bare, "feature", "first round\n")
 			} else {
 				merge = git("commit-tree", "-p", "origin/main", "-p", "HEAD", "-m", "Merge first round", "HEAD^{tree}")
@@ -50,8 +50,11 @@ func TestCatchUpReturnsMergedBranchesToTip(t *testing.T) {
 			merge = git("rev-parse", "origin/main")
 			advanceOrigin(t, bare, "later", "base moved\n")
 			git("fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
-			if mode == "already-at-tip" || mode == "old-catch-up" {
+			if mode == "already-at-tip" || mode == "old-catch-up" || mode == "base-advanced-after-old-catch-up" {
 				git("merge", "-q", "--no-edit", "origin/main")
+			}
+			if mode == "base-advanced-after-old-catch-up" {
+				advanceOrigin(t, bare, "newer", "base moved again\n")
 			}
 			old := git("rev-parse", "HEAD")
 			mergedPRCommand(t, head, merge)
