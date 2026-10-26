@@ -17,7 +17,7 @@ step.
 ```sh
 wtc harness init agent-harness \
   --remote git@github.com:example-org/agent-harness.git \
-  --cli-version 0.1.53
+  --cli-version 0.1.54
 cd agent-harness
 ```
 
