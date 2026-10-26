@@ -605,7 +605,10 @@ function collectionTables(v) {
   async function mergeWorker(w, r) {
     const name = nameOf(r);
     if (!r.taskSessionKey) return v.say(`${name}: the task has no checkout of it to merge worker ${w.name} into`);
-    catching.add(r.sessionKey);
+    // Both checkouts are busy: the task's row would offer ↓ in the same
+    // worktree meanwhile.
+    const keys = [r.sessionKey, r.taskSessionKey];
+    keys.forEach((k) => catching.add(k));
     v.rerender();
     try {
       v.say(`Merging worker ${w.name} into ${name}…`);
@@ -618,7 +621,7 @@ function collectionTables(v) {
         v.say(`${name}: ${out.json?.summary ?? (out.message || "exit " + out.code)}`);
       }
     } finally {
-      catching.delete(r.sessionKey);
+      keys.forEach((k) => catching.delete(k));
       await v.refresh();
     }
   }
@@ -859,11 +862,15 @@ function collectionTables(v) {
     for (const w of workers) {
       const dirty = w.repos.reduce((n, r) => n + (r.dirty ?? 0), 0);
       const unmerged = w.repos.reduce((n, r) => n + (r.toMerge ?? 0), 0);
+      // Without the task's status of a checkout, nobody knows what is merged.
+      const unknown = w.repos.filter((r) => r.toMerge == null || r.mergeError).map(nameOf);
       const loss = [dirty ? plural(dirty, "uncommitted file") : "", unmerged ? `${plural(unmerged, "commit")} not merged` : ""].filter(Boolean).join(" and ");
+      const facts = [loss ? `It has ${loss}.` : "", unknown.length ? `Whether its commits in ${unknown.join(", ")} are merged is not known.` : "",
+        !loss && !unknown.length ? "Everything in it is merged." : ""].filter(Boolean).join(" ");
       const discard = w.repos.some((r) => catching.has(r.sessionKey)) ? working()
         : armed.has(w.name)
-          ? count("discard?", `Click again to discard worker ${w.name}${loss ? `, with ${loss}` : ""}`, TONE.failure, () => discardWorker(w))
-          : smallButton("✕", `Discard worker ${w.name}: deletes its sessions, and OpenClaw removes its worktrees${loss ? `. It has ${loss}` : ", which are merged"}`, () => discardWorker(w));
+          ? count("discard?", `Click again to discard worker ${w.name}. ${facts}`, TONE.failure, () => discardWorker(w))
+          : smallButton("✕", `Discard worker ${w.name}: deletes its sessions, and OpenClaw removes its worktrees. ${facts}`, () => discardWorker(w));
       w.repos.forEach((r, i) => {
         const merge = catching.has(r.sessionKey) ? working()
           : r.mergeError ? toned("?", TONE.failure, r.mergeError)

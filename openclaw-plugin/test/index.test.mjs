@@ -503,12 +503,14 @@ test("a worker's checkouts are the worker's, not a second row of the task's repo
     child("agent:main:subagent:site", "site", "9-x", "w1"),
     child("agent:main:subagent:api", "api", "9-x", "w2"),
     child("agent:main:subagent:site-docs", "site", "9-x--docs", "w3"),
+    // The task has no checkout of the harness, and its status no word on it.
+    child("agent:main:subagent:harness-docs", "harness", "9-x--docs", "w4"),
   ];
   const repo = (repo, dir, branch, more = {}) => ({ repo, path: `/worktrees/${dir}`, branch, ...more });
   const status = {
     "9-x": { repos: [repo("site", "w1", "openclaw/9-x"), repo("api", "w2", "openclaw/9-x")],
       workers: [{ name: "docs", collection: "9-x--docs", repos: [{ repo: "site", branch: "openclaw/9-x--docs", toMerge: 2 }] }] },
-    "9-x--docs": { repos: [repo("site", "w3", "openclaw/9-x--docs", { dirty: 13 })] },
+    "9-x--docs": { repos: [repo("site", "w3", "openclaw/9-x--docs", { dirty: 13 }), repo("harness", "w4", "openclaw/9-x--docs")] },
   };
   const argvs = [];
   plugin.register({
@@ -532,7 +534,7 @@ test("a worker's checkouts are the worker's, not a second row of the task's repo
   const [w] = result.workers;
   assert.equal(w.name, "docs");
   assert.equal(w.collection, "9-x--docs");
-  assert.deepEqual(w.repos.map((r) => [r.repo, r.dirty, r.toMerge, r.taskSessionKey]), [["site", 13, 2, "agent:main:subagent:site"]]);
+  assert.deepEqual(w.repos.map((r) => [r.repo, r.dirty, r.toMerge, r.taskSessionKey]).sort(), [["harness", undefined, null, null], ["site", 13, 2, "agent:main:subagent:site"]]);
 
   // Merging the worker is a catch-up from its branch in the task's checkout.
   await actions.get("catch-up").handler({ sessionKey: "agent:main:subagent:site", agentId: "main", payload: { from: "docs" } });
