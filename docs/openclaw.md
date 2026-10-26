@@ -131,7 +131,20 @@ agent asks for something that would fail or publish the wrong thing:
   `--allow-sensitive` is for the file that is meant to be committed;
 - when there is nothing to publish.
 
-`wtc catch-up` merges and never rebases, for the same reason, and aborts a
+For a GitHub branch whose pull request has merged, `wtc catch-up` returns
+the checkout to its base tip with HEAD detached. It also does this when an
+earlier catch-up already advanced the completed branch. The old branch is
+retained, and its PR moves from the repository row to the collection's pull
+request list. Follow-up commits must move to a new branch before returning
+to the tip; catch-up refuses to leave them behind.
+
+OpenClaw binds publication to the owner's managed branch. Returning to the
+tip does not rebind that owner or permit publishing an arbitrary new branch:
+another publication round needs a fresh managed worktree and owner. Support
+for starting that round in the same collection is tracked in
+[#207](https://github.com/lcorneliussen/wtc-cli/issues/207).
+
+On a live branch, `wtc catch-up` merges and never rebases, and aborts a
 conflicted merge so the worktree is as before.
 
 ## Other forges

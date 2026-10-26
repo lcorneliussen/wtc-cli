@@ -527,20 +527,40 @@ test("composer: collapsed, the same facts summed", async () => {
   view.dispose();
 });
 
-test("composer: after a merge, ↓ brings the merge in", async () => {
+test("composer: after a merge, ↓ leaves the finished branch even at the tip", async () => {
   const merged = (mergedIn) => ({ number: 2, state: "merged", url: "https://github.com/octo/site/pull/2", checks: "success", mergedIn });
   const { host, view } = await mount("composer", collection([repo("site", { pullRequest: merged(false) }), repo("docs", { pullRequest: merged(true) })]));
   await settle();
   const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
   const downs = [...card.all()].filter((n) => n.tagName === "BUTTON" && n.textContent === "↓");
-  assert.ok(downs.some((n) => n.title === "#2 was merged. Catch up: fetch main and merge it in, to continue from the merge; never rebases, never pushes"));
-  // Collapsed, the summary offers it too; one that has the merge needs none.
+  assert.ok(downs.some((n) => n.title === "#2 was merged. Return to main's tip, detached; keep it in the pull request list. The next change starts a new branch"));
+  // Collapsed, both completed branches still need to be left.
   assert.ok(downs.some((n) => n.title.startsWith("Catch up site (#2 merged)")));
-  assert.ok(!downs.some((n) => /docs/.test(n.title)));
+  assert.ok(downs.some((n) => /docs/.test(n.title)));
   calls.length = 0;
   await downs.find((n) => n.title.startsWith("#2 was merged")).onclick();
   await settle();
   assert.ok(calls.some((c) => c.actionId === "catch-up" && c.sessionKey === "agent:main:owner:site"));
+  view.dispose();
+});
+
+test("completed rounds leave the repository row and remain in the PR list", async () => {
+  const old = { number: 2, state: "merged", title: "First round", url: "https://github.com/octo/site/pull/2", checks: "success" };
+  const current = repo("site", { branch: undefined, pullRequests: [old] });
+  for (const kind of ["composer", "panel"]) {
+    const { host, view } = await mount(kind, collection([current]));
+    const [repos, prs] = tables(host);
+    assert.equal(repos[1][1], "at main");
+    assert.equal(repos[1][5], "·");
+    assert.deepEqual(prs[1].slice(0, 3), ["#2", "site", "merged"]);
+    assert.ok(!buttons(host).some((b) => b.startsWith("↑") || b.startsWith("↓")));
+    view.dispose();
+  }
+  // A following round keeps the earlier one; the same PR recorded during a
+  // retry appears only once.
+  const next = { ...old, number: 3, state: "open", title: "Next round" };
+  const { host, view } = await mount("panel", collection([repo("site", { pullRequest: next, pullRequests: [old, next] })]));
+  assert.deepEqual(tables(host)[1].slice(1).map((r) => r[0]), ["#2", "#3"]);
   view.dispose();
 });
 

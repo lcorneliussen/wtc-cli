@@ -118,10 +118,14 @@ func RecordedBase(dir, name string) string {
 	return baseOfBranch(dir, Branch(name))
 }
 
-// checkedOutBase is the base recorded for the branch checked out at dir, or "".
+// checkedOutBase is the branch's recorded base, or a completed round's base
+// when detached, so returning to the tip preserves a non-default base.
 func checkedOutBase(dir string) string {
 	branch, _ := git(dir, "branch", "--show-current")
 	if branch == "" {
+		if rounds, err := readCompletedRounds(dir); err == nil {
+			return rounds.Base
+		}
 		return ""
 	}
 	return baseOfBranch(dir, branch)

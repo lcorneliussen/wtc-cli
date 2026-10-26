@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lcorneliussen/wtc-cli/internal/next"
 )
 
 // CollectionSchema names the JSON that describes a collection's checkouts. A
@@ -45,10 +47,15 @@ type CheckoutStatus struct {
 	// next publication would send.
 	Unpublished int          `json:"unpublished"`
 	PullRequest *PullRequest `json:"pullRequest"`
+	// PullRequests keeps completed rounds in the collection's PR list.
+	PullRequests []PullRequest `json:"pullRequests,omitempty"`
 	// Proposal is the title and description proposed for the branch's pull
 	// request, which the person's push opens it with.
 	Proposal *Proposal `json:"proposal,omitempty"`
-	Error    string    `json:"error,omitempty"`
+	// Next is the repository's next step, read from all of the above; nil
+	// when nothing waits on anyone.
+	Next  *next.Step `json:"next,omitempty"`
+	Error string     `json:"error,omitempty"`
 }
 
 // PullRequest is the pull request of a checkout's branch.
@@ -72,6 +79,10 @@ type PullRequest struct {
 	// MergedIn says, of a merged pull request whose merge commit is known,
 	// whether the checkout has that commit. Absent otherwise.
 	MergedIn *bool `json:"mergedIn,omitempty"`
+	// Head is the commit the pull request ended at.
+	Head        string `json:"head,omitempty"`
+	Branch      string `json:"branch,omitempty"`
+	MergeCommit string `json:"mergeCommit,omitempty"`
 }
 
 // ManagedCollections finds the gateway's collections: the managed worktrees
@@ -164,6 +175,12 @@ func checkoutStatus(path string, pullRequests bool) CheckoutStatus {
 		return s
 	}
 	s.Branch, _ = git(top, "branch", "--show-current")
+	if rounds, err := readCompletedRounds(top); err != nil {
+		s.Error = err.Error()
+		return s
+	} else {
+		s.PullRequests = rounds.PRs
+	}
 	origin := Origin{Forge: ForgeUnknown}
 	if url, err := git(top, "remote", "get-url", "origin"); err == nil {
 		origin = ParseOrigin(url)
@@ -222,7 +239,49 @@ func checkoutStatus(path string, pullRequests bool) CheckoutStatus {
 	if pullRequests && origin.Forge == ForgeGitHub && s.Branch != "" {
 		s.PullRequest = gitHubPullRequest(top, origin, s.Branch)
 	}
+	s.Next = next.For(s.facts(top))
 	return s
+}
+
+// facts is what the next step is read from: the status, the commits it is
+// about, and whether merging the base would conflict.
+func (s CheckoutStatus) facts(top string) next.Facts {
+	f := next.Facts{Repo: s.Repo, Host: next.HostOpenClaw, Branch: s.Branch, Base: s.Base,
+		Ahead: s.Ahead, Behind: s.Behind, Dirty: s.Dirty, Conflicted: s.Conflicted,
+		InProgress: (&Checkout{Dir: top}).inProgress()}
+	if f.Repo == "" {
+		f.Repo = filepath.Base(top)
+	}
+	f.Head, _ = git(top, "rev-parse", "HEAD")
+	if s.Base != "" {
+		f.BaseHead, _ = git(top, "rev-parse", s.Base)
+	}
+	// What ↑ would send: the commits since the gateway's last publication,
+	// or before its first one everything ahead of the base. A detached
+	// checkout has no branch to push.
+	if s.Branch != "" {
+		f.ToPush = s.Unpublished
+	}
+	if s.Behind > 0 && s.Base != "" && f.InProgress == "" {
+		var ok bool
+		f.MergeConflicts, ok = next.PredictMerge(top, s.Base)
+		f.MergeUnknown = !ok
+	}
+	// Work after a merged pull request: commits neither in it nor in the
+	// base, leaving out merges (a catch-up's merge of the base is no work).
+	// Unknown without the pull request's head, so then none is claimed.
+	if pr := s.PullRequest; pr != nil && pr.State == "merged" && pr.Head != "" && s.Base != "" {
+		if n, err := git(top, "rev-list", "--count", "--no-merges", "HEAD", "^"+pr.Head, "^"+s.Base); err == nil {
+			f.AfterMerge, _ = strconv.Atoi(n)
+		}
+		if f.AfterMerge == 0 {
+			f.NeedsBranch, _ = (&Checkout{Dir: top}).hasFollowUpWork(pr, s.Base)
+		}
+	}
+	if pr := s.PullRequest; pr != nil {
+		f.PR = &next.PR{Number: pr.Number, State: pr.State, Draft: pr.Draft, Checks: pr.Checks, Mergeable: pr.Mergeable, Review: pr.Review, MergedIn: pr.MergedIn}
+	}
+	return f
 }
 
 // gitHubPullRequest is the newest pull request from branch, or nil: without
@@ -231,7 +290,7 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "--repo", origin.Owner+"/"+origin.Repo, "--head", branch,
-		"--state", "all", "--limit", "1", "--json", "number,url,state,isDraft,title,statusCheckRollup,mergeable,reviewDecision,mergeCommit")
+		"--state", "all", "--limit", "1", "--json", "number,url,state,isDraft,title,statusCheckRollup,mergeable,reviewDecision,mergeCommit,headRefOid")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -245,6 +304,7 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 		Title   string `json:"title"`
 		Merge   string `json:"mergeable"`
 		Review  string `json:"reviewDecision"`
+		Head    string `json:"headRefOid"`
 		Commit  *struct {
 			OID string `json:"oid"`
 		} `json:"mergeCommit"`
@@ -258,9 +318,10 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 		return nil
 	}
 	f := found[0]
-	pr := &PullRequest{Number: f.Number, URL: f.URL, State: strings.ToLower(f.State), Draft: f.IsDraft, Title: f.Title, Checks: "none",
-		Mergeable: strings.ToLower(f.Merge), Review: strings.ToLower(f.Review)}
+	pr := &PullRequest{Number: f.Number, URL: f.URL, State: strings.ToLower(f.State), Draft: f.IsDraft, Title: f.Title, Checks: "none", Branch: branch,
+		Mergeable: strings.ToLower(f.Merge), Review: strings.ToLower(f.Review), Head: f.Head}
 	if pr.State == "merged" && f.Commit != nil && f.Commit.OID != "" {
+		pr.MergeCommit = f.Commit.OID
 		in := gitOK(dir, "merge-base", "--is-ancestor", f.Commit.OID, "HEAD")
 		pr.MergedIn = &in
 	}

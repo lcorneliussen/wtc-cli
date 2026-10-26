@@ -319,7 +319,8 @@ type CatchUp struct {
 	Merged bool   `json:"merged"`
 	// FastForward says the checkout had nothing the ref lacked: it now is the
 	// ref, and no merge commit was made.
-	FastForward bool `json:"fastForward,omitempty"`
+	FastForward   bool `json:"fastForward,omitempty"`
+	ReturnedToTip bool `json:"returnedToTip,omitempty"`
 	// Worker says the checkout is a worker's: its work reaches the forge
 	// through its task.
 	Worker bool   `json:"worker,omitempty"`
@@ -327,8 +328,9 @@ type CatchUp struct {
 	Note   string `json:"note,omitempty"`
 }
 
-// CatchUp fetches the destination branch and merges it. It never rebases and
-// never pushes: published history stays as it is, and the gateway publishes
+// CatchUp fetches the destination branch. A merged GitHub PR returns its
+// checkout to the detached base tip; a live branch merges the base. It never
+// rebases and never pushes: published history stays as it is, and the gateway publishes
 // the merge with the next publication (a worker's, with its task's). A
 // conflicted merge is aborted. A detached worktree is not merged into but
 // moved to the tip (forward).
@@ -346,6 +348,11 @@ func (c *Checkout) CatchUp() (CatchUp, error) {
 	}
 	if c.Detached {
 		return c.forward(result, "refs/remotes/origin/"+c.Dest, "origin/"+c.Dest)
+	}
+	if c.Origin.Forge == ForgeGitHub {
+		if pr := gitHubPullRequest(c.Dir, c.Origin, c.Branch()); pr != nil && pr.State == "merged" {
+			return c.returnToTip(result, pr)
+		}
 	}
 	return c.merge(result, "refs/remotes/origin/"+c.Dest, "origin/"+c.Dest)
 }

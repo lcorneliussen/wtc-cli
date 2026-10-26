@@ -4,9 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/lcorneliussen/wtc-cli/internal/next"
 )
 
 func TestDetectHost(t *testing.T) {
@@ -343,7 +346,7 @@ func TestStatus(t *testing.T) {
 	}
 	want := CheckoutStatus{Path: c.Dir, Repo: "docs", Owner: "example-ws", Forge: ForgeBitbucket, Branch: "openclaw/72-add-thing", Base: "origin/main",
 		Ahead: 2, Dirty: 2, Untracked: 1, Published: true, Unpublished: 1}
-	if got.Repos[0] != want {
+	if !reflect.DeepEqual(got.Repos[0], want) {
 		t.Errorf("got  %+v\nwant %+v", got.Repos[0], want)
 	}
 	if got.Repos[1].Error == "" {
@@ -630,5 +633,110 @@ func TestMergeFromASubSessionsBranchByItsName(t *testing.T) {
 	// Its own branch is no branch to merge from.
 	if _, err := c.MergeFrom(c.Branch()); err == nil {
 		t.Error("merged the checkout's own branch into itself")
+	}
+}
+
+func TestStatusNamesTheNextStep(t *testing.T) {
+	c, git := managedWorktree(t, "/dev/null/unused")
+	bare := git("remote", "get-url", "--push", "origin")
+	git("remote", "set-url", "origin", bare)
+	fetch := func() { t.Helper(); git("fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main") }
+
+	// Committed work, nothing new on the base: the person pushes it.
+	write(t, c, "notes.md", "mine\n")
+	git("add", ".")
+	git("commit", "-qm", "work")
+	s := checkoutStatus(c.Dir, false)
+	if s.Next == nil || s.Next.Step != "push" || s.Next.By != next.ByWTC || s.Next.Approve != next.ApprovePerson || s.Next.Gateway != "github_publish" {
+		t.Fatalf("committed work: %+v", s.Next)
+	}
+
+	// The base moves on without touching it: a clean catch-up, the agent's call.
+	advanceOrigin(t, bare, "OTHER", "theirs\n")
+	fetch()
+	s = checkoutStatus(c.Dir, false)
+	if s.Next == nil || s.Next.Step != "catch-up" || s.Next.Approve != next.ApproveAgent || !strings.Contains(s.Next.Reason, "merges cleanly") {
+		t.Fatalf("behind, clean: %+v", s.Next)
+	}
+	// ...and changing the same file: a merge for the agent, naming it.
+	advanceOrigin(t, bare, "notes.md", "theirs\n")
+	fetch()
+	s = checkoutStatus(c.Dir, false)
+	if s.Next == nil || s.Next.Step != "merge" || s.Next.By != next.ByAgent || !strings.Contains(s.Next.Reason, "conflicts in notes.md") {
+		t.Fatalf("behind, conflicting: %+v", s.Next)
+	}
+	if git("status", "--porcelain") != "" {
+		t.Fatal("predicting the merge touched the worktree")
+	}
+
+	// Uncommitted work: everything waits for it.
+	write(t, c, "draft.md", "wip\n")
+	git("add", "draft.md")
+	if s = checkoutStatus(c.Dir, false); s.Next != nil {
+		t.Fatalf("work in progress: %+v", s.Next)
+	}
+	git("rm", "-q", "--cached", "draft.md")
+	if err := os.Remove(filepath.Join(c.Dir, "draft.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Detached at an older base: wtc moves it, nobody needs to agree.
+	git("checkout", "-q", "--detach", "origin/main~1")
+	s = checkoutStatus(c.Dir, false)
+	if s.Next == nil || s.Next.Step != "catch-up" || s.Next.By != next.ByWTC || s.Next.Approve != "" {
+		t.Fatalf("detached, behind: %+v", s.Next)
+	}
+}
+
+// A squash merge leaves the branch's commits out of the base. Following the
+// step the status names, back to the tip, must not end in a step that asks
+// to move wtc's own merge of the base to a new branch.
+func TestAfterASquashMergeTheNextStepsEnd(t *testing.T) {
+	c, git := managedWorktree(t, "/dev/null/unused")
+	bare := git("remote", "get-url", "--push", "origin")
+	git("remote", "set-url", "origin", bare)
+	write(t, c, "feature.md", "feature\n")
+	git("add", ".")
+	git("commit", "-qm", "the feature")
+	head := git("rev-parse", "HEAD")
+	// The pull request is squash-merged: its content lands on main as one
+	// new commit, and main moves on.
+	advanceOrigin(t, bare, "feature.md", "feature\n")
+	advanceOrigin(t, bare, "OTHER", "later\n")
+	git("fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
+	squash := git("rev-parse", "origin/main~1")
+	merged := func() *PullRequest {
+		in := gitOK(c.Dir, "merge-base", "--is-ancestor", squash, "HEAD")
+		return &PullRequest{Number: 7, State: "merged", Head: head, MergedIn: &in}
+	}
+	step := func() *next.Step {
+		s := checkoutStatus(c.Dir, false)
+		s.PullRequest = merged()
+		return next.For(s.facts(c.Dir))
+	}
+	if got := step(); got == nil || got.Step != "return-to-tip" || got.Approve != "" {
+		t.Fatalf("after the squash merge: %+v", got)
+	}
+	// The unknown-forge fixture exercises the legacy fallback: its merge of
+	// the base must not be counted as new work.
+	if _, err := c.CatchUp(); err != nil {
+		t.Fatal(err)
+	}
+	// The merge itself is no work of its own, but its completed branch must
+	// still be left. The gateway path that knows the PR does this directly.
+	if got := step(); got == nil || got.Step != "return-to-tip" {
+		t.Fatalf("still on the completed branch: %+v", got)
+	}
+	git("checkout", "-q", "--detach", "origin/main")
+	// ...and then nothing is left to do.
+	if got := step(); got != nil {
+		t.Fatalf("after catching up: %+v", got)
+	}
+	// Real work after the merge goes to a new branch.
+	write(t, c, "followup.md", "more\n")
+	git("add", ".")
+	git("commit", "-qm", "follow-up")
+	if got := step(); got == nil || got.Step != "new-branch" || got.By != next.ByAgent {
+		t.Fatalf("a follow-up commit: %+v", got)
 	}
 }

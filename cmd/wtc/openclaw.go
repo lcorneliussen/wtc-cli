@@ -621,6 +621,8 @@ func catchUpSummary(result openclaw.CatchUp) string {
 		return fmt.Sprintf("%s %s", result.Branch, result.Note)
 	}
 	switch {
+	case result.ReturnedToTip:
+		return fmt.Sprintf("returned to origin/%s's tip, detached; %s", result.Dest, result.Note)
 	case result.Branch == "" && result.Merged:
 		return fmt.Sprintf("detached at origin/%s's tip again: no work of its own, nothing to publish", result.Dest)
 	case result.Branch == "":

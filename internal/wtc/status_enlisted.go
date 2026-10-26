@@ -260,17 +260,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 			}
 		}
 		if detail.State == "OPEN" || detail.State == "DRAFT" {
-			if branchRow >= 0 && detail.Base != "" && catchUpGitOK(snapshot.Repos[branchRow].Worktree, "check-ref-format", "--branch", detail.Base) {
-				if behind, countErr := statusCount(snapshot.Repos[branchRow].Worktree, "HEAD..origin/"+detail.Base); countErr == nil {
-					if snapshot.Repos[branchRow].Behind > 0 {
-						snapshot.StaleCount--
-					}
-					snapshot.Repos[branchRow].Behind = behind
-					if behind > 0 {
-						snapshot.StaleCount++
-					}
-				}
-			}
+			statusPRBase(&snapshot, branchRow, detail.Base)
 			if branchRow >= 0 && snapshot.Repos[branchRow].PR == nil {
 				prURL := record.URL
 				if prURL == "" && forge != "" {
@@ -313,6 +303,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		}
 		detail := statusEnrichRecord(PRRecord{Repo: row.Repo, Number: number}, slug, forge)
 		if detail.State == "OPEN" || detail.State == "DRAFT" {
+			statusPRBase(&snapshot, i, detail.Base)
 			snapshot.Repos[i].PR = &StatusPRFacts{Number: detail.Number, Checks: detail.Checks,
 				URL: prURLForStatus(forge, slug, number), Merge: detail.Merge, Review: detail.Review, Draft: detail.State == "DRAFT"}
 		}
@@ -323,6 +314,8 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 			return snapshot, err
 		}
 	}
+	// The pull requests change what comes next.
+	statusNext(&snapshot)
 	return snapshot, nil
 }
 
@@ -420,5 +413,27 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 			}
 			break
 		}
+	}
+}
+
+// statusPRBase uses the same base for enlisted and discovered pull requests.
+func statusPRBase(snapshot *StatusSnapshot, index int, base string) {
+	if index < 0 || base == "" {
+		return
+	}
+	r := &snapshot.Repos[index]
+	if !catchUpGitOK(r.Worktree, "check-ref-format", "--branch", base) {
+		return
+	}
+	behind, err := statusCount(r.Worktree, "HEAD..origin/"+base)
+	if err != nil {
+		return
+	}
+	if r.Behind > 0 {
+		snapshot.StaleCount--
+	}
+	r.Behind, r.baseRef = behind, "origin/"+base
+	if behind > 0 {
+		snapshot.StaleCount++
 	}
 }
