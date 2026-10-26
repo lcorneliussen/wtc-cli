@@ -155,7 +155,8 @@ func (c *Context) Upgrade(opt UpgradeOptions) (UpgradeResult, error) {
 	}
 	result.Notes, result.NotesSource, err = upgradeNotes(c.Collection, from, to, opt.DryRun)
 	if err != nil && !opt.DryRun {
-		// The pin is written and installed; missing notes do not undo that.
+		// The pin is written, and installed when mise is present (see
+		// NotInstalled); missing notes undo neither.
 		result.NotesError = err.Error()
 		return result, nil
 	}
