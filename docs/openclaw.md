@@ -282,13 +282,20 @@ checkout, exchanging work through git (#106).
 - A worker uses the task's harness for names and default branches, but gets
   no worktree of the harness unless its part is the harness.
 
-- The Collection panel and the card show workers under their task, in a
-  section of their own, not as more rows of the task's repositories: per
-  worker and repository its uncommitted files and the commits the task has
-  not merged yet. **⇢** merges them into the task's checkout
-  (`wtc catch-up --from`, with the agent's git identity); a conflict goes to
-  the conversation. **✕** discards the worker after asking again: it deletes
-  the worker's sessions, and OpenClaw removes their worktrees.
+- A worker is merge-only: `wtc publish` refuses on its branch and `wtc svc`
+  in its collection. Its work reaches the forge through the task's branch.
+  `wtc catch-up` in a worker's checkout merges the task's branch into it.
+- The Collection panel and the card show each worker as a sub-row under its
+  repository, with the repository's columns measured against the task's
+  branch instead of the forge: ± its uncommitted files (the tooltip says
+  which the task has the same, which differ and which only the worker has),
+  **↑** merges its commits into the task's checkout (`wtc catch-up --from`,
+  with the agent's git identity), **↓** catches it up with the task. It has
+  no pull request. **✕** discards the worker after asking again: it deletes
+  the worker's sessions, and OpenClaw removes their worktrees. A conflict
+  goes to the conversation.
+- A part that needs its own pull request or services is no worker but a
+  collection of its own, with its own conversation.
 
 ## wtc projects
 

@@ -503,3 +503,69 @@ func TestMergeWorker(t *testing.T) {
 		t.Errorf("without the task's worktree: %+v", got)
 	}
 }
+
+func TestTaskOf(t *testing.T) {
+	for name, want := range map[string]string{"site-work--docs": "site-work", "site-work": "", "site-work--": "", "--docs": "", "a--b--c": "a--b"} {
+		if got := TaskOf(name); got != want {
+			t.Errorf("TaskOf(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestAWorkerAgainstItsTask(t *testing.T) {
+	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
+	write(t, c, "notes.md", "task\n")
+	git("add", ".")
+	git("commit", "-qm", "task groundwork")
+	dir := filepath.Join(t.TempDir(), "72-add-thing--a")
+	git("worktree", "add", "-q", "-b", "openclaw/72-add-thing--a", dir, "openclaw/72-add-thing")
+	worker, err := OpenCatchUpCheckout(dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A worker never publishes: its work leaves through the task.
+	if _, err := worker.PlanPublish(PublishOptions{}); err == nil || !strings.Contains(err.Error(), "is a worker of 72-add-thing") {
+		t.Fatalf("a worker's publish: %v", err)
+	}
+
+	// The task moves on: the worker is behind it, and catches up with it.
+	write(t, c, "more.md", "more\n")
+	git("add", ".")
+	git("commit", "-qm", "task moves on")
+	if err := os.WriteFile(filepath.Join(dir, "draft.md"), []byte("draft\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("worker's notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := WorkerRepos("72-add-thing", []string{c.Dir}, []string{dir})
+	if len(got) != 1 || got[0].Behind != 1 || got[0].ToMerge != 0 {
+		t.Fatalf("behind: %+v", got)
+	}
+	files := map[string]string{}
+	for _, f := range got[0].Uncommitted {
+		files[f.Path] = f.State
+	}
+	if files["draft.md"] != "only" || files["notes.md"] != "differs" || len(files) != 2 {
+		t.Errorf("uncommitted: %+v", got[0].Uncommitted)
+	}
+	gitIn(t, "-C", dir, "checkout", "-q", "--", "notes.md")
+	if err := os.Remove(filepath.Join(dir, "draft.md")); err != nil {
+		t.Fatal(err)
+	}
+	result, err := worker.CatchUpWithTask()
+	if err != nil || !result.Merged || result.From != "openclaw/72-add-thing" {
+		t.Fatalf("catch-up with the task: %+v %v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "more.md")); err != nil {
+		t.Errorf("the task's commit did not reach the worker: %v", err)
+	}
+	if got := WorkerRepos("72-add-thing", []string{c.Dir}, []string{dir}); got[0].Behind != 0 {
+		t.Errorf("after: %+v", got)
+	}
+	// The task itself has no task to catch up with.
+	if _, err := c.CatchUpWithTask(); err == nil {
+		t.Error("the task caught up with a task")
+	}
+}

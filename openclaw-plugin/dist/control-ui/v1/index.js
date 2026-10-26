@@ -634,6 +634,27 @@ function collectionTables(v) {
       await v.refresh();
     }
   }
+  // A worker catches up with the task's branch: the catch-up in its own
+  // checkout merges its parent, not origin.
+  async function catchUpWorker(w, r) {
+    const name = nameOf(r);
+    catching.add(r.sessionKey);
+    v.rerender();
+    try {
+      v.say(`Catching worker ${w.name} up with the task's ${name}…`);
+      const out = await call(v.host, "catch-up", r.sessionKey, v.agent());
+      const conflicts = conflictsOf(out.message);
+      if (conflicts.length) {
+        await askSkill(v.host, v.key(), "wtc-catch-up", `${name}: catching worker ${w.name} up with the task (wtc catch-up in its checkout) conflicts in ${conflicts.join(", ")}.`);
+        v.say(`${name}: ${conflicts.join(", ")} changed in both; the conversation was asked to catch worker ${w.name} up and resolve them.`);
+      } else {
+        v.say(`${name}: ${out.json?.summary ?? (wtcMessage(out.message) || "exit " + out.code)}`, out.code !== 0);
+      }
+    } finally {
+      catching.delete(r.sessionKey);
+      await v.refresh();
+    }
+  }
   // Discarding a worker deletes its sessions; OpenClaw removes their
   // worktrees. It asks again first: the second click within a few seconds
   // discards.
@@ -857,40 +878,44 @@ function collectionTables(v) {
     return out;
   }
 
-  // WORKER REPO ± ⇢: a worker's checkouts, what the task has not merged from
-  // each yet, and what ends it.
-  function workerTable(workers, narrow = false) {
-    const columns = [
-      { head: "Worker", width: "minmax(0,max-content)" },
-      { head: "Repo", width: "minmax(0,1fr)", under: true },
-      { head: "±", title: "Changed files the worker has not committed", align: "center" },
-      { head: "⇢", title: "The worker's commits the task's branch has not merged: click to merge them in", align: "center" },
-      { head: "", title: "Discard the worker" },
-    ];
-    const rows = [];
-    for (const w of workers) {
-      const dirty = w.repos.reduce((n, r) => n + (r.dirty ?? 0), 0);
-      const unmerged = w.repos.reduce((n, r) => n + (r.toMerge ?? 0), 0);
-      // Without the task's status of a checkout, nobody knows what is merged.
-      const unknown = w.repos.filter((r) => r.toMerge == null || r.mergeError).map(nameOf);
-      const loss = [dirty ? plural(dirty, "uncommitted file") : "", unmerged ? `${plural(unmerged, "commit")} not merged` : ""].filter(Boolean).join(" and ");
-      const facts = [loss ? `It has ${loss}.` : "", unknown.length ? `Whether its commits in ${unknown.join(", ")} are merged is not known.` : "",
-        !loss && !unknown.length ? "Everything in it is merged." : ""].filter(Boolean).join(" ");
-      const discard = w.repos.some((r) => catching.has(r.sessionKey)) ? working()
-        : armed.has(w.name)
-          ? count("discard?", `Click again to discard worker ${w.name}. ${facts}`, TONE.failure, () => discardWorker(w))
-          : smallButton("✕", `Discard worker ${w.name}: deletes its sessions, and OpenClaw removes its worktrees. ${facts}`, () => discardWorker(w));
-      w.repos.forEach((r, i) => {
-        const merge = catching.has(r.sessionKey) ? working()
-          : r.mergeError ? toned("?", TONE.failure, r.mergeError)
-          : r.toMerge > 0 ? count(`⇢ ${r.toMerge}`, `${plural(r.toMerge, "commit")} of worker ${w.name} not in the task's ${nameOf(r)}. Merge them in (wtc catch-up --from ${w.name}); never rebases, never pushes`, TONE.pending, () => mergeWorker(w, r))
-          : r.toMerge === 0 ? muted("✓", "Merged into the task") : null;
-        // A worker's name and ✕ once, on its first repository.
-        rows.push([i === 0 ? css(el("span", { textContent: w.name, title: `Collection ${w.collection}` }), "font-weight:600") : el("span"),
-          repoName(r), r.dirty ? toned(String(r.dirty), TONE.pending, plural(r.dirty, "uncommitted file")) : null, merge, i === 0 ? discard : el("span")]);
-      });
-    }
-    return table(columns, rows, narrow);
+  // A worker's checkout is a sub-row under its repository, with the same
+  // columns: ± its uncommitted files, ↑ its commits the task's branch lacks
+  // (merged into the task, never pushed to the forge), ↓ the task's commits it
+  // lacks. A worker has no pull request; ✕ discards it.
+  const workerFacts = (w) => {
+    const dirty = w.repos.reduce((n, r) => n + (r.dirty ?? 0), 0);
+    const unmerged = w.repos.reduce((n, r) => n + (r.toMerge ?? 0), 0);
+    // Without the task's status of a checkout, nobody knows what is merged.
+    const unknown = w.repos.filter((r) => r.toMerge == null || r.mergeError).map(nameOf);
+    const loss = [dirty ? plural(dirty, "uncommitted file") : "", unmerged ? `${plural(unmerged, "commit")} not merged` : ""].filter(Boolean).join(" and ");
+    return [loss ? `It has ${loss}.` : "", unknown.length ? `Whether its commits in ${unknown.join(", ")} are merged is not known.` : "",
+      !loss && !unknown.length ? "Everything in it is merged." : ""].filter(Boolean).join(" ");
+  };
+  // The uncommitted files, each against the task's checkout.
+  const filesTitle = (r) => {
+    const by = { same: [], differs: [], only: [] };
+    for (const f of r.uncommitted ?? []) (by[f.state] ?? by.differs).push(f.path);
+    return [`${plural(r.dirty, "uncommitted file")}, compared with the task's ${nameOf(r)}:`,
+      by.differs.length ? `differs: ${by.differs.join(", ")}` : "", by.only.length ? `only here: ${by.only.join(", ")}` : "",
+      by.same.length ? `the same in the task: ${by.same.join(", ")}` : ""].filter(Boolean).join("\n");
+  };
+  function workerRow(w, r) {
+    const busyHere = catching.has(r.sessionKey);
+    const discard = busyHere ? null
+      : armed.has(w.name)
+        ? count("discard?", `Click again to discard worker ${w.name}. ${workerFacts(w)}`, TONE.failure, () => discardWorker(w))
+        : smallButton("✕", `Discard worker ${w.name}${w.repos.length > 1 ? `, in all its ${w.repos.length} repositories` : ""}: deletes its sessions, and OpenClaw removes its worktrees. ${workerFacts(w)}`, () => discardWorker(w));
+    const name = css(el("span", { title: `Worker ${w.name}: a part of the task worked on beside it, in a checkout of its own (collection ${w.collection}). It merges into the task; it never gets a pull request.` },
+      muted("↳"), css(el("span", { textContent: w.name }), "font-weight:600"), discard), "display:inline-flex;align-items:center;gap:6px;padding-left:10px;min-width:0");
+    const up = busyHere ? working()
+      : r.mergeError ? toned("?", TONE.failure, r.mergeError)
+      : r.toMerge > 0 ? count(`↑ ${r.toMerge}`, `${plural(r.toMerge, "commit")} of worker ${w.name} not in the task's ${nameOf(r)}. Merge them into the task (wtc catch-up --from ${w.name}); never to the forge, never rebases`, TONE.pending, () => mergeWorker(w, r))
+      : null;
+    const down = busyHere ? null
+      : r.behind > 0 ? count(`↓ ${r.behind}`, `${plural(r.behind, "commit")} of the task's ${nameOf(r)} not in worker ${w.name}. Catch the worker up with the task; never rebases`, TONE.pending, () => catchUpWorker(w, r))
+      : null;
+    return [name, css(el("code", { textContent: r.branch ?? "", title: r.branch ?? "" }), "font-size:12px;color:var(--muted, #888)"),
+      r.dirty ? toned(String(r.dirty), TONE.pending, filesTitle(r)) : null, up, down, null, null, null, null];
   }
 
   function prTable(repos, narrow = false) {
@@ -911,10 +936,22 @@ function collectionTables(v) {
         css(el("span", { textContent: pr.title ?? "", title: pr.title ?? "" }), "overflow:hidden;text-overflow:ellipsis")];
     }), narrow);
   }
-  return { table, checkAccount, notice, repoTable: (repos, narrow) =>
+  // Each repository's row, then its workers' sub-rows; a worker's checkout of
+  // a repository the task has none of comes last.
+  function repoRows(repos, workers = []) {
+    const sub = workers.flatMap((w) => w.repos.map((r) => ({ w, r })));
+    const rows = [];
+    for (const r of repos) {
+      rows.push(repoRow(r));
+      for (const s of sub.filter((s) => s.r.repo && s.r.repo === r.repo)) rows.push(workerRow(s.w, s.r));
+    }
+    for (const s of sub.filter((s) => !repos.some((r) => r.repo && r.repo === s.r.repo))) rows.push(workerRow(s.w, s.r));
+    return rows;
+  }
+  return { table, checkAccount, notice, repoTable: (repos, narrow, workers) =>
     // Narrow, the repository (with its branch below) takes the room the
     // branch had.
-    table(narrow ? REPO_COLUMNS.map((c, i) => (i === 0 ? { ...c, width: "minmax(0,1fr)" } : c)) : REPO_COLUMNS, repos.map(repoRow), narrow), serviceTable, totals, prTable, workerTable };
+    table(narrow ? REPO_COLUMNS.map((c, i) => (i === 0 ? { ...c, width: "minmax(0,1fr)" } : c)) : REPO_COLUMNS, repoRows(repos, workers), narrow), serviceTable, totals, prTable };
 }
 
 // The text of the latest message the person wrote, from chat.history.
@@ -1119,9 +1156,7 @@ function mountComposer(container, context) {
       "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
     );
     tables.checkAccount(repos);
-    const workers = entry.data.workers ?? [];
-    detail.replaceChildren(...[tables.repoTable(repos, narrow), tables.notice(),
-      workers.length ? css(el("div", {}, css(el("span", { textContent: "Workers", title: "Parts of the task in parallel, each in checkouts of its own" }), "color:var(--muted, #888);font-size:12px"), tables.workerTable(workers, narrow)), "display:grid;gap:4px") : null,
+    detail.replaceChildren(...[tables.repoTable(repos, narrow, entry.data.workers), tables.notice(),
       groups.length ? tables.serviceTable(groups, entry.data, narrow) : null].filter(Boolean));
     if (card.parentNode !== container) container.prepend(card);
   }
@@ -1477,13 +1512,12 @@ function mountCollection(container, context) {
 
     const repoSection = css(el("div", {}, heading("Repositories")), "display:grid;gap:10px");
     if (repos.length === 0) repoSection.append(muted("No repositories yet. Ask in the conversation, or add one below.", "font-size:13px"));
-    else repoSection.append(tables.repoTable(repos, narrow));
+    else repoSection.append(tables.repoTable(repos, narrow, data.workers));
     tables.checkAccount(repos);
     const howTo = tables.notice();
     if (howTo) repoSection.append(howTo);
     repoSection.append(adder);
 
-    const workerSection = data.workers?.length ? el("div", {}, heading("Workers"), tables.workerTable(data.workers, narrow)) : null;
     const prSection = repos.some((r) => r.pullRequest) ? el("div", {}, heading("Pull requests"), tables.prTable(repos, narrow)) : null;
 
     const serviceSection = el("div", {}, heading("Services"));
@@ -1491,7 +1525,7 @@ function mountCollection(container, context) {
     else serviceSection.append(tables.serviceTable(groups, data, narrow));
 
     const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
-    body.replaceChildren(...[repoSection, workerSection, prSection, serviceSection, ...warnings, footer(data)].filter(Boolean));
+    body.replaceChildren(...[repoSection, prSection, serviceSection, ...warnings, footer(data)].filter(Boolean));
     say(note, noteFailed);
   }
 

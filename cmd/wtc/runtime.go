@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
+	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -16,7 +18,18 @@ func runtimeContext() (*wtc.Context, error) {
 	if err != nil {
 		return nil, err
 	}
-	return wtc.Discover(cwd)
+	c, err := wtc.Discover(cwd)
+	if err != nil {
+		return nil, err
+	}
+	// A worker's services are its task's: the worker merges into the task,
+	// whose collection runs them.
+	if openclaw.DetectHost(os.Getenv) == openclaw.HostOpenClaw {
+		if task := openclaw.TaskOf(filepath.Base(c.Collection)); task != "" {
+			return nil, fmt.Errorf("%s is a worker's collection: services run in its task's collection, %s", filepath.Base(c.Collection), task)
+		}
+	}
+	return c, nil
 }
 
 func addRuntimeCommands(root *cobra.Command, asJSON *bool) {

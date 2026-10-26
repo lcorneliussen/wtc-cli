@@ -19,7 +19,9 @@ conflict: you do, in your own checkout of the repository.
    them back.)
 3. **Merge.** In `<folder>/<repo>`:
    - the base branch: `wtc catch-up`;
-   - a worker's branch: `wtc catch-up --from <worker>`. A sandbox's
+   - in a worker's checkout, `wtc catch-up` merges the task's branch, the
+     worker's parent;
+   - a worker's branch into yours: `wtc catch-up --from <worker>`. A sandbox's
      catch-up merges only the base: merge a worker's branch from the
      repository's session outside the sandbox.
 4. **Read what it says.**

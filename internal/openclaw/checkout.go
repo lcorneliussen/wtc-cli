@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -226,6 +227,9 @@ type PublishOptions struct {
 // PlanPublish checks that publishing this checkout is safe and returns the
 // intent for it. It reads and never writes: no commit, no fetch, no push.
 func (c *Checkout) PlanPublish(opt PublishOptions) (Plan, error) {
+	if task := TaskOf(c.Worktree); task != "" {
+		return Plan{}, fmt.Errorf("%s is a worker of %s: a worker's work leaves through the task. Merge it into the task (wtc catch-up --from %s in the task's checkout), and the task publishes it", c.Branch(), task, strings.TrimPrefix(c.Worktree, task+WorkerSeparator))
+	}
 	if what := c.inProgress(); what != "" {
 		return Plan{}, fmt.Errorf("%s is in progress in %s: finish or abort it before publishing", what, c.Dir)
 	}
@@ -340,6 +344,24 @@ func (c *Checkout) CatchUp() (CatchUp, error) {
 	return c.merge(result, "refs/remotes/origin/"+c.Dest, "origin/"+c.Dest)
 }
 
+// CatchUpWithTask merges the task's branch into a worker's checkout: a
+// worker's parent is its task, not origin. Nothing is fetched; the task's
+// branch is in the same clone.
+func (c *Checkout) CatchUpWithTask() (CatchUp, error) {
+	task := TaskOf(c.Worktree)
+	result := CatchUp{Branch: c.Branch(), Dest: c.Dest, From: Branch(task)}
+	if task == "" {
+		return result, fmt.Errorf("%s is no worker's branch", c.Branch())
+	}
+	if !HasBranch(c.Dir, Branch(task)) {
+		return result, fmt.Errorf("%s has no branch %s: the task has not started work in this repository yet", c.Repo, Branch(task))
+	}
+	if err := c.readyToMerge(); err != nil {
+		return result, err
+	}
+	return c.merge(result, "refs/heads/"+Branch(task), Branch(task))
+}
+
 // forward moves a detached worktree to ref, which must contain it: with no
 // branch there is nothing to merge into, and commits of its own would be
 // left behind.
@@ -375,6 +397,16 @@ func HasRemoteBranch(dir, branch string) bool {
 // task 12-paging works in collection 12-paging--a, on branch
 // openclaw/12-paging--a.
 const WorkerSeparator = "--"
+
+// TaskOf is the task a worker's worktree name belongs to: site-work for
+// site-work--docs. It is empty for a worktree that is no worker.
+func TaskOf(worktree string) string {
+	at := strings.LastIndex(worktree, WorkerSeparator)
+	if at <= 0 || at+len(WorkerSeparator) == len(worktree) || !ValidWorktreeName(worktree) {
+		return ""
+	}
+	return worktree[:at]
+}
 
 // WorkerWorktree is the worktree name of a worker of task: worker is its
 // short name or the whole one.
@@ -462,8 +494,46 @@ type WorkerRepo struct {
 	Branch string `json:"branch"`
 	// ToMerge counts the worker's commits the task's branch does not have
 	// yet: 0 once wtc catch-up --from merged them.
-	ToMerge int    `json:"toMerge"`
-	Error   string `json:"error,omitempty"`
+	ToMerge int `json:"toMerge"`
+	// Behind counts the task's commits the worker does not have: what a
+	// catch-up in the worker's checkout brings in.
+	Behind int `json:"behind"`
+	// Uncommitted are the worker's uncommitted files, each compared with the
+	// task's checkout of the repository: whether the task has it already.
+	Uncommitted []WorkerFile `json:"uncommitted,omitempty"`
+	Error       string       `json:"error,omitempty"`
+}
+
+// WorkerFile is an uncommitted file of a worker. State is "same" when the
+// task's checkout has the file as the worker has it (or neither has it),
+// "differs" when both have it differently, and "only" when the task's
+// checkout does not have it.
+type WorkerFile struct {
+	Path  string `json:"path"`
+	State string `json:"state"`
+}
+
+// workerFiles compares the uncommitted files of the worker's checkout with
+// the task's checkout of the same repository.
+func workerFiles(workerDir, taskDir string) []WorkerFile {
+	changes, err := (&Checkout{Dir: workerDir}).pending()
+	if err != nil {
+		return nil
+	}
+	var files []WorkerFile
+	for _, ch := range changes {
+		mine, errMine := os.ReadFile(filepath.Join(workerDir, ch.path))
+		theirs, errTheirs := os.ReadFile(filepath.Join(taskDir, ch.path))
+		state := "differs"
+		switch {
+		case errMine != nil && errTheirs != nil, errMine == nil && errTheirs == nil && bytes.Equal(mine, theirs):
+			state = "same"
+		case errMine == nil && errTheirs != nil:
+			state = "only"
+		}
+		files = append(files, WorkerFile{Path: ch.path, State: state})
+	}
+	return files
 }
 
 // WorkerRepos describes the worker's checkouts against the task's: each
@@ -498,6 +568,12 @@ func WorkerRepos(task string, taskDirs, workerDirs []string) []WorkerRepo {
 			} else {
 				w.ToMerge, _ = strconv.Atoi(n)
 			}
+			if n, err := git(taskDir, "rev-list", "--count", "refs/heads/"+w.Branch+"..refs/heads/"+Branch(task)); err == nil {
+				w.Behind, _ = strconv.Atoi(n)
+			}
+		}
+		if ok && err == nil {
+			w.Uncommitted = workerFiles(dir, taskDir)
 		}
 		repos = append(repos, w)
 	}

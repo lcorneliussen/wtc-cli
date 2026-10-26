@@ -50,9 +50,11 @@ Read that before the first `wtc` command of a task and follow it. In short:
   checkout: `wtc add-repo <repo> --worker <name> --work "<part>"`, then
   `wtc catch-up --from <name>` in `<folder>/<repo>` to merge one in. A
   worker is only for a part that really runs beside yours; work you would do
-  next anyway goes in your own checkout. When a worker ends, merge it in, or
-  tell the person what is left so they can discard it in the card: none is
-  left behind.
+  next anyway goes in your own checkout. A worker only merges into your
+  branch: no pull request and no services of its own. A part that needs
+  those is a collection of its own, which the person starts. When a worker
+  ends, merge it in, or tell the person what is left so they can discard it
+  in the card: none is left behind.
 - **Catching up** a repository, merging a worker in, and resolving the
   conflicts either brings: the **wtc-catch-up** skill. It never rebases and
   never pushes.

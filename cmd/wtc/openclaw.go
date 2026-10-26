@@ -591,9 +591,13 @@ func catchUpCheckout(dest, from string, asJSON bool) error {
 		return err
 	}
 	var result openclaw.CatchUp
-	if from != "" {
+	switch {
+	case from != "":
 		result, err = checkout.MergeWorker(from)
-	} else {
+	case dest == "" && openclaw.TaskOf(checkout.Worktree) != "":
+		// A worker catches up with its task, the branch it merges into.
+		result, err = checkout.CatchUpWithTask()
+	default:
 		result, err = checkout.CatchUp()
 	}
 	if err != nil {
@@ -606,6 +610,13 @@ func catchUpCheckout(dest, from string, asJSON bool) error {
 // the destination leaves the branch at its base with nothing to publish; a
 // worker's commits, even fast-forwarded, are the task's to publish.
 func catchUpSummary(result openclaw.CatchUp) string {
+	// A worker's catch-up merges its task's branch, which is its own to merge.
+	if task := openclaw.TaskOf(strings.TrimPrefix(result.Branch, openclaw.BranchPrefix)); task != "" && result.From == openclaw.Branch(task) {
+		if result.Merged {
+			return fmt.Sprintf("merged the task's %s into the worker's %s", result.From, result.Branch)
+		}
+		return fmt.Sprintf("%s %s", result.Branch, result.Note)
+	}
 	switch {
 	case result.Branch == "" && result.Merged:
 		return fmt.Sprintf("detached at origin/%s's tip again: no work of its own, nothing to publish", result.Dest)

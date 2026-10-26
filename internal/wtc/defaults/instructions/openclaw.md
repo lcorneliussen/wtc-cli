@@ -46,16 +46,26 @@ based on your branch where you have one, so it builds on your groundwork.
 - `wtc catch-up --from <worker>` merges the worker's branch into yours with
   no fetch: the worktrees share the gateway's clone. It never rebases; for a
   conflict, follow the wtc-catch-up skill.
-- Publishing stays the task's: the person pushes your branch with ↑, with
-  the workers' work merged in. Workers' branches are not published.
+- A worker is merge-only. Its work leaves through your branch: the person
+  pushes that with ↑, with the workers' work merged in. `wtc publish` refuses
+  on a worker's branch, and `wtc svc` in a worker's collection: services run
+  in yours.
+- `wtc catch-up` in a worker's checkout merges your branch, its parent, into
+  it, not origin's.
 - Readers (review, research, a test run) need no worker: they can read your
   checkouts.
 - A worker is only for a part that really runs beside yours. Work you would
   do next anyway goes in your own checkout: a worker you then wait for is a
   second copy of the repository for nothing.
+- A part that needs its own pull request, its own services or the person's
+  attention is no worker: it is a collection of its own, with its own
+  conversation. Suggest that the person starts one (ad hoc, or in this wtc
+  project).
 - When a worker ends, merge it in, or tell the person what is left. The card
-  shows each worker under the task, with **⇢** to merge it and **✕** to
-  discard it; none should be left behind.
+  shows each worker as a sub-row under its repository: ± its uncommitted
+  files (against yours), **↑** merges its commits into your checkout, **↓**
+  catches it up with yours, and **✕** discards it. None should be left
+  behind.
 
 ## wtc projects
 

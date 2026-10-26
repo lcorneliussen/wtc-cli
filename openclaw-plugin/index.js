@@ -593,7 +593,10 @@ export default {
       for (const r of rows.filter((r) => r.worker)) {
         if (!workers.has(r.worker)) workers.set(r.worker, { name: r.worker, collection: task + WORKER_SEPARATOR + r.worker, repos: [] });
         const merge = toMerge.get(`${r.worker}\n${r.repo}`);
+        // ↓ and the files are against the task, not origin: a worker merges
+        // into the task, and only the task goes to the forge.
         workers.get(r.worker).repos.push({ ...r, toMerge: merge?.toMerge ?? null, mergeError: merge?.error ?? null,
+          behind: merge?.behind ?? null, uncommitted: merge?.uncommitted ?? [],
           // The task's own checkout of the repository, which a merge goes into.
           taskSessionKey: result.repos.find((t) => t.repo && t.repo === r.repo)?.sessionKey ?? null });
       }
