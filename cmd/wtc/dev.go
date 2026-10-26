@@ -48,16 +48,14 @@ func handOverToDevBuild() {
 	}
 	if !wtc.DevBuildTakesOver(version, build) {
 		if term.IsTerminal(os.Stderr.Fd()) {
-			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: dev build %s is older than %s; using %s ({{command}} dev install to rebuild)
-`), build.Version, version, version)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: dev build %s is older than %s; using %s ({{command}} dev install to rebuild)\n"), build.Version, version, version)
 		}
 		return
 	}
 	env := append(os.Environ(), wtc.DevBuildDelegatedEnv+"="+version)
 	// On success Exec does not return; on failure keep running this binary.
 	if err := syscall.Exec(build.Binary, os.Args, env); err != nil {
-		fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: cannot run dev build %s: %v
-`), build.Binary, err)
+		fmt.Fprintf(os.Stderr, branding.Text("{{command}}: cannot run dev build %s: %v\n"), build.Binary, err)
 	}
 }
 
@@ -129,8 +127,7 @@ func describeBuild(readInfo func() (*debug.BuildInfo, bool)) string {
 
 func addDevCommands(root *cobra.Command, asJSON *bool) {
 	dev := &cobra.Command{Use: "dev", Short: branding.Text("Run a collection-local build of {{command}} in place of the pinned release"),
-		Long: branding.Text(`{{command}} dev install builds the wtc-cli checkout in this collection into .wtc/dev/wtc.
-`) +
+		Long: branding.Text("{{command}} dev install builds the wtc-cli checkout in this collection into .wtc/dev/wtc.\n") +
 			branding.Text("Any {{command}} started inside the collection then hands over to that build while it is the same version\n") +
 			"or newer, and runs itself again once it is newer than the build. Set WTC_DEV_BUILD=off to skip\n" +
 			"the handover for one command.", Args: cobra.NoArgs}

@@ -51,14 +51,11 @@ func printPlan(plan openclaw.Plan) error {
 			if in.Tool != "" {
 				how = " with the " + in.Tool + " tool and its args, unchanged"
 			}
-			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: nothing was done. Publishing is the person's: tell them it is ready to push with ↑ in the collection card. Only if they asked you to publish, carry out this intent %s%s.
-`), who, how)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: nothing was done. Publishing is the person's: tell them it is ready to push with ↑ in the collection card. Only if they asked you to publish, carry out this intent %s%s.\n"), who, how)
 		} else if in.Tool != "" {
-			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: nothing was done. Call the %s tool %s with this intent's args, unchanged.
-`), in.Tool, who)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: nothing was done. Call the %s tool %s with this intent's args, unchanged.\n"), in.Tool, who)
 		} else {
-			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: nothing was done. Carry out this %s intent %s with the skill for %s.
-`), in.Action, who, in.Forge)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: nothing was done. Carry out this %s intent %s with the skill for %s.\n"), in.Action, who, in.Forge)
 		}
 	}
 	for _, w := range plan.Warnings {
@@ -478,9 +475,7 @@ func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string
 	if len(listed) > 0 {
 		separate += fmt.Sprintf(branding.Text(", and here {{command}} add-repo %s%s"), strings.Join(listed, " "), here)
 	}
-	err := fmt.Errorf("wtc project %s does not list %s. Ask the person which they want:\n"+branding.Text(`  1. ad hoc beside the project's repositories, in this collection: {{command}} add-repo %s%s --ad-hoc
-`)+branding.Text(`  2. registered in the project: %sadd it to .harness-repos.yml in the collection's worktree of its harness %s and commit that (it is published like any repository), then {{command}} add-repo %s%s
-`)+
+	err := fmt.Errorf("wtc project %s does not list %s. Ask the person which they want:\n"+branding.Text("  1. ad hoc beside the project's repositories, in this collection: {{command}} add-repo %s%s --ad-hoc\n")+branding.Text("  2. registered in the project: %sadd it to .harness-repos.yml in the collection's worktree of its harness %s and commit that (it is published like any repository), then {{command}} add-repo %s%s\n")+
 		"  3. a collection of its own, in an ad-hoc wtc project: %s",
 		h.Name, strings.Join(unlisted, ", "), all, here, register, h.Name, all, here, separate)
 	if len(elsewhere) > 0 {

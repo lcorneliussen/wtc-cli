@@ -69,8 +69,7 @@ func checkoutReviewBranch(worktree, branch string) error {
 		return fmt.Errorf("invalid branch name %q", branch)
 	}
 	if _, err := reviewGit(worktree, "fetch", "origin", branch); err != nil {
-		fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: could not fetch PR branch %s before checkout
-`), branch)
+		fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: could not fetch PR branch %s before checkout\n"), branch)
 	}
 	if _, err := reviewGit(worktree, "show-ref", "--verify", "refs/heads/"+branch); err == nil {
 		_, err = reviewGit(worktree, "switch", "--merge", branch)
@@ -134,8 +133,7 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 			raw, err = forgeOutput(cmd)
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: PR #%s metadata unavailable; bundle will use local refs
-`), opt.PR)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: PR #%s metadata unavailable; bundle will use local refs\n"), opt.PR)
 			raw = nil
 		}
 		if len(raw) > 0 {
@@ -167,8 +165,7 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 				} `json:"links"`
 			}
 			if err := json.Unmarshal(raw, &p); err != nil {
-				fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: PR #%s metadata is invalid; bundle will use local refs
-`), opt.PR)
+				fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: PR #%s metadata is invalid; bundle will use local refs\n"), opt.PR)
 			} else {
 				prTitle, prBody, prBase, prHead, prBranch, prURL = p.Title, p.Body, p.BaseRefName, p.HeadRefOid, p.HeadRefName, p.URL
 				if prBody == "" {
@@ -238,8 +235,7 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 		branch = opt.Head
 	}
 	if prHead != "" && !SameReviewSHA(headSHA, prHead) {
-		fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: local head %s differs from PR head %s
-`), headSHA[:7], prHead[:min(7, len(prHead))])
+		fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: local head %s differs from PR head %s\n"), headSHA[:7], prHead[:min(7, len(prHead))])
 	}
 	baseRef := opt.Base
 	if baseRef == "" && prBase != "" {

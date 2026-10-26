@@ -194,8 +194,7 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 		}
 		fmt.Println(result.URL)
 		if result.InlineFailed > 0 {
-			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: %d inline comments failed to post
-`), result.InlineFailed)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: %d inline comments failed to post\n"), result.InlineFailed)
 		}
 		return nil
 	}

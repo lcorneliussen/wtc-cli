@@ -21,8 +21,7 @@ func (c *Context) RunHook(event string, values map[string]string) error {
 	post := strings.HasSuffix(event, ".post")
 	fail := func(err error) error {
 		if post {
-			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: hook %s failed: %v
-`), event, err)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: hook %s failed: %v\n"), event, err)
 			return nil
 		}
 		return fmt.Errorf("hook %s failed: %w", event, err)

@@ -71,8 +71,7 @@ func addUpgradeCommand(root *cobra.Command, asJSON *bool) {
 			fmt.Printf("mise not found: wtc %s is pinned but not installed\n", result.To)
 		}
 		if result.NotesError != "" {
-			fmt.Printf(branding.Text(`release notes unavailable (%s); read them with the new binary: {{command}} release-notes --since %s
-`), result.NotesError, result.From)
+			fmt.Printf(branding.Text("release notes unavailable (%s); read them with the new binary: {{command}} release-notes --since %s\n"), result.NotesError, result.From)
 		} else {
 			fmt.Printf("release notes %s → %s, from %s:\n\n", result.From, result.To, result.NotesSource)
 		}

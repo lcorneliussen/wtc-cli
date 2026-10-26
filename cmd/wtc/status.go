@@ -105,8 +105,7 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 			term.IsTerminal(os.Stdout.Fd()) && term.IsTerminal(os.Stderr.Fd()) {
 			started := time.Now()
 			c.StatusProgress = func(message string) {
-				fmt.Fprintf(os.Stderr, branding.Text(`{{command}} status [%s] %s
-`), time.Since(started).Truncate(time.Second), message)
+				fmt.Fprintf(os.Stderr, branding.Text("{{command}} status [%s] %s\n"), time.Since(started).Truncate(time.Second), message)
 			}
 		}
 		if !procs && !cmd.Flags().Changed("repos") && statusTrue(statusSetting(c, "WTC_STATUS_REPOS")) {
@@ -190,8 +189,7 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 			snapshot, fetched, err = c.StatusLiveSnapshotWithFetchAge(all, noFetch, time.Duration(fetchAgeSeconds)*time.Second)
 		}
 		if fetched.Failed > 0 {
-			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: %d status ref refresh(es) failed; showing local refs
-`), fetched.Failed)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: %d status ref refresh(es) failed; showing local refs\n"), fetched.Failed)
 		}
 		if err != nil {
 			return err
