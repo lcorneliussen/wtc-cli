@@ -328,8 +328,9 @@ type CatchUp struct {
 
 // CatchUp fetches the destination branch and merges it. It never rebases and
 // never pushes: published history stays as it is, and the gateway publishes
-// the merge with the next publication (a worker's, with its task's). A conflicted merge is aborted. A
-// detached worktree is not merged into but moved to the tip (forward).
+// the merge with the next publication (a worker's, with its task's). A
+// conflicted merge is aborted. A detached worktree is not merged into but
+// moved to the tip (forward).
 func (c *Checkout) CatchUp() (CatchUp, error) {
 	result := CatchUp{Branch: c.Branch(), Dest: c.Dest}
 	if c.Detached {

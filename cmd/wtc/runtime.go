@@ -21,7 +21,9 @@ func runtimeContext() (*wtc.Context, error) {
 	return wtc.Discover(cwd)
 }
 
-// startContext is runtimeContext for what starts services or tunnels. A
+// startContext is runtimeContext for what starts services or tunnels, or
+// provisions their resources (add, up, restart, provision, opening a
+// tunnel). A
 // worker's services are its task's: the worker merges into the task, whose
 // collection runs them. Stopping, listing and logs still work in a worker's
 // collection, for what ran there before.

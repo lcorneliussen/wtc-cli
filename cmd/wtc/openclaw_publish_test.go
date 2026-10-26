@@ -121,7 +121,7 @@ func TestCatchUpSummary(t *testing.T) {
 		// A worker catches up with its task.
 		{openclaw.CatchUp{Branch: "openclaw/x--a", Dest: "main", From: "openclaw/x", Merged: true, Worker: true}, "merged the task's openclaw/x into the worker's openclaw/x--a"},
 		{openclaw.CatchUp{Branch: "openclaw/x--a", From: "openclaw/x", Note: "already contains openclaw/x", Worker: true}, "openclaw/x--a already contains openclaw/x"},
-		// A worker that merged origin's (--dest) still publishes through its task.
+		// A worker that merged origin's (--dest) still reaches the forge through its task.
 		{openclaw.CatchUp{Branch: "openclaw/x--a", Dest: "main", Merged: true, Worker: true}, "merged origin/main into openclaw/x--a; it reaches the forge through the task"},
 		// A task with "--" in its own name is no worker.
 		{openclaw.CatchUp{Branch: "openclaw/fix--login", Dest: "main", Merged: true}, "merged origin/main into openclaw/fix--login; publish to send the merge (wtc publish)"},

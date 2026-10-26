@@ -586,7 +586,7 @@ func TestAWorkerAgainstItsTask(t *testing.T) {
 }
 
 func TestATaskWithDashesIsNoWorker(t *testing.T) {
-	c, git := managedWorktree(t, "https://github.com/example-org/docs.git")
+	_, git := managedWorktree(t, "https://github.com/example-org/docs.git")
 	dir := filepath.Join(t.TempDir(), "fix--login")
 	git("worktree", "add", "-q", "-b", "openclaw/fix--login", dir, "openclaw/72-add-thing")
 	task, err := OpenCatchUpCheckout(dir, "main")
@@ -600,5 +600,4 @@ func TestATaskWithDashesIsNoWorker(t *testing.T) {
 	if _, err := task.PlanPublish(PublishOptions{}); err != nil && strings.Contains(err.Error(), "is a worker of") {
 		t.Errorf("a task with dashes was refused as a worker: %v", err)
 	}
-	_ = c
 }
