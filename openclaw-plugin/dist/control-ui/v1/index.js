@@ -134,8 +134,9 @@ async function confirmBitbucket(host, agentId, r, pending, say) {
   return null;
 }
 
-// The files a catch-up's merge stopped on, from wtc's message; none when it
-// did not stop on a conflict.
+// The files a catch-up's merge stopped on, from wtc's message (Checkout.merge
+// in internal/openclaw/checkout.go, whose test pins the sentence); none when
+// it did not stop on a conflict.
 export const conflictsOf = (message) => (/conflicts in: (.+?)\. The merge was aborted/.exec(message ?? "")?.[1] ?? "")
   .split(/,\s*/).filter(Boolean);
 

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -439,7 +440,9 @@ func TestMergeWorker(t *testing.T) {
 	}
 	gitIn(t, "-C", worker, "commit", "-qam", "worker")
 	before := git("rev-parse", "HEAD")
-	if _, err := c.MergeWorker("a"); err == nil || !strings.Contains(err.Error(), "conflicts in: notes.md") {
+	// The Control UI card reads the files out of this sentence (conflictsOf
+	// in openclaw-plugin/dist/control-ui/v1/index.js): keep the two in step.
+	if _, err := c.MergeWorker("a"); err == nil || !regexp.MustCompile(`conflicts in: notes\.md\. The merge was aborted`).MatchString(err.Error()) {
 		t.Errorf("conflict: %v", err)
 	}
 	if git("rev-parse", "HEAD") != before || git("status", "--porcelain") != "" {
