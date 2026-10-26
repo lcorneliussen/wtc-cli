@@ -3,6 +3,7 @@ package openclaw
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -144,7 +145,7 @@ func (c GatewayConfig) names() string {
 // and add-repo asks the person what to do with a repository it does not
 // list.
 func ChooseHarness(cfg GatewayConfig, flag, recorded string, names []string, has func(Harness, string) bool) (*Harness, error) {
-	ask := fmt.Sprintf("Ask the person which wtc project this collection works in (%s; wtc projects lists their repositories), then pass --project <name>, or --project %s for an ad-hoc one", cfg.names(), NoHarness)
+	ask := fmt.Sprintf(branding.Text("Ask the person which wtc project this collection works in (%s; {{command}} projects lists their repositories), then pass --project <name>, or --project %s for an ad-hoc one"), cfg.names(), NoHarness)
 	switch {
 	case recorded == NoHarness:
 		if flag != "" && flag != NoHarness {
@@ -166,7 +167,7 @@ func ChooseHarness(cfg GatewayConfig, flag, recorded string, names []string, has
 		h := cfg.Find(flag)
 		if h == nil {
 			if len(cfg.Harnesses) == 0 {
-				return nil, fmt.Errorf("the gateway configures no wtc projects, so there is no wtc project %s", flag)
+				return nil, fmt.Errorf(branding.Text("the gateway configures no {{command}} projects, so there is no wtc project %s"), flag)
 			}
 			return nil, fmt.Errorf("the gateway configures no wtc project %s. %s", flag, ask)
 		}

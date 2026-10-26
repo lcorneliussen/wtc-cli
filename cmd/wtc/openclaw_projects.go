@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/spf13/cobra"
 )
@@ -50,19 +51,20 @@ func gatewayProjects() ([]gatewayProject, error) {
 func addProjectsCommand(root *cobra.Command, asJSON *bool) {
 	cmd := &cobra.Command{
 		Use:   "projects",
-		Short: "Under OpenClaw: list the gateway's wtc projects and their repositories",
-		Long: `A wtc project is a named set of repositories: a harness the gateway is
+		Short: branding.Text("Under OpenClaw: list the gateway's {{command}} projects and their repositories"),
+		Long: branding.Text(`A wtc project is a named set of repositories: a harness the gateway is
 configured with, whose .harness-repos.yml lists them. A collection works in
 one wtc project, with worktrees of the repositories a task needs, or in an
 ad-hoc one, which takes any repository.
 
 projects lists them, so that what the person asks to work on can be matched to
-a project and its repositories before wtc add-repo starts a collection.`,
+a project and its repositories before {{command}} add-repo starts a collection.`),
+
 		Args: cobra.NoArgs,
 	}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if h := currentHost(); h != openclaw.HostOpenClaw {
-			return fmt.Errorf("wtc projects lists an OpenClaw gateway's wtc projects, and this is a %s session: a harness's .harness-repos.yml lists its repositories", h)
+			return fmt.Errorf(branding.Text("{{command}} projects lists an OpenClaw gateway's {{command}} projects, and this is a %s session: a harness's .harness-repos.yml lists its repositories"), h)
 		}
 		projects, err := gatewayProjects()
 		if err != nil {
@@ -76,7 +78,7 @@ a project and its repositories before wtc add-repo starts a collection.`,
 func projectsSummary(projects []gatewayProject) string {
 	var b strings.Builder
 	if len(projects) == 0 {
-		b.WriteString("This gateway configures no wtc projects: every collection is ad hoc.\n")
+		b.WriteString(branding.Text("This gateway configures no {{command}} projects: every collection is ad hoc.\n"))
 	}
 	for _, p := range projects {
 		def := ""
@@ -95,7 +97,7 @@ func projectsSummary(projects []gatewayProject) string {
 			fmt.Fprintf(&b, "  %s  %s%s\n", r.Name, r.Remote, role)
 		}
 	}
-	b.WriteString("Any other repository: ad hoc, wtc add-repo <url> --project none, or beside a project's with --ad-hoc.\n")
-	b.WriteString("Start a collection: wtc add-repo <repo> [...] --worktree <name>; the project whose repositories these are is picked.")
+	b.WriteString(branding.Text("Any other repository: ad hoc, {{command}} add-repo <url> --project none, or beside a project's with --ad-hoc.\n"))
+	b.WriteString(branding.Text("Start a collection: {{command}} add-repo <repo> [...] --worktree <name>; the project whose repositories these are is picked."))
 	return b.String()
 }

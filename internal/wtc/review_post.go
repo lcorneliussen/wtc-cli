@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"io"
 	"net/http"
 	"net/url"
@@ -194,7 +195,7 @@ func (c *Context) PostReviewBundle(bundle string, opt ReviewPostOptions) (Review
 	if cid != "" {
 		posted, err = postReviewComment(manifest, cid, body)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "wtc: warning: update of review comment %s failed; creating a new comment: %v\n", cid, err)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: update of review comment %s failed; creating a new comment: %v\n"), cid, err)
 		}
 	}
 	if cid == "" || err != nil {
@@ -403,7 +404,7 @@ func priorReviewInlineKeys(m ReviewManifest, bundle string) map[string]bool {
 	if m.Forge == "github" {
 		out, err := reviewForgeCommand(m.RepoDir, "gh", []string{"api", fmt.Sprintf("repos/%s/pulls/%s/comments?per_page=100", m.Slug, m.PR), "--paginate", "--slurp"}, nil)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "wtc: read prior GitHub inline comments: %v: %s\n", err, strings.TrimSpace(string(out)))
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: read prior GitHub inline comments: %v: %s\n"), err, strings.TrimSpace(string(out)))
 			return nil
 		}
 		for _, match := range reviewInlineMarker.FindAllStringSubmatch(string(out), -1) {
@@ -412,7 +413,7 @@ func priorReviewInlineKeys(m ReviewManifest, bundle string) map[string]bool {
 	} else {
 		out, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "list", m.PR, "--all", "--json"}, nil)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "wtc: read prior Bitbucket inline comments: %v\n", err)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: read prior Bitbucket inline comments: %v\n"), err)
 			return nil
 		}
 		for _, match := range reviewInlineMarker.FindAllStringSubmatch(string(out), -1) {
@@ -425,7 +426,7 @@ func priorReviewInlineKeys(m ReviewManifest, bundle string) map[string]bool {
 func postReviewInline(m ReviewManifest, bundle string) (posted, failed, skipped int) {
 	prior := priorReviewInlineKeys(m, bundle)
 	if prior == nil {
-		fmt.Fprintln(os.Stderr, "wtc: could not read prior inline comments; review remains pending")
+		fmt.Fprintln(os.Stderr, branding.Text("{{command}}: could not read prior inline comments; review remains pending"))
 		return 0, 1, 0
 	}
 	rows := readInlineRecords(bundle)
@@ -485,7 +486,7 @@ func postReviewInline(m ReviewManifest, bundle string) (posted, failed, skipped 
 						diff, err = parseReviewDiff(data)
 					}
 					if err != nil {
-						fmt.Fprintf(os.Stderr, "wtc: cannot validate inline positions: %v\n", err)
+						fmt.Fprintf(os.Stderr, branding.Text("{{command}}: cannot validate inline positions: %v\n"), err)
 						return posted, failed + 1, skipped
 					}
 					diffLoaded = true
@@ -497,7 +498,7 @@ func postReviewInline(m ReviewManifest, bundle string) (posted, failed, skipped 
 						failed++
 					}
 					skipped++
-					fmt.Fprintf(os.Stderr, "wtc: inline %s:%d skipped: not in diff (finding remains in summary)\n", f.File, f.Line)
+					fmt.Fprintf(os.Stderr, branding.Text("{{command}}: inline %s:%d skipped: not in diff (finding remains in summary)\n"), f.File, f.Line)
 					continue
 				}
 			}
@@ -556,10 +557,10 @@ func postReviewInline(m ReviewManifest, bundle string) (posted, failed, skipped 
 			}
 			if row.Skipped != "" {
 				skipped++
-				fmt.Fprintf(os.Stderr, "wtc: inline %s:%d skipped: not in diff (GitHub could not resolve position)\n", f.File, f.Line)
+				fmt.Fprintf(os.Stderr, branding.Text("{{command}}: inline %s:%d skipped: not in diff (GitHub could not resolve position)\n"), f.File, f.Line)
 			} else if row.ID == "" {
 				failed++
-				fmt.Fprintf(os.Stderr, "wtc: inline %s:%d: %s\n", f.File, f.Line, row.Error)
+				fmt.Fprintf(os.Stderr, branding.Text("{{command}}: inline %s:%d: %s\n"), f.File, f.Line, row.Error)
 			} else {
 				posted++
 			}

@@ -127,7 +127,7 @@ func addOpenCommand(root *cobra.Command, asJSON *bool) {
 			if item.Error != "" {
 				failures++
 				if strings.Contains(item.Error, "openpty") {
-					item.Error += "; " + openPtyHint
+					item.Error += "; " + openPtyHint()
 				}
 			}
 			items = append(items, item)

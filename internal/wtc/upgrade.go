@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 )
 
 // cliReleaseRepo is the GitHub repository that publishes wtc releases, and
@@ -87,7 +88,7 @@ func replaceCompatibility(config, requires string) (string, error) {
 func (c *Context) Upgrade(opt UpgradeOptions) (UpgradeResult, error) {
 	result := UpgradeResult{DryRun: opt.DryRun, Files: []string{".wtc-cli-version", "wtc.toml"}}
 	if c.AdHoc {
-		return result, errors.New("wtc upgrade needs a harness collection; an ad-hoc collection uses the installed wtc")
+		return result, errors.New(branding.Text("{{command}} upgrade needs a harness collection; an ad-hoc collection uses the installed wtc"))
 	}
 	pinFile, err := pinInput(c.Harness)
 	if err != nil {
@@ -125,7 +126,7 @@ func (c *Context) Upgrade(opt UpgradeOptions) (UpgradeResult, error) {
 		// Checked before anything is written, so a typo leaves no pin behind
 		// that mise cannot install.
 		if err := exec.Command("gh", "api", "repos/"+cliReleaseRepo+"/releases/tags/v"+result.To, "--jq", ".tag_name").Run(); err != nil {
-			return result, fmt.Errorf("wtc %s is not a published release (checked with gh): %w", result.To, err)
+			return result, fmt.Errorf(branding.Text("{{command}} %s is not a published release (checked with gh): %w"), result.To, err)
 		}
 	}
 	if result.Requires, err = CompatibilityRange(result.To); err != nil {
@@ -241,7 +242,7 @@ func publishedReleaseNotes(from, to *semver.Version) ([]ReleaseNote, error) {
 		notes = append(notes, r.note)
 	}
 	if len(notes) == 0 || notes[len(notes)-1].Version != to.String() {
-		return notes, fmt.Errorf("wtc %s is not a published release", to)
+		return notes, fmt.Errorf(branding.Text("{{command}} %s is not a published release"), to)
 	}
 	return notes, nil
 }

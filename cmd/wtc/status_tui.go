@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/mattn/go-runewidth"
 )
@@ -1173,7 +1174,7 @@ func (m statusTUIModel) headerLine() string {
 	if m.refreshing {
 		age += " · refreshing"
 	}
-	return fmt.Sprintf("wtc status · %s · %s", name, age)
+	return fmt.Sprintf(branding.Text("{{command}} status · %s · %s"), name, age)
 }
 
 func statusTUIProgressLine(step string, elapsed time.Duration, width int) string {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
 
@@ -415,7 +416,7 @@ func firstAgentPrompt(collection, kind string) string {
 		prompt = "/wtc-start"
 	}
 	if _, ok := wtc.ReadReviewMode(collection); ok {
-		prompt += " This collection is review-only: produce and post the review, nothing else. No commits, pushes, thread resolution or `wtc review ready`."
+		prompt += branding.Text(" This collection is review-only: produce and post the review, nothing else. No commits, pushes, thread resolution or `{{command}} review ready`.")
 	}
 	return prompt
 }

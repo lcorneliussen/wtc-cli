@@ -13,6 +13,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
@@ -50,15 +51,15 @@ func printPlan(plan openclaw.Plan) error {
 			if in.Tool != "" {
 				how = " with the " + in.Tool + " tool and its args, unchanged"
 			}
-			fmt.Fprintf(os.Stderr, "wtc: nothing was done. Publishing is the person's: tell them it is ready to push with ↑ in the collection card. Only if they asked you to publish, carry out this intent %s%s.\n", who, how)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: nothing was done. Publishing is the person's: tell them it is ready to push with ↑ in the collection card. Only if they asked you to publish, carry out this intent %s%s.\n"), who, how)
 		} else if in.Tool != "" {
-			fmt.Fprintf(os.Stderr, "wtc: nothing was done. Call the %s tool %s with this intent's args, unchanged.\n", in.Tool, who)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: nothing was done. Call the %s tool %s with this intent's args, unchanged.\n"), in.Tool, who)
 		} else {
-			fmt.Fprintf(os.Stderr, "wtc: nothing was done. Carry out this %s intent %s with the skill for %s.\n", in.Action, who, in.Forge)
+			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: nothing was done. Carry out this %s intent %s with the skill for %s.\n"), in.Action, who, in.Forge)
 		}
 	}
 	for _, w := range plan.Warnings {
-		fmt.Fprintln(os.Stderr, "wtc: warning:", w)
+		fmt.Fprintln(os.Stderr, branding.Text("{{command}}: warning:"), w)
 	}
 	return nil
 }
@@ -119,7 +120,7 @@ pull request with them. One left out keeps what was recorded before.`,
 	publish.Flags().BoolVar(&opt.AllowSensitive, "allow-sensitive", false, "Publish uncommitted files even when their names look like credentials")
 	publish.RunE = func(cmd *cobra.Command, args []string) error {
 		if h := currentHost(); h != openclaw.HostOpenClaw {
-			return fmt.Errorf("wtc publish hands a publication to an OpenClaw gateway, and this is a %s session. Push and open the pull request with the wtc-pr or wtc-draft-pr skill", h)
+			return fmt.Errorf(branding.Text("{{command}} publish hands a publication to an OpenClaw gateway, and this is a %s session. Push and open the pull request with the wtc-pr or wtc-draft-pr skill"), h)
 		}
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -220,7 +221,7 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 		if err != nil {
 			return err
 		}
-		instructions := "You own the " + repo + " worktree of collection " + target + ". The collection's session works in it; do nothing until it asks you to. When asked to publish, run wtc publish in your worktree and carry out its plan."
+		instructions := "You own the " + repo + " worktree of collection " + target + branding.Text(". The collection's session works in it; do nothing until it asks you to. When asked to publish, run {{command}} publish in your worktree and carry out its plan.")
 		if worker != "" {
 			instructions = workerTask(target, repo, work)
 		}
@@ -317,7 +318,7 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 // takes, and how it hands its work back.
 func workerTask(worktree, repo, work string) string {
 	return "You are a worker on " + repo + ", in collection " + worktree + ", on branch " + openclaw.Branch(worktree) + ". Your part of the task: " + strings.TrimSpace(work) +
-		"\n\nWork, build, test and commit only in your own worktree. Never publish, push or rebase, and do not edit other checkouts. When you are done, or stuck, end with what you did, the commits, and what is left: the task's session merges your branch with wtc catch-up --from, and publishes."
+		branding.Text("\n\nWork, build, test and commit only in your own worktree. Never publish, push or rebase, and do not edit other checkouts. When you are done, or stuck, end with what you did, the commits, and what is left: the task's session merges your branch with {{command}} catch-up --from, and publishes.")
 }
 
 // repoToAdd is one repository add-repo spawns a worktree of: arg as
@@ -460,7 +461,7 @@ func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string
 		here += " --project " + h.Name
 	}
 	all := strings.Join(repos, " ")
-	register := fmt.Sprintf("run `wtc add-repo %s%s` first, then ", h.Remote, here)
+	register := fmt.Sprintf(branding.Text("run `{{command}} add-repo %s%s` first, then "), h.Remote, here)
 	if hasWorktree {
 		register = ""
 	}
@@ -470,13 +471,11 @@ func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string
 			listed = append(listed, r)
 		}
 	}
-	separate := fmt.Sprintf("wtc add-repo %s --worktree <another-name> --project %s", strings.Join(unlisted, " "), openclaw.NoHarness)
+	separate := fmt.Sprintf(branding.Text("{{command}} add-repo %s --worktree <another-name> --project %s"), strings.Join(unlisted, " "), openclaw.NoHarness)
 	if len(listed) > 0 {
-		separate += fmt.Sprintf(", and here wtc add-repo %s%s", strings.Join(listed, " "), here)
+		separate += fmt.Sprintf(branding.Text(", and here {{command}} add-repo %s%s"), strings.Join(listed, " "), here)
 	}
-	err := fmt.Errorf("wtc project %s does not list %s. Ask the person which they want:\n"+
-		"  1. ad hoc beside the project's repositories, in this collection: wtc add-repo %s%s --ad-hoc\n"+
-		"  2. registered in the project: %sadd it to .harness-repos.yml in the collection's worktree of its harness %s and commit that (it is published like any repository), then wtc add-repo %s%s\n"+
+	err := fmt.Errorf("wtc project %s does not list %s. Ask the person which they want:\n"+branding.Text("  1. ad hoc beside the project's repositories, in this collection: {{command}} add-repo %s%s --ad-hoc\n")+branding.Text("  2. registered in the project: %sadd it to .harness-repos.yml in the collection's worktree of its harness %s and commit that (it is published like any repository), then {{command}} add-repo %s%s\n")+
 		"  3. a collection of its own, in an ad-hoc wtc project: %s",
 		h.Name, strings.Join(unlisted, ", "), all, here, register, h.Name, all, here, separate)
 	if len(elsewhere) > 0 {
@@ -487,7 +486,7 @@ func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string
 		sort.Strings(projects)
 		var in []string
 		for _, p := range projects {
-			in = append(in, fmt.Sprintf("in a new conversation for wtc project %s, which lists %s: the person starts it, and there wtc add-repo %s --worktree <name> --project %s", p, strings.Join(elsewhere[p], ", "), strings.Join(elsewhere[p], " "), p))
+			in = append(in, fmt.Sprintf(branding.Text("in a new conversation for wtc project %s, which lists %s: the person starts it, and there {{command}} add-repo %s --worktree <name> --project %s"), p, strings.Join(elsewhere[p], ", "), strings.Join(elsewhere[p], " "), p))
 		}
 		err = fmt.Errorf("%w\n  4. usually the right one for work on that project: %s", err, strings.Join(in, "; or "))
 	}
@@ -635,7 +634,7 @@ func catchUpSummary(result openclaw.CatchUp) string {
 	case result.Merged && result.Worker:
 		return fmt.Sprintf("merged origin/%s into %s; it reaches the forge through the task", result.Dest, result.Branch)
 	case result.Merged:
-		return fmt.Sprintf("merged origin/%s into %s; publish to send the merge (wtc publish)", result.Dest, result.Branch)
+		return fmt.Sprintf(branding.Text("merged origin/%s into %s; publish to send the merge ({{command}} publish)"), result.Dest, result.Branch)
 	}
 	return fmt.Sprintf("%s %s", result.Branch, result.Note)
 }
@@ -672,7 +671,7 @@ func gatewayStatus(names, subs []string, asJSON bool) error {
 		return enc.Encode(result)
 	}
 	if len(names) == 0 {
-		fmt.Println("No collections: the gateway has no managed worktrees yet. wtc add-repo <repo> --worktree <name> starts one.")
+		fmt.Println(branding.Text("No collections: the gateway has no managed worktrees yet. {{command}} add-repo <repo> --worktree <name> starts one."))
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -767,7 +766,7 @@ func (w gatewayWorker) String() string {
 		case r.ToMerge == 0:
 			parts = append(parts, r.Repo+" merged")
 		default:
-			parts = append(parts, fmt.Sprintf("%s %d to merge (wtc catch-up --from %s)", r.Repo, r.ToMerge, w.Name))
+			parts = append(parts, fmt.Sprintf(branding.Text("%s %d to merge ({{command}} catch-up --from %s)"), r.Repo, r.ToMerge, w.Name))
 		}
 	}
 	return "worker " + w.Name + ": " + strings.Join(parts, ", ")
@@ -850,7 +849,7 @@ func refuseUnderGateway(command string) error {
 	if currentHost() != openclaw.HostOpenClaw {
 		return nil
 	}
-	return fmt.Errorf("wtc %s makes a folder collection, which the OpenClaw gateway cannot see or publish. Here a collection is managed worktrees of one name: wtc add-repo <owner/name> --worktree <name> starts one, and wtc status lists them (wtc docs instructions/openclaw.md)", command)
+	return fmt.Errorf(branding.Text("{{command}} %s makes a folder collection, which the OpenClaw gateway cannot see or publish. Here a collection is managed worktrees of one name: {{command}} add-repo <owner/name> --worktree <name> starts one, and {{command}} status lists them ({{command}} docs instructions/openclaw.md)"), command)
 }
 
 // gatewayStateDir is where the gateway keeps its projects and worktrees.

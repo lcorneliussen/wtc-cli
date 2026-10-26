@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/spf13/cobra"
 )
@@ -60,7 +61,7 @@ func sandboxCatchUp(gw *openclaw.HTTPGateway, cont, asJSON bool) error {
 	var summary []string
 	switch {
 	case len(r.Conflicts) > 0:
-		summary = append(summary, fmt.Sprintf("merging origin/%s stopped on conflicts in: %s. Resolve them with git as in any merge (git log --merge, git show :1:<file>, :2:, :3:), git add each, then run wtc catch-up --continue. Do not rebase", r.Base, strings.Join(r.Conflicts, ", ")))
+		summary = append(summary, fmt.Sprintf(branding.Text("merging origin/%s stopped on conflicts in: %s. Resolve them with git as in any merge (git log --merge, git show :1:<file>, :2:, :3:), git add each, then run {{command}} catch-up --continue. Do not rebase"), r.Base, strings.Join(r.Conflicts, ", ")))
 	case r.Merged:
 		summary = append(summary, fmt.Sprintf("merged origin/%s into %s", r.Base, r.Branch))
 	case r.Note != "":

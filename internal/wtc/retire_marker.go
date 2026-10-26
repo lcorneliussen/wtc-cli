@@ -3,6 +3,7 @@ package wtc
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"os"
 	"path/filepath"
 	"time"
@@ -70,8 +71,7 @@ func retiredAncestor(dir string) string {
 }
 
 func retiredFolderError(dir string) error {
-	return fmt.Errorf("%s holds the leftovers of a retired collection (see %s); run `wtc retire %s` once they are gone",
-		dir, RetiredMarkerFile, filepath.Base(dir))
+	return fmt.Errorf(branding.Text("%s holds the leftovers of a retired collection (see %s); run `{{command}} retire %s` once they are gone"), dir, RetiredMarkerFile, filepath.Base(dir))
 }
 
 // retireLeftovers lists what keeps a folder alive, except the marker itself.

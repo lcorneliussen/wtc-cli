@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -32,7 +34,7 @@ func addUpgradeCommand(root *cobra.Command, asJSON *bool) {
 			return fmt.Errorf("--rollout takes the pin from each harness's development tip; it cannot be combined with --version")
 		}
 		if currentHost() == openclaw.HostOpenClaw {
-			return fmt.Errorf("under OpenClaw, upgrade by installing the new wtc and running `wtc openclaw install`")
+			return errors.New(branding.Text("under OpenClaw, upgrade by installing the new wtc and running `{{command}} openclaw install`"))
 		}
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -69,7 +71,7 @@ func addUpgradeCommand(root *cobra.Command, asJSON *bool) {
 			fmt.Printf("mise not found: wtc %s is pinned but not installed\n", result.To)
 		}
 		if result.NotesError != "" {
-			fmt.Printf("release notes unavailable (%s); read them with the new binary: wtc release-notes --since %s\n", result.NotesError, result.From)
+			fmt.Printf(branding.Text("release notes unavailable (%s); read them with the new binary: {{command}} release-notes --since %s\n"), result.NotesError, result.From)
 		} else {
 			fmt.Printf("release notes %s → %s, from %s:\n\n", result.From, result.To, result.NotesSource)
 		}
@@ -80,7 +82,7 @@ func addUpgradeCommand(root *cobra.Command, asJSON *bool) {
 			fmt.Print(strings.TrimRight(note.Content, "\n") + "\n")
 		}
 		if !result.DryRun {
-			fmt.Println("\nNext: decide what to adapt or adopt from these notes, commit the harness change on a branch, open its PR,\nand after it merges run `wtc upgrade --rollout`.")
+			fmt.Println(branding.Text("\nNext: decide what to adapt or adopt from these notes, commit the harness change on a branch, open its PR,\nand after it merges run `{{command}} upgrade --rollout`."))
 		}
 		return nil
 	}

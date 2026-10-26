@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -28,7 +29,7 @@ func addInitCommand(root *cobra.Command, asJSON *bool) {
 		if err != nil {
 			return err
 		}
-		return emit(envelope{OK: true, Data: result, Summary: "done: ad-hoc collection at " + result.Collection + "\nnext: wtc add-repo <clone-url|path-to-checkout>"}, *asJSON)
+		return emit(envelope{OK: true, Data: result, Summary: "done: ad-hoc collection at " + result.Collection + branding.Text("\nnext: {{command}} add-repo <clone-url|path-to-checkout>")}, *asJSON)
 	}
 	root.AddCommand(cmd)
 }

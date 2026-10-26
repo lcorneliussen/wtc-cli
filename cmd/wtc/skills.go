@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -108,7 +109,7 @@ func addSkillsCommands(root *cobra.Command, asJSON *bool) {
 			}
 		}
 		for _, failure := range failures {
-			fmt.Fprintln(os.Stderr, "wtc: "+failure)
+			fmt.Fprintln(os.Stderr, branding.Text("{{command}}: ")+failure)
 		}
 		if len(failures) > 0 {
 			return fmt.Errorf("%d collection(s) failed", len(failures))

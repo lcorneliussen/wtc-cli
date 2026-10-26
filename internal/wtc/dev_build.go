@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 )
 
 // A collection may carry its own build of wtc, made from the wtc-cli checkout
@@ -148,7 +149,7 @@ func DevBuildSource(collection string) (string, error) {
 	}
 	switch len(found) {
 	case 0:
-		return "", fmt.Errorf("no wtc-cli checkout in %s; add it with wtc add-repo or pass --source", collection)
+		return "", fmt.Errorf(branding.Text("no wtc-cli checkout in %s; add it with {{command}} add-repo or pass --source"), collection)
 	case 1:
 		return found[0], nil
 	}

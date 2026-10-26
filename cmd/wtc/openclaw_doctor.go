@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 )
 
@@ -79,10 +80,10 @@ func openClawChecks(env openClawEnv) []doctorCheck {
 	checks = append(checks, doctorCheck{Name: "gh", OK: err == nil, Detail: orElse(gh, "not on the PATH: pull requests on GitHub need it")})
 
 	if _, err := env.lookPath("openclaw"); err != nil {
-		return append(checks, doctorCheck{Name: "openclaw", Required: true, Detail: "not on the PATH: run wtc doctor on the gateway host, where the plugin and agents can be checked"})
+		return append(checks, doctorCheck{Name: "openclaw", Required: true, Detail: branding.Text("not on the PATH: run {{command}} doctor on the gateway host, where the plugin and agents can be checked")})
 	}
 
-	plugin := doctorCheck{Name: "plugin", Required: true, Detail: "the wtc plugin is not installed: wtc openclaw install"}
+	plugin := doctorCheck{Name: "plugin", Required: true, Detail: branding.Text("the wtc plugin is not installed: {{command}} openclaw install")}
 	if out, err := env.run("openclaw", "plugins", "list", "--json"); err != nil {
 		plugin.Detail = fmt.Sprintf("openclaw plugins list failed: %v", err)
 	} else {
@@ -106,7 +107,7 @@ func openClawChecks(env openClawEnv) []doctorCheck {
 			case !p.Enabled:
 				plugin.Detail = fmt.Sprintf("%s is installed but disabled: openclaw plugins enable wtc", p.Version)
 			case releaseVersion(want) && p.Version != want:
-				plugin.Detail = fmt.Sprintf("%s is installed, but this wtc is %s: wtc openclaw install", p.Version, want)
+				plugin.Detail = fmt.Sprintf(branding.Text("%s is installed, but this wtc is %s: {{command}} openclaw install"), p.Version, want)
 			default:
 				plugin.OK = true
 				plugin.Detail = fmt.Sprintf("%s, %s", p.Version, orElse(p.Status, "enabled"))
@@ -115,7 +116,7 @@ func openClawChecks(env openClawEnv) []doctorCheck {
 	}
 	checks = append(checks, plugin)
 
-	ui := doctorCheck{Name: "control-ui", Required: true, Detail: customPluginsKey + " is off, so the card and panel do not load: wtc openclaw install turns it on"}
+	ui := doctorCheck{Name: "control-ui", Required: true, Detail: customPluginsKey + branding.Text(" is off, so the card and panel do not load: {{command}} openclaw install turns it on")}
 	if out, err := env.run("openclaw", "config", "get", customPluginsKey); err == nil && strings.TrimSpace(lastLine(out)) == "true" {
 		ui.OK, ui.Detail = true, customPluginsKey
 	}
@@ -138,11 +139,11 @@ func openClawChecks(env openClawEnv) []doctorCheck {
 		case a.Workspace == "":
 			c.Detail = "the agent has no workspace"
 		case errors.Is(err, fs.ErrNotExist):
-			c.Detail = fmt.Sprintf("%s does not exist; create it with: wtc docs openclaw-AGENTS.md >> %s", file, file)
+			c.Detail = fmt.Sprintf(branding.Text("%s does not exist; create it with: {{command}} docs openclaw-AGENTS.md >> %s"), file, file)
 		case err != nil:
 			c.Detail = fmt.Sprintf("%s could not be read: %v", file, err)
 		case !mentionsWtc.Match(data):
-			c.Detail = fmt.Sprintf("%s does not mention wtc, so its agent only finds it through the skill; add: wtc docs openclaw-AGENTS.md >> %s", file, file)
+			c.Detail = fmt.Sprintf(branding.Text("%s does not mention wtc, so its agent only finds it through the skill; add: {{command}} docs openclaw-AGENTS.md >> %s"), file, file)
 		default:
 			c.OK, c.Detail = true, file
 		}
@@ -225,7 +226,7 @@ func harnessChecks(env openClawEnv) []doctorCheck {
 	}
 	cfg, err := openclaw.ParseGatewayConfig(out)
 	if err != nil {
-		return []doctorCheck{{Name: "harnesses", Required: true, Detail: err.Error() + ": wtc add-repo fails until it is fixed"}}
+		return []doctorCheck{{Name: "harnesses", Required: true, Detail: err.Error() + branding.Text(": {{command}} add-repo fails until it is fixed")}}
 	}
 	if len(cfg.Harnesses) == 0 {
 		return []doctorCheck{{Name: "harnesses", OK: true, Detail: "none configured: collections are ad hoc"}}

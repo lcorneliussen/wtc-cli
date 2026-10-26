@@ -3,6 +3,7 @@ package wtc
 import (
 	"archive/tar"
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"io"
 	"os"
 	"os/exec"
@@ -147,7 +148,7 @@ func (c *Context) snapshotReviewRepository(dir, kind, name string) (bool, error)
 		}
 	}
 	if info, err := os.Stat(owner); err != nil || !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "wtc: warning: %s %s has no Git owner; snapshot skipped\n", kind, name)
+		fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: %s %s has no Git owner; snapshot skipped\n"), kind, name)
 		return false, nil
 	}
 	oldRef := repo.ProductionRef
@@ -159,7 +160,7 @@ func (c *Context) snapshotReviewRepository(dir, kind, name string) (bool, error)
 	}
 	oldSHA, err := reviewBareRef(owner, oldRef)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "wtc: warning: %s %s ref %s unavailable; snapshot skipped\n", kind, name, oldRef)
+		fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: %s %s ref %s unavailable; snapshot skipped\n"), kind, name, oldRef)
 		return false, nil
 	}
 	baseDir := filepath.Join(dir, kind, name)

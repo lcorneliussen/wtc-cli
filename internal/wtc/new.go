@@ -3,6 +3,7 @@ package wtc
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -287,7 +288,7 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	var branchNote string
 	switch {
 	case opt.Review:
-		branchNote = fmt.Sprintf("**Review-only collection.** You review someone else's PR; the result is a verdict and nothing else.\nProduce and post the review only: `wtc review bundle`, `wtc review run`, `wtc review post`.\nNo commits, no pushes, no thread resolution, no `wtc review ready`; those belong to the author.\nPushing from `%s` is disabled. When the author pushes again, `wtc review bundle` moves to the new head for the next round.\n\nOther siblings start detached at the tip.", primaryDir(primary, harnessRepo))
+		branchNote = fmt.Sprintf(branding.Text("**Review-only collection.** You review someone else's PR; the result is a verdict and nothing else.\nProduce and post the review only: `{{command}} review bundle`, `{{command}} review run`, `{{command}} review post`.\nNo commits, no pushes, no thread resolution, no `{{command}} review ready`; those belong to the author.\nPushing from `%s` is disabled. When the author pushes again, `{{command}} review bundle` moves to the new head for the next round.\n\nOther siblings start detached at the tip."), primaryDir(primary, harnessRepo))
 	case opt.PR != "":
 		branchNote = fmt.Sprintf("The primary sibling is on a local branch at the exact PR head. Push review work with:\n\n    git -C %s push %s %s\n\nOther siblings start detached at the tip.", shellQuote(primaryDir(primary, harnessRepo)), shellQuote(result.PushRemote), shellQuote("HEAD:refs/heads/"+result.IntendedBranch))
 	case opt.Branch != "":
@@ -295,7 +296,7 @@ func (c *Context) NewCollection(opt NewOptions) (NewResult, error) {
 	default:
 		branchNote = fmt.Sprintf("Worktrees start **detached at the development tip** — no branch exists yet.\nCreate one at your first commit:\n\n    git switch -c %s\n\n(that is the expected name; adjust it if the work turns out to be something else).", result.IntendedBranch)
 	}
-	handoff := fmt.Sprintf("# wtc: %s — launch note (EPHEMERAL)\n\n**Goal:** %s\n\nFirst agent on this wtc: read this, turn anything durable into issues /\ncommits / PRs, then **delete this file as your very first action**\n(harness/AGENTS.md → \"State lives in git\").\n\n%s Collection env: `.env.collection` (inherited via `mise.toml`).\nRetire with `wtc retire .` from this collection's Herdr workspace, or `wtc retire %s` from another collection.\n", filepath.Base(result.Collection), defaultSource(result.Source), branchNote, filepath.Base(result.Collection))
+	handoff := fmt.Sprintf(branding.Text("# wtc: %s — launch note (EPHEMERAL)\n\n**Goal:** %s\n\nFirst agent on this wtc: read this, turn anything durable into issues /\ncommits / PRs, then **delete this file as your very first action**\n(harness/AGENTS.md → \"State lives in git\").\n\n%s Collection env: `.env.collection` (inherited via `mise.toml`).\nRetire with `{{command}} retire .` from this collection's Herdr workspace, or `{{command}} retire %s` from another collection.\n"), filepath.Base(result.Collection), defaultSource(result.Source), branchNote, filepath.Base(result.Collection))
 	if err := os.WriteFile(filepath.Join(result.Collection, "HANDOFF.md"), []byte(handoff), 0644); err != nil {
 		return result, err
 	}

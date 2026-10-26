@@ -2,6 +2,7 @@ package wtc
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,7 +27,7 @@ func runtimeShortTarget(m *runtimeManifest, target string) (string, error) {
 	}
 	switch len(dirs) {
 	case 0:
-		return "", fmt.Errorf("unknown service %q; wtc svc lists them", target)
+		return "", fmt.Errorf(branding.Text("unknown service %q; {{command}} svc lists them"), target)
 	case 1:
 		for dir := range dirs {
 			return dir + "/" + target, nil
@@ -214,7 +216,7 @@ func runtimeFragmentFor(c *Context, repo runtimeRepo, shared bool) string {
 // AddService enlists a service and, unless told otherwise, starts it.
 func (c *Context) AddService(opt ServiceOptions) (RuntimeResult, error) {
 	if len(opt.Cmd) == 0 {
-		return RuntimeResult{}, fmt.Errorf("give the command after --, such as wtc svc add web -- npm run dev")
+		return RuntimeResult{}, errors.New(branding.Text("give the command after --, such as {{command}} svc add web -- npm run dev"))
 	}
 	repo, name, err := c.runtimeServiceRepo(opt.Service, false)
 	if err != nil {
@@ -290,7 +292,7 @@ func (c *Context) RemoveService(service string, shared bool) (RuntimeResult, err
 		files[task.Source] = append(files[task.Source], strings.TrimPrefix(task.Path, repo.dir+"/"))
 	}
 	if len(files) == 0 {
-		return RuntimeResult{}, fmt.Errorf("unknown service %s/%s; wtc svc lists them", repo.dir, name)
+		return RuntimeResult{}, fmt.Errorf(branding.Text("unknown service %s/%s; {{command}} svc lists them"), repo.dir, name)
 	}
 	if others == 0 {
 		// Nothing would be left to run; stop everything first, if it ever ran.
@@ -401,7 +403,7 @@ func (c *Context) Tunnel(opt TunnelOptions) (RuntimeResult, error) {
 		}
 	}
 	if service == nil {
-		return RuntimeResult{}, fmt.Errorf("unknown service %s; wtc svc lists them", group)
+		return RuntimeResult{}, fmt.Errorf(branding.Text("unknown service %s; {{command}} svc lists them"), group)
 	}
 	if opt.Stop {
 		if len(tunnels) == 0 {
@@ -486,7 +488,7 @@ func (c *Context) DekitCommand(args []string) (*exec.Cmd, error) {
 		return nil, err
 	}
 	if m == nil {
-		return nil, fmt.Errorf("services are not configured; run wtc up")
+		return nil, errors.New(branding.Text("services are not configured; run {{command}} up"))
 	}
 	binary, err := c.runtimeBinary()
 	if err != nil {

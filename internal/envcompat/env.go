@@ -3,6 +3,7 @@ package envcompat
 
 import (
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"os"
 	"strings"
 	"sync"
@@ -53,7 +54,7 @@ func (r *resolver) lookup(name string, lookup lookupFunc) (string, bool) {
 	}
 	if oldSet && value != old {
 		if _, warned := r.warned.LoadOrStore(suffix, true); !warned {
-			r.warn(fmt.Sprintf("wtc: %s and %s differ; using %s", current, legacy, current))
+			r.warn(fmt.Sprintf(branding.Text("{{command}}: %s and %s differ; using %s"), current, legacy, current))
 		}
 	}
 	return value, true

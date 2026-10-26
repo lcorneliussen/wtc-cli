@@ -43,6 +43,21 @@ func TestPinnedBinaryHandsOverToDevBuild(t *testing.T) {
 		}
 	}
 	writeVersion(devVersion)
+	// Handover executes the legacy-named dev artifact but must retain the
+	// invocation used by its caller for help, version and command hints.
+	taba := filepath.Join(t.TempDir(), "taba")
+	if err := os.Symlink(pinned, taba); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"--version"}, {"svc", "add", "--help"}} {
+		cmd := exec.Command(taba, args...)
+		cmd.Dir = filepath.Join(collection, "harness")
+		cmd.Env = append(os.Environ(), "WTC_DEV_DELEGATED_FROM=", "WTC_DEV_BUILD=")
+		raw, err := cmd.CombinedOutput()
+		if err != nil || !strings.Contains(string(raw), "taba ") || strings.Contains(string(raw), "wtc version") || strings.Contains(string(raw), "wtc svc") {
+			t.Fatalf("dev handover lost invocation identity: %v %s", err, raw)
+		}
+	}
 	run := func(env ...string) string {
 		cmd := exec.Command(pinned, "--version")
 		cmd.Dir = filepath.Join(collection, "harness")

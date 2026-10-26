@@ -95,7 +95,7 @@ func openAfterNew(source *wtc.Context, collection string, explicitOpen, noOpen b
 	item := openCollection(source, filepath.Base(collection), opt, openDesiredLayout(target, opt, running), running, true)
 	if item.Error != "" {
 		if strings.Contains(item.Error, "openpty") {
-			item.Error += "; " + openPtyHint
+			item.Error += "; " + openPtyHint()
 		}
 		return fmt.Errorf("collection created at %s, but opening failed: %s", collection, item.Error)
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
 
@@ -12,7 +13,7 @@ func statusTable(snapshot wtc.StatusSnapshot, reposOnly bool, width int) string 
 	if name == "" {
 		name = "(all)"
 	}
-	lines := []string{statusTUIFit(fmt.Sprintf("wtc status · %s · %s", name, snapshot.GeneratedAt), width), ""}
+	lines := []string{statusTUIFit(fmt.Sprintf(branding.Text("{{command}} status · %s · %s"), name, snapshot.GeneratedAt), width), ""}
 	lines = append(lines, statusTUIRepoLines(snapshot, width, false)...)
 	lines = append(lines, statusTUIRuntimeLines(snapshot, width, false)...)
 	if !reposOnly {
