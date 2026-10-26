@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
 
 func TestWriteOpenClawPluginStampsTheVersion(t *testing.T) {
@@ -175,12 +176,23 @@ func TestOpenClawSkillsAreTheOpenClawVariants(t *testing.T) {
 	if err := writeOpenClawPlugin(dir, "v1.2.3"); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "skills", "wtc-catch-up", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(string(data), "---\nname: wtc-catch-up\n") || !strings.Contains(string(data), "wtc catch-up --continue") || strings.Contains(string(data), "herdr") {
-		t.Errorf("wtc-catch-up is not its OpenClaw variant:\n%.400s", data)
+	// Each is its OpenClaw variant, not the local skill of that name.
+	for name, marker := range map[string]string{
+		"wtc-catch-up": "wtc catch-up --continue",
+		"wtc-pr":       "they push it\n   with ↑",
+		"wtc-follow":   "wtc: pull request news",
+	} {
+		data, err := os.ReadFile(filepath.Join(dir, "skills", name, "SKILL.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(string(data), "---\nname: "+name+"\n") || !strings.Contains(string(data), marker) {
+			t.Errorf("%s is not its OpenClaw variant:\n%.400s", name, data)
+		}
+		// The marker tells the variants apart only while the local skill lacks it.
+		if local, _ := wtc.ReadDefault("skills/" + name + "/SKILL.md"); strings.Contains(string(local), marker) {
+			t.Errorf("the local %s has %q too: pick a marker only its OpenClaw variant has", name, marker)
+		}
 	}
 	// Skills without an OpenClaw variant stay local.
 	if _, err := os.Stat(filepath.Join(dir, "skills", "wtc-open")); err == nil {
