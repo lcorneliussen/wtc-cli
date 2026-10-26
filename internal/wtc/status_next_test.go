@@ -9,8 +9,12 @@ import (
 // A local row's facts become its next step: pushing is the agent's here,
 // and the pull request's facts read as the forge reports them.
 func TestStatusNextFromALocalRow(t *testing.T) {
+	// No git in the worktree: the mapping is what is tested here, and git
+	// must not read the checkout the test runs in. Predicting the merge is
+	// tested in next and on the gateway.
+	none := t.TempDir()
 	branch := func(fields StatusRepo) StatusRepo {
-		fields.Repo, fields.BranchKind, fields.Branch, fields.baseRef = "api", "branch", "12-paging", "origin/main"
+		fields.Repo, fields.BranchKind, fields.Branch, fields.baseRef, fields.Worktree = "api", "branch", "12-paging", "origin/main", none
 		return fields
 	}
 	for _, tc := range []struct {
@@ -27,7 +31,7 @@ func TestStatusNextFromALocalRow(t *testing.T) {
 		{"a merge in progress", branch(StatusRepo{Operation: "merge", Conflict: true}), "resolve", next.ByAgent},
 		{"a pushed branch behind its base: the agent decides", branch(StatusRepo{Behind: 2}), "catch-up", next.ByWTC},
 		{"uncommitted files: wait", branch(StatusRepo{Ahead: 1, Behind: 2, Changed: 3}), "", ""},
-		{"detached and current: nothing", StatusRepo{Repo: "api", BranchKind: "detached", Branch: "main"}, "", ""},
+		{"detached and current: nothing", StatusRepo{Repo: "api", BranchKind: "detached", Branch: "main", Worktree: none}, "", ""},
 	} {
 		got := next.For(statusFacts(tc.row))
 		switch {
