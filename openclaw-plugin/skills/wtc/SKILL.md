@@ -46,13 +46,13 @@ Read that before the first `wtc` command of a task and follow it. In short:
   with ↑ in the card. Never `git push`.
 - **A "wtc: pull request news" event**: act on it with the **wtc-follow**
   skill.
-- Parallel parts of a task go to workers, never to two writers in one
-  checkout: `wtc add-repo <repo> --worker <name> --work "<part>"`, then
-  `wtc catch-up --from <name>` in `<folder>/<repo>` to merge one in. A
-  worker is only for a part that really runs beside yours; work you would do
-  next anyway goes in your own checkout. When a worker ends, merge it in, or
-  tell the person what is left so they can discard it in the card: none is
-  left behind.
-- **Catching up** a repository, merging a worker in, and resolving the
+- **One focus per collection**: per repository one branch and one pull
+  request. Parallel work, or a second pull request in a repository, is a
+  collection of its own with its own conversation: propose it to the person
+  with a brief, and they start it. Subagents only read your checkouts; don't
+  give one a worktree to write in. A sub-session's worktree shows in the
+  card under its repository; merge what you want of it
+  (`wtc catch-up --from <branch>`) or tell the person what is left.
+- **Catching up** a repository, merging a sub-session's branch in, and resolving the
   conflicts either brings: the **wtc-catch-up** skill. It never rebases and
   never pushes.

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
+	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -17,6 +19,39 @@ func runtimeContext() (*wtc.Context, error) {
 		return nil, err
 	}
 	return wtc.Discover(cwd)
+}
+
+// startContext is runtimeContext for what starts services or tunnels, or
+// provisions their resources (add, up, restart, provision, opening a
+// tunnel). A worker's services are its task's: the worker merges into the
+// task, whose collection runs them. Stopping, listing and logs still work in
+// a worker's collection, for what ran there before.
+func startContext() (*wtc.Context, error) {
+	c, err := runtimeContext()
+	if err != nil {
+		return nil, err
+	}
+	if err := refuseWorkerServices(c.Collection, os.Getenv); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// refuseWorkerServices refuses a worker's collection under OpenClaw: one
+// named <task>--<worker> beside its task's collection.
+func refuseWorkerServices(collection string, getenv func(string) string) error {
+	if openclaw.DetectHost(getenv) != openclaw.HostOpenClaw {
+		return nil
+	}
+	name := filepath.Base(collection)
+	task := openclaw.TaskOf(name)
+	if task == "" {
+		return nil
+	}
+	if info, err := os.Stat(filepath.Join(filepath.Dir(collection), task)); err != nil || !info.IsDir() {
+		return nil
+	}
+	return fmt.Errorf("%s is a worker's collection: services run in its task's collection, %s", name, task)
 }
 
 func addRuntimeCommands(root *cobra.Command, asJSON *bool) {
@@ -98,7 +133,7 @@ A name without its repository works when only one repository has it.`}
 	}
 	provision := &cobra.Command{Use: "provision [repo/task-or-group]", Short: "Run idempotent resource hooks without starting services", Args: cobra.MaximumNArgs(1)}
 	provision.RunE = func(cmd *cobra.Command, args []string) error {
-		c, err := runtimeContext()
+		c, err := startContext()
 		if err != nil {
 			return err
 		}
@@ -139,7 +174,11 @@ func runtimeActionCommand(action string, asJSON *bool) *cobra.Command {
 		if wait < 0 {
 			return fmt.Errorf("--wait must be nonnegative")
 		}
-		c, err := runtimeContext()
+		load := startContext
+		if action == "down" {
+			load = runtimeContext
+		}
+		c, err := load()
 		if err != nil {
 			return err
 		}

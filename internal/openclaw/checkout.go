@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -226,6 +227,9 @@ type PublishOptions struct {
 // PlanPublish checks that publishing this checkout is safe and returns the
 // intent for it. It reads and never writes: no commit, no fetch, no push.
 func (c *Checkout) PlanPublish(opt PublishOptions) (Plan, error) {
+	if task := c.task(); task != "" {
+		return Plan{}, fmt.Errorf("%s is a worker of %s: a worker's work leaves through the task. Merge it into the task (wtc catch-up --from %s in the task's checkout), and the task publishes it", c.Branch(), task, strings.TrimPrefix(c.Worktree, task+WorkerSeparator))
+	}
 	if what := c.inProgress(); what != "" {
 		return Plan{}, fmt.Errorf("%s is in progress in %s: finish or abort it before publishing", what, c.Dir)
 	}
@@ -303,25 +307,31 @@ func (c *Checkout) PlanPublish(opt PublishOptions) (Plan, error) {
 	return plan, nil
 }
 
-// CatchUp is the result of merging the destination branch, or a worker's
-// branch, into the checkout.
+// CatchUp is the result of merging the destination branch, a worker's branch
+// (into its task) or the task's branch (into a worker) into the checkout.
 type CatchUp struct {
 	Branch string `json:"branch"`
 	Dest   string `json:"dest"`
-	// From is the worker branch merged in, instead of Dest.
+	// From is the branch merged in instead of Dest: a sub-session's or a
+	// worker's, by its name, merged into the collection's, or the
+	// collection's, merged into a sub-session's or a worker's.
 	From   string `json:"from,omitempty"`
 	Merged bool   `json:"merged"`
 	// FastForward says the checkout had nothing the ref lacked: it now is the
 	// ref, and no merge commit was made.
-	FastForward bool   `json:"fastForward,omitempty"`
-	Head        string `json:"head"`
-	Note        string `json:"note,omitempty"`
+	FastForward bool `json:"fastForward,omitempty"`
+	// Worker says the checkout is a worker's: its work reaches the forge
+	// through its task.
+	Worker bool   `json:"worker,omitempty"`
+	Head   string `json:"head"`
+	Note   string `json:"note,omitempty"`
 }
 
 // CatchUp fetches the destination branch and merges it. It never rebases and
 // never pushes: published history stays as it is, and the gateway publishes
-// the merge with the next publication. A conflicted merge is aborted. A
-// detached worktree is not merged into but moved to the tip (forward).
+// the merge with the next publication (a worker's, with its task's). A
+// conflicted merge is aborted. A detached worktree is not merged into but
+// moved to the tip (forward).
 func (c *Checkout) CatchUp() (CatchUp, error) {
 	result := CatchUp{Branch: c.Branch(), Dest: c.Dest}
 	if c.Detached {
@@ -338,6 +348,24 @@ func (c *Checkout) CatchUp() (CatchUp, error) {
 		return c.forward(result, "refs/remotes/origin/"+c.Dest, "origin/"+c.Dest)
 	}
 	return c.merge(result, "refs/remotes/origin/"+c.Dest, "origin/"+c.Dest)
+}
+
+// CatchUpWithTask merges the task's branch into a worker's checkout: a
+// worker's parent is its task, not origin. Nothing is fetched; the task's
+// branch is in the same clone.
+func (c *Checkout) CatchUpWithTask() (CatchUp, error) {
+	task := TaskOf(c.Worktree)
+	result := CatchUp{Branch: c.Branch(), Dest: c.Dest, From: Branch(task)}
+	if task == "" {
+		return result, fmt.Errorf("%s is no worker's branch", c.Branch())
+	}
+	if !HasBranch(c.Dir, Branch(task)) {
+		return result, fmt.Errorf("%s has no branch %s: no task of that name works in this repository", c.Repo, Branch(task))
+	}
+	if err := c.readyToMerge(); err != nil {
+		return result, err
+	}
+	return c.merge(result, "refs/heads/"+Branch(task), Branch(task))
 }
 
 // forward moves a detached worktree to ref, which must contain it: with no
@@ -376,6 +404,30 @@ func HasRemoteBranch(dir, branch string) bool {
 // openclaw/12-paging--a.
 const WorkerSeparator = "--"
 
+// TaskOf is the task a worker's worktree name would belong to: site-work for
+// site-work--docs, or empty for a name that cannot be a worker's. A task may
+// have "--" in its own name, so Checkout.task also checks for the task's
+// branch.
+func TaskOf(worktree string) string {
+	at := strings.LastIndex(worktree, WorkerSeparator)
+	if at <= 0 || at+len(WorkerSeparator) == len(worktree) || !ValidWorktreeName(worktree) {
+		return ""
+	}
+	return worktree[:at]
+}
+
+// task is the task this checkout is a worker of: the name says so, and the
+// task's branch is in the same clone. Empty for a checkout that is no worker.
+func (c *Checkout) task() string {
+	if task := TaskOf(c.Worktree); task != "" && HasBranch(c.Dir, Branch(task)) {
+		return task
+	}
+	return ""
+}
+
+// IsWorker reports whether the checkout is a worker's: see task.
+func (c *Checkout) IsWorker() bool { return c.task() != "" }
+
 // WorkerWorktree is the worktree name of a worker of task: worker is its
 // short name or the whole one.
 func WorkerWorktree(task, worker string) (string, error) {
@@ -390,16 +442,27 @@ func WorkerWorktree(task, worker string) (string, error) {
 	return name, nil
 }
 
-// MergeWorker merges the branch of a worker of this checkout's task. The
-// worker's collection has its worktree in the same clone of the repository,
-// so its branch is a local ref and nothing is fetched. Like CatchUp it never
-// rebases and never pushes, and a conflicted merge is aborted.
-func (c *Checkout) MergeWorker(worker string) (CatchUp, error) {
+// MergeFrom merges another branch of the same clone into this checkout's:
+// a sub-session's branch by its name, or a wtc worker's by its short name.
+// Worktrees of one repository share the gateway's clone, so the branch is a
+// local ref and nothing is fetched. Like CatchUp it never rebases and never
+// pushes, and a conflicted merge is aborted.
+func (c *Checkout) MergeFrom(from string) (CatchUp, error) {
 	if c.Detached {
-		return CatchUp{Dest: c.Dest}, fmt.Errorf("%s is detached: a worker's branch merges into the task's branch, and this repository has none yet", c.Dir)
+		return CatchUp{Dest: c.Dest}, fmt.Errorf("%s is detached: a branch merges into this repository's branch, and it has none yet", c.Dir)
 	}
 	result := CatchUp{Branch: c.Branch(), Dest: c.Dest}
-	name, err := WorkerWorktree(c.Worktree, worker)
+	// A branch by its own name: a sub-session names its branch after its
+	// change, not after this collection.
+	if from != "" && from != result.Branch && HasBranch(c.Dir, from) {
+		result.From = from
+		if err := c.readyToMerge(); err != nil {
+			return result, err
+		}
+		return c.merge(result, "refs/heads/"+from, from)
+	}
+	// Otherwise a wtc worker's short name: openclaw/<collection>--<worker>.
+	name, err := WorkerWorktree(c.Worktree, from)
 	if err != nil {
 		return result, err
 	}
@@ -458,16 +521,57 @@ func (c *Checkout) merge(result CatchUp, ref, label string) (CatchUp, error) {
 // WorkerRepo is a worker's branch in one repository, measured against the
 // task's branch there.
 type WorkerRepo struct {
-	Repo   string `json:"repo"`
+	Repo string `json:"repo"`
+	// Path is the worktree compared.
+	Path   string `json:"path"`
 	Branch string `json:"branch"`
 	// ToMerge counts the worker's commits the task's branch does not have
 	// yet: 0 once wtc catch-up --from merged them.
-	ToMerge int    `json:"toMerge"`
-	Error   string `json:"error,omitempty"`
+	ToMerge int `json:"toMerge"`
+	// Behind counts the collection's commits the worktree does not have:
+	// what a catch-up from the collection's branch brings in.
+	Behind int `json:"behind"`
+	// Uncommitted are the worker's uncommitted files, each compared with the
+	// task's checkout of the repository: whether the task has it already.
+	Uncommitted []WorkerFile `json:"uncommitted,omitempty"`
+	Error       string       `json:"error,omitempty"`
 }
 
-// WorkerRepos describes the worker's checkouts against the task's: each
-// worker worktree is compared in the task's worktree of the same clone.
+// WorkerFile is an uncommitted file of a sub-session's checkout. State is "same" when the
+// task's checkout has the file as the worker has it (or neither has it),
+// "only" when only the worker has it, and "differs" otherwise: both have it
+// differently, or only the task does (the worker deleted it).
+type WorkerFile struct {
+	Path  string `json:"path"`
+	State string `json:"state"`
+}
+
+// workerFiles compares the uncommitted files of a sub-session's checkout
+// with the collection's checkout of the same repository.
+func workerFiles(workerDir, taskDir string) []WorkerFile {
+	changes, err := (&Checkout{Dir: workerDir}).pending()
+	if err != nil {
+		return nil
+	}
+	var files []WorkerFile
+	for _, ch := range changes {
+		mine, errMine := os.ReadFile(filepath.Join(workerDir, ch.path))
+		theirs, errTheirs := os.ReadFile(filepath.Join(taskDir, ch.path))
+		state := "differs"
+		switch {
+		case errMine != nil && errTheirs != nil, errMine == nil && errTheirs == nil && bytes.Equal(mine, theirs):
+			state = "same"
+		case errMine == nil && errTheirs != nil:
+			state = "only"
+		}
+		files = append(files, WorkerFile{Path: ch.path, State: state})
+	}
+	return files
+}
+
+// WorkerRepos compares worktrees of sub-sessions (or wtc workers) with the
+// checkouts of the collection named task: each in the collection's worktree
+// of the same clone.
 func WorkerRepos(task string, taskDirs, workerDirs []string) []WorkerRepo {
 	clones := map[string]string{}
 	for _, dir := range taskDirs {
@@ -477,7 +581,7 @@ func WorkerRepos(task string, taskDirs, workerDirs []string) []WorkerRepo {
 	}
 	var repos []WorkerRepo
 	for _, dir := range workerDirs {
-		w := WorkerRepo{Repo: filepath.Base(filepath.Dir(dir))}
+		w := WorkerRepo{Repo: filepath.Base(filepath.Dir(dir)), Path: dir}
 		if url, err := git(dir, "remote", "get-url", "origin"); err == nil && ParseOrigin(url).Repo != "" {
 			w.Repo = ParseOrigin(url).Repo
 		}
@@ -498,6 +602,12 @@ func WorkerRepos(task string, taskDirs, workerDirs []string) []WorkerRepo {
 			} else {
 				w.ToMerge, _ = strconv.Atoi(n)
 			}
+			if n, err := git(taskDir, "rev-list", "--count", "refs/heads/"+w.Branch+"..refs/heads/"+Branch(task)); err == nil {
+				w.Behind, _ = strconv.Atoi(n)
+			}
+		}
+		if ok && err == nil {
+			w.Uncommitted = workerFiles(dir, taskDir)
 		}
 		repos = append(repos, w)
 	}

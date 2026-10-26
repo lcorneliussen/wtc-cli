@@ -495,22 +495,29 @@ test("the card's catch-up runs wtc catch-up with the agent's git identity", asyn
   assert.equal(env.GIT_AUTHOR_NAME, "Team Claw");
 });
 
-test("a worker's checkouts are the worker's, not a second row of the task's repository", async () => {
+test("a sub-session's checkouts are its own, not a second row of the collection's repository, whatever its name", async () => {
   const actions = new Map();
   const child = (key, repo, name, dir) => ({ sessionKey: key, entry: { parentSessionKey: "agent:main:c", projectId: repo, worktree: { id: dir, branch: `openclaw/${name}` }, workspaceDir: `/worktrees/${dir}` } });
   const entries = [
     { sessionKey: "agent:main:c", entry: {} },
     child("agent:main:subagent:site", "site", "9-x", "w1"),
     child("agent:main:subagent:api", "api", "9-x", "w2"),
+    // A wtc worker, named after the collection...
     child("agent:main:subagent:site-docs", "site", "9-x--docs", "w3"),
-    // The task has no checkout of the harness, and its status no word on it.
+    // ...whose harness the collection has no checkout of...
     child("agent:main:subagent:harness-docs", "harness", "9-x--docs", "w4"),
+    // ...and a session spawned with a worktree named for its change.
+    child("agent:main:subagent:nav", "site", "13-docs-nav", "w5"),
   ];
   const repo = (repo, dir, branch, more = {}) => ({ repo, path: `/worktrees/${dir}`, branch, ...more });
   const status = {
     "9-x": { repos: [repo("site", "w1", "openclaw/9-x"), repo("api", "w2", "openclaw/9-x")],
-      workers: [{ name: "docs", collection: "9-x--docs", repos: [{ repo: "site", branch: "openclaw/9-x--docs", toMerge: 2 }] }] },
+      subSessions: [
+        { repo: "site", path: "/worktrees/w3", branch: "openclaw/9-x--docs", toMerge: 2, behind: 1, uncommitted: [{ path: "a.md", state: "only" }] },
+        { repo: "site", path: "/worktrees/w5", branch: "openclaw/13-docs-nav", toMerge: 1, behind: 0 },
+      ] },
     "9-x--docs": { repos: [repo("site", "w3", "openclaw/9-x--docs", { dirty: 13 }), repo("harness", "w4", "openclaw/9-x--docs")] },
+    "13-docs-nav": { repos: [repo("site", "w5", "openclaw/13-docs-nav")] },
   };
   const argvs = [];
   plugin.register({
@@ -529,16 +536,77 @@ test("a worker's checkouts are the worker's, not a second row of the task's repo
     logger: {},
   });
   const { result } = await actions.get("collection").handler({ sessionKey: "agent:main:c", agentId: "main", payload: {} });
+  // The collection's status compares every sub-session's worktree.
+  const collectionStatus = argvs.find((a) => a.argv[1] === "status" && a.argv[2] === "9-x").argv;
+  assert.deepEqual(collectionStatus.filter((a, i) => collectionStatus[i - 1] === "--sub").sort(), ["/worktrees/w3", "/worktrees/w4", "/worktrees/w5"]);
   assert.deepEqual(result.repos.map((r) => `${r.repo} ${r.branch}`), ["api openclaw/9-x", "site openclaw/9-x"]);
-  assert.equal(result.workers.length, 1);
-  const [w] = result.workers;
-  assert.equal(w.name, "docs");
-  assert.equal(w.collection, "9-x--docs");
-  assert.deepEqual(w.repos.map((r) => [r.repo, r.dirty, r.toMerge, r.taskSessionKey]).sort(), [["harness", undefined, null, null], ["site", 13, 2, "agent:main:subagent:site"]]);
+  assert.deepEqual(result.subSessions.map((w) => w.name), ["13-docs-nav", "docs"]);
+  const docs = result.subSessions.find((w) => w.name === "docs");
+  assert.equal(docs.collection, "9-x--docs");
+  assert.deepEqual(docs.repos.map((r) => [r.repo, r.dirty, r.toMerge, r.taskSessionKey]).sort(), [["harness", undefined, null, null], ["site", 13, 2, "agent:main:subagent:site"]]);
+  // ↓ and the files are the collection's view, not origin's.
+  const site = docs.repos.find((r) => r.repo === "site");
+  assert.equal(site.behind, 1);
+  assert.deepEqual(site.uncommitted, [{ path: "a.md", state: "only" }]);
+  const nav = result.subSessions.find((w) => w.name === "13-docs-nav").repos[0];
+  assert.deepEqual([nav.branch, nav.toMerge, nav.taskSessionKey], ["openclaw/13-docs-nav", 1, "agent:main:subagent:site"]);
 
-  // Merging the worker is a catch-up from its branch in the task's checkout.
-  await actions.get("catch-up").handler({ sessionKey: "agent:main:subagent:site", agentId: "main", payload: { from: "docs" } });
-  assert.deepEqual(argvs.at(-1), { argv: ["wtc", "catch-up", "--from", "docs", "--json"], cwd: "/worktrees/w1" });
-  const refused = await actions.get("catch-up").handler({ sessionKey: "agent:main:subagent:site", agentId: "main", payload: { from: "--all" } });
-  assert.equal(refused.ok, false);
+  // Merging one is a catch-up from its branch, by its name, in the collection's checkout.
+  await actions.get("catch-up").handler({ sessionKey: "agent:main:subagent:site", agentId: "main", payload: { from: "openclaw/13-docs-nav" } });
+  assert.deepEqual(argvs.at(-1), { argv: ["wtc", "catch-up", "--from", "openclaw/13-docs-nav", "--json"], cwd: "/worktrees/w1" });
+  for (const bad of ["--all", "a..b", "x/", "a//b"]) {
+    const refused = await actions.get("catch-up").handler({ sessionKey: "agent:main:subagent:site", agentId: "main", payload: { from: bad } });
+    assert.equal(refused.ok, false, bad);
+  }
+});
+
+test("the collection is the one wtc made, also when a sub-session has as many checkouts", async () => {
+  const actions = new Map();
+  // One checkout of the collection, one of a sub-session spawned with a
+  // worktree: a tie by count. wtc labels the owners it spawns.
+  const entries = [
+    { sessionKey: "agent:main:c", entry: {} },
+    { sessionKey: "agent:main:subagent:site", entry: { parentSessionKey: "agent:main:c", label: "194-subrows site", projectId: "site", worktree: { branch: "openclaw/194-subrows" }, workspaceDir: "/worktrees/w1" } },
+    { sessionKey: "agent:main:subagent:x", entry: { parentSessionKey: "agent:main:c", label: "docs helper", projectId: "site", worktree: { branch: "openclaw/docs" }, workspaceDir: "/worktrees/w2" } },
+  ];
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      state: { resolveStateDir: () => "/nonexistent" },
+      agent: { session: { listSessionEntries: () => entries, getSessionEntry: () => undefined } },
+      system: { runCommandWithTimeout: async (argv) => ({ code: 0, stdout: argv[1] === "status" ? JSON.stringify({ [argv[2]]: { repos: [{ repo: "site", path: argv[2] === "docs" ? "/worktrees/w2" : "/worktrees/w1", branch: `openclaw/${argv[2]}` }] } }) : "", stderr: "" }) },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const { result } = await actions.get("collection").handler({ sessionKey: "agent:main:c", agentId: "main", payload: {} });
+  assert.deepEqual(result.repos.map((r) => r.branch), ["openclaw/194-subrows"]);
+  assert.deepEqual(result.subSessions.map((w) => [w.name, w.repos[0].taskBranch]), [["docs", "openclaw/194-subrows"]]);
+});
+
+test("without wtc's labels the collection is the name others extend, then the most used", async () => {
+  const pick = async (entries) => {
+    const actions = new Map();
+    plugin.register({
+      pluginConfig: {},
+      runtime: {
+        state: { resolveStateDir: () => "/nonexistent" },
+        agent: { session: { listSessionEntries: () => [{ sessionKey: "agent:main:c", entry: {} }, ...entries], getSessionEntry: () => undefined } },
+        system: { runCommandWithTimeout: async (argv) => ({ code: 0, stdout: argv[1] === "status" ? JSON.stringify({ [argv[2]]: { repos: [] } }) : "", stderr: "" }) },
+      },
+      session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+      registerHttpRoute() {},
+      on() {},
+      logger: {},
+    });
+    const { result } = await actions.get("collection").handler({ sessionKey: "agent:main:c", agentId: "main", payload: {} });
+    return result.subSessions.map((w) => w.name);
+  };
+  const child = (key, name, label) => ({ sessionKey: key, entry: { parentSessionKey: "agent:main:c", ...(label ? { label } : {}), worktree: { branch: `openclaw/${name}` }, workspaceDir: `/worktrees/${key}` } });
+  // No labels: a worker's name extends the collection's, so it is never the collection.
+  assert.deepEqual(await pick([child("a", "9-x--docs"), child("b", "9-x--docs"), child("c", "9-x")]), ["docs"]);
+  // A label without a project: the one that starts with its name.
+  assert.deepEqual(await pick([child("a", "9-x", "9-x site"), child("b", "nav", "helper")]), ["nav"]);
 });

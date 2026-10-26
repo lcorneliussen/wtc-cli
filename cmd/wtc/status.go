@@ -40,10 +40,12 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&silent, "silent", false, "Suppress progress messages during one-shot terminal output")
 	cmd.Flags().IntVar(&fetchAgeSeconds, "fetch-age", 300, "Refresh remote refs older than this many seconds")
 	cmd.Flags().IntVar(&watchSeconds, "watch", 0, "Run the interactive view with this refresh interval in seconds")
+	var subs []string
+	cmd.Flags().StringArrayVar(&subs, "sub", nil, "Under OpenClaw: also compare this worktree of a sub-session with the collection's checkout of its repository (repeatable)")
 	cmd.Flags().Lookup("watch").NoOptDefVal = "30"
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if currentHost() == openclaw.HostOpenClaw {
-			return gatewayStatus(args, *asJSON)
+			return gatewayStatus(args, subs, *asJSON)
 		}
 		terminal := term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd())
 		implicitTUI := terminal && !cmd.Flags().Changed("tui") && !cmd.Flags().Changed("watch") &&

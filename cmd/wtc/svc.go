@@ -61,7 +61,7 @@ and wtc svc tunnel can expose it.`,
 		if cmd.ArgsLenAtDash() != 1 {
 			return errors.New("put the command after --, such as wtc svc add web -- npm run dev")
 		}
-		c, err := runtimeContext()
+		c, err := startContext()
 		if err != nil {
 			return err
 		}
@@ -102,7 +102,11 @@ anonymous devtunnel are on the internet and open only with --public.`,
 	tunnel.Flags().BoolVar(&topt.Stop, "stop", false, "Close the tunnel")
 	tunnel.Flags().DurationVar(&topt.Wait, "wait", 60*time.Second, "Wait until the tunnel answers (0 returns immediately)")
 	tunnel.RunE = func(cmd *cobra.Command, args []string) error {
-		c, err := runtimeContext()
+		load := startContext
+		if topt.Stop {
+			load = runtimeContext
+		}
+		c, err := load()
 		if err != nil {
 			return err
 		}

@@ -1,6 +1,6 @@
 ---
 name: wtc-catch-up
-description: "Under OpenClaw: bring a repository of this conversation's collection up to date with its base branch, or merge a worker's branch into it, and resolve the conflicts when the merge stops on them. Use when the person or the collection card asks to catch up a repository, when a merge conflicts, when a pull request conflicts with its base, or after a pull request merged."
+description: "Under OpenClaw: bring a repository of this conversation's collection up to date with its base branch, or merge another branch of it (a sub-session's) into it, and resolve the conflicts when the merge stops on them. Use when the person or the collection card asks to catch up a repository, when a merge conflicts, when a pull request conflicts with its base, or after a pull request merged."
 metadata: { "openclaw": { "emoji": "↓", "requires": { "bins": ["wtc", "git"] } } }
 ---
 
@@ -19,9 +19,12 @@ conflict: you do, in your own checkout of the repository.
    them back.)
 3. **Merge.** In `<folder>/<repo>`:
    - the base branch: `wtc catch-up`;
-   - a worker's branch: `wtc catch-up --from <worker>`. A sandbox's
-     catch-up merges only the base: merge a worker's branch from the
-     repository's session outside the sandbox.
+   - another branch of the repository (a sub-session's) into yours:
+     `wtc catch-up --from <branch>`, by its name. A sandbox's catch-up
+     merges only the base: merge another branch from the repository's
+     session outside the sandbox;
+   - in a sub-session's checkout made by `--worker`, `wtc catch-up` merges
+     the collection's branch, its parent.
 4. **Read what it says.**
    - Merged, fast-forwarded, moved to the base's tip (a detached worktree
      with no work yet), or already up to date: done.

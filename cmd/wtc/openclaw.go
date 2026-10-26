@@ -578,9 +578,11 @@ func gatewayConfig() (openclaw.GatewayConfig, error) {
 	return openclaw.ParseGatewayConfig(out)
 }
 
-// catchUpCheckout is catch-up under OpenClaw: merge the destination branch,
-// or a worker's branch with from, into this session's worktree, or move a
-// detached one to the destination's tip. No rebase and no push.
+// catchUpCheckout is catch-up under OpenClaw. With from it merges another
+// branch of the repository by its name: a sub-session's, a worker's, or the
+// collection's into a sub-session. In a worker's checkout without --dest it
+// merges the collection's branch. Otherwise it merges the destination branch,
+// or moves a detached worktree to its tip. No rebase and no push.
 func catchUpCheckout(dest, from string, asJSON bool) error {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -591,11 +593,16 @@ func catchUpCheckout(dest, from string, asJSON bool) error {
 		return err
 	}
 	var result openclaw.CatchUp
-	if from != "" {
-		result, err = checkout.MergeWorker(from)
-	} else {
+	switch {
+	case from != "":
+		result, err = checkout.MergeFrom(from)
+	case dest == "" && checkout.IsWorker():
+		// A worker catches up with its task, the branch it merges into.
+		result, err = checkout.CatchUpWithTask()
+	default:
 		result, err = checkout.CatchUp()
 	}
+	result.Worker = checkout.IsWorker()
 	if err != nil {
 		return err
 	}
@@ -606,6 +613,13 @@ func catchUpCheckout(dest, from string, asJSON bool) error {
 // the destination leaves the branch at its base with nothing to publish; a
 // worker's commits, even fast-forwarded, are the task's to publish.
 func catchUpSummary(result openclaw.CatchUp) string {
+	// A worker's catch-up merges its task's branch, which is its own to merge.
+	if task := openclaw.TaskOf(strings.TrimPrefix(result.Branch, openclaw.BranchPrefix)); result.Worker && result.From == openclaw.Branch(task) {
+		if result.Merged {
+			return fmt.Sprintf("merged the task's %s into the worker's %s", result.From, result.Branch)
+		}
+		return fmt.Sprintf("%s %s", result.Branch, result.Note)
+	}
 	switch {
 	case result.Branch == "" && result.Merged:
 		return fmt.Sprintf("detached at origin/%s's tip again: no work of its own, nothing to publish", result.Dest)
@@ -615,6 +629,8 @@ func catchUpSummary(result openclaw.CatchUp) string {
 		return fmt.Sprintf("%s is at origin/%s again: nothing of its own on it, nothing to publish", result.Branch, result.Dest)
 	case result.Merged && result.From != "":
 		return fmt.Sprintf("merged %s into %s; the person publishes it with ↑ when the task is ready", result.From, result.Branch)
+	case result.Merged && result.Worker:
+		return fmt.Sprintf("merged origin/%s into %s; it reaches the forge through the task", result.Dest, result.Branch)
 	case result.Merged:
 		return fmt.Sprintf("merged origin/%s into %s; publish to send the merge (wtc publish)", result.Dest, result.Branch)
 	}
@@ -624,7 +640,7 @@ func catchUpSummary(result openclaw.CatchUp) string {
 // gatewayStatus is status under OpenClaw. A collection there is no folder:
 // it is the managed worktrees of one name, one per repository, each owned by
 // a session of its own. Without a name it shows every collection.
-func gatewayStatus(names []string, asJSON bool) error {
+func gatewayStatus(names, subs []string, asJSON bool) error {
 	all, err := openclaw.ManagedCollections(gatewayStateDir())
 	if err != nil {
 		return err
@@ -642,6 +658,9 @@ func gatewayStatus(names []string, asJSON bool) error {
 		col.Folder, col.Services, col.Error = linkGatewayFolder(name, col.Repos)
 		col.Harness = gatewayHarness(col.Folder, all[name])
 		col.Workers = gatewayWorkers(name, all)
+		if len(subs) > 0 {
+			col.SubSessions = openclaw.WorkerRepos(name, all[name], subs)
+		}
 		result[name] = col
 	}
 	if asJSON {
@@ -713,9 +732,12 @@ type gatewayCollection struct {
 	// instructions apply to the work in it.
 	Harness *gatewayHarnessStatus `json:"harness,omitempty"`
 	// Workers are the collections task--worker of this one's workers.
-	Workers  []gatewayWorker   `json:"workers,omitempty"`
-	Services []wtc.RuntimeItem `json:"services"`
-	Error    string            `json:"error,omitempty"`
+	Workers []gatewayWorker `json:"workers,omitempty"`
+	// SubSessions compares the worktrees given with --sub, a sub-session's
+	// whatever their names, with the collection's checkouts.
+	SubSessions []openclaw.WorkerRepo `json:"subSessions,omitempty"`
+	Services    []wtc.RuntimeItem     `json:"services"`
+	Error       string                `json:"error,omitempty"`
 }
 
 type gatewayHarnessStatus struct {

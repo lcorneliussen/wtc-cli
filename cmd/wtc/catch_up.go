@@ -29,7 +29,7 @@ func addCatchUpCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().BoolVar(&opt.NoEnv, "no-env", false, "Skip environment refresh")
 	cmd.Flags().BoolVar(&opt.NoSecrets, "no-secrets", false, "Skip secret links")
 	cmd.Flags().StringVar(&dest, "dest", "", "Under OpenClaw: branch to merge in (default: origin's default branch)")
-	cmd.Flags().StringVar(&from, "from", "", "Under OpenClaw: merge a worker's branch (openclaw/<task>--<worker>) instead, with no fetch")
+	cmd.Flags().StringVar(&from, "from", "", "Under OpenClaw: merge this branch of the same repository instead (a sub-session's, by its name), with no fetch")
 	cmd.Flags().BoolVar(&cont, "continue", false, "In an OpenClaw sandbox: finish a catch-up that stopped on conflicts, once they are resolved")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if gw := openclaw.GatewayFromEnv(os.Getenv); gw != nil {
@@ -41,7 +41,7 @@ func addCatchUpCommand(root *cobra.Command, asJSON *bool) {
 				}
 			})
 			if len(other) > 0 || len(args) > 0 {
-				return fmt.Errorf("in an OpenClaw sandbox, catch-up merges the session's base and takes only --continue (got %s): merge a worker's branch, or another base, from the repository's session outside the sandbox", strings.Join(append(other, args...), " "))
+				return fmt.Errorf("in an OpenClaw sandbox, catch-up merges the session's base and takes only --continue (got %s): merge another branch of the repository, or another base, from the repository's session outside the sandbox", strings.Join(append(other, args...), " "))
 			}
 			return sandboxCatchUp(gw, cont, *asJSON)
 		}
