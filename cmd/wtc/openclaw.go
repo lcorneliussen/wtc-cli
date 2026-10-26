@@ -599,14 +599,22 @@ func catchUpCheckout(dest, from string, asJSON bool) error {
 	if err != nil {
 		return err
 	}
-	summary := fmt.Sprintf("%s %s", result.Branch, result.Note)
+	return emit(envelope{OK: true, Data: result, Summary: catchUpSummary(result)}, asJSON)
+}
+
+// catchUpSummary says what a catch-up under OpenClaw did. A fast-forward of
+// the destination leaves the branch at its base with nothing to publish; a
+// worker's commits, even fast-forwarded, are the task's to publish.
+func catchUpSummary(result openclaw.CatchUp) string {
 	switch {
+	case result.Merged && result.FastForward && result.From == "":
+		return fmt.Sprintf("%s is at origin/%s again: nothing of its own on it, nothing to publish", result.Branch, result.Dest)
 	case result.Merged && result.From != "":
-		summary = fmt.Sprintf("merged %s into %s; the person publishes it with ↑ when the task is ready", result.From, result.Branch)
+		return fmt.Sprintf("merged %s into %s; the person publishes it with ↑ when the task is ready", result.From, result.Branch)
 	case result.Merged:
-		summary = fmt.Sprintf("merged origin/%s into %s; publish to send the merge (wtc publish)", result.Dest, result.Branch)
+		return fmt.Sprintf("merged origin/%s into %s; publish to send the merge (wtc publish)", result.Dest, result.Branch)
 	}
-	return emit(envelope{OK: true, Data: result, Summary: summary}, asJSON)
+	return fmt.Sprintf("%s %s", result.Branch, result.Note)
 }
 
 // gatewayStatus is status under OpenClaw. A collection there is no folder:

@@ -100,7 +100,7 @@ func RuntimeText(items []RuntimeItem) string {
 		return items[i].Collection+"/"+items[i].Group+"/"+items[i].Path < items[j].Collection+"/"+items[j].Group+"/"+items[j].Path
 	})
 	var b strings.Builder
-	b.WriteString("Services (dekit; ready = startup probe passed)\n")
+	b.WriteString("Services (dekit; ready = startup probe passed, then looked at now)\n")
 	group := ""
 	for _, item := range items {
 		key := item.Collection + "/" + item.Group
@@ -130,6 +130,12 @@ func RuntimeText(items []RuntimeItem) string {
 		}
 		if item.Error != "" {
 			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.Error))
+		}
+		if item.Answering == "no" {
+			fmt.Fprintf(&b, " · not answering now: %s", runtimeTextSafe(item.AnswerDetail))
+		}
+		if item.Login != "" {
+			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.Login))
 		}
 		b.WriteByte('\n')
 	}

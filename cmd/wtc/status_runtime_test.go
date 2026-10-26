@@ -311,3 +311,37 @@ func TestStatusTUIReadsServicesWhenSignalledOrDue(t *testing.T) {
 		t.Fatal("started a second read while one is in flight")
 	}
 }
+
+// Ready is only a startup probe: a live task that doesn't answer now, or a
+// live tunnel whose provider can't serve, is red, and its hover says why.
+func TestStatusRuntimeShowsTroubleNow(t *testing.T) {
+	ok := wtc.RuntimeItem{Path: "app/web/server", Group: "app/web", Kind: "service", State: "ready", URL: "http://127.0.0.1:1", Answering: "yes"}
+	silent := ok
+	silent.Answering, silent.AnswerDetail = "no", "HTTP 502"
+	login := wtc.RuntimeItem{Path: "app/web/tailscale", Group: "app/web", Kind: "endpoint", State: "ready", Login: "Tailscale needs a login: tailscale up"}
+	closed := login
+	closed.State = "idle"
+	starting := login
+	starting.State = "running"
+	for _, tc := range []struct {
+		item        wtc.RuntimeItem
+		state, tone string
+	}{
+		{ok, "ready", statusToneSuccess},
+		{silent, "no answer", statusToneFailure},
+		{login, "login", statusToneFailure},
+		{starting, "login", statusToneFailure},
+		// A closed tunnel's login waits until it is opened.
+		{closed, "stopped", statusToneDim},
+	} {
+		if _, tone := statusRuntimeMark(tc.item); statusRuntimeState(tc.item) != tc.state || tone != tc.tone {
+			t.Errorf("%s: %q %q, want %q %q", tc.item.Path, statusRuntimeState(tc.item), tone, tc.state, tc.tone)
+		}
+	}
+	if h := statusRuntimeHover(silent); !strings.Contains(h, "not answering now: HTTP 502") {
+		t.Errorf("hover: %s", h)
+	}
+	if h := statusRuntimeHover(login); !strings.Contains(h, "tailscale up") {
+		t.Errorf("hover: %s", h)
+	}
+}

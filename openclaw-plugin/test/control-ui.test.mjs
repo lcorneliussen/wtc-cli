@@ -95,6 +95,7 @@ const collections = new Map();
 const histories = new Map();
 const calls = [];
 let svcResult = { ok: true, result: { message: "done" } };
+let catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
 let personal = null;
@@ -127,6 +128,7 @@ const hostRequest = async (method, params) => {
   }
   calls.push({ method, ...params });
   if (method === "plugins.sessionAction" && params.actionId === "svc") return svcResult;
+  if (method === "plugins.sessionAction" && params.actionId === "catch-up") return catchUpResult;
   if (method === "sessions.github.publish") return { status: "needs_confirmation", requestId: "req-1" };
   if (method === "sessions.github.confirm") return { status: "published", url: "https://github.com/octo/api/pull/7" };
   return {};
@@ -233,9 +235,10 @@ test("panel: a busy collection", async () => {
 
 test("panel: repositories on different branches", async () => {
   const { host, view } = await mount("panel", collection([
-    repo("api"), repo("web"), repo("docs", { branch: "release" }),
+    repo("api", { ahead: 1 }), repo("web", { ahead: 1 }), repo("docs", { branch: "release", ahead: 1 }), repo("site"),
   ]));
-  assert.deepEqual(tables(host)[0].slice(1).map((r) => r[1]), ["openclaw/test", "openclaw/test", "release"]);
+  // One with nothing on its branch yet shows its base.
+  assert.deepEqual(tables(host)[0].slice(1).map((r) => r[1]), ["openclaw/test", "openclaw/test", "release", "main"]);
   view.dispose();
 });
 
@@ -294,6 +297,13 @@ test("composer: the actions are on the facts they change", async () => {
   calls.length = 0;
   await named(/^3 new on main\. Catch up/).onclick();
   assert.deepEqual(calls.map((c) => c.actionId), ["catch-up"]);
+  // A catch-up that stops on a conflict goes to the conversation too.
+  catchUpResult = { ok: true, result: { code: 1, json: null, message: "wtc: merging origin/main into openclaw/test conflicts in: README.md, go.mod. The merge was aborted and the checkout is as before. Merge by hand with `git merge origin/main`, resolve, commit — do not rebase\n" } };
+  calls.length = 0;
+  await named(/^3 new on main\. Catch up/).onclick();
+  assert.deepEqual(calls.map((c) => c.actionId ?? c.method), ["catch-up", "sessions.send"]);
+  assert.match(calls[1].message, /conflicts in README\.md, go\.mod\. Run wtc catch-up in your checkout of api; .*wtc catch-up --continue in a sandbox.*Don't rebase, and don't push/);
+  catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
   await named(/^#7 conflicts with main\. Resolve/).onclick();
   assert.match(calls.at(-1).message, /Pull request #7 of api conflicts.*Don't push/);
   // Without the Bitbucket plugin's publish, Bitbucket is not pushed from
@@ -726,4 +736,40 @@ test("the plugin registers the panel, the composer and a session-menu action, an
   const noop = () => () => {};
   ui.activate({ ui: { registerPanel: noop, registerReplacement: noop, registerAction: (a) => { actions.push(a); return () => {}; }, selectReplacement() {} } });
   assert.deepEqual(actions.map((a) => [a.id, a.placement]), [["open-collection-session", "session"]]);
+});
+
+test("panel: a ready service that doesn't answer, and a tunnel whose provider needs a login", async () => {
+  const web = { group: "api/web", path: "api/web/main", repo: "api", kind: "service", label: "preview", state: "ready", url: "http://127.0.0.1:42201", answering: "no", answer_detail: "HTTP 502" };
+  const tunnel = { group: "api/web", path: "api/web/tailscale", repo: "api", kind: "endpoint", provider: "tailscale", state: "ready", url: "https://host.example.ts.net:42201", login: "Tailscale needs a login: tailscale up" };
+  const { host, view } = await mount("panel", { ...collection([repo("api")], [web, tunnel]), tunnelProviders: ["tailscale"] });
+  const all = [...host.all()];
+  assert.ok(all.some((n) => n.textContent !== "⚠" && /^ready, not answering now \(HTTP 502\)/.test(n.title ?? n.textContent ?? "")), "the service says it isn't answering");
+  assert.ok(all.some((n) => n.textContent === "⚠" && /Tailscale needs a login: tailscale up/.test(n.title)), "the tunnel says it needs a login");
+  view.dispose();
+  // A closed tunnel's provider login leaves a healthy service healthy; the
+  // button that opens it again says what to do first.
+  const fine = { ...web, answering: "yes", answer_detail: undefined };
+  const closed = { ...tunnel, state: "idle" };
+  const quiet = await mount("panel", { ...collection([repo("api")], [fine, closed]), tunnelProviders: ["tailscale"] });
+  const nodes = [...quiet.host.all()];
+  assert.ok(!nodes.some((n) => /not answering|⚠/.test(n.textContent ?? "") || /^ready: /.test(n.title ?? "")), "nothing marked as failing");
+  assert.ok(nodes.some((n) => n.tagName === "BUTTON" && /Open the tailscale tunnel again .*First: Tailscale needs a login: tailscale up/.test(n.title)));
+  quiet.view.dispose();
+});
+
+test("composer: a repository with nothing on its branch shows its base", async () => {
+  const { host, view } = await mount("composer", collection([
+    repo("wtc-site"),
+    repo("wtc-cli", { ahead: 1, unpublished: 1 }),
+  ]));
+  await settle();
+  const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
+  card.open = true;
+  for (const fn of card.listeners.toggle) fn();
+  const codes = [...card.all()].filter((n) => n.tagName === "CODE");
+  const site = codes.find((n) => n.textContent === "main");
+  assert.ok(site, "the untouched one shows its base");
+  assert.match(site.title, /nothing on openclaw\/test yet/);
+  assert.ok(codes.some((n) => n.textContent === "openclaw/test"), "the one with a commit shows its branch");
+  view.dispose();
 });

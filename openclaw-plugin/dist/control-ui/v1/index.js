@@ -29,8 +29,11 @@ const link = (text, href) => (/^https?:\/\//.test(href ?? "") ? el("a", { textCo
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
 const isRunning = (s) => s.state === "ready" || s.state === "running";
-const isFailed = (s) => s.state === "failed" || (s.state === "exited" && s.exit_code > 0);
-const serviceState = (s) => `${s.state ?? "?"}${s.exit_code > 0 ? ` (exit ${s.exit_code})` : ""}`;
+// Ready is only a startup probe: wtc also looks at the address now, and at
+// whether the tunnel provider's client is signed in.
+// A closed tunnel's provider login matters only once it is opened again.
+const isFailed = (s) => s.state === "failed" || (s.state === "exited" && s.exit_code > 0) || s.answering === "no" || (!!s.login && isRunning(s));
+const serviceState = (s) => `${s.state ?? "?"}${s.exit_code > 0 ? ` (exit ${s.exit_code})` : ""}${s.answering === "no" ? `, not answering now (${s.answer_detail ?? "no answer"})` : ""}${s.login && isRunning(s) ? `: ${s.login}` : ""}`;
 
 // Pushing is the person's, through the gateway, never the agent's: the
 // gateway publishes an owner's worktree (pushes the branch, opens or updates
@@ -131,10 +134,27 @@ async function confirmBitbucket(host, agentId, r, pending, say) {
   return null;
 }
 
-async function catchUpRepo(host, agentId, r, say) {
+// The files a catch-up's merge stopped on, from wtc's message (Checkout.merge
+// in internal/openclaw/checkout.go, whose test pins the sentence); none when
+// it did not stop on a conflict.
+export const conflictsOf = (message) => (/conflicts in: (.+?)\. The merge was aborted/.exec(message ?? "")?.[1] ?? "")
+  .split(/,\s*/).filter(Boolean);
+
+// A conflict is the agent's to resolve, in its own checkout: in a sandbox,
+// wtc catch-up there stops on the conflict with git's merge state, and the
+// gateway takes the resolved branch back; outside one, wtc catch-up says to
+// merge by hand. The gateway's own merge was aborted and changed nothing.
+async function catchUpRepo(host, agentId, r, say, ask) {
   const name = r.repo ?? r.project;
   say(`Catching up ${name}…`);
   const out = await call(host, "catch-up", r.sessionKey, agentId);
+  const conflicts = conflictsOf(out.message);
+  if (conflicts.length) {
+    const base = r.base ?? "its base";
+    await ask(`Catching up ${name} with ${base} conflicts in ${conflicts.join(", ")}. Run wtc catch-up in your checkout of ${name}; where it stops on the conflicts, resolve them there and finish as it says (wtc catch-up --continue in a sandbox). Don't rebase, and don't push: pushing is mine, through the gateway.`);
+    say(`${name}: ${conflicts.join(", ")} changed on both sides; the conversation was asked to merge and resolve them.`);
+    return;
+  }
   say(`${name}: ${out.json?.summary ?? (out.message || "exit " + out.code)}`);
 }
 
@@ -238,11 +258,14 @@ function repoTitle(r, size = "14px") {
   label.style.cssText = `text-decoration:none;color:inherit;font-size:${size};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0`;
   return css(el("span", {}, forgeIcon(r.forge), label), "display:inline-flex;align-items:center;gap:6px;min-width:0");
 }
-// The branch most of a collection's repositories are on: shown once, and per
-// repository only where it differs.
+// A gateway worktree is on its own branch from the start; until something is
+// on it, it is its base, as a detached worktree is in a local collection.
+const untouched = (r) => !!r.branch && !r.ahead && !r.dirty && !r.published && !r.pullRequest;
+// The branch most of a collection's repositories with work on them are on:
+// shown once, and per repository only where it differs.
 const collectionBranch = (repos) => {
   const counts = new Map();
-  for (const r of repos) if (r.branch) counts.set(r.branch, (counts.get(r.branch) ?? 0) + 1);
+  for (const r of repos) if (r.branch && !untouched(r)) counts.set(r.branch, (counts.get(r.branch) ?? 0) + 1);
   return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 };
 const serviceName = (s) => s.label || String(s.group ?? s.path ?? "?").split("/").pop();
@@ -407,11 +430,14 @@ function tunnelNode(g, t, svc, { label, opener } = {}) {
   if (svc.busy(`${g.group}:${name}`)) return css(el("span", { textContent: label ? "…" : `${name} …` }), "color:var(--muted, #888)");
   // A closed tunnel is an action: open it again.
   if (!isRunning(t)) {
-    const title = `Open the ${name} tunnel again${pub ? ": anyone with the link can use it" : ""} (${serviceState(t)})`;
+    const title = `Open the ${name} tunnel again${pub ? ": anyone with the link can use it" : ""} (${serviceState(t)})${t.login ? `. First: ${t.login}` : ""}`;
     const again = () => svc.run({ op: "tunnel", group: g.group, provider: name, public: pub }, `Opening the ${name} tunnel…`, `${g.group}:${name}`);
     return opener ? opener(title, again) : pill(`▶ ${name}`, title, again);
   }
+  // Running, but not answering or not signed in: say so on it.
+  const trouble = isFailed(t) ? css(el("span", { textContent: "⚠", title: serviceState(t) }), "color:var(--danger, #cf222e)") : null;
   return css(el("span", {},
+    trouble,
     t.url ? link(label ?? name, t.url) : label ?? name,
     smallButton("✕", `Close the ${name} tunnel`, () => svc.run({ op: "tunnel", group: g.group, provider: name, stop: true }, `Closing the ${name} tunnel…`, `${g.group}:${name}`))),
   "display:inline-flex;align-items:center;gap:2px;white-space:nowrap");
@@ -566,7 +592,7 @@ function collectionTables(v) {
   async function catchUp(list) {
     list.forEach((r) => catching.add(r.sessionKey));
     v.rerender();
-    try { for (const r of list) await catchUpRepo(v.host, v.agent(), r, v.say); } finally {
+    try { for (const r of list) await catchUpRepo(v.host, v.agent(), r, v.say, (message) => askConversation(v.host, v.key(), message)); } finally {
       list.forEach((r) => catching.delete(r.sessionKey));
       await v.refresh();
     }
@@ -680,7 +706,9 @@ function collectionTables(v) {
     return [
       repoName(r),
       r.error ? toned(r.error, TONE.failure, r.error)
-        : css(el("code", { textContent: r.branch ?? `at ${baseOf(r)}`, title: r.branch ? `${r.branch}, ${r.ahead ?? 0} ahead of ${baseOf(r)}` : "No branch yet: the first push creates one" }), "font-size:12px;color:var(--muted, #888)"),
+        : untouched(r)
+          ? css(el("code", { textContent: baseOf(r), title: `At ${baseOf(r)}: nothing on ${r.branch} yet, which the first commit there starts` }), "font-size:12px;color:var(--muted, #888)")
+          : css(el("code", { textContent: r.branch ?? `at ${baseOf(r)}`, title: r.branch ? `${r.branch}, ${r.ahead ?? 0} ahead of ${baseOf(r)}` : "No branch yet: the first push creates one" }), "font-size:12px;color:var(--muted, #888)"),
       r.dirty ? toned(String(r.dirty), TONE.pending, `${plural(r.dirty, "file")} changed, not committed yet`) : null,
       busy.has(r.sessionKey) ? working() : pushCell(r, n),
       catching.has(r.sessionKey) ? working() : toCatchUp(r) ? catchUpCell(r) : null,

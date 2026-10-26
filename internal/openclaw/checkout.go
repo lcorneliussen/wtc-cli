@@ -295,8 +295,11 @@ type CatchUp struct {
 	// From is the worker branch merged in, instead of Dest.
 	From   string `json:"from,omitempty"`
 	Merged bool   `json:"merged"`
-	Head   string `json:"head"`
-	Note   string `json:"note,omitempty"`
+	// FastForward says the checkout had nothing the ref lacked: it now is the
+	// ref, and no merge commit was made.
+	FastForward bool   `json:"fastForward,omitempty"`
+	Head        string `json:"head"`
+	Note        string `json:"note,omitempty"`
 }
 
 // CatchUp fetches the destination branch and merges it. It never rebases and
@@ -387,7 +390,9 @@ func (c *Checkout) merge(result CatchUp, ref, label string) (CatchUp, error) {
 		result.Note = "already contains " + label
 		return result, nil
 	}
+	result.FastForward = gitOK(c.Dir, "merge-base", "--is-ancestor", "HEAD", ref)
 	if _, mergeErr := git(c.Dir, "merge", "--no-edit", "--quiet", ref); mergeErr != nil {
+		result.FastForward = false
 		conflicts, _ := git(c.Dir, "diff", "--name-only", "--diff-filter=U", "--ignore-submodules=dirty")
 		if c.inProgress() != "" {
 			_, _ = git(c.Dir, "merge", "--abort")
@@ -395,7 +400,9 @@ func (c *Checkout) merge(result CatchUp, ref, label string) (CatchUp, error) {
 		if strings.TrimSpace(conflicts) == "" {
 			return result, fmt.Errorf("merging %s into %s failed, and the checkout is as before: %w", label, c.Branch(), mergeErr)
 		}
-		return result, fmt.Errorf("merging %s into %s conflicts in: %s. The merge was aborted and the checkout is as before. Merge by hand with `git merge %s`, resolve, commit — do not rebase", label, c.Branch(), strings.Join(strings.Fields(conflicts), ", "), label)
+		// The Control UI card reads the files from "conflicts in: …. The merge
+		// was aborted" (conflictsOf in the plugin's control-ui bundle).
+		return result, fmt.Errorf("merging %s into %s conflicts in: %s. The merge was aborted and the checkout is as before. Merge by hand with `git merge %s`, resolve, commit — do not rebase", label, c.Branch(), strings.Join(strings.Split(strings.TrimSpace(conflicts), "\n"), ", "), label)
 	}
 	result.Merged = true
 	result.Head, _ = git(c.Dir, "rev-parse", "HEAD")
