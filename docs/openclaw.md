@@ -146,6 +146,13 @@ checks and requested changes ask the corresponding skill. Push uses the
 existing personal account and confirmation flow; merge opens the pull request
 for the person. Refreshing the card alone does not execute these actions.
 
+Uncommitted files offer **Commit changes**: the conversation reviews and
+commits the intended changes, leaving publication to the person. GitHub's ↑
+can also commit pending files as part of preparing publication; Bitbucket's ↑
+publishes commits only. The expanded card shows the latest action result in
+full. A refused or failed publication appears as an error even when the
+gateway supplies only a status and message.
+
 OpenClaw binds publication to the owner's managed branch. Returning to the
 tip does not rebind that owner or permit publishing an arbitrary new branch:
 another publication round needs a fresh managed worktree and owner. Support
