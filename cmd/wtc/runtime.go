@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -56,23 +58,24 @@ func refuseWorkerServices(collection string, getenv func(string) string) error {
 
 func addRuntimeCommands(root *cobra.Command, asJSON *bool) {
 	runtime := &cobra.Command{Use: "svc", Aliases: []string{"services", "runtime"}, Short: "List, enlist, start and stop this collection's services and tunnels",
-		Long: `Services are a repository's long-running processes, such as a web server, with
+		Long: branding.Text(`Services are a repository's long-running processes, such as a web server, with
 their tunnels and resources, run by this collection's dekit runner.
 
-A repository shares services in its committed .harness/dekit.tasks.yaml. wtc svc
-add and wtc svc tunnel write this collection's own .wtc/svc/<repo>.yaml unless
+A repository shares services in its committed .harness/dekit.tasks.yaml. {{command}} svc
+add and {{command}} svc tunnel write this collection's own .wtc/svc/<repo>.yaml unless
 --shared is given; that file is never committed and goes with the collection.
 
-  wtc svc                          list services, tunnels and resources
-  wtc svc add web --port-env PORT -- npm run dev
-  wtc svc up|down|restart [web]    all, or one service
-  wtc svc logs web                 recent output; -f follows
-  wtc svc tunnel web tailscale     open a tunnel; --public for one on the internet
-  wtc svc tunnel web --stop        close it
-  wtc svc rm web                   stop and remove
-  wtc svc dekit -- why web/main    anything else, with dekit itself
+  {{command}} svc                          list services, tunnels and resources
+  {{command}} svc add web --port-env PORT -- npm run dev
+  {{command}} svc up|down|restart [web]    all, or one service
+  {{command}} svc logs web                 recent output; -f follows
+  {{command}} svc tunnel web tailscale     open a tunnel; --public for one on the internet
+  {{command}} svc tunnel web --stop        close it
+  {{command}} svc rm web                   stop and remove
+  {{command}} svc dekit -- why web/main    anything else, with dekit itself
 
-A name without its repository works when only one repository has it.`}
+A name without its repository works when only one repository has it.`),
+	}
 	runtime.RunE = func(cmd *cobra.Command, args []string) error {
 		c, err := runtimeContext()
 		if err != nil {
@@ -83,7 +86,7 @@ A name without its repository works when only one repository has it.`}
 			return json.NewEncoder(os.Stdout).Encode(items)
 		}
 		if len(items) == 0 {
-			fmt.Println("No services. Enlist one with wtc svc add <name> -- <command>; wtc svc --help explains.")
+			fmt.Println(branding.Text("No services. Enlist one with {{command}} svc add <name> -- <command>; {{command}} svc --help explains."))
 			return nil
 		}
 		fmt.Print(wtc.RuntimeText(items))
@@ -217,7 +220,7 @@ func runtimeLogsCommand(asJSON *bool) *cobra.Command {
 	logs.Flags().IntVar(&tail, "tail", 100, "Number of recent lines")
 	logs.RunE = func(cmd *cobra.Command, args []string) error {
 		if *asJSON {
-			return fmt.Errorf("logs emits plain text; use wtc svc --json for state")
+			return errors.New(branding.Text("logs emits plain text; use {{command}} svc --json for state"))
 		}
 		if tail < 0 {
 			return fmt.Errorf("--tail must be nonnegative")

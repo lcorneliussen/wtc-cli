@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"io"
 	"net/http"
 	"net/url"
@@ -116,7 +117,7 @@ func AcceptSandboxBranch(dir, commit, bundle string) (Delivery, error) {
 		return d, nil
 	}
 	if !gitOK(c.Dir, "merge-base", "--is-ancestor", head, commit) {
-		return d, fmt.Errorf("%.12s does not extend %s at %.12s: the gateway's branch moved. Run wtc catch-up again, which starts from it", commit, d.Branch, head)
+		return d, fmt.Errorf(branding.Text("%.12s does not extend %s at %.12s: the gateway's branch moved. Run {{command}} catch-up again, which starts from it"), commit, d.Branch, head)
 	}
 	commits, err := git(c.Dir, "rev-list", "--parents", head+".."+commit, "--not", "--remotes=origin")
 	if err != nil {
@@ -348,10 +349,10 @@ func SandboxCatchUpCheckout(dir string, gw SandboxGateway, cont bool) (SandboxCa
 	var r SandboxCatchUp
 	top, err := git(dir, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return r, errors.New("not in a git checkout: run wtc catch-up in the repository's checkout")
+		return r, errors.New(branding.Text("not in a git checkout: run {{command}} catch-up in the repository's checkout"))
 	}
 	if gitOK(top, "remote", "get-url", "origin") {
-		return r, errors.New("this checkout has an origin, so it is not a sandbox's private copy: wtc catch-up in a sandbox works on the session's checkout")
+		return r, errors.New(branding.Text("this checkout has an origin, so it is not a sandbox's private copy: {{command}} catch-up in a sandbox works on the session's checkout"))
 	}
 	s, err := gw.Session()
 	if err != nil {
@@ -375,7 +376,7 @@ func SandboxCatchUpCheckout(dir string, gw SandboxGateway, cont bool) (SandboxCa
 	c := &Checkout{Dir: top}
 	if !cont {
 		if what := c.inProgress(); what != "" {
-			return r, fmt.Errorf("%s is in progress: finish it, then run wtc catch-up --continue", what)
+			return r, fmt.Errorf(branding.Text("%s is in progress: finish it, then run {{command}} catch-up --continue"), what)
 		}
 		if !gitOK(top, "merge-base", "--is-ancestor", gateway, "HEAD") {
 			// The gateway committed since (a publication): its branch wins,
@@ -403,10 +404,10 @@ func SandboxCatchUpCheckout(dir string, gw SandboxGateway, cont bool) (SandboxCa
 	} else if c.inProgress() == "a merge" {
 		if conflicts, _ := git(top, "diff", "--name-only", "--diff-filter=U"); conflicts != "" {
 			r.Conflicts = strings.Fields(conflicts)
-			return r, fmt.Errorf("still unresolved: %s. Resolve them and git add each, then run wtc catch-up --continue", strings.Join(r.Conflicts, ", "))
+			return r, fmt.Errorf(branding.Text("still unresolved: %s. Resolve them and git add each, then run {{command}} catch-up --continue"), strings.Join(r.Conflicts, ", "))
 		}
 		if files := stagedConflictMarkers(top); len(files) > 0 {
-			return r, fmt.Errorf("conflict markers are still in %s: resolve them, git add, then run wtc catch-up --continue", strings.Join(files, ", "))
+			return r, fmt.Errorf(branding.Text("conflict markers are still in %s: resolve them, git add, then run {{command}} catch-up --continue"), strings.Join(files, ", "))
 		}
 		if _, err := git(top, append(identity(top), "commit", "--quiet", "--no-edit")...); err != nil {
 			return r, err
@@ -420,7 +421,7 @@ func SandboxCatchUpCheckout(dir string, gw SandboxGateway, cont bool) (SandboxCa
 		return r, err
 	}
 	if !gitOK(top, "merge-base", "--is-ancestor", gateway, head) {
-		return r, errors.Join(fmt.Errorf("%.12s does not extend the gateway's %s: run wtc catch-up again", head, s.Branch), unstash(top, &r))
+		return r, errors.Join(fmt.Errorf(branding.Text("%.12s does not extend the gateway's %s: run {{command}} catch-up again"), head, s.Branch), unstash(top, &r))
 	}
 	if head != mustRev(top, gateway) {
 		bundle, err := os.CreateTemp("", "wtc-catch-up-*.bundle")

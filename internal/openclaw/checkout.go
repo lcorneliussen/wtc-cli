@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"os"
 	"os/exec"
 	"path"
@@ -228,7 +229,7 @@ type PublishOptions struct {
 // intent for it. It reads and never writes: no commit, no fetch, no push.
 func (c *Checkout) PlanPublish(opt PublishOptions) (Plan, error) {
 	if task := c.task(); task != "" {
-		return Plan{}, fmt.Errorf("%s is a worker of %s: a worker's work leaves through the task. Merge it into the task (wtc catch-up --from %s in the task's checkout), and the task publishes it", c.Branch(), task, strings.TrimPrefix(c.Worktree, task+WorkerSeparator))
+		return Plan{}, fmt.Errorf(branding.Text("%s is a worker of %s: a worker's work leaves through the task. Merge it into the task ({{command}} catch-up --from %s in the task's checkout), and the task publishes it"), c.Branch(), task, strings.TrimPrefix(c.Worktree, task+WorkerSeparator))
 	}
 	if what := c.inProgress(); what != "" {
 		return Plan{}, fmt.Errorf("%s is in progress in %s: finish or abort it before publishing", what, c.Dir)

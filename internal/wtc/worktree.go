@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 )
 
@@ -316,6 +317,7 @@ func runRepoCommand(worktree, hook, program string, args ...string) {
 	cmd.Dir = worktree
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "wtc: warning: %s hook for %s failed: %v\n", hook, filepath.Base(worktree), err)
+		fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: %s hook for %s failed: %v
+`), hook, filepath.Base(worktree), err)
 	}
 }

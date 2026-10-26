@@ -3,7 +3,9 @@ package wtc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"golang.org/x/sys/unix"
 	"io"
 	"net/http"
@@ -255,7 +257,7 @@ func runtimeGroupTasks(selector string, tasks []runtimeTask, starting bool) ([]r
 	}
 	if len(picked) == 0 {
 		group := strings.TrimSuffix(selector, "/**")
-		return nil, fmt.Errorf("%s has only tunnels; open one with wtc svc tunnel", group)
+		return nil, fmt.Errorf(branding.Text("%s has only tunnels; open one with {{command}} svc tunnel"), group)
 	}
 	return picked, nil
 }
@@ -275,7 +277,7 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 			}
 		}
 		if m == nil {
-			return fmt.Errorf("runtime is not configured; run wtc up")
+			return errors.New(branding.Text("runtime is not configured; run {{command}} up"))
 		}
 		if action != "down" {
 			if err := runtimeOutputPathsSafe(m); err != nil {
@@ -335,7 +337,7 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 				return err
 			}
 			if state != "running" {
-				return fmt.Errorf("runner is %s; run wtc up first", state)
+				return fmt.Errorf(branding.Text("runner is %s; run {{command}} up first"), state)
 			}
 			for _, item := range c.runtimeStatus(m) {
 				if item.State == "ready" || item.State == "running" || item.State == "starting" {
@@ -353,7 +355,7 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 					running = append(running, task)
 				}
 				if len(running) == 0 {
-					return fmt.Errorf("nothing is running; start services with wtc up")
+					return errors.New(branding.Text("nothing is running; start services with {{command}} up"))
 				}
 				tasks = running
 				for _, task := range tasks {
@@ -498,9 +500,9 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 				}
 				if time.Now().After(deadline) {
 					if pending != "" {
-						return fmt.Errorf("%s after %s; inspect wtc status and wtc logs", pending, wait)
+						return fmt.Errorf(branding.Text("%s after %s; inspect {{command}} status and {{command}} logs"), pending, wait)
 					}
-					return fmt.Errorf("runtime readiness timed out after %s; inspect wtc status and wtc logs", wait)
+					return fmt.Errorf(branding.Text("runtime readiness timed out after %s; inspect {{command}} status and {{command}} logs"), wait)
 				}
 				time.Sleep(100 * time.Millisecond)
 			}

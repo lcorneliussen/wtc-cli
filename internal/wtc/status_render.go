@@ -2,6 +2,7 @@ package wtc
 
 import (
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"sort"
 	"strings"
 )
@@ -187,7 +188,7 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 	if len(s.Retired) != 0 {
 		b.WriteString("\n## Retired leftovers\n\n")
 		for _, row := range s.Retired {
-			fmt.Fprintf(&b, "- **%s** — %s; `wtc retire %s` finishes once they are gone\n", row.Folder, statusRetiredHolding(row), row.Folder)
+			fmt.Fprintf(&b, branding.Text("- **%s** — %s; `{{command}} retire %s` finishes once they are gone\n"), row.Folder, statusRetiredHolding(row), row.Folder)
 		}
 	}
 	if s.ShowCollectionColumn || !includePRs {
@@ -205,7 +206,7 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 	}
 	if len(active) == 0 && len(archived) == 0 {
 		if s.PRsEmptyHint {
-			b.WriteString("- (none enlisted — `wtc pr enlist <repo> <n>`)\n")
+			b.WriteString(branding.Text("- (none enlisted — `{{command}} pr enlist <repo> <n>`)\n"))
 		} else {
 			b.WriteString("- (none)\n")
 		}

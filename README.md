@@ -66,7 +66,7 @@ Real commands against synthetic local repositories:
 | Set up a team harness | [Handbook](https://wtc.sh/docs/team-harness/), [harness design](docs/harness-design.md) |
 | Configure hooks, environment, secrets, or services | [Embedded customization guide](internal/wtc/defaults/instructions/customize.md), `wtc docs` |
 | Understand a release or upgrade | [Release notes and upgrades](docs/release-notes.md), `wtc release-notes --since <old-pin>` |
-| Prepare for the taba rename | [Environment compatibility](docs/rename-compatibility.md), [configuration inputs](docs/rename-config-inputs.md), [rename announcement](https://taba.sh/wtc-is-now-taba/) |
+| Prepare for the taba rename | [Environment compatibility](docs/rename-compatibility.md), [configuration inputs](docs/rename-config-inputs.md), [command names](docs/rename-invocation.md), [rename announcement](https://taba.sh/wtc-is-now-taba/) |
 | Build, test, or contribute | [Development and validation](docs/development.md) |
 | Report a bug | [Issues](https://github.com/lcorneliussen/wtc-cli/issues) — include version, host mode, and a redacted reproduction |
 

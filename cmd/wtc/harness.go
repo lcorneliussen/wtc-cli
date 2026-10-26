@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -43,7 +44,7 @@ func addHarnessCommands(root *cobra.Command, asJSON *bool) {
 		}
 		data, err := wtc.ReadDefault(args[0])
 		if err != nil {
-			return fmt.Errorf("unknown embedded document %q; run wtc docs to list paths", args[0])
+			return fmt.Errorf(branding.Text("unknown embedded document %q; run {{command}} docs to list paths"), args[0])
 		}
 		if *asJSON {
 			return emit(envelope{OK: true, Data: map[string]string{"path": args[0], "content": string(data)}}, true)

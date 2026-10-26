@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/openclaw"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -35,13 +36,13 @@ func emit(v envelope, asJSON bool) error {
 func main() {
 	handOverToDevBuild()
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "wtc:", err)
+		fmt.Fprintln(os.Stderr, branding.Text("{{command}}:"), err)
 		os.Exit(1)
 	}
 }
 func run() error {
 	var asJSON bool
-	root := &cobra.Command{Use: "wtc", Short: "Worktree collection tools", SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: branding.Name(), Short: "Worktree collection tools", SilenceUsage: true, SilenceErrors: true}
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "Emit a JSON result")
 	root.Version = versionLabel()

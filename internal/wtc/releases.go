@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
@@ -351,7 +352,7 @@ func SelectReleaseNotes(version, since string) ([]ReleaseNote, error) {
 		}
 	}
 	if version != "" {
-		return nil, fmt.Errorf("release notes for %q are not embedded in this binary; run wtc release-notes --list", version)
+		return nil, fmt.Errorf(branding.Text("release notes for %q are not embedded in this binary; run {{command}} release-notes --list"), version)
 	}
 	return selected, nil
 }

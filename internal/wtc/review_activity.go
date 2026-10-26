@@ -3,6 +3,7 @@ package wtc
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -291,7 +292,7 @@ func (c *Context) PrepareHostedReviewBundle(bundle string) error {
 		return err
 	}
 	if len(activity.Waiting) > 0 {
-		return fmt.Errorf("hosted review is waiting for %s; inspect wtc review activity, let it finish, then re-run local review", strings.Join(activity.Waiting, ", "))
+		return fmt.Errorf(branding.Text("hosted review is waiting for %s; inspect {{command}} review activity, let it finish, then re-run local review"), strings.Join(activity.Waiting, ", "))
 	}
 	if len(activity.Findings) > 0 {
 		return fmt.Errorf("%d open hosted review threads; address or answer and resolve them before starting local review", len(activity.Findings))

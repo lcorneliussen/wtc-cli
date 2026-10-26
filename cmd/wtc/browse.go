@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -67,7 +68,7 @@ func addBrowseCommand(root *cobra.Command, asJSON *bool) {
 			}
 			if callerAgent {
 				// Neovim here would take over the agent's terminal.
-				open := "wtc open " + filepath.Base(c.Collection)
+				open := branding.Text("{{command}} open ") + filepath.Base(c.Collection)
 				if session := os.Getenv("HERDR_SESSION"); session != "" {
 					open += " --session " + session
 				}

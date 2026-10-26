@@ -36,4 +36,4 @@ Toolchain caches fingerprint the selected config path and contents, so switching
 
 ## Later increments
 
-Runtime and generated-state namespaces such as `.wtc`, `.wtc-prs`, service runner state, review records and caches retain their existing names. Changing a live runtime namespace needs a coordinated transition so clients do not start separate runners for one collection. Invocation-aware branding and eventual default-name changes remain separate work in the [rename plan](https://taba.sh/wtc-is-now-taba/).
+Runtime and generated-state namespaces such as `.wtc`, `.wtc-prs`, service runner state, review records and caches retain their existing names. Changing a live runtime namespace needs a coordinated transition so clients do not start separate runners for one collection. [Invocation-aware command names](rename-invocation.md) are a separate preparation increment; eventual default-name changes follow the [rename plan](https://taba.sh/wtc-is-now-taba/).

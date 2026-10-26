@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
@@ -676,7 +677,7 @@ func (c *Context) newAdHoc(opt NewOptions) (NewResult, error) {
 	if opt.Branch != "" {
 		branchNote = "All siblings are already on the explicitly requested branch. Commit on that branch; do not create it again.\n"
 	}
-	handoff := fmt.Sprintf("# wtc: %s — launch note (EPHEMERAL)\n\n**Goal:** %s\n\nAn ad-hoc collection: no harness, registry in `.wtc/config/repos.yml`.\nFirst agent on this wtc: read this, turn anything durable into issues /\ncommits / PRs, then **delete this file as your very first action**.\n\n%s\nAdd repositories with `wtc add-repo <name|clone-url|path>`. Retire with `wtc retire .` from inside it.\n", name, defaultSource(result.Source), branchNote)
+	handoff := fmt.Sprintf(branding.Text("# wtc: %s — launch note (EPHEMERAL)\n\n**Goal:** %s\n\nAn ad-hoc collection: no harness, registry in `.wtc/config/repos.yml`.\nFirst agent on this wtc: read this, turn anything durable into issues /\ncommits / PRs, then **delete this file as your very first action**.\n\n%s\nAdd repositories with `{{command}} add-repo <name|clone-url|path>`. Retire with `{{command}} retire .` from inside it.\n"), name, defaultSource(result.Source), branchNote)
 	if err := os.WriteFile(filepath.Join(result.Collection, "HANDOFF.md"), []byte(handoff), 0644); err != nil {
 		return result, err
 	}

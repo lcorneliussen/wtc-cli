@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -30,7 +31,7 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	var round int
 	var public, noCatchUp bool
 	var startOpen, startNoOpen bool
-	start := &cobra.Command{Use: "start <repo>#<number> [repo ...]", Short: "Create a review-only collection for someone else's PR (wtc new --pr … --review)", Args: cobra.MinimumNArgs(1)}
+	start := &cobra.Command{Use: "start <repo>#<number> [repo ...]", Short: branding.Text("Create a review-only collection for someone else's PR ({{command}} new --pr … --review)"), Args: cobra.MinimumNArgs(1)}
 	start.Flags().BoolVar(&startOpen, "open", false, "Open the new collection in herdr")
 	start.Flags().BoolVar(&startNoOpen, "no-open", false, "Leave the collection unopened")
 	start.RunE = func(cmd *cobra.Command, args []string) error {
@@ -193,7 +194,8 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 		}
 		fmt.Println(result.URL)
 		if result.InlineFailed > 0 {
-			fmt.Fprintf(os.Stderr, "wtc: warning: %d inline comments failed to post\n", result.InlineFailed)
+			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: %d inline comments failed to post
+`), result.InlineFailed)
 		}
 		return nil
 	}

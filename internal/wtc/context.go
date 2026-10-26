@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/BurntSushi/toml"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 	"gopkg.in/yaml.v3"
 )
@@ -114,7 +115,7 @@ func Discover(start string) (*Context, error) {
 		}
 		dir = parent
 	}
-	return nil, errors.New("not inside a worktree collection (harness/.harness-repos.yml not found); run `wtc init` to make this folder an ad-hoc collection")
+	return nil, errors.New(branding.Text("not inside a worktree collection (harness/.harness-repos.yml not found); run `{{command}} init` to make this folder an ad-hoc collection"))
 }
 
 func OpenCollection(dir string) (*Context, error) {

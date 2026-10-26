@@ -3,6 +3,7 @@ package wtc
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"os"
 	"path/filepath"
 	"sort"
@@ -95,16 +96,19 @@ func copyPublicReviewComments(dir string, manifest ReviewManifest) {
 	if manifest.Forge == "bitbucket" {
 		raw, err := reviewForgeCommand(manifest.RepoDir, "bb", []string{"--json", "pr", "comments", "list", manifest.PR, "--limit", "1000", "--no-truncate"}, nil)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "wtc: warning: Bitbucket review comments unavailable: %v\n", err)
+			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: Bitbucket review comments unavailable: %v
+`), err)
 			return
 		}
 		comments, err := parseBitbucketBundleComments(raw)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "wtc: warning: Bitbucket review comments could not be parsed: %v\n", err)
+			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: Bitbucket review comments could not be parsed: %v
+`), err)
 			return
 		}
 		if err := writeBundleComments(dir, comments); err != nil {
-			fmt.Fprintf(os.Stderr, "wtc: warning: Bitbucket review comments could not be saved: %v\n", err)
+			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: Bitbucket review comments could not be saved: %v
+`), err)
 		}
 		return
 	}
@@ -113,21 +117,25 @@ func copyPublicReviewComments(dir string, manifest ReviewManifest) {
 	}
 	conversation, err := reviewForgeCommand(manifest.RepoDir, "gh", []string{"pr", "view", manifest.PR, "--repo", manifest.Slug, "--json", "comments"}, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "wtc: warning: review comments unavailable: %v\n", err)
+		fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: review comments unavailable: %v
+`), err)
 		return
 	}
 	inline, err := reviewForgeCommand(manifest.RepoDir, "gh", []string{"api", fmt.Sprintf("repos/%s/pulls/%s/comments?per_page=100", manifest.Slug, manifest.PR), "--paginate", "--slurp"}, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "wtc: warning: inline review comments unavailable: %v\n", err)
+		fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: inline review comments unavailable: %v
+`), err)
 		return
 	}
 	comments, err := parseBundleComments(conversation, inline)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "wtc: warning: review comments could not be parsed: %v\n", err)
+		fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: review comments could not be parsed: %v
+`), err)
 		return
 	}
 	if err := writeBundleComments(dir, comments); err != nil {
-		fmt.Fprintf(os.Stderr, "wtc: warning: review comments could not be saved: %v\n", err)
+		fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: warning: review comments could not be saved: %v
+`), err)
 	}
 }
 

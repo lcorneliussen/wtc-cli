@@ -11,6 +11,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/charmbracelet/x/term"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -47,14 +48,16 @@ func handOverToDevBuild() {
 	}
 	if !wtc.DevBuildTakesOver(version, build) {
 		if term.IsTerminal(os.Stderr.Fd()) {
-			fmt.Fprintf(os.Stderr, "wtc: dev build %s is older than %s; using %s (wtc dev install to rebuild)\n", build.Version, version, version)
+			fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: dev build %s is older than %s; using %s ({{command}} dev install to rebuild)
+`), build.Version, version, version)
 		}
 		return
 	}
 	env := append(os.Environ(), wtc.DevBuildDelegatedEnv+"="+version)
 	// On success Exec does not return; on failure keep running this binary.
-	if err := syscall.Exec(build.Binary, append([]string{build.Binary}, os.Args[1:]...), env); err != nil {
-		fmt.Fprintf(os.Stderr, "wtc: cannot run dev build %s: %v\n", build.Binary, err)
+	if err := syscall.Exec(build.Binary, os.Args, env); err != nil {
+		fmt.Fprintf(os.Stderr, branding.Text(`{{command}}: cannot run dev build %s: %v
+`), build.Binary, err)
 	}
 }
 
@@ -125,9 +128,10 @@ func describeBuild(readInfo func() (*debug.BuildInfo, bool)) string {
 }
 
 func addDevCommands(root *cobra.Command, asJSON *bool) {
-	dev := &cobra.Command{Use: "dev", Short: "Run a collection-local build of wtc in place of the pinned release",
-		Long: "wtc dev install builds the wtc-cli checkout in this collection into .wtc/dev/wtc.\n" +
-			"Any wtc started inside the collection then hands over to that build while it is the same version\n" +
+	dev := &cobra.Command{Use: "dev", Short: branding.Text("Run a collection-local build of {{command}} in place of the pinned release"),
+		Long: branding.Text(`{{command}} dev install builds the wtc-cli checkout in this collection into .wtc/dev/wtc.
+`) +
+			branding.Text("Any {{command}} started inside the collection then hands over to that build while it is the same version\n") +
 			"or newer, and runs itself again once it is newer than the build. Set WTC_DEV_BUILD=off to skip\n" +
 			"the handover for one command.", Args: cobra.NoArgs}
 	collectionRoot := func() (string, error) {
@@ -163,7 +167,7 @@ func addDevCommands(root *cobra.Command, asJSON *bool) {
 			return emit(envelope{OK: true, Data: build, Summary: fmt.Sprintf("installed dev build %s from %s\n%s", build.Version, build.Source, devBuildEffect(build))}, *asJSON)
 		}}
 	install.Flags().StringVar(&source, "source", "", "wtc-cli checkout to build (default: the collection's wtc-cli sibling)")
-	status := &cobra.Command{Use: "status", Short: "Show which wtc runs in this collection", Args: cobra.NoArgs,
+	status := &cobra.Command{Use: "status", Short: branding.Text("Show which {{command}} runs in this collection"), Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := collectionRoot()
 			if err != nil {
@@ -189,7 +193,7 @@ func addDevCommands(root *cobra.Command, asJSON *bool) {
 			}
 			summary := "no dev build to remove"
 			if removed {
-				summary = "removed the dev build; wtc runs the pinned or ambient release here again"
+				summary = branding.Text("removed the dev build; {{command}} runs the pinned or ambient release here again")
 			}
 			return emit(envelope{OK: true, Data: map[string]bool{"removed": removed}, Summary: summary}, *asJSON)
 		}}
@@ -205,10 +209,10 @@ func devBuildEffect(build *wtc.DevBuild) string {
 		return "in effect: this is the dev build"
 	}
 	if wtc.DevBuildTakesOver(version, build) {
-		return "in effect: wtc " + version + " hands over to it"
+		return branding.Text("in effect: {{command}} ") + version + " hands over to it"
 	}
 	if _, err := os.Stat(build.Binary); err == nil && version == "dev" {
-		return "this wtc is an unversioned build and does not hand over"
+		return branding.Text("this {{command}} is an unversioned build and does not hand over")
 	}
-	return "not in effect: wtc " + version + " is newer"
+	return branding.Text("not in effect: {{command}} ") + version + " is newer"
 }

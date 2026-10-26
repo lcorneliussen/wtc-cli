@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
 
@@ -62,7 +63,7 @@ func secretInventoryTUI(c *wtc.Context, result wtc.SecretInventory) error {
 		})
 	}
 	return runInventoryTUI(inventoryTUIModel{
-		title:   "wtc secrets · " + filepath.Base(c.Collection),
+		title:   branding.Text("{{command}} secrets · ") + filepath.Base(c.Collection),
 		heading: "PATH",
 		summary: fmt.Sprintf("%d file paths · shared means available to collections with that repository", len(rows)),
 		rows:    rows,
@@ -94,7 +95,7 @@ func envInventoryTUI(c *wtc.Context, result wtc.EnvInventory) error {
 		})
 	}
 	return runInventoryTUI(inventoryTUIModel{
-		title:   "wtc env · " + filepath.Base(c.Collection),
+		title:   branding.Text("{{command}} env · ") + filepath.Base(c.Collection),
 		heading: "FILE / KEY",
 		summary: fmt.Sprintf("%d source files · %d variable names · values hidden", len(result.Files), len(result.Variables)),
 		rows:    rows,

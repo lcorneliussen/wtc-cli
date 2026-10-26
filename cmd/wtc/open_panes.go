@@ -12,10 +12,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
 
-const openPtyHint = "the machine is out of pseudo-terminals (kern.tty.ptmx_max); close idle tool panes with wtc open --trim --all or stop unused herdr sessions"
+func openPtyHint() string {
+	return branding.Text("the machine is out of pseudo-terminals (kern.tty.ptmx_max); close idle tool panes with {{command}} open --trim --all or stop unused herdr sessions")
+}
 
 func openTrimCommand(c *wtc.Context, names []string, opt openOptions, running bool, asJSON *bool) error {
 	if !running {
@@ -150,7 +153,8 @@ func openBrowseCommand(argv []string) bool {
 	if filepath.Base(argv[0]) == "nvim" {
 		return true
 	}
-	return filepath.Base(argv[0]) == "wtc" && len(argv) > 1 && argv[1] == "browse"
+	name := strings.TrimSuffix(filepath.Base(argv[0]), ".exe")
+	return (name == "wtc" || name == "taba") && len(argv) > 1 && argv[1] == "browse"
 }
 
 func openPaneProcessIDs(session, pane string) (map[int]bool, error) {
@@ -220,7 +224,7 @@ func openPtyReport() (string, bool) {
 	if holders := openPtyHolders(); holders != "" {
 		report += "; most panes: " + holders
 	}
-	return report + "; close idle tool panes with wtc open --trim --all", true
+	return report + branding.Text("; close idle tool panes with {{command}} open --trim --all"), true
 }
 
 func openPtyHolders() string {

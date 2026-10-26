@@ -11,6 +11,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	openclawplugin "github.com/lcorneliussen/wtc-cli/openclaw-plugin"
 	"github.com/spf13/cobra"
@@ -25,7 +26,7 @@ func addOpenClawCommands(root *cobra.Command) {
 	var noConfig bool
 	install := &cobra.Command{
 		Use:   "install",
-		Short: "Install this wtc's OpenClaw plugin on the gateway: the collection card, the Collection panel and the agent's wtc skills",
+		Short: branding.Text("Install this wtc's OpenClaw plugin on the gateway: the collection card, the Collection panel and the agent's {{command}} skills"),
 		Long: `Run on the gateway host, where wtc and openclaw are on the PATH. The plugin is
 embedded in this binary, so it is always the one that matches this wtc.
 

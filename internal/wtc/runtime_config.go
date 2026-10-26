@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Masterminds/semver/v3"
+	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"gopkg.in/yaml.v3"
 	"io"
 	"net/url"
@@ -451,7 +452,7 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 				return nil
 			}
 		} else if state != "absent" {
-			return nil, fmt.Errorf("runtime config changed while the runner is %s; run wtc down before rendering", state)
+			return nil, fmt.Errorf(branding.Text("runtime config changed while the runner is %s; run {{command}} down before rendering"), state)
 		} else if _, err := runtimeCommand(old, false, "runner", "stop"); err != nil && !strings.Contains(err.Error(), "Runner is not running.") {
 			// Clear down's saved task definitions before applying changed config.
 			return nil, err
