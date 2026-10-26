@@ -85,7 +85,10 @@ type Facts struct {
 	// AfterMerge counts the commits made after the pull request merged:
 	// neither in it nor in the base, and no merges.
 	AfterMerge int
-	PR         *PR
+	// NeedsBranch preserves work on a completed branch when the local
+	// catch-up cannot prove that the base carries it.
+	NeedsBranch bool
+	PR          *PR
 }
 
 // For is the repository's next step, or nil when nothing waits on anyone.
@@ -117,19 +120,22 @@ func For(f Facts) *Step {
 	// A merged branch is finished: nothing is merged into it any more. It
 	// goes back to the tip, and the next change branches anew; commits made
 	// after the merge are such a change, on the wrong branch.
-	case pr != nil && pr.State == "merged" && f.AfterMerge > 0:
+	case pr != nil && pr.State == "merged" && (f.AfterMerge > 0 || f.NeedsBranch):
 		s.Step, s.By, s.Skill = "new-branch", ByAgent, "wtc-catch-up"
 		s.Reason = fmt.Sprintf("#%d was merged, but %d commits came after it: put them on a new branch", pr.Number, f.AfterMerge)
+		if f.NeedsBranch {
+			s.Reason = fmt.Sprintf("#%d was merged, but the base does not carry this branch's work: put it on a new branch", pr.Number)
+		}
 		s.Then = []string{"push"}
 		s.Key = key(f.Head)
-	case pr != nil && pr.State == "merged" && (f.Behind > 0 || pr.MergedIn == nil || !*pr.MergedIn):
+	case pr != nil && pr.State == "merged" && (f.Branch != "" || f.Behind > 0 || pr.MergedIn == nil || !*pr.MergedIn):
 		s.Step, s.By = "return-to-tip", ByWTC
 		s.Reason = fmt.Sprintf("#%d was merged: back to %s's tip; the next change branches anew", pr.Number, baseName(f.Base))
 		s.Command = []string{"wtc", "catch-up"}
 		s.Key = key(fmt.Sprint(pr.Number), f.BaseHead)
 	case pr != nil && pr.State == "merged":
-		// At the tip, with nothing of its own after the merge: nothing is
-		// pushed to a merged branch.
+		// Completed, with no further work to publish: never push to a
+		// merged branch.
 		return nil
 	case f.Branch == "" && f.Ahead > 0:
 		s.Step, s.By, s.Skill = "new-branch", ByAgent, "wtc-catch-up"
@@ -194,6 +200,9 @@ func For(f Facts) *Step {
 		s.Key = key(f.Head)
 	default:
 		return nil
+	}
+	if f.Host != HostOpenClaw && len(s.Command) > 0 {
+		s.Command = append(s.Command, "--repos", f.Repo)
 	}
 	return s
 }

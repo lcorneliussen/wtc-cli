@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -345,7 +346,7 @@ func TestStatus(t *testing.T) {
 	}
 	want := CheckoutStatus{Path: c.Dir, Repo: "docs", Owner: "example-ws", Forge: ForgeBitbucket, Branch: "openclaw/72-add-thing", Base: "origin/main",
 		Ahead: 2, Dirty: 2, Untracked: 1, Published: true, Unpublished: 1}
-	if got.Repos[0] != want {
+	if !reflect.DeepEqual(got.Repos[0], want) {
 		t.Errorf("got  %+v\nwant %+v", got.Repos[0], want)
 	}
 	if got.Repos[1].Error == "" {
@@ -721,7 +722,13 @@ func TestAfterASquashMergeTheNextStepsEnd(t *testing.T) {
 	if _, err := c.CatchUp(); err != nil {
 		t.Fatal(err)
 	}
-	// ...and then nothing is left to do: the merge is no work of its own.
+	// The merge itself is no work of its own, but its completed branch must
+	// still be left. The gateway path that knows the PR does this directly.
+	if got := step(); got == nil || got.Step != "return-to-tip" {
+		t.Fatalf("still on the completed branch: %+v", got)
+	}
+	git("checkout", "-q", "--detach", "origin/main")
+	// ...and then nothing is left to do.
 	if got := step(); got != nil {
 		t.Fatalf("after catching up: %+v", got)
 	}

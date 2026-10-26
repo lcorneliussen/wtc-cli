@@ -252,7 +252,26 @@ func (c *Context) StatusLocalSnapshot(all bool) (StatusSnapshot, error) {
 // statusNext reads each repository's next step from its row.
 func statusNext(snapshot *StatusSnapshot) {
 	for i := range snapshot.Repos {
-		snapshot.Repos[i].Next = next.For(statusFacts(snapshot.Repos[i]))
+		r := &snapshot.Repos[i]
+		r.Next = nil
+		if r.ReviewOnly {
+			continue
+		}
+		f := statusFacts(*r)
+		if r.PR == nil && r.BranchKind == "branch" {
+			for _, pr := range snapshot.PRs {
+				if !pr.OnBranch || pr.State != "MERGED" || (pr.Repo != r.Repo && pr.Repo != r.Dir) {
+					continue
+				}
+				number, _ := strconv.Atoi(pr.Number)
+				in := pr.MergeCommit != "" && catchUpGitOK(r.Worktree, "merge-base", "--is-ancestor", pr.MergeCommit, "HEAD")
+				f.PR = &next.PR{Number: number, State: "merged", MergedIn: &in}
+				f.NeedsBranch = !catchUpLanded(catchUpTarget{path: r.Worktree}, r.baseRef,
+					catchUpPR{state: "MERGED", mergeCommit: pr.MergeCommit})
+				break
+			}
+		}
+		r.Next = next.For(f)
 	}
 }
 
@@ -286,8 +305,8 @@ func statusFacts(r StatusRepo) next.Facts {
 		f.PR = &next.PR{Number: number, Draft: pr.Draft, State: "open",
 			Checks: map[string]string{"FAILURE": "failure", "SUCCESS": "success", "PENDING": "pending"}[strings.ToUpper(pr.Checks)],
 			Review: map[string]string{"approved": "approved", "changes": "changes_requested"}[pr.Review]}
-		// Rows carry open pull requests only: a merged one is caught up by
-		// wtc catch-up, which returns the branch to the tip.
+		// Open PRs live on the repository row; retained merged PRs are read
+		// from the collection's PR list by statusNext.
 		switch strings.ToUpper(pr.Merge) {
 		case "CONFLICTING", "DIRTY":
 			f.PR.Mergeable = "conflicting"

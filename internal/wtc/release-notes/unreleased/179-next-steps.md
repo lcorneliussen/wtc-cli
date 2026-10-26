@@ -14,3 +14,12 @@
   the gateway's own action. Its `key` changes only when the facts do. The
   same field is in the OpenClaw gateway's status
   ([#179](https://github.com/lcorneliussen/wtc-cli/issues/179)).
+- **Gateway catch-up leaves completed GitHub branches.** Once their PR is
+  merged, `wtc catch-up` returns them to the detached base tip, including
+  branches already advanced by an earlier catch-up. Completed PRs stay in
+  the card and panel's pull request list and leave the repository row.
+  Follow-up work is kept on its branch until the agent moves it to a new
+  one; the completed branch is never rewritten or pushed.
+- Local catch-up steps select their repository with `--repos`. Review-only
+  checkouts receive no authoring steps, and a merged branch with follow-up
+  work asks for a new branch.

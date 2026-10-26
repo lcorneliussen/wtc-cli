@@ -21,14 +21,14 @@ func TestFor(t *testing.T) {
 		{"work in progress", Facts{Repo: "api", Branch: "12-x", Ahead: 1, Dirty: 2}, "", "", nil},
 		{"a merge in progress is the agent's", Facts{Repo: "api", InProgress: "a merge", Conflicted: 2}, "resolve", ByAgent,
 			func(s *Step) bool { return s.Skill == "wtc-catch-up" }},
-		{"a merged PR not in the checkout: back to the tip", Facts{Repo: "api", Base: "origin/main", Branch: "12-x", PR: &PR{Number: 7, State: "merged", MergedIn: &no}}, "return-to-tip", ByWTC,
+		{"a merged PR not in the checkout: back to the tip", Facts{Repo: "api", Host: HostOpenClaw, Base: "origin/main", Branch: "12-x", PR: &PR{Number: 7, State: "merged", MergedIn: &no}}, "return-to-tip", ByWTC,
 			func(s *Step) bool {
 				return reflect.DeepEqual(s.Command, []string{"wtc", "catch-up"}) && s.Approve == "" && s.Reason == "#7 was merged: back to main's tip; the next change branches anew"
 			}},
 		{"merged, and main moved on: back to the tip, never a merge into it", Facts{Repo: "api", Base: "origin/main", Branch: "12-x", Behind: 21, PR: &PR{Number: 7, State: "merged", MergedIn: &yes}}, "return-to-tip", ByWTC,
 			func(s *Step) bool { return s.Approve == "" }},
-		{"merged, and at the tip: nothing", Facts{Repo: "api", Branch: "12-x", PR: &PR{Number: 7, State: "merged", MergedIn: &yes}}, "", "", nil},
-		{"a catch-up's merge after the merge is no work", Facts{Repo: "api", Branch: "12-x", ToPush: 1, PR: &PR{Number: 7, State: "merged", MergedIn: &yes}}, "", "", nil},
+		{"merged, and at the tip: leave the branch", Facts{Repo: "api", Branch: "12-x", PR: &PR{Number: 7, State: "merged", MergedIn: &yes}}, "return-to-tip", ByWTC, nil},
+		{"a catch-up's merge after the merge is no work", Facts{Repo: "api", Branch: "12-x", ToPush: 1, PR: &PR{Number: 7, State: "merged", MergedIn: &yes}}, "return-to-tip", ByWTC, nil},
 		{"commits after the merge go to a new branch", Facts{Repo: "api", Branch: "12-x", ToPush: 2, AfterMerge: 2, PR: &PR{Number: 7, State: "merged", MergedIn: &yes}}, "new-branch", ByAgent,
 			func(s *Step) bool {
 				return s.Reason == "#7 was merged, but 2 commits came after it: put them on a new branch"
@@ -42,7 +42,9 @@ func TestFor(t *testing.T) {
 		{"behind, merging conflicts", Facts{Repo: "api", Base: "origin/main", Behind: 3, Branch: "12-x", Ahead: 1, MergeConflicts: []string{"README.md"}}, "merge", ByAgent,
 			func(s *Step) bool { return s.Reason == "3 new on main; merging conflicts in README.md" }},
 		{"behind and detached: wtc moves it", Facts{Repo: "api", Base: "origin/main", Behind: 5}, "catch-up", ByWTC,
-			func(s *Step) bool { return s.Approve == "" }},
+			func(s *Step) bool {
+				return s.Approve == "" && reflect.DeepEqual(s.Command, []string{"wtc", "catch-up", "--repos", "api"})
+			}},
 		{"behind on a live branch: clean, but the agent's call", Facts{Repo: "api", Base: "origin/main", Behind: 2, Branch: "12-x", Ahead: 1}, "catch-up", ByWTC,
 			func(s *Step) bool { return s.Approve == ApproveAgent && s.Reason == "2 new on main; merges cleanly" }},
 		{"behind on a pushed branch, nothing ahead: still the agent's call", Facts{Repo: "api", Base: "origin/main", Behind: 2, Branch: "12-x"}, "catch-up", ByWTC,

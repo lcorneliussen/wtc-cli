@@ -506,19 +506,28 @@ const brand = (size, version) => css(el("span", {},
 // and its branch, the service), then its facts under the header, still in
 // their columns.
 const NARROW_PX = 520;
+const pullRequestRows = (repos) => {
+  const rows = new Map();
+  for (const r of repos) for (const pr of [...(r.pullRequests ?? []), ...(r.pullRequest ? [r.pullRequest] : [])]) {
+    rows.set(`${r.forge}/${r.owner}/${r.repo ?? r.project}#${pr.number}`, { ...r, pullRequest: pr });
+  }
+  return [...rows.values()];
+};
 function collectionTables(v) {
   // Repositories being pushed, and being caught up.
   const busy = new Set();
   const catching = new Set();
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
-  const toPush = (r) => r.unpublished || (!r.pullRequest ? r.ahead ?? 0 : 0);
-  const pushable = (r) => !r.error && (r.dirty || toPush(r) > 0);
-  // A merged pull request whose merge the worktree does not have yet: its
-  // base was not fetched since, so it does not count as behind.
-  const unmerged = (r) => !r.error && r.pullRequest?.state === "merged" && r.pullRequest.mergedIn === false;
-  const toCatchUp = (r) => r.behind > 0 || unmerged(r);
-  const catchUpCell = (r) => r.behind
+  const finished = (r) => r.pullRequest?.state === "merged";
+  const toPush = (r) => finished(r) ? 0 : r.unpublished || (!r.pullRequest ? r.ahead ?? 0 : 0);
+  const pushable = (r) => !r.error && !finished(r) && (r.dirty || toPush(r) > 0);
+  // A completed branch returns to the tip even if its commits are already
+  // present there. Its PR leaves the repository row after that move.
+  const toCatchUp = (r) => !r.error && (r.behind > 0 || finished(r));
+  const catchUpCell = (r) => finished(r)
+    ? count(r.behind ? `↓ ${r.behind}` : "↓", `#${r.pullRequest.number} was merged. Return to ${baseOf(r)}'s tip, detached; keep it in the pull request list. The next change starts a new branch`, TONE.pending, () => catchUp([r]))
+    : r.behind
     ? count(`↓ ${r.behind}`, `${r.behind} new on ${baseOf(r)}. Catch up: merge them in; never rebases, never pushes`, TONE.pending, () => catchUp([r]))
     : count("↓", `#${r.pullRequest.number} was merged. Catch up: fetch ${baseOf(r)} and merge it in, to continue from the merge; never rebases, never pushes`, TONE.pending, () => catchUp([r]));
   const nameOf = (r) => r.repo ?? r.project ?? r.label;
@@ -870,7 +879,7 @@ function collectionTables(v) {
       slot("↑", ready.some((r) => busy.has(r.sessionKey)) ? working() : ready.length
         ? count(commits ? `↑ ${commits}` : "↑", `Push ${ready.map(nameOf).join(", ")}, each to its pull request or a new draft one`, TONE.pending, () => pushAll(ready)) : null),
       slot("↓", behind.some((r) => catching.has(r.sessionKey)) ? working() : behind.length
-        ? count(behind.some((r) => r.behind) ? `↓ ${behind.reduce((n, r) => n + (r.behind ?? 0), 0)}` : "↓", `Catch up ${behind.map((r) => `${nameOf(r)} (${r.behind || `#${r.pullRequest.number} merged`})`).join(", ")}: merge the base in; never rebases, never pushes`, TONE.pending, () => catchUp(behind)) : null),
+        ? count(behind.some((r) => r.behind) ? `↓ ${behind.reduce((n, r) => n + (r.behind ?? 0), 0)}` : "↓", `Catch up ${behind.map((r) => `${nameOf(r)} (${r.behind || `#${r.pullRequest.number} merged`})`).join(", ")}: return merged branches to the tip; merge the base into live branches; never rebases, never pushes`, TONE.pending, () => catchUp(behind)) : null),
       slot("PR", prs.length ? toned(`${prs.length}${worst && prTone(worst) === TONE.failure ? " ✗" : worst && prTone(worst) === TONE.success ? " ✓" : ""}`, prTone(worst),
         prs.map((r) => `${nameOf(r)} #${r.pullRequest.number}: ${[r.pullRequest.title, ...prState(r.pullRequest)].filter(Boolean).join(", ")}`).join("\n")) : null),
     ];
@@ -934,7 +943,7 @@ function collectionTables(v) {
   }
 
   function prTable(repos, narrow = false) {
-    const open = repos.filter((r) => r.pullRequest);
+    const open = pullRequestRows(repos);
     const columns = [
       { head: "PR" },
       { head: "Repo", width: "minmax(0,max-content)" },
@@ -1172,6 +1181,7 @@ function mountComposer(container, context) {
     );
     tables.checkAccount(repos);
     detail.replaceChildren(...[tables.repoTable(repos, narrow, entry.data.subSessions), tables.notice(),
+      repos.some((r) => r.pullRequests?.length) ? el("div", {}, el("div", { textContent: "Pull requests" }), tables.prTable(repos, narrow)) : null,
       groups.length ? tables.serviceTable(groups, entry.data, narrow) : null].filter(Boolean));
     if (card.parentNode !== container) container.prepend(card);
   }
@@ -1533,7 +1543,7 @@ function mountCollection(container, context) {
     if (howTo) repoSection.append(howTo);
     repoSection.append(adder);
 
-    const prSection = repos.some((r) => r.pullRequest) ? el("div", {}, heading("Pull requests"), tables.prTable(repos, narrow)) : null;
+    const prSection = pullRequestRows(repos).length ? el("div", {}, heading("Pull requests"), tables.prTable(repos, narrow)) : null;
 
     const serviceSection = el("div", {}, heading("Services"));
     if (groups.length === 0) serviceSection.append(muted(data.servicesNote ?? "None running. Start them in the collection folder with wtc svc.", "font-size:13px"));

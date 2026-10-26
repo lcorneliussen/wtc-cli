@@ -47,6 +47,8 @@ type CheckoutStatus struct {
 	// next publication would send.
 	Unpublished int          `json:"unpublished"`
 	PullRequest *PullRequest `json:"pullRequest"`
+	// PullRequests keeps completed rounds in the collection's PR list.
+	PullRequests []PullRequest `json:"pullRequests,omitempty"`
 	// Proposal is the title and description proposed for the branch's pull
 	// request, which the person's push opens it with.
 	Proposal *Proposal `json:"proposal,omitempty"`
@@ -78,7 +80,9 @@ type PullRequest struct {
 	// whether the checkout has that commit. Absent otherwise.
 	MergedIn *bool `json:"mergedIn,omitempty"`
 	// Head is the commit the pull request ended at.
-	Head string `json:"head,omitempty"`
+	Head        string `json:"head,omitempty"`
+	Branch      string `json:"branch,omitempty"`
+	MergeCommit string `json:"mergeCommit,omitempty"`
 }
 
 // ManagedCollections finds the gateway's collections: the managed worktrees
@@ -171,6 +175,12 @@ func checkoutStatus(path string, pullRequests bool) CheckoutStatus {
 		return s
 	}
 	s.Branch, _ = git(top, "branch", "--show-current")
+	if rounds, err := readCompletedRounds(top); err != nil {
+		s.Error = err.Error()
+		return s
+	} else {
+		s.PullRequests = rounds.PRs
+	}
 	origin := Origin{Forge: ForgeUnknown}
 	if url, err := git(top, "remote", "get-url", "origin"); err == nil {
 		origin = ParseOrigin(url)
@@ -305,9 +315,10 @@ func gitHubPullRequest(dir string, origin Origin, branch string) *PullRequest {
 		return nil
 	}
 	f := found[0]
-	pr := &PullRequest{Number: f.Number, URL: f.URL, State: strings.ToLower(f.State), Draft: f.IsDraft, Title: f.Title, Checks: "none",
+	pr := &PullRequest{Number: f.Number, URL: f.URL, State: strings.ToLower(f.State), Draft: f.IsDraft, Title: f.Title, Checks: "none", Branch: branch,
 		Mergeable: strings.ToLower(f.Merge), Review: strings.ToLower(f.Review), Head: f.Head}
 	if pr.State == "merged" && f.Commit != nil && f.Commit.OID != "" {
+		pr.MergeCommit = f.Commit.OID
 		in := gitOK(dir, "merge-base", "--is-ancestor", f.Commit.OID, "HEAD")
 		pr.MergedIn = &in
 	}
