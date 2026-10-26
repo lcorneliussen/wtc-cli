@@ -330,8 +330,9 @@ export function openaiDecisions({ apiKey, model = "gpt-6-luna", baseUrl = "https
 }
 
 // The git identity the agent's own commits get, for a merge the plugin makes
-// on its behalf: its managed GitHub identity's gitAuthor (the agent's, else
-// the system's), else its name as <slug>@localhost, else OpenClaw's.
+// on its behalf: its managed GitHub identity's gitAuthor (an agent with its
+// own tools.github uses that one's, even without a gitAuthor; others the
+// system's), else its name as <slug>@localhost, else OpenClaw's.
 export function agentGitIdentity(config, agentId) {
   const entry = config?.agents?.entries?.[agentId] ?? {};
   const author = entry.tools?.github ? entry.tools.github.gitAuthor : config?.tools?.github?.gitAuthor;

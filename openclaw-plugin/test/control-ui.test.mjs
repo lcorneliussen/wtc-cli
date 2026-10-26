@@ -95,6 +95,7 @@ const collections = new Map();
 const histories = new Map();
 const calls = [];
 let svcResult = { ok: true, result: { message: "done" } };
+let catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
 let personal = null;
@@ -127,6 +128,7 @@ const hostRequest = async (method, params) => {
   }
   calls.push({ method, ...params });
   if (method === "plugins.sessionAction" && params.actionId === "svc") return svcResult;
+  if (method === "plugins.sessionAction" && params.actionId === "catch-up") return catchUpResult;
   if (method === "sessions.github.publish") return { status: "needs_confirmation", requestId: "req-1" };
   if (method === "sessions.github.confirm") return { status: "published", url: "https://github.com/octo/api/pull/7" };
   return {};
@@ -295,6 +297,13 @@ test("composer: the actions are on the facts they change", async () => {
   calls.length = 0;
   await named(/^3 new on main\. Catch up/).onclick();
   assert.deepEqual(calls.map((c) => c.actionId), ["catch-up"]);
+  // A catch-up that stops on a conflict goes to the conversation too.
+  catchUpResult = { ok: true, result: { code: 1, json: null, message: "wtc: merging origin/main into openclaw/test conflicts in: README.md, go.mod. The merge was aborted and the checkout is as before. Merge by hand with `git merge origin/main`, resolve, commit — do not rebase\n" } };
+  calls.length = 0;
+  await named(/^3 new on main\. Catch up/).onclick();
+  assert.deepEqual(calls.map((c) => c.actionId ?? c.method), ["catch-up", "sessions.send"]);
+  assert.match(calls[1].message, /conflicts in README\.md, go\.mod\. Merge .* resolve the conflicts and commit\. Don't rebase, and don't push/);
+  catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
   await named(/^#7 conflicts with main\. Resolve/).onclick();
   assert.match(calls.at(-1).message, /Pull request #7 of api conflicts.*Don't push/);
   // Without the Bitbucket plugin's publish, Bitbucket is not pushed from
