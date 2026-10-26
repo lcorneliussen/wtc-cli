@@ -171,3 +171,46 @@ func TestStatusNextUsesPullRequestBase(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkspaceNextTargetsTheOtherCollection(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	beta, err := c.NewCollection(NewOptions{Slug: "beta", Repos: []string{"widget"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureGit(t, "-C", c.Harness, "switch", "-qc", "live")
+	fixtureFile(t, filepath.Join(c.Harness, "pending"), "keep current work\n", 0644)
+	before := fixtureGit(t, "-C", c.Harness, "rev-parse", "HEAD")
+	source := filepath.Join(c.Workspace, "source-agent-harness")
+	fixtureFile(t, filepath.Join(source, "README.md"), "new base\n", 0644)
+	fixtureGit(t, "-C", source, "add", "README.md")
+	fixtureGit(t, "-C", source, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-qm", "base advances")
+	fixtureGit(t, "-C", c.Harness, "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
+	snapshot, err := c.StatusLocalSnapshot(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var step *next.Step
+	for _, r := range snapshot.Repos {
+		if r.Collection == "beta" && r.Dir == "harness" {
+			step = r.Next
+		}
+	}
+	if step == nil || !reflect.DeepEqual(step.Command, []string{"wtc", "catch-up", "beta", "--repos", "agent-harness"}) {
+		t.Fatalf("wrong collection command: %+v", step)
+	}
+	_, err = c.CatchUp(CatchUpOptions{Collections: []string{step.Command[2]}, Repos: []string{step.Command[4]},
+		NoSkills: true, NoMCP: true, NoEnv: true, NoSecrets: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fixtureGit(t, "-C", c.Harness, "rev-parse", "HEAD") != before || fixtureGit(t, "-C", c.Harness, "branch", "--show-current") != "live" {
+		t.Fatal("other collection's step moved the current checkout")
+	}
+	if data, err := os.ReadFile(filepath.Join(c.Harness, "pending")); err != nil || string(data) != "keep current work\n" {
+		t.Fatalf("current collection's work: %s %v", data, err)
+	}
+	if fixtureGit(t, "-C", filepath.Join(beta.Collection, "harness"), "rev-parse", "HEAD") != fixtureGit(t, "-C", source, "rev-parse", "HEAD") {
+		t.Fatal("target collection was not caught up")
+	}
+}

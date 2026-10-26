@@ -93,6 +93,10 @@ func TestKey(t *testing.T) {
 	if a.Key != again.Key || a.Key == moved.Key || a.Key != "api:catch-up:h1:b1" {
 		t.Errorf("keys: %q %q %q", a.Key, again.Key, moved.Key)
 	}
+	other := For(Facts{Collection: "other", Repo: "api", Behind: 2, Head: "h1", BaseHead: "b1"})
+	if other.Key == a.Key || !reflect.DeepEqual(other.Command, []string{"wtc", "catch-up", "other", "--repos", "api"}) {
+		t.Fatalf("collection target: %+v", other)
+	}
 }
 
 func TestPredictMerge(t *testing.T) {

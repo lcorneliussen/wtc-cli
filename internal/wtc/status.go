@@ -279,7 +279,7 @@ func statusNext(snapshot *StatusSnapshot) {
 // against the branch's upstream (the development tip when it has none), so
 // it is what a push would send.
 func statusFacts(r StatusRepo) next.Facts {
-	f := next.Facts{Repo: r.Repo, Host: next.HostLocal, Base: r.baseRef,
+	f := next.Facts{Collection: r.Collection, Repo: r.Repo, Host: next.HostLocal, Base: r.baseRef,
 		Ahead: r.Ahead, Behind: r.Behind, Dirty: r.Changed, InProgress: r.Operation}
 	if r.Repo == "" {
 		f.Repo = r.Dir

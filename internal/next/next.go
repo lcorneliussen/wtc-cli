@@ -63,11 +63,12 @@ type PR struct {
 
 // Facts is a repository's state, as a status reads it.
 type Facts struct {
-	Repo   string
-	Host   string
-	Branch string // empty when detached
-	Base   string // the ref Behind counts against, e.g. origin/main
-	Head   string // the commit checked out
+	Collection string // local collection targeted by executable commands
+	Repo       string
+	Host       string
+	Branch     string // empty when detached
+	Base       string // the ref Behind counts against, e.g. origin/main
+	Head       string // the commit checked out
 	// BaseHead is the commit Base is at.
 	BaseHead   string
 	Ahead      int
@@ -98,7 +99,11 @@ type Facts struct {
 func For(f Facts) *Step {
 	s := &Step{Repo: f.Repo}
 	key := func(parts ...string) string {
-		return strings.Join(append([]string{f.Repo, s.Step}, parts...), ":")
+		prefix := []string{f.Repo, s.Step}
+		if f.Collection != "" {
+			prefix = append([]string{f.Collection}, prefix...)
+		}
+		return strings.Join(append(prefix, parts...), ":")
 	}
 	pr := f.PR
 	open := pr != nil && pr.State == "open"
@@ -202,6 +207,9 @@ func For(f Facts) *Step {
 		return nil
 	}
 	if f.Host != HostOpenClaw && len(s.Command) > 0 {
+		if f.Collection != "" {
+			s.Command = append(s.Command, f.Collection)
+		}
 		s.Command = append(s.Command, "--repos", f.Repo)
 	}
 	return s
