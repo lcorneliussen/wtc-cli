@@ -59,7 +59,11 @@ Read that before the first `wtc` command of a task and follow it. In short:
   review comments on the forge yourself.
 - Parallel parts of a task go to workers, never to two writers in one
   checkout: `wtc add-repo <repo> --worker <name> --work "<part>"`, then
-  `wtc catch-up --from <name>` in `<folder>/<repo>` to merge one in.
+  `wtc catch-up --from <name>` in `<folder>/<repo>` to merge one in. A
+  worker is only for a part that really runs beside yours; work you would do
+  next anyway goes in your own checkout. When a worker ends, merge it in, or
+  tell the person what is left so they can discard it in the card: none is
+  left behind.
 - `wtc catch-up` in `<folder>/<repo>` merges the base in; it never rebases
   and never pushes.
 - In a sandbox with `WTC_GATEWAY_GIT` set, `wtc catch-up` in the checkout

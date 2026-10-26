@@ -13,6 +13,8 @@ import path from "node:path";
 import { startSandboxGit } from "./sandbox-git.js";
 
 const PLUGIN_ID = "wtc";
+// A worker's collection is <task>--<worker> (openclaw.WorkerSeparator).
+const WORKER_SEPARATOR = "--";
 
 // The client each tunnel provider of wtc svc tunnel runs, and the providers
 // whose tunnel anyone with the link can open.
@@ -544,7 +546,16 @@ export default {
       if (children.length === 0) return result;
       // The collection's name is its worktrees' name. wtc status reads
       // them, keeps the collection's folder and reports its services.
-      const names = [...new Set(children.map((c) => String(c.entry.worktree?.branch ?? "").replace(/^openclaw\//, "")).filter(Boolean))];
+      const collectionName = (entry) => String(entry.worktree?.branch ?? "").replace(/^openclaw\//, "");
+      const names = [...new Set(children.map((c) => collectionName(c.entry)).filter(Boolean))];
+      // A worker works in the collection <task>--<worker>: its checkouts are
+      // the worker's, not a second copy of the task's repositories.
+      const task = names.find((n) => !names.some((m) => n.startsWith(m + WORKER_SEPARATOR))) ?? names[0];
+      const workerOf = (name) => {
+        const short = name.startsWith(task + WORKER_SEPARATOR) ? name.slice(task.length + WORKER_SEPARATOR.length) : "";
+        return short && !short.includes(WORKER_SEPARATOR) ? short : null;
+      };
+      const toMerge = new Map();
       let checkouts = [];
       result.services = [];
       for (const name of names) {
@@ -552,6 +563,7 @@ export default {
         try {
           const col = JSON.parse(status.stdout)[name] ?? {};
           checkouts.push(...(col.repos ?? []));
+          if (name === task) for (const w of col.workers ?? []) for (const r of w.repos ?? []) toMerge.set(`${w.name}\n${r.repo}`, r);
           result.services.push(...(col.services ?? []));
           if (col.folder) result.collection.folder = col.folder;
           // The wtc project it works in: its harness, or ad hoc.
@@ -563,16 +575,29 @@ export default {
         }
       }
       const byPath = new Map(checkouts.map((c) => [c.path, c]));
-      result.repos = children
+      const rows = children
         .map(({ sessionKey, entry }) => ({
           sessionKey,
           label: entry.label ?? entry.displayName ?? null,
           project: entry.projectId ?? null,
           // A hidden owner has no conversation of its own.
           owner: sessionKey.includes(":subagent:") ? "hidden" : "conversation",
+          worker: workerOf(collectionName(entry)),
           ...(byPath.get(worktreeOf(entry)) ?? { path: worktreeOf(entry), branch: entry.worktree?.branch ?? null, error: "no status" }),
         }))
         .sort((a, b) => String(a.project ?? a.repo).localeCompare(String(b.project ?? b.repo)));
+      result.repos = rows.filter((r) => !r.worker);
+      // Each worker with its checkouts, and per checkout what the task's
+      // branch has not merged from it yet.
+      const workers = new Map();
+      for (const r of rows.filter((r) => r.worker)) {
+        if (!workers.has(r.worker)) workers.set(r.worker, { name: r.worker, collection: task + WORKER_SEPARATOR + r.worker, repos: [] });
+        const merge = toMerge.get(`${r.worker}\n${r.repo}`);
+        workers.get(r.worker).repos.push({ ...r, toMerge: merge?.toMerge ?? null, mergeError: merge?.error ?? null,
+          // The task's own checkout of the repository, which a merge goes into.
+          taskSessionKey: result.repos.find((t) => t.repo && t.repo === r.repo)?.sessionKey ?? null });
+      }
+      result.workers = [...workers.values()].sort((a, b) => a.name.localeCompare(b.name));
       tell(agentId, parentKey, watch.observe(agentId, parentKey, result.repos));
       return result;
     };
@@ -726,16 +751,18 @@ export default {
 
     api.session.controls.registerSessionAction({
       id: "catch-up",
-      description: "Merge the destination branch into this session's worktree (wtc catch-up). Never rebases, never pushes.",
+      description: "Merge the destination branch into this session's worktree (wtc catch-up), or with payload.from a worker's branch (wtc catch-up --from). Never rebases, never pushes.",
       requiredScopes: ["operator.write"],
       async handler(action) {
         const entry = action.sessionKey && api.runtime.agent.session.getSessionEntry({ agentId: action.agentId, sessionKey: action.sessionKey });
         const cwd = worktreeOf(entry);
         if (!cwd) return { ok: false, error: "this session owns no managed worktree" };
+        const from = action.payload?.from;
+        if (from !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(String(from))) return { ok: false, error: "from names a worker" };
         // wtc reads its host from the environment an agent's shell has, and a
         // merge commit needs the identity that shell would commit with.
         const config = api.runtime?.config?.current?.() ?? api.config;
-        const r = await run(["wtc", "catch-up", "--json"], { cwd, timeoutMs: 120000, env: { OPENCLAW_SHELL: "exec", ...agentGitIdentity(config, action.agentId) } });
+        const r = await run(["wtc", "catch-up", ...(from ? ["--from", String(from)] : []), "--json"], { cwd, timeoutMs: 120000, env: { OPENCLAW_SHELL: "exec", ...agentGitIdentity(config, action.agentId) } });
         let json = null;
         try { json = JSON.parse(r.stdout); } catch { /* reported as text below */ }
         return { ok: true, result: { code: r.code, json, message: (json ? "" : r.stdout) + r.stderr } };
