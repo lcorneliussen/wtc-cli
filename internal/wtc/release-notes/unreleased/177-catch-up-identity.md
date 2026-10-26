@@ -10,3 +10,4 @@
   own checkout and resolve the files there. In a sandbox with the gateway's
   git service, `wtc catch-up` stops on the conflict, and
   `wtc catch-up --continue` hands the resolved branch back to the gateway.
+- A conflicting file whose name has a space stays whole in the conflict list.

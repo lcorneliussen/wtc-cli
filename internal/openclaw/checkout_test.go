@@ -433,16 +433,22 @@ func TestMergeWorker(t *testing.T) {
 	}
 
 	// Both change the same file: the merge is aborted and nothing changes.
+	// A name with a space stays whole in the list.
 	write(t, c, "notes.md", "task two\n")
-	git("commit", "-qam", "task")
-	if err := os.WriteFile(filepath.Join(worker, "notes.md"), []byte("worker two\n"), 0o644); err != nil {
-		t.Fatal(err)
+	write(t, c, "my notes.md", "task\n")
+	git("add", "-A")
+	git("commit", "-qm", "task")
+	for name, body := range map[string]string{"notes.md": "worker two\n", "my notes.md": "worker\n"} {
+		if err := os.WriteFile(filepath.Join(worker, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	gitIn(t, "-C", worker, "commit", "-qam", "worker")
+	gitIn(t, "-C", worker, "add", "-A")
+	gitIn(t, "-C", worker, "commit", "-qm", "worker")
 	before := git("rev-parse", "HEAD")
 	// The Control UI card reads the files out of this sentence (conflictsOf
 	// in openclaw-plugin/dist/control-ui/v1/index.js): keep the two in step.
-	if _, err := c.MergeWorker("a"); err == nil || !regexp.MustCompile(`conflicts in: notes\.md\. The merge was aborted`).MatchString(err.Error()) {
+	if _, err := c.MergeWorker("a"); err == nil || !regexp.MustCompile(`conflicts in: my notes\.md, notes\.md\. The merge was aborted`).MatchString(err.Error()) {
 		t.Errorf("conflict: %v", err)
 	}
 	if git("rev-parse", "HEAD") != before || git("status", "--porcelain") != "" {
