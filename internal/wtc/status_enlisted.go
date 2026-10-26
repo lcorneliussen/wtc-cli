@@ -266,6 +266,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 						snapshot.StaleCount--
 					}
 					snapshot.Repos[branchRow].Behind = behind
+					snapshot.Repos[branchRow].baseRef = "origin/" + detail.Base
 					if behind > 0 {
 						snapshot.StaleCount++
 					}
@@ -323,6 +324,8 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 			return snapshot, err
 		}
 	}
+	// The pull requests change what comes next.
+	statusNext(&snapshot)
 	return snapshot, nil
 }
 

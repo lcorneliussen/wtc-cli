@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lcorneliussen/wtc-cli/internal/next"
 )
 
 // StatusSnapshot is the canonical status schema shared by the one-shot view
@@ -47,6 +49,12 @@ type StatusRepo struct {
 	Prod          *StatusBuild   `json:"prod"`
 	Runtime       string         `json:"runtime,omitempty"`
 	ReviewOnly    bool           `json:"review_only,omitempty"`
+	// Next is the repository's next step, read from the facts above; nil
+	// when nothing waits on anyone.
+	Next *next.Step `json:"next,omitempty"`
+	// baseRef is the ref Behind counts against: the development tip, or an
+	// open pull request's base.
+	baseRef string
 }
 
 type StatusPRFacts struct {
@@ -157,7 +165,7 @@ func statusCount(worktree, rangeSpec string) (int, error) {
 func statusLocalRepo(t catchUpTarget) (StatusRepo, error) {
 	dir := filepath.Base(t.path)
 	row := StatusRepo{Collection: t.collection, Dir: dir, Repo: t.repo,
-		Worktree: t.path, Tree: "clean"}
+		Worktree: t.path, Tree: "clean", baseRef: t.ref}
 	remote, err := statusGit(t.path, "remote", "get-url", "origin")
 	if err == nil {
 		row.Slug, row.Forge = catchUpForge(remote)
@@ -237,5 +245,54 @@ func (c *Context) StatusLocalSnapshot(all bool) (StatusSnapshot, error) {
 		c.statusRetired(&snapshot)
 	}
 	c.statusRuntime(&snapshot, all)
+	statusNext(&snapshot)
 	return snapshot, nil
+}
+
+// statusNext reads each repository's next step from its row.
+func statusNext(snapshot *StatusSnapshot) {
+	for i := range snapshot.Repos {
+		snapshot.Repos[i].Next = next.For(statusFacts(snapshot.Repos[i]))
+	}
+}
+
+// statusFacts is what a local row tells about the next step. Ahead counts
+// against the branch's upstream, so it is what a push would send.
+func statusFacts(r StatusRepo) next.Facts {
+	f := next.Facts{Repo: r.Repo, Host: next.HostLocal, Base: r.baseRef,
+		Ahead: r.Ahead, Behind: r.Behind, Dirty: r.Changed, InProgress: r.Operation}
+	if r.Repo == "" {
+		f.Repo = r.Dir
+	}
+	if r.Conflict {
+		f.Conflicted = 1
+	}
+	if r.BranchKind == "branch" {
+		f.Branch = r.Branch
+		f.ToPush = r.Ahead
+	}
+	f.Head, _ = statusGit(r.Worktree, "rev-parse", "HEAD")
+	if r.baseRef != "" {
+		f.BaseHead, _ = statusGit(r.Worktree, "rev-parse", r.baseRef)
+	}
+	if r.Behind > 0 && r.baseRef != "" && f.InProgress == "" {
+		var ok bool
+		f.MergeConflicts, ok = next.PredictMerge(r.Worktree, r.baseRef)
+		f.MergeUnknown = !ok
+	}
+	if pr := r.PR; pr != nil {
+		number, _ := strconv.Atoi(pr.Number)
+		f.PR = &next.PR{Number: number, Draft: pr.Draft, State: "open",
+			Checks: map[string]string{"FAILURE": "failure", "SUCCESS": "success", "PENDING": "pending"}[strings.ToUpper(pr.Checks)],
+			Review: map[string]string{"approved": "approved", "changes": "changes_requested"}[pr.Review]}
+		switch strings.ToUpper(pr.Merge) {
+		case "MERGED":
+			f.PR.State = "merged"
+		case "CONFLICTING", "DIRTY":
+			f.PR.Mergeable = "conflicting"
+		case "CLEAN", "MERGEABLE":
+			f.PR.Mergeable = "mergeable"
+		}
+	}
+	return f
 }

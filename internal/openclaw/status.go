@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lcorneliussen/wtc-cli/internal/next"
 )
 
 // CollectionSchema names the JSON that describes a collection's checkouts. A
@@ -48,7 +50,10 @@ type CheckoutStatus struct {
 	// Proposal is the title and description proposed for the branch's pull
 	// request, which the person's push opens it with.
 	Proposal *Proposal `json:"proposal,omitempty"`
-	Error    string    `json:"error,omitempty"`
+	// Next is the repository's next step, read from all of the above; nil
+	// when nothing waits on anyone.
+	Next  *next.Step `json:"next,omitempty"`
+	Error string     `json:"error,omitempty"`
 }
 
 // PullRequest is the pull request of a checkout's branch.
@@ -222,7 +227,37 @@ func checkoutStatus(path string, pullRequests bool) CheckoutStatus {
 	if pullRequests && origin.Forge == ForgeGitHub && s.Branch != "" {
 		s.PullRequest = gitHubPullRequest(top, origin, s.Branch)
 	}
+	s.Next = next.For(s.facts(top))
 	return s
+}
+
+// facts is what the next step is read from: the status, the commits it is
+// about, and whether merging the base would conflict.
+func (s CheckoutStatus) facts(top string) next.Facts {
+	f := next.Facts{Repo: s.Repo, Host: next.HostOpenClaw, Branch: s.Branch, Base: s.Base,
+		Ahead: s.Ahead, Behind: s.Behind, Dirty: s.Dirty, Conflicted: s.Conflicted,
+		InProgress: (&Checkout{Dir: top}).inProgress()}
+	if f.Repo == "" {
+		f.Repo = filepath.Base(top)
+	}
+	f.Head, _ = git(top, "rev-parse", "HEAD")
+	if s.Base != "" {
+		f.BaseHead, _ = git(top, "rev-parse", s.Base)
+	}
+	// What ↑ would send: commits since the last publication, or before the
+	// first pull request everything ahead of the base. A detached checkout
+	// has no branch to push.
+	if s.Branch != "" {
+		f.ToPush = s.Unpublished
+	}
+	if s.Behind > 0 && s.Base != "" && f.InProgress == "" {
+		f.MergeConflicts, f.MergeUnknown = next.PredictMerge(top, s.Base)
+		f.MergeUnknown = !f.MergeUnknown
+	}
+	if pr := s.PullRequest; pr != nil {
+		f.PR = &next.PR{Number: pr.Number, State: pr.State, Draft: pr.Draft, Checks: pr.Checks, Mergeable: pr.Mergeable, Review: pr.Review, MergedIn: pr.MergedIn}
+	}
+	return f
 }
 
 // gitHubPullRequest is the newest pull request from branch, or nil: without
