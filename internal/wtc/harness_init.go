@@ -50,12 +50,11 @@ func InitHarness(opt HarnessInitOptions) (HarnessInitResult, error) {
 	if err != nil {
 		return result, err
 	}
-	majorMinor := strings.Split(opt.CLIVersion, ".")
-	nextMinor := 0
-	if _, err := fmt.Sscan(majorMinor[1], &nextMinor); err != nil {
+	requires, err := CompatibilityRange(opt.CLIVersion)
+	if err != nil {
 		return result, err
 	}
-	config := map[string]any{"compatibility": map[string]string{"requires": fmt.Sprintf(">=%s,<%s.%d", opt.CLIVersion, majorMinor[0], nextMinor+1)}, "harness": map[string]string{"name": opt.Name}}
+	config := map[string]any{"compatibility": map[string]string{"requires": requires}, "harness": map[string]string{"name": opt.Name}}
 	var configText strings.Builder
 	if err := toml.NewEncoder(&configText).Encode(config); err != nil {
 		return result, err

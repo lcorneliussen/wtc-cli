@@ -259,10 +259,10 @@ func (c *Context) RenderMise() ([]byte, error) {
 		if !cliVersionPattern.MatchString(version) {
 			return nil, fmt.Errorf("invalid CLI version in %s: %q", versionFile, version)
 		}
-		if _, exists := tools["github:lcorneliussen/wtc-cli"]; exists {
+		if _, exists := tools[cliMiseTool]; exists {
 			return nil, fmt.Errorf("mise.tools must not override the committed CLI pin")
 		}
-		tools["github:lcorneliussen/wtc-cli"] = version
+		tools[cliMiseTool] = version
 	}
 	if len(tools) > 0 {
 		b.WriteString("[tools]\n")
@@ -325,6 +325,25 @@ func (c *Context) TrustMise() error {
 	cmd.Dir = c.Collection
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("mise trust failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// InstallMise installs the tools the collection's mise config pins, such as
+// a newly pinned wtc. Without mise it installs nothing and returns nil;
+// callers that must report that check for mise themselves.
+func (c *Context) InstallMise() error {
+	mise, err := exec.LookPath("mise")
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	cmd := exec.Command(mise, "install")
+	cmd.Dir = c.Collection
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("mise install failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }

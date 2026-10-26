@@ -22,11 +22,22 @@ and unreleased changes. It cannot be combined with a version or `--list`.
 
 ## Upgrade a harness
 
-Read the committed `.wtc-cli-version` and the target release. Run the **target
-binary** with `release-notes --since <old-pin>`: an old binary only contains its
-own archive and cannot fetch future notes. Download the published target binary
-without changing the harness pin first. For a binary that predates this command,
-read its [GitHub release notes](https://github.com/lcorneliussen/wtc-cli/releases).
+`wtc upgrade`, run in a collection of the harness, does the mechanical part: it
+resolves the latest release (or `--version`), bumps `.wtc-cli-version` and the
+`wtc.toml` compatibility range together, refreshes the collection's mise
+config, installs the release, and prints that release's notes since the old
+pin. `--dry-run` writes nothing and reads the published GitHub release notes
+instead. It commits nothing; the rest of this section is the review it leaves
+to you. After the harness PR merges, `wtc upgrade --rollout` catches every
+collection's harness up: clean worktrees and idle agents only, with `mise
+install`, reporting the collections left for their owners.
+
+Without the command, read the committed `.wtc-cli-version` and the target
+release. Run the **target binary** with `release-notes --since <old-pin>`: an
+old binary only contains its own archive and cannot fetch future notes.
+Download the published target binary without changing the harness pin first.
+For a binary that predates this command, read its [GitHub release
+notes](https://github.com/lcorneliussen/wtc-cli/releases).
 
 Use the notes to decide which features need local adoption and which contract
 changes need tests. Compare local skills and instructions with the target's

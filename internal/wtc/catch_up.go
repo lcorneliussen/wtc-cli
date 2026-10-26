@@ -26,6 +26,19 @@ type CatchUpOptions struct {
 	NoMCP        bool
 	NoEnv        bool
 	NoSecrets    bool
+	// IdleOnly leaves a collection whose herdr agent is working or blocked
+	// to that agent. InstallTools runs mise install in each harness target,
+	// so a new pin is usable at once; it is skipped when that target's env
+	// refresh failed, and with NoEnv it installs what mise.toml already pins.
+	IdleOnly     bool
+	InstallTools bool
+}
+
+// RolloutOptions is the sweep `wtc upgrade --rollout` runs: every
+// collection's harness, clean worktrees and idle agents only, with the pinned
+// tools installed.
+func RolloutOptions(dryRun bool) CatchUpOptions {
+	return CatchUpOptions{All: true, Repos: []string{"harness"}, CleanOnly: true, IdleOnly: true, InstallTools: true, DryRun: dryRun}
 }
 
 type CatchUpRow struct {

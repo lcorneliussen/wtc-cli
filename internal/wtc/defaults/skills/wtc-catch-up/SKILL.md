@@ -46,6 +46,7 @@ catch-up does not authorize `--all`.
 ```bash
 wtc catch-up --all --harness-only --dry-run --json
 wtc catch-up --all --harness-only --reload-status
+wtc catch-up --all --harness-only --clean-only --idle-only --install-tools   # = wtc upgrade --rollout
 wtc catch-up --repos harness,widget --clean-only --json
 wtc catch-up --all --repos widget --report /path/to/rollout.json
 ```
@@ -65,6 +66,12 @@ conflicts are aborted back to the original tree and handed to their owning
 collection. Keep the existing stash/update/restore behavior for a local
 invocation unless `--clean-only` is requested. Never remove untracked files
 to make a rollout proceed.
+
+`--idle-only` also leaves a collection whose herdr agent is working or
+blocked to that agent (`needs-owner`, "agent working"); the initiating
+collection is never skipped for its own agent. `--install-tools` runs
+`mise install` after a harness's environment refresh, so a new CLI pin is
+installed where it lands.
 
 Collection-root skills, MCP and environment actions run through the installed
 CLI only when the selected harness updates successfully or is already current.
@@ -348,14 +355,13 @@ file, which is overwritten on the next run.
 wtc env setup
 ```
 
-`.env.collection` is written by `write_collection_env`, and only `branch-off`
-(new collection) and `add-repo` (only when the file is missing) ever call it.
-So a variable added to the generator since — a port for a newly registered
-repo, `GH_CONFIG_DIR` — reaches new collections only, and every older
-collection stays stale indefinitely. This is the missing half.
+`wtc env setup` regenerates `.env.collection` and `mise.toml` from the
+current registry and configuration, so a port for a newly registered repo, a
+new environment variable or a new CLI pin reaches existing collections too,
+not only new ones.
 
-Same ordering rule as the skills above: it runs **this collection's**
-`harness/` generator, so it must come *after* §3 moved that worktree.
+Same ordering rule as the skills above: it reads **this collection's**
+`harness/`, so it must come *after* §3 moved that worktree.
 
 It preserves the collection's port base, so ports do not move, and leaves
 `.env.collection.local` alone. It regenerates `.env.collection` wholesale,

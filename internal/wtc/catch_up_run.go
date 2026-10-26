@@ -534,8 +534,27 @@ func (c *Context) CatchUp(opt CatchUpOptions) (CatchUpReport, error) {
 		fetched[t.owner] = state
 		report.add("fetch", t.collection, t.repo, state, reason, "", "", "")
 	}
+	// The initiating collection's own agent is the one running this sweep.
+	busy := map[string]string{}
+	if opt.IdleOnly {
+		session := catchUpSession(c)
+		for _, t := range targets {
+			if _, seen := busy[t.collection]; seen || t.collection == filepath.Base(c.Collection) {
+				continue
+			}
+			status, err := catchUpAgentBusy(session, t.collection)
+			if err != nil {
+				status = "unknown: " + err.Error()
+			}
+			busy[t.collection] = status
+		}
+	}
 	for _, t := range targets {
 		source, err := catchUpGit(t.path, "rev-parse", "--verify", "HEAD")
+		if status := busy[t.collection]; status != "" {
+			report.add("repo", t.collection, t.repo, "needs-owner", "agent "+status+"; idle-only leaves it untouched", source, "", source)
+			continue
+		}
 		if fetched[t.owner] == "failed" {
 			// Nothing is reconciled from stale refs, so no PR or ref check can
 			// change the outcome. Repo-scoped hooks never needed the remote;
@@ -647,37 +666,16 @@ func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt Catch
 		return
 	}
 	if !opt.NoEnv {
-		run("env", func(target *Context) error {
-			data, err := target.RenderEnv()
-			if err != nil {
-				return err
-			}
-			mise, err := target.RenderMise()
-			if err != nil {
-				return err
-			}
-			oldEnv, _ := os.ReadFile(filepath.Join(target.Collection, ".env.collection"))
-			oldMise, _ := os.ReadFile(filepath.Join(target.Collection, "mise.toml"))
-			changed := !bytes.Equal(oldEnv, data) || !bytes.Equal(oldMise, mise)
-			if err := target.ValidateEnvSupport(); err != nil {
-				return err
-			}
-			if err := target.RunHook("env.pre", nil); err != nil {
-				return err
-			}
-			if changed {
-				if err := target.WriteEnv(data); err != nil {
-					return err
-				}
-			}
-			if err := target.EnsureEnvSupport(); err != nil {
-				return err
-			}
-			if err := target.TrustMise(); err != nil {
-				return err
-			}
-			return target.RunHook("env.post", nil)
-		})
+		run("env", (*Context).refreshEnv)
+	}
+	if opt.InstallTools {
+		if last := report.Outcomes[len(report.Outcomes)-1]; !opt.NoEnv && last.Repo == "env" && last.Outcome == "failed" {
+			report.add("hook", t.collection, "tools", "skipped", "environment refresh failed; nothing installed", "", "", "")
+		} else if _, err := exec.LookPath("mise"); err != nil {
+			report.add("hook", t.collection, "tools", "skipped", "mise not installed", "", "", "")
+		} else {
+			run("tools", (*Context).InstallMise)
+		}
 	}
 	if !opt.NoSkills {
 		run("skills", func(target *Context) error {
@@ -712,4 +710,38 @@ func (c *Context) catchUpHooks(report *CatchUpReport, t catchUpTarget, opt Catch
 	if opt.ReloadStatus {
 		c.catchUpReloadStatus(report, t, opt)
 	}
+}
+
+// refreshEnv regenerates the collection env and mise config between the env
+// hooks, writing .env.collection only when its content changed.
+func (c *Context) refreshEnv() error {
+	data, err := c.RenderEnv()
+	if err != nil {
+		return err
+	}
+	mise, err := c.RenderMise()
+	if err != nil {
+		return err
+	}
+	oldEnv, _ := os.ReadFile(filepath.Join(c.Collection, ".env.collection"))
+	oldMise, _ := os.ReadFile(filepath.Join(c.Collection, "mise.toml"))
+	changed := !bytes.Equal(oldEnv, data) || !bytes.Equal(oldMise, mise)
+	if err := c.ValidateEnvSupport(); err != nil {
+		return err
+	}
+	if err := c.RunHook("env.pre", nil); err != nil {
+		return err
+	}
+	if changed {
+		if err := c.WriteEnv(data); err != nil {
+			return err
+		}
+	}
+	if err := c.EnsureEnvSupport(); err != nil {
+		return err
+	}
+	if err := c.TrustMise(); err != nil {
+		return err
+	}
+	return c.RunHook("env.post", nil)
 }
