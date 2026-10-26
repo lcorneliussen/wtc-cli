@@ -95,6 +95,8 @@ const collections = new Map();
 const histories = new Map();
 const calls = [];
 let svcResult = { ok: true, result: { message: "done" } };
+// What sessions.delete says it kept, by session.
+let preserved = {};
 let catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
@@ -129,6 +131,7 @@ const hostRequest = async (method, params) => {
   calls.push({ method, ...params });
   if (method === "plugins.sessionAction" && params.actionId === "svc") return svcResult;
   if (method === "plugins.sessionAction" && params.actionId === "catch-up") return catchUpResult;
+  if (method === "sessions.delete") return { ok: true, key: params.key, deleted: true, archived: [], ...(preserved[params.key] ? { worktreePreserved: preserved[params.key] } : {}) };
   if (method === "sessions.github.publish") return { status: "needs_confirmation", requestId: "req-1" };
   if (method === "sessions.github.confirm") return { status: "published", url: "https://github.com/octo/api/pull/7" };
   return {};
@@ -771,5 +774,70 @@ test("composer: a repository with nothing on its branch shows its base", async (
   assert.ok(site, "the untouched one shows its base");
   assert.match(site.title, /nothing on openclaw\/test yet/);
   assert.ok(codes.some((n) => n.textContent === "openclaw/test"), "the one with a commit shows its branch");
+  view.dispose();
+});
+
+test("composer: a worker has its own rows, merges into the task's checkout, and is discarded after asking again", async () => {
+  const data = {
+    ...collection([repo("site")]),
+    workers: [{ name: "docs", collection: "test--docs", repos: [
+      repo("site", { sessionKey: "agent:main:owner:site-docs", branch: "openclaw/test--docs", dirty: 13, toMerge: 2, taskSessionKey: "agent:main:owner:site" }),
+    ] }],
+  };
+  const { host, view } = await mount("composer", data);
+  const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
+  const [repos, workers] = tables(card);
+  // One row of site for the task; the worker's site is the worker's.
+  assert.deepEqual(repos.slice(1).map((r) => r[0]), ["site"]);
+  assert.deepEqual(workers, [["Worker", "Repo", "±", "⇢", ""], ["docs", "site", "13", "⇢ 2", "✕"]]);
+  const named = (re) => [...card.all()].find((n) => n.tagName === "BUTTON" && re.test(n.title));
+
+  calls.length = 0;
+  await named(/^2 commits of worker docs/).onclick();
+  assert.deepEqual(calls.map((c) => [c.actionId, c.sessionKey, c.payload?.from]), [["catch-up", "agent:main:owner:site", "docs"]]);
+
+  // ✕ asks again, naming what would go; the second click deletes the sessions.
+  calls.length = 0;
+  named(/^Discard worker docs/).onclick({ preventDefault() {}, stopPropagation() {} });
+  await settle();
+  assert.equal(calls.length, 0);
+  const again = named(/^Click again to discard worker docs\. It has 13 uncommitted files and 2 commits not merged\.$/);
+  assert.ok(again);
+  await again.onclick();
+  assert.deepEqual(calls.map((c) => [c.method, c.key]), [["sessions.delete", "agent:main:owner:site-docs"]]);
+  view.dispose();
+});
+
+test("composer: a worker's merge conflict goes to the conversation; an unknown merge state is said before discarding", async () => {
+  const data = {
+    ...collection([repo("site")]),
+    workers: [{ name: "docs", collection: "test--docs", repos: [
+      repo("site", { sessionKey: "agent:main:owner:site-docs", branch: "openclaw/test--docs", toMerge: 1, taskSessionKey: "agent:main:owner:site" }),
+      repo("harness", { sessionKey: "agent:main:owner:harness-docs", branch: "openclaw/test--docs", toMerge: null, taskSessionKey: null }),
+    ] }],
+  };
+  const { host, view } = await mount("composer", data);
+  const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
+  const named = (re) => [...card.all()].find((n) => n.tagName === "BUTTON" && re.test(n.title));
+  const stop = { preventDefault() {}, stopPropagation() {} };
+
+  catchUpResult = { ok: true, result: { code: 1, json: null, message: "wtc: merging openclaw/test--docs into openclaw/test conflicts in: index.md. The merge was aborted and the checkout is as before. Merge by hand with `git merge openclaw/test--docs`, resolve, commit — do not rebase\n" } };
+  calls.length = 0;
+  await named(/^1 commit of worker docs/).onclick();
+  assert.deepEqual(calls.map((c) => c.actionId ?? c.method), ["catch-up", "sessions.send"]);
+  assert.match(calls[1].message, /Merging worker docs into site conflicts in index\.md\. Run wtc catch-up --from docs in your checkout of site/);
+  catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
+
+  // The task has no checkout of the harness: nothing says what is merged.
+  assert.ok(named(/^Discard worker docs: .*Whether its commits in harness are merged is not known\.$/));
+  named(/^Discard worker docs/).onclick(stop);
+  await settle();
+  calls.length = 0;
+  preserved = { "agent:main:owner:harness-docs": { id: "w9", branch: "openclaw/test--docs", path: "/worktrees/w9", reason: "busy" } };
+  await named(/^Click again to discard worker docs/).onclick();
+  preserved = {};
+  assert.deepEqual(calls.map((c) => c.key), ["agent:main:owner:site-docs", "agent:main:owner:harness-docs"]);
+  await settle();
+  assert.ok([...card.all()].some((n) => /^Worker docs discarded; OpenClaw kept the worktree of harness \(busy, at \/worktrees\/w9\)\.$/.test(n.textContent ?? "")));
   view.dispose();
 });

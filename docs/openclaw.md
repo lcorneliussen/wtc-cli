@@ -282,8 +282,13 @@ checkout, exchanging work through git (#106).
 - A worker uses the task's harness for names and default branches, but gets
   no worktree of the harness unless its part is the harness.
 
-The Collection panel does not group workers under their task yet; it shows
-each worker's collection as its own.
+- The Collection panel and the card show workers under their task, in a
+  section of their own, not as more rows of the task's repositories: per
+  worker and repository its uncommitted files and the commits the task has
+  not merged yet. **⇢** merges them into the task's checkout
+  (`wtc catch-up --from`, with the agent's git identity); a conflict goes to
+  the conversation. **✕** discards the worker after asking again: it deletes
+  the worker's sessions, and OpenClaw removes their worktrees.
 
 ## wtc projects
 
