@@ -483,7 +483,8 @@ instead. An agent asked to set wtc up starts with `wtc docs setup.md`.
    ships Git 2.39 and no `gh`, and publication fails there with "workspace
    attributes could not be verified".
 3. **The plugin**, which brings the collection card, the Collection panel and
-   the agent's `wtc` skill:
+   the agent's skills: `wtc`, and the OpenClaw variants of `wtc-catch-up`,
+   `wtc-pr` and `wtc-follow` (each `SKILL.openclaw.md` among wtc's skills):
 
    ```sh
    wtc openclaw install

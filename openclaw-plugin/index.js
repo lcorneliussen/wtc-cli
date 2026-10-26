@@ -504,8 +504,8 @@ export default {
       const text = [
         "wtc: pull request news for this collection",
         ...lines.map((l) => `- ${l}`),
-        "Bring the task's progress up to date with this.",
-        ...(lines.some((l) => / was merged\.$|opened and merged\.$/.test(l)) ? ["After a merge, run wtc catch-up in that repository's checkout, so it continues from the merge, and check what is left of the task."] : []),
+        // What to do about each is the wtc-follow skill's.
+        "Act on it with the wtc-follow skill, and bring the task's progress up to date.",
         "Tell the person only what they need to act on.",
       ].join("\n");
       try {

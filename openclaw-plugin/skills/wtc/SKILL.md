@@ -41,22 +41,11 @@ Read that before the first `wtc` command of a task and follow it. In short:
   here ad hoc.
 - `wtc status <name>` shows the collection folder; edit, build, test and
   commit in `<folder>/<repo>`.
-- **Pushing is the person's.** When work is committed, write the pull
-  request's description to a file: what changed and why, how it was checked,
-  what is left (the repository's PR template when it has one). Then run
-  `wtc publish --title "…" --body-file <file>` in `<folder>/<repo>`. It checks
-  the work and records the text, and the person's push opens the pull request
-  with it. Tell them it is ready: they push it with ↑ for that repository in
-  the card, as themselves, after confirming. Carry out the publish plan
-  yourself only when they explicitly ask you to. Never `git push`.
-- **A "wtc: pull request news" event** says what happened since: a pull
-  request opened, checks failed or passed, a review was approved or asked for
-  changes, a conflict, or a merge. Update the task's progress with it. For a
-  failure, a review or a conflict, look at it (`gh pr checks`,
-  `gh pr view --comments`) and tell the person what you will do. After a
-  merge, run `wtc catch-up` in that repository's checkout so it continues
-  from the merge, then say what is done and what is left. Don't answer
-  review comments on the forge yourself.
+- **Pushing is the person's.** When work is committed and ready for review,
+  get its pull request ready with the **wtc-pr** skill; the person pushes it
+  with ↑ in the card. Never `git push`.
+- **A "wtc: pull request news" event**: act on it with the **wtc-follow**
+  skill.
 - Parallel parts of a task go to workers, never to two writers in one
   checkout: `wtc add-repo <repo> --worker <name> --work "<part>"`, then
   `wtc catch-up --from <name>` in `<folder>/<repo>` to merge one in. A
@@ -64,10 +53,6 @@ Read that before the first `wtc` command of a task and follow it. In short:
   next anyway goes in your own checkout. When a worker ends, merge it in, or
   tell the person what is left so they can discard it in the card: none is
   left behind.
-- `wtc catch-up` in `<folder>/<repo>` merges the base in; it never rebases
-  and never pushes.
-- In a sandbox with `WTC_GATEWAY_GIT` set, `wtc catch-up` in the checkout
-  merges the base in there, with full history, and hands the branch, your
-  commits included, to the gateway. On a conflict, resolve it with git,
-  `git add` each file, then `wtc catch-up --continue`. There it takes no
-  other flags: `--from` runs in a session outside the sandbox.
+- **Catching up** a repository, merging a worker in, and resolving the
+  conflicts either brings: the **wtc-catch-up** skill. It never rebases and
+  never pushes.

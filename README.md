@@ -23,7 +23,7 @@ editor are optional.
 You need Git and macOS or Linux. Download a [published binary](https://github.com/lcorneliussen/wtc-cli/releases), or use mise:
 
 ```sh
-mise use -g github:lcorneliussen/wtc-cli@0.1.55
+mise use -g github:lcorneliussen/wtc-cli@0.1.56
 wtc --version
 ```
 
