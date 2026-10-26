@@ -98,6 +98,7 @@ let svcResult = { ok: true, result: { message: "done" } };
 // What sessions.delete says it kept, by session.
 let preserved = {};
 let catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
+let nextResult;
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
 let personal = null;
@@ -131,6 +132,7 @@ const hostRequest = async (method, params) => {
   calls.push({ method, ...params });
   if (method === "plugins.sessionAction" && params.actionId === "svc") return svcResult;
   if (method === "plugins.sessionAction" && params.actionId === "catch-up") return catchUpResult;
+  if (method === "plugins.sessionAction" && params.actionId === "next") return nextResult;
   if (method === "sessions.delete") return { ok: true, key: params.key, deleted: true, archived: [], ...(preserved[params.key] ? { worktreePreserved: preserved[params.key] } : {}) };
   if (method === "sessions.github.publish") return { status: "needs_confirmation", requestId: "req-1" };
   if (method === "sessions.github.confirm") return { status: "published", url: "https://github.com/octo/api/pull/7" };
@@ -266,6 +268,35 @@ test("composer: no card for a session without repositories", async () => {
   const { host, view } = await mount("composer", collection([]));
   assert.equal([...host.all()].some((n) => n.className === "wtc-collection-card"), false);
   view.dispose();
+});
+
+test("next actions: run the rechecked step and hand judgment to the conversation", async () => {
+  for (const kind of ["composer", "panel"]) {
+    const step = { step: "return-to-tip", by: "wtc", reason: "The pull request merged", key: "tip:1", command: ["wtc", "catch-up"] };
+    const r = repo("api", { next: step });
+    const { host, view } = await mount(kind, collection([r]));
+    const action = () => [...host.all()].find((n) => n.tagName === "BUTTON" && n.title === step.reason);
+    assert.ok(action());
+    nextResult = { ok: true, result: { performed: true, repo: r, code: 0, json: { summary: "returned to tip" } } };
+    calls.length = 0;
+    action().onclick({ preventDefault() {}, stopPropagation() {} });
+    await settle();
+    assert.deepEqual(calls.map((c) => c.actionId), ["next"]);
+    assert.deepEqual(calls[0].payload, { ownerSessionKey: r.sessionKey, key: step.key });
+    assert.match(host.textContent, /returned to tip/);
+    nextResult = { ok: false, error: "the next step changed" };
+    action().onclick({ preventDefault() {}, stopPropagation() {} });
+    await settle();
+    assert.match(host.textContent, /the next step changed/);
+    const approved = { ...step, step: "catch-up", approve: "agent" };
+    nextResult = { ok: true, result: { performed: false, repo: { ...r, next: approved } } };
+    calls.length = 0;
+    action().onclick({ preventDefault() {}, stopPropagation() {} });
+    await settle();
+    assert.deepEqual(calls.map((c) => c.actionId ?? c.method), ["next", "sessions.send"]);
+    assert.match(calls[1].message, /^\/skill wtc-catch-up api:/);
+    view.dispose();
+  }
 });
 
 test("composer: the card for a busy collection", async () => {

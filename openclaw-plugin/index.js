@@ -767,25 +767,57 @@ export default {
       });
     }
 
-    api.session.controls.registerSessionAction({
-      id: "catch-up",
-      description: "Merge the destination branch into this session's worktree (wtc catch-up; in a worker's worktree, the task's branch), or with payload.from another branch of the repository, a sub-session's (wtc catch-up --from). Never rebases, never pushes.",
-      requiredScopes: ["operator.write"],
-      async handler(action) {
-        const entry = action.sessionKey && api.runtime.agent.session.getSessionEntry({ agentId: action.agentId, sessionKey: action.sessionKey });
+    const catchingUp = new Set();
+    const catchUp = async (action) => {
+      if (catchingUp.has(action.sessionKey)) return { ok: false, error: "this repository is already catching up" };
+      catchingUp.add(action.sessionKey);
+      try {
+        const entry = action.sessionKey && await getSessionEntry({ agentId: action.agentId, sessionKey: action.sessionKey });
         const cwd = worktreeOf(entry);
         if (!cwd) return { ok: false, error: "this session owns no managed worktree" };
-        // A branch of the same repository, by its name: never an option.
         const from = action.payload?.from;
         if (from !== undefined && (!/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(String(from)) || /\.\.|\/\/|\/$|\.lock$/.test(String(from)))) return { ok: false, error: "from names a branch" };
-        // wtc reads its host from the environment an agent's shell has, and a
-        // merge commit needs the identity that shell would commit with.
         const config = api.runtime?.config?.current?.() ?? api.config;
         const r = await run(["wtc", "catch-up", ...(from ? ["--from", String(from)] : []), "--json"], { cwd, timeoutMs: 120000, env: { OPENCLAW_SHELL: "exec", ...agentGitIdentity(config, action.agentId) } });
         let json = null;
         try { json = JSON.parse(r.stdout); } catch { /* reported as text below */ }
         return { ok: true, result: { code: r.code, json, message: (json ? "" : r.stdout) + r.stderr } };
+      } finally { catchingUp.delete(action.sessionKey); }
+    };
+
+    // The browser supplies an identity, never an executable command. Read the
+    // collection again before acting: a repository may have become dirty or
+    // moved to a step that needs the agent or person's agreement.
+    const acting = new Set();
+    api.session.controls.registerSessionAction({
+      id: "next",
+      description: "Recheck a repository's next step; run a catch-up needing no approval or offer its current handoff.",
+      requiredScopes: ["operator.write"],
+      async handler(action) {
+        const { ownerSessionKey, key } = action.payload ?? {};
+        if (!action.agentId || !action.sessionKey || !ownerSessionKey || typeof key !== "string") return { ok: false, error: "session and next step are required" };
+        const lock = `${action.agentId}:${ownerSessionKey}`;
+        if (acting.has(lock)) return { ok: false, error: "this repository's next step is already running" };
+        acting.add(lock);
+        try {
+          const collection = await loadCollection(action.agentId, action.sessionKey);
+          const repo = collection.repos.find((r) => r.sessionKey === ownerSessionKey);
+          if (!repo || repo.error || !repo.next || repo.next.key !== key) return { ok: false, error: "the next step changed; refresh the collection" };
+          const step = repo.next;
+          if (step.by === "wtc" && !step.approve && JSON.stringify(step.command) === JSON.stringify(["wtc", "catch-up"])) {
+            const out = await catchUp({ ...action, sessionKey: ownerSessionKey, payload: {} });
+            return out.ok ? { ok: true, result: { ...out.result, performed: true, repo } } : out;
+          }
+          return { ok: true, result: { performed: false, repo } };
+        } finally { acting.delete(lock); }
       },
+    });
+
+    api.session.controls.registerSessionAction({
+      id: "catch-up",
+      description: "Merge the destination branch into this session's worktree (wtc catch-up; in a worker's worktree, the task's branch), or with payload.from another branch of the repository, a sub-session's (wtc catch-up --from). Never rebases, never pushes.",
+      requiredScopes: ["operator.write"],
+      handler: catchUp,
     });
   },
 };

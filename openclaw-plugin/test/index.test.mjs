@@ -6,6 +6,60 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+test("next actions recheck membership and state, preserve approvals and use only supported gateway commands", async () => {
+  const actions = new Map();
+  const owner = "agent:main:repo:api";
+  const entry = { parentSessionKey: "agent:main:c", projectId: "api", label: "test api", worktree: { branch: "openclaw/test" }, workspaceDir: "/worktrees/api" };
+  const commands = [];
+  const step = { step: "return-to-tip", by: "wtc", key: "api:tip:abc", reason: "merged", command: ["wtc", "catch-up"] };
+  let row = { path: entry.workspaceDir, repo: "api", next: step };
+  let release;
+  let block = false;
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      state: { resolveStateDir: () => mkdtempSync(path.join(os.tmpdir(), "wtc-next-")) },
+      agent: { session: {
+        listSessionEntries: () => [{ sessionKey: "agent:main:c", entry: {} }, { sessionKey: owner, entry }],
+        getSessionEntry: async ({ sessionKey }) => sessionKey === owner ? entry : undefined,
+      } },
+      system: { runCommandWithTimeout: async (argv, opts) => {
+        if (argv[1] === "status") return { code: 0, stdout: JSON.stringify({ test: { repos: [row] } }) };
+        if (argv[1] === "--version") return { code: 0, stdout: "wtc version dev" };
+        commands.push({ argv, opts });
+        if (block) await new Promise((resolve) => { release = resolve; });
+        return { code: 0, stdout: JSON.stringify({ summary: "returned to tip" }), stderr: "" };
+      } },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {}, on() {}, logger: {},
+  });
+  const act = (payload = {}, sessionKey = "agent:main:c") => actions.get("next").handler({ agentId: "main", sessionKey, payload: { ownerSessionKey: owner, key: step.key, ...payload } });
+  assert.deepEqual(actions.get("next").requiredScopes, ["operator.write"]);
+  assert.equal((await act({}, "agent:main:other")).ok, false);
+  assert.equal((await act({ key: "old" })).ok, false);
+  row = { ...row, next: null };
+  assert.equal((await act()).ok, false, "a newly dirty checkout has no next step");
+  row = { ...row, next: { ...step, approve: "agent" } };
+  assert.equal((await act()).result.performed, false);
+  row.next = { ...step, approve: "person", gateway: "github_publish" };
+  assert.equal((await act()).result.performed, false);
+  row.next = { ...step, command: ["sh", "-c", "untrusted"] };
+  assert.equal((await act()).result.performed, false);
+  assert.equal(commands.length, 0);
+  row.next = step;
+  block = true;
+  const first = act({ command: ["sh", "-c", "ignored"] });
+  while (!release) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await act()).ok, false, "a double click cannot start another execution");
+  release();
+  const result = await first;
+  assert.equal(result.result.performed, true);
+  assert.deepEqual(commands[0].argv, ["wtc", "catch-up", "--json"]);
+  assert.equal(commands[0].opts.cwd, entry.workspaceDir);
+  assert.equal(commands[0].opts.env.OPENCLAW_SHELL, "exec");
+});
+
 test("the panel warns when the gateway's wtc is not the release the plugin came from", () => {
   assert.equal(versionWarning("0.1.42", "wtc version 0.1.42\n"), null);
   assert.match(versionWarning("0.1.42", "wtc version 0.1.43\n"), /the wtc 0\.1\.42 plugin.*runs wtc 0\.1\.43.*wtc openclaw install/);

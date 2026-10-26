@@ -8,6 +8,16 @@ conflict marker, such as `✗3`; compact views retain the warning when counts do
 not fit. Passing checks or a clean local checkout do not clear a PR conflict.
 Local unmerged files are shown separately in the working-tree (`±`) cell.
 
+The terminal table and live view show **Next actions** from each repository's
+status. In the live view, press `n`, choose with `↑`/`↓`, and press Enter. A
+step needing no approval can run catch-up for that repository; status is read
+again first, and newly dirty or busy checkouts stay with their owner. Steps
+needing judgment ask the collection's idle herdr agent to follow the named
+skill. In a plain terminal, or when that agent is busy, the view shows the
+instruction to give it. An approved pull request opens in the browser for the
+person to merge. `Esc` returns to the status table. These are manual actions;
+the view does not run them on every refresh.
+
 - `wtc env list` shows variable names, source files, and whether a collection-local entry overrides an earlier one. It opens a scrollable, width-aware view in an interactive terminal; `--no-tui` prints a compact table and `--json` emits structured data. It never prints values. Bare `wtc env` shows help.
 - `wtc env setup [--collection DIR] [--dry-run]` regenerates `.env.collection`, preserving its port base. It leaves `.env.collection.local` intact, writes the collection's mise environment file, and trusts the generated mise config when mise is installed. Existing flagged `wtc env` invocations remain supported.
 - `wtc doctor` checks the collection registry and local tool availability. Under [OpenClaw](openclaw.md), or with `--openclaw`, it checks the gateway instead: Git 2.42+, `gh`, the wtc plugin and its version, custom Control UI plugins, and that each agent's `AGENTS.md` mentions wtc (`wtc docs openclaw-AGENTS.md` is the section to add). It fails when a required check does.
