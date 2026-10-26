@@ -494,3 +494,49 @@ test("the card's catch-up runs wtc catch-up with the agent's git identity", asyn
   assert.equal(env.GIT_COMMITTER_EMAIL, "team-claw@localhost");
   assert.equal(env.GIT_AUTHOR_NAME, "Team Claw");
 });
+
+test("a worker's checkouts are the worker's, not a second row of the task's repository", async () => {
+  const actions = new Map();
+  const child = (key, repo, name, dir) => ({ sessionKey: key, entry: { parentSessionKey: "agent:main:c", projectId: repo, worktree: { id: dir, branch: `openclaw/${name}` }, workspaceDir: `/worktrees/${dir}` } });
+  const entries = [
+    { sessionKey: "agent:main:c", entry: {} },
+    child("agent:main:subagent:site", "site", "9-x", "w1"),
+    child("agent:main:subagent:api", "api", "9-x", "w2"),
+    child("agent:main:subagent:site-docs", "site", "9-x--docs", "w3"),
+  ];
+  const repo = (repo, dir, branch, more = {}) => ({ repo, path: `/worktrees/${dir}`, branch, ...more });
+  const status = {
+    "9-x": { repos: [repo("site", "w1", "openclaw/9-x"), repo("api", "w2", "openclaw/9-x")],
+      workers: [{ name: "docs", collection: "9-x--docs", repos: [{ repo: "site", branch: "openclaw/9-x--docs", toMerge: 2 }] }] },
+    "9-x--docs": { repos: [repo("site", "w3", "openclaw/9-x--docs", { dirty: 13 })] },
+  };
+  const argvs = [];
+  plugin.register({
+    pluginConfig: {},
+    runtime: {
+      state: { resolveStateDir: () => "/nonexistent" },
+      agent: { session: { listSessionEntries: () => entries, getSessionEntry: ({ sessionKey }) => entries.find((e) => e.sessionKey === sessionKey)?.entry } },
+      system: { runCommandWithTimeout: async (argv, options) => {
+        argvs.push({ argv, cwd: options?.cwd });
+        return { code: 0, stdout: argv[1] === "status" ? JSON.stringify({ [argv[2]]: status[argv[2]] }) : "{}", stderr: "" };
+      } },
+    },
+    session: { controls: { registerSessionAction: (a) => actions.set(a.id, a), registerControlUiDescriptor() {} } },
+    registerHttpRoute() {},
+    on() {},
+    logger: {},
+  });
+  const { result } = await actions.get("collection").handler({ sessionKey: "agent:main:c", agentId: "main", payload: {} });
+  assert.deepEqual(result.repos.map((r) => `${r.repo} ${r.branch}`), ["api openclaw/9-x", "site openclaw/9-x"]);
+  assert.equal(result.workers.length, 1);
+  const [w] = result.workers;
+  assert.equal(w.name, "docs");
+  assert.equal(w.collection, "9-x--docs");
+  assert.deepEqual(w.repos.map((r) => [r.repo, r.dirty, r.toMerge, r.taskSessionKey]), [["site", 13, 2, "agent:main:subagent:site"]]);
+
+  // Merging the worker is a catch-up from its branch in the task's checkout.
+  await actions.get("catch-up").handler({ sessionKey: "agent:main:subagent:site", agentId: "main", payload: { from: "docs" } });
+  assert.deepEqual(argvs.at(-1), { argv: ["wtc", "catch-up", "--from", "docs", "--json"], cwd: "/worktrees/w1" });
+  const refused = await actions.get("catch-up").handler({ sessionKey: "agent:main:subagent:site", agentId: "main", payload: { from: "--all" } });
+  assert.equal(refused.ok, false);
+});

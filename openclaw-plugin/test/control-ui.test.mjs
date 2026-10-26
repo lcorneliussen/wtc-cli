@@ -773,3 +773,34 @@ test("composer: a repository with nothing on its branch shows its base", async (
   assert.ok(codes.some((n) => n.textContent === "openclaw/test"), "the one with a commit shows its branch");
   view.dispose();
 });
+
+test("composer: a worker has its own rows, merges into the task's checkout, and is discarded after asking again", async () => {
+  const data = {
+    ...collection([repo("site")]),
+    workers: [{ name: "docs", collection: "test--docs", repos: [
+      repo("site", { sessionKey: "agent:main:owner:site-docs", branch: "openclaw/test--docs", dirty: 13, toMerge: 2, taskSessionKey: "agent:main:owner:site" }),
+    ] }],
+  };
+  const { host, view } = await mount("composer", data);
+  const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
+  const [repos, workers] = tables(card);
+  // One row of site for the task; the worker's site is the worker's.
+  assert.deepEqual(repos.slice(1).map((r) => r[0]), ["site"]);
+  assert.deepEqual(workers, [["Worker", "Repo", "±", "⇢", ""], ["docs", "site", "13", "⇢ 2", "✕"]]);
+  const named = (re) => [...card.all()].find((n) => n.tagName === "BUTTON" && re.test(n.title));
+
+  calls.length = 0;
+  await named(/^2 commits of worker docs/).onclick();
+  assert.deepEqual(calls.map((c) => [c.actionId, c.sessionKey, c.payload?.from]), [["catch-up", "agent:main:owner:site", "docs"]]);
+
+  // ✕ asks again, naming what would go; the second click deletes the sessions.
+  calls.length = 0;
+  named(/^Discard worker docs/).onclick({ preventDefault() {}, stopPropagation() {} });
+  await settle();
+  assert.equal(calls.length, 0);
+  const again = named(/^Click again to discard worker docs, with 13 uncommitted files and 2 commits not merged/);
+  assert.ok(again);
+  await again.onclick();
+  assert.deepEqual(calls.map((c) => [c.method, c.key]), [["sessions.delete", "agent:main:owner:site-docs"]]);
+  view.dispose();
+});

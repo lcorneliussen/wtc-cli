@@ -50,6 +50,12 @@ based on your branch where you have one, so it builds on your groundwork.
   the workers' work merged in. Workers' branches are not published.
 - Readers (review, research, a test run) need no worker: they can read your
   checkouts.
+- A worker is only for a part that really runs beside yours. Work you would
+  do next anyway goes in your own checkout: a worker you then wait for is a
+  second copy of the repository for nothing.
+- When a worker ends, merge it in, or tell the person what is left. The card
+  shows each worker under the task, with **⇢** to merge it and **✕** to
+  discard it; none should be left behind.
 
 ## wtc projects
 

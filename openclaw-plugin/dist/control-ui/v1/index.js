@@ -17,8 +17,8 @@ const el = (tag, props = {}, ...kids) => {
 };
 const css = (node, text) => ((node.style.cssText = text), node);
 
-async function call(host, actionId, sessionKey, agentId) {
-  const res = await host.request("plugins.sessionAction", { pluginId: PLUGIN_ID, actionId, sessionKey, ...(agentId ? { agentId } : {}) });
+async function call(host, actionId, sessionKey, agentId, payload) {
+  const res = await host.request("plugins.sessionAction", { pluginId: PLUGIN_ID, actionId, sessionKey, ...(agentId ? { agentId } : {}), ...(payload ? { payload } : {}) });
   if (res && res.ok === false) throw new Error(res.error ?? "action failed");
   return res?.result ?? res;
 }
@@ -600,6 +600,55 @@ function collectionTables(v) {
   async function pushAll(list) {
     for (const r of list) await publish(r);
   }
+  // A worker's commits go into the task's checkout of the repository, as a
+  // catch-up from its branch; a conflict is the agent's, as on ↓.
+  async function mergeWorker(w, r) {
+    const name = nameOf(r);
+    if (!r.taskSessionKey) return v.say(`${name}: the task has no checkout of it to merge worker ${w.name} into`);
+    catching.add(r.sessionKey);
+    v.rerender();
+    try {
+      v.say(`Merging worker ${w.name} into ${name}…`);
+      const out = await call(v.host, "catch-up", r.taskSessionKey, v.agent(), { from: w.name });
+      const conflicts = conflictsOf(out.message);
+      if (conflicts.length) {
+        await askConversation(v.host, v.key(), `Merging worker ${w.name} into ${name} conflicts in ${conflicts.join(", ")}. Run wtc catch-up --from ${w.name} in your checkout of ${name}, resolve the conflicts there and commit. Don't rebase, and don't push: pushing is mine, through the gateway.`);
+        v.say(`${name}: ${conflicts.join(", ")} changed in both; the conversation was asked to merge worker ${w.name} and resolve them.`);
+      } else {
+        v.say(`${name}: ${out.json?.summary ?? (out.message || "exit " + out.code)}`);
+      }
+    } finally {
+      catching.delete(r.sessionKey);
+      await v.refresh();
+    }
+  }
+  // Discarding a worker deletes its sessions; OpenClaw removes their
+  // worktrees. It asks again first: the second click within a few seconds
+  // discards.
+  const armed = new Map();
+  async function discardWorker(w) {
+    if (!armed.has(w.name)) {
+      armed.set(w.name, setTimeout(() => { armed.delete(w.name); v.rerender(); }, 5000));
+      v.rerender();
+      return;
+    }
+    clearTimeout(armed.get(w.name));
+    armed.delete(w.name);
+    w.repos.forEach((r) => catching.add(r.sessionKey));
+    v.rerender();
+    try {
+      v.say(`Discarding worker ${w.name}…`);
+      const kept = [];
+      for (const r of w.repos) {
+        const out = await v.host.request("sessions.delete", { key: r.sessionKey, agentId: v.agent() });
+        if (out?.worktreePreserved) kept.push(`${nameOf(r)} (${out.worktreePreserved.reason}, at ${out.worktreePreserved.path})`);
+      }
+      v.say(kept.length ? `Worker ${w.name} discarded; OpenClaw kept the worktree of ${kept.join(", ")}.` : `Worker ${w.name} discarded.`);
+    } finally {
+      w.repos.forEach((r) => catching.delete(r.sessionKey));
+      await v.refresh();
+    }
+  }
 
   // The card is wtc status's tables: a column per fact, always in its place,
   // "·" where there is none. What can be done about a fact is done on it: the
@@ -796,6 +845,38 @@ function collectionTables(v) {
     return out;
   }
 
+  // WORKER REPO ± ⇢: a worker's checkouts, what the task has not merged from
+  // each yet, and what ends it.
+  function workerTable(workers, narrow = false) {
+    const columns = [
+      { head: "Worker", width: "minmax(0,max-content)" },
+      { head: "Repo", width: "minmax(0,1fr)", under: true },
+      { head: "±", title: "Changed files the worker has not committed", align: "center" },
+      { head: "⇢", title: "The worker's commits the task's branch has not merged: click to merge them in", align: "center" },
+      { head: "", title: "Discard the worker" },
+    ];
+    const rows = [];
+    for (const w of workers) {
+      const dirty = w.repos.reduce((n, r) => n + (r.dirty ?? 0), 0);
+      const unmerged = w.repos.reduce((n, r) => n + (r.toMerge ?? 0), 0);
+      const loss = [dirty ? plural(dirty, "uncommitted file") : "", unmerged ? `${plural(unmerged, "commit")} not merged` : ""].filter(Boolean).join(" and ");
+      const discard = w.repos.some((r) => catching.has(r.sessionKey)) ? working()
+        : armed.has(w.name)
+          ? count("discard?", `Click again to discard worker ${w.name}${loss ? `, with ${loss}` : ""}`, TONE.failure, () => discardWorker(w))
+          : smallButton("✕", `Discard worker ${w.name}: deletes its sessions, and OpenClaw removes its worktrees${loss ? `. It has ${loss}` : ", which are merged"}`, () => discardWorker(w));
+      w.repos.forEach((r, i) => {
+        const merge = catching.has(r.sessionKey) ? working()
+          : r.mergeError ? toned("?", TONE.failure, r.mergeError)
+          : r.toMerge > 0 ? count(`⇢ ${r.toMerge}`, `${plural(r.toMerge, "commit")} of worker ${w.name} not in the task's ${nameOf(r)}. Merge them in (wtc catch-up --from ${w.name}); never rebases, never pushes`, TONE.pending, () => mergeWorker(w, r))
+          : r.toMerge === 0 ? muted("✓", "Merged into the task") : null;
+        // A worker's name and ✕ once, on its first repository.
+        rows.push([i === 0 ? css(el("span", { textContent: w.name, title: `Collection ${w.collection}` }), "font-weight:600") : el("span"),
+          repoName(r), r.dirty ? toned(String(r.dirty), TONE.pending, plural(r.dirty, "uncommitted file")) : null, merge, i === 0 ? discard : el("span")]);
+      });
+    }
+    return table(columns, rows, narrow);
+  }
+
   function prTable(repos, narrow = false) {
     const open = repos.filter((r) => r.pullRequest);
     const columns = [
@@ -817,7 +898,7 @@ function collectionTables(v) {
   return { table, checkAccount, notice, repoTable: (repos, narrow) =>
     // Narrow, the repository (with its branch below) takes the room the
     // branch had.
-    table(narrow ? REPO_COLUMNS.map((c, i) => (i === 0 ? { ...c, width: "minmax(0,1fr)" } : c)) : REPO_COLUMNS, repos.map(repoRow), narrow), serviceTable, totals, prTable };
+    table(narrow ? REPO_COLUMNS.map((c, i) => (i === 0 ? { ...c, width: "minmax(0,1fr)" } : c)) : REPO_COLUMNS, repos.map(repoRow), narrow), serviceTable, totals, prTable, workerTable };
 }
 
 // The text of the latest message the person wrote, from chat.history.
@@ -1020,7 +1101,10 @@ function mountComposer(container, context) {
       "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
     );
     tables.checkAccount(repos);
-    detail.replaceChildren(...[tables.repoTable(repos, narrow), tables.notice(), groups.length ? tables.serviceTable(groups, entry.data, narrow) : null].filter(Boolean));
+    const workers = entry.data.workers ?? [];
+    detail.replaceChildren(...[tables.repoTable(repos, narrow), tables.notice(),
+      workers.length ? css(el("div", {}, css(el("span", { textContent: "Workers", title: "Parts of the task in parallel, each in checkouts of its own" }), "color:var(--muted, #888);font-size:12px"), tables.workerTable(workers, narrow)), "display:grid;gap:4px") : null,
+      groups.length ? tables.serviceTable(groups, entry.data, narrow) : null].filter(Boolean));
     if (card.parentNode !== container) container.prepend(card);
   }
   card.addEventListener("toggle", () => entry && render(entry));
@@ -1374,6 +1458,7 @@ function mountCollection(container, context) {
     if (howTo) repoSection.append(howTo);
     repoSection.append(adder);
 
+    const workerSection = data.workers?.length ? el("div", {}, heading("Workers"), tables.workerTable(data.workers, narrow)) : null;
     const prSection = repos.some((r) => r.pullRequest) ? el("div", {}, heading("Pull requests"), tables.prTable(repos, narrow)) : null;
 
     const serviceSection = el("div", {}, heading("Services"));
@@ -1381,7 +1466,7 @@ function mountCollection(container, context) {
     else serviceSection.append(tables.serviceTable(groups, data, narrow));
 
     const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
-    body.replaceChildren(...[repoSection, prSection, serviceSection, ...warnings, footer(data)].filter(Boolean));
+    body.replaceChildren(...[repoSection, workerSection, prSection, serviceSection, ...warnings, footer(data)].filter(Boolean));
     log.textContent = note;
   }
 
