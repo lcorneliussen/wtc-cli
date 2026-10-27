@@ -144,20 +144,78 @@ func TestRuntimeTextSaysWhatIsWrongNow(t *testing.T) {
 // Status as people see it carries the live look; up's wait loop polls
 // without it, so its deadline holds.
 func TestRuntimeStatusWiring(t *testing.T) {
-	c := runtimeFixture(t)
-	runtimeLoginCheck = func(string) string { return "Tailscale needs a login: tailscale up" }
-	called := 0
-	runtimeAnswerCheck = func(string) (bool, string) { called++; return false, "HTTP 502" }
-	items := []RuntimeItem{{Path: "a", Kind: "endpoint", Provider: "tailscale", State: "ready", URL: "https://a.example"}}
-	runtimeTunnelLogins(items, runtimeLoginCheck)
-	runtimeAnswering(items, runtimeAnswerCheck)
-	if items[0].Login == "" || items[0].Answering != "no" || items[0].AnswerDetail != "HTTP 502" || called != 1 {
-		t.Fatalf("%+v", items[0])
+	for _, tc := range []struct {
+		name, login, answer, detail string
+	}{
+		{name: "healthy", answer: "yes"},
+		{name: "unreachable", answer: "no", detail: "HTTP 502"},
+		{name: "provider login", answer: "yes", login: "provider needs a login"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := runtimeFixture(t)
+			m, err := c.renderRuntime()
+			if err != nil || m == nil || len(m.Tasks) != 2 {
+				t.Fatalf("prepare runtime: %v", err)
+			}
+			m.Tasks[0].URL = "https://service.example.invalid"
+			m.Tasks[1].URL = "https://tunnel.example.invalid"
+			m.Tasks[1].Provider, m.Tasks[1].Exposure = "devtunnel", ExposureAccount
+			if err := runtimeSaveManifest(m); err != nil {
+				t.Fatal(err)
+			}
+			fixtureFile(t, filepath.Join(m.Root, "running"), "", 0600)
+			fixtureFile(t, filepath.Join(m.Root, "fake-tasks.json"), `{"tasks":[{"path":"widget/web/server","state":"ready"},{"path":"widget/web/tunnel","state":"ready"}]}`, 0600)
+			logins := 0
+			runtimeLoginCheck = func(provider string) string {
+				if provider != "devtunnel" {
+					t.Errorf("unexpected provider %q", provider)
+				}
+				logins++
+				return tc.login
+			}
+			var mu sync.Mutex
+			probes := map[string]int{}
+			runtimeAnswerCheck = func(raw string) (bool, string) {
+				mu.Lock()
+				probes[raw]++
+				mu.Unlock()
+				return tc.answer == "yes", tc.detail
+			}
+			items := c.RuntimeStatus()
+			if len(items) != 2 || logins != 1 || probes[m.Tasks[0].URL] != 1 || probes[m.Tasks[1].URL] != 1 {
+				t.Fatalf("public status did not enrich the runner snapshot: %+v, probes %+v, logins %d", items, probes, logins)
+			}
+			for _, item := range items {
+				if item.State != "ready" || item.Answering != tc.answer || item.AnswerDetail != tc.detail {
+					t.Fatalf("missing reachability observation: %+v", item)
+				}
+				if item.Kind == "endpoint" && item.Login != tc.login {
+					t.Fatalf("missing login observation: %+v", item)
+				}
+			}
+			logins, probes = 0, map[string]int{}
+			quiet := c.runtimeStatusOnly()
+			if len(quiet) != 2 || logins != 0 || len(probes) != 0 {
+				t.Fatalf("runner-only status performed live checks: %+v, probes %+v, logins %d", quiet, probes, logins)
+			}
+			for _, item := range quiet {
+				if item.State != "ready" || item.Answering != "" || item.AnswerDetail != "" || item.Login != "" {
+					t.Fatalf("runner-only view carries live observations: %+v", item)
+				}
+			}
+		})
 	}
-	// Without a runner both views are the same, and the quiet one asks nothing.
-	called = 0
-	_ = c.runtimeStatusOnly()
-	if called != 0 {
-		t.Fatal("up's wait loop looked at addresses")
+}
+
+func TestRuntimeTextNamesEndpointExposure(t *testing.T) {
+	text := RuntimeText([]RuntimeItem{
+		{Collection: "fixture", Group: "widget/web", Path: "widget/web/public", Kind: "endpoint", State: "ready", URL: "https://public.example.invalid", Exposure: ExposurePublic},
+		{Collection: "fixture", Group: "widget/web", Path: "widget/web/unknown", Kind: "endpoint", State: "ready", URL: "https://preview.example.invalid"},
+		{Collection: "fixture", Group: "widget/web", Path: "widget/web/private", Kind: "endpoint", State: "ready", Exposure: ExposureTailnet},
+	})
+	for _, want := range []string{"exposure: public", "exposure: unknown", "exposure: tailnet"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q: %s", want, text)
+		}
 	}
 }

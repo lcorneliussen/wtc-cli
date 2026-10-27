@@ -234,6 +234,15 @@ that gives no answer, or a 5xx such as a tunnel's 502 while the service
 behind it restarts, shows `not answering now`. A tunnel whose provider's
 client is not signed in (Tailscale, devtunnel) shows how to sign it in, and
 `wtc svc tunnel` refuses to open one until it is.
+
+The detailed terminal status table labels internet-reachable tunnels with
+`[public]`. A healthy public tunnel uses the same health color as a healthy
+protected tunnel; failures and login problems retain their error color.
+Running tunnels with `[exposure unknown]` remain warning-colored until their
+access policy is known.
+Plain service output also names each endpoint's exposure, including when
+terminal colors are disabled.
+
 No `wtc start` runtime command is introduced; the session orientation skill
 keeps its existing meaning.
 
