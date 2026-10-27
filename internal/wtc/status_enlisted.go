@@ -215,11 +215,21 @@ func statusViewPR(record PRRecord, slug, forge string, bypassCache bool) statusP
 	var raw []byte
 	var err error
 	if bypassCache {
+		unlock, lockErr := statusLockCache(statusForgeEntryPath("pr", forge, slug, record.Number))
+		if lockErr == nil {
+			defer unlock()
+		}
+		if _, ok := statusReadForgeEntry("omit", forge, slug, record.Number); ok {
+			if cached, ok := statusReadCachedDetail(record, slug, forge); ok {
+				return cached
+			}
+		}
 		stale, _ := statusReadForgeEntryAny("pr", forge, slug, record.Number)
 		var live bool
 		raw, live, err = statusWithForgeBudget(forge, stale, fetch)
 		if live && len(raw) > 0 {
 			statusWriteForgeCache(forge, slug, record.Number, raw)
+			statusWriteForgeEntry("omit", forge, slug, record.Number, []byte("ok"))
 		}
 	} else {
 		raw, err = statusSingleFlight("pr", forge, slug, record.Number, fetch)

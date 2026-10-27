@@ -184,15 +184,15 @@ func statusConfirmFullBuild(slug, branch string, incremental *StatusBuild, sourc
 	if lockErr == nil {
 		defer unlock()
 	}
-	corrected := statusAuditedCorrection(slug, branch, incremental)
+	corrected, found := statusAuditedCorrection(slug, branch, incremental)
 	if !statusFullRefreshDue("bitbucket.org", slug, "build:"+branch) {
-		if corrected != nil {
+		if found {
 			return corrected
 		}
 		return incremental
 	}
 	fallback := incremental
-	if corrected != nil {
+	if found {
 		fallback = corrected
 	}
 	parts := strings.SplitN(slug, "/", 2)
@@ -224,28 +224,28 @@ func statusBuildFingerprint(build *StatusBuild) string {
 	return number + "|" + checks + "|" + sha
 }
 
-func statusPreferAuditedBuild(slug, branch string, pageBuild *StatusBuild) *StatusBuild {
+func statusPreferAuditedBuild(slug, branch string, pageBuild *StatusBuild) (*StatusBuild, bool) {
 	if pageBuild == nil || statusFullRefreshDue("bitbucket.org", slug, "build:"+branch) {
-		return nil
+		return nil, false
 	}
 	return statusAuditedCorrection(slug, branch, pageBuild)
 }
 
-func statusAuditedCorrection(slug, branch string, pageBuild *StatusBuild) *StatusBuild {
+func statusAuditedCorrection(slug, branch string, pageBuild *StatusBuild) (*StatusBuild, bool) {
 	if pageBuild == nil {
-		return nil
+		return nil, false
 	}
 	raw, ok := statusReadForgeEntryAny("full", "bitbucket.org", slug, "build:"+branch)
 	if !ok || string(raw) != statusBuildFingerprint(pageBuild) {
-		return nil
+		return nil, false
 	}
 	saved, ok := statusReadForgeEntryAny("build", "bitbucket.org", slug, branch)
 	if !ok {
-		return nil
+		return nil, false
 	}
 	savedBuild, err := statusParseBBBuild(saved, slug, branch)
-	if err != nil || savedBuild == nil {
-		return nil
+	if err != nil {
+		return nil, false
 	}
-	return savedBuild
+	return savedBuild, true
 }

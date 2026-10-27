@@ -68,6 +68,8 @@ func statusEncodeOpenPRs(prs []statusOpenPR, truncated bool) ([]byte, error) {
 	}{PRs: prs, Truncated: truncated})
 }
 
+var statusBeforeOpenPublish func()
+
 func statusDetailFromOpenItem(record PRRecord, slug, forge string, item statusOpenPR) (statusPRDetail, bool, bool) {
 	if stamp, ok := statusReadForgeEntryAny("stamp", forge, slug, record.Number); ok && string(stamp) == item.Fingerprint {
 		if cached, ok := statusReadForgeEntryAny("pr", forge, slug, record.Number); ok {
@@ -79,6 +81,9 @@ func statusDetailFromOpenItem(record PRRecord, slug, forge string, item statusOp
 	detail, err := statusParseForgeDetail(forge, item.Raw, record)
 	if err != nil {
 		return statusPRDetail{}, false, false
+	}
+	if statusBeforeOpenPublish != nil {
+		statusBeforeOpenPublish()
 	}
 	statusWriteForgeCache(forge, slug, record.Number, item.Raw)
 	statusWriteForgeEntry("stamp", forge, slug, record.Number, []byte(item.Fingerprint))

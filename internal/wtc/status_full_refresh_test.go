@@ -272,6 +272,110 @@ func TestStatusPullRequestAuditFetchesOnceAcrossCallers(t *testing.T) {
 	}
 }
 
+func TestStatusEmptyPipelineAuditStaysEmpty(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_FULL_REFRESH", "60")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	var targeted atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("target.ref_name") == "main" {
+			targeted.Add(1)
+			w.Write([]byte(`{"values":[]}`))
+			return
+		}
+		w.Write([]byte(`{"values":[{"build_number":11,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"bbbbbbb"}}}]}`))
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	first, err := statusBBBuild("team/widget", "main")
+	if err != nil || first != nil || targeted.Load() != 1 {
+		t.Fatalf("empty audit = %+v targeted=%d err=%v", first, targeted.Load(), err)
+	}
+	second, err := statusBBBuild("team/widget", "main")
+	if err != nil || second != nil || targeted.Load() != 1 {
+		t.Fatalf("empty audit was replaced by the page: %+v targeted=%d err=%v", second, targeted.Load(), err)
+	}
+	past := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(statusForgeEntryPath("full", "bitbucket.org", "team/widget", "build:main"), past, past); err != nil {
+		t.Fatal(err)
+	}
+	statusForgeCool("bitbucket.org", time.Minute)
+	kept, err := statusBBBuild("team/widget", "main")
+	if err != nil || kept != nil || targeted.Load() != 1 {
+		t.Fatalf("failed audit revived the page build: %+v targeted=%d err=%v", kept, targeted.Load(), err)
+	}
+}
+
+func TestStatusOmittedPullRequestFetchIsShared(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_FULL_REFRESH", "60")
+	dir := t.TempDir()
+	views := filepath.Join(dir, "views")
+	started := filepath.Join(dir, "started")
+	release := filepath.Join(dir, "release")
+	t.Setenv("WTC_TEST_VIEWS", views)
+	t.Setenv("WTC_TEST_STARTED", started)
+	t.Setenv("WTC_TEST_RELEASE", release)
+	bin := t.TempDir()
+	script := `#!/bin/sh
+case "$2" in
+  list) printf '%s\n' '[]' ;;
+  view) printf 'x\n' >> "$WTC_TEST_VIEWS"; touch "$WTC_TEST_STARTED"; while [ ! -f "$WTC_TEST_RELEASE" ]; do sleep 0.01; done; printf '%s\n' '{"number":7,"state":"MERGED","title":"Audited"}' ;;
+  *) exit 2 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	statusWriteForgeCache("github.com", "example/widget", "7", []byte(`{"number":7,"state":"OPEN","title":"Saved"}`))
+	record := PRRecord{Number: "7", Title: "Saved"}
+	errc := make(chan error, 2)
+	for range 2 {
+		go func() {
+			detail := statusEnrichRecord(record, "example/widget", "github.com")
+			if detail.State != "MERGED" || detail.Title != "Audited" {
+				errc <- fmt.Errorf("detail=%+v", detail)
+				return
+			}
+			errc <- nil
+		}()
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(started); err != nil {
+		t.Fatal("omitted fetch did not start")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if statusTestFileLines(t, views) != 1 {
+		t.Fatalf("views = %d", statusTestFileLines(t, views))
+	}
+	if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if statusTestFileLines(t, views) != 1 {
+		t.Fatalf("views = %d", statusTestFileLines(t, views))
+	}
+	cached, ok := statusReadCachedDetail(record, "example/widget", "github.com")
+	if !ok || cached.State != "MERGED" || cached.Title != "Audited" {
+		t.Fatalf("saved detail = %+v ok=%v", cached, ok)
+	}
+}
+
 func TestStatusListedPullRequestAuditIsNotOverwritten(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("WTC_FORGE_FULL_REFRESH", "60")
@@ -294,6 +398,17 @@ esac
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	publishReady := make(chan struct{})
+	var once sync.Once
+	releasePublish := func() { once.Do(func() { close(publishReady) }) }
+	defer releasePublish()
+	var publishers atomic.Int32
+	statusBeforeOpenPublish = func() {
+		if publishers.Add(1) > 1 {
+			<-publishReady
+		}
+	}
+	t.Cleanup(func() { statusBeforeOpenPublish = nil })
 	record := PRRecord{Number: "7", Title: "Saved"}
 	errc := make(chan error, 2)
 	for range 2 {
@@ -316,13 +431,25 @@ esac
 	if _, err := os.Stat(started); err != nil {
 		t.Fatal("audit did not start")
 	}
-	time.Sleep(50 * time.Millisecond)
+	arrived := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(arrived) && publishers.Load() < 2 {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if statusTestFileLines(t, views) != 1 {
 		t.Fatalf("views = %d", statusTestFileLines(t, views))
 	}
 	if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	saved := time.Now().Add(2 * time.Second)
+	for time.Now().Before(saved) {
+		cached, ok := statusReadCachedDetail(record, "example/widget", "github.com")
+		if ok && cached.Title == "Audited" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	releasePublish()
 	for range 2 {
 		if err := <-errc; err != nil {
 			t.Fatal(err)
@@ -330,6 +457,10 @@ esac
 	}
 	if statusTestFileLines(t, views) != 1 {
 		t.Fatalf("views = %d", statusTestFileLines(t, views))
+	}
+	cached, ok := statusReadCachedDetail(record, "example/widget", "github.com")
+	if !ok || cached.Title != "Audited" {
+		t.Fatalf("saved detail = %+v ok=%v", cached, ok)
 	}
 }
 

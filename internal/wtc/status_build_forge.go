@@ -142,7 +142,7 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 		return nil, err
 	}
 	if build != nil {
-		if audited := statusPreferAuditedBuild(slug, branch, build); audited != nil {
+		if audited, found := statusPreferAuditedBuild(slug, branch, build); found {
 			return audited, nil
 		}
 		return statusConfirmFullBuild(slug, branch, build, "page", user, pass), nil
