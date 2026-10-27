@@ -21,7 +21,10 @@ func init() {
 	}
 	if mode == "registered" {
 		stopped := make(chan struct{})
-		c := &Context{Collection: os.Getenv("WTC_TEST_STATUS_COLLECTION")}
+		c, err := OpenCollection(os.Getenv("WTC_TEST_STATUS_COLLECTION"))
+		if err != nil {
+			os.Exit(2)
+		}
 		cleanup, err := c.RegisterStatusWatcher(func() { close(stopped) })
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -36,6 +39,17 @@ func init() {
 	for {
 		time.Sleep(time.Hour)
 	}
+}
+
+func watcherCollection(t *testing.T) *Context {
+	t.Helper()
+	target := t.TempDir()
+	fixtureFile(t, filepath.Join(target, AdHocConfigDir, adHocRegistryFile), "repos: []\n", 0600)
+	c, err := OpenCollection(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }
 
 func watcherFixture(t *testing.T, collection, cwd, mode string, args ...string) (*exec.Cmd, <-chan error) {
@@ -78,7 +92,7 @@ func waitWatcherExit(t *testing.T, exited <-chan error) {
 }
 
 func TestRegisteredStatusWatchersRetireByResolvedCollection(t *testing.T) {
-	target, other := t.TempDir(), t.TempDir()
+	target, other := watcherCollection(t).Collection, watcherCollection(t).Collection
 	_, first := watcherFixture(t, target, other, "registered", "wtc", "status", filepath.Base(target), "--tui")
 	_, second := watcherFixture(t, target, target, "registered", "./taba", "status", "--tui")
 	_, unrelated := watcherFixture(t, other, target, "registered", "wtc", "status", "--tui")
@@ -102,7 +116,8 @@ func TestRegisteredStatusWatchersRetireByResolvedCollection(t *testing.T) {
 }
 
 func TestStatusWatcherStaleAndReplacedLeases(t *testing.T) {
-	target := t.TempDir()
+	c := watcherCollection(t)
+	target := c.Collection
 	_, unrelated := watcherFixture(t, target, target, "idle", "wtc", "status", "--tui")
 	// Even PID-shaped stale records do not confer ownership of a process.
 	fixtureFile(t, filepath.Join(target, statusWatcherDir, "watcher-stale"), "12345\n", 0600)
@@ -114,7 +129,6 @@ func TestStatusWatcherStaleAndReplacedLeases(t *testing.T) {
 		t.Fatal("stale lease signaled an unrelated process")
 	default:
 	}
-	c := &Context{Collection: target}
 	stopped := make(chan struct{})
 	cleanup, err := c.RegisterStatusWatcher(func() { close(stopped) })
 	if err != nil {
@@ -275,16 +289,70 @@ func TestRetireStopsWatchersBeforeRemovingTheirWorkingDirectories(t *testing.T) 
 
 func TestStatusWatcherRejectsRetiredAndSymlinkedRegistries(t *testing.T) {
 	for _, retired := range []bool{false, true} {
-		target := t.TempDir()
+		c := watcherCollection(t)
+		target := c.Collection
 		if retired {
 			fixtureFile(t, filepath.Join(target, RetiredMarkerFile), "{}", 0600)
 		} else if err := os.Symlink(t.TempDir(), filepath.Join(target, statusWatcherDir)); err != nil {
 			t.Fatal(err)
 		}
-		c := &Context{Collection: target}
 		if cleanup, err := c.RegisterStatusWatcher(func() {}); err == nil {
 			cleanup()
 			t.Fatal("watcher accepted an invalid collection registry")
 		}
+	}
+}
+
+func TestStatusWatcherRegistrationCannotReviveRetirement(t *testing.T) {
+	c := watcherCollection(t)
+	registered := make(chan error, 1)
+	err := c.withRuntimeLock(func() error {
+		go func() {
+			cleanup, err := c.RegisterStatusWatcher(func() {})
+			registered <- err
+			if err == nil {
+				cleanup()
+			}
+		}()
+		select {
+		case err := <-registered:
+			t.Fatalf("registration bypassed retirement lock: %v", err)
+		case <-time.After(100 * time.Millisecond):
+		}
+		// Model the final removal while retirement still owns its lock. The
+		// waiting caller already discovered the collection before it vanished.
+		return os.RemoveAll(c.Collection)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-registered:
+		if err == nil {
+			t.Fatal("registration revived a removed collection")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("registration did not finish after retirement")
+	}
+	if _, err := os.Stat(c.Collection); !os.IsNotExist(err) {
+		t.Fatalf("registration recreated collection files: %v", err)
+	}
+}
+
+func TestStatusWatcherConcurrentRegistrationAndCleanup(t *testing.T) {
+	c := watcherCollection(t)
+	for range 20 {
+		cleanup, err := c.RegisterStatusWatcher(func() {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() { cleanup(); close(done) }()
+		next, err := c.RegisterStatusWatcher(func() {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-done
+		next()
 	}
 }

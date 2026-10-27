@@ -21,6 +21,21 @@ func (c *Context) RegisterStatusWatcher(stop func()) (func(), error) {
 	if RetiredFolder(c.Collection) {
 		return nil, retiredFolderError(c.Collection)
 	}
+	var cleanup func()
+	err := c.withRuntimeLock(func() error {
+		// Retirement holds this same lock through folder removal. Reopen after
+		// acquiring it so an already-discovered context cannot revive a retire.
+		if _, err := OpenCollection(c.Collection); err != nil {
+			return err
+		}
+		var err error
+		cleanup, err = c.registerStatusWatcher(stop)
+		return err
+	})
+	return cleanup, err
+}
+
+func (c *Context) registerStatusWatcher(stop func()) (func(), error) {
 	dir := filepath.Join(c.Collection, statusWatcherDir)
 	if err := os.Mkdir(dir, 0700); err != nil && !os.IsExist(err) {
 		return nil, err
@@ -53,7 +68,12 @@ func (c *Context) RegisterStatusWatcher(stop func()) (func(), error) {
 				_ = os.Remove(f.Name())
 			}
 			_ = f.Close()
-			_ = os.Remove(dir) // Only remove an empty registry.
+			// Release the lease before taking the lifecycle lock: retirement
+			// may own that lock while it waits for this watcher to stop.
+			_ = c.withRuntimeLock(func() error {
+				_ = os.Remove(dir) // Only remove an empty registry.
+				return nil
+			})
 		})
 	}
 	go func() {

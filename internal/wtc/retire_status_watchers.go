@@ -14,7 +14,7 @@ func stopRetiredStatusWatchers(target string) error {
 	if err := stopRegisteredStatusWatchers(target); err != nil {
 		return err
 	}
-	output, err := exec.Command("ps", "ax", "-o", "pid=,args=").Output()
+	output, err := exec.Command("ps", "axww", "-o", "pid=,args=").Output()
 	if err != nil {
 		return nil
 	}
