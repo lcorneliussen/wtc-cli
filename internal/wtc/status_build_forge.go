@@ -139,6 +139,13 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 	if live {
 		statusSaveLivePipelinePage(slug, raw, started)
 	}
+	if pageSince, ok := statusForgeEntrySince("pipelines", "bitbucket.org", slug, "recent"); ok {
+		if buildSince, ok := statusForgeEntrySince("build", "bitbucket.org", slug, branch); ok && buildSince.After(pageSince) {
+			if saved, ok := statusReadForgeEntryAny("build", "bitbucket.org", slug, branch); ok {
+				raw = saved
+			}
+		}
+	}
 	build, err := statusParseBBBuild(raw, slug, branch)
 	if err != nil {
 		return nil, err

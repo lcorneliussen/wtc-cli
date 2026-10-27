@@ -517,3 +517,22 @@ func TestStatusOlderPipelinePageDoesNotReplaceANewerBuild(t *testing.T) {
 		t.Fatalf("newer page was not saved: %s", saved)
 	}
 }
+
+func TestStatusOlderPipelinePageShowsTheNewerSavedBuild(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	slug := "team/widget"
+	page := []byte(`{"values":[{"build_number":12,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"aaaaaaa"}}}]}`)
+	audited := []byte(`{"values":[{"build_number":13,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"bbbbbbb"}}}]}`)
+	pageStarted := time.Now()
+	statusWriteForgeEntrySince("pipelines", "bitbucket.org", slug, "recent", page, pageStarted)
+	statusWriteForgeEntrySince("build", "bitbucket.org", slug, "main", audited, pageStarted.Add(time.Second))
+	statusMarkFullRefresh("bitbucket.org", slug, "build:main")
+
+	build, err := statusBBBuild(slug, "main")
+	if err != nil || build == nil || *build.Build != "13" {
+		t.Fatalf("older page shadowed the saved build: %+v err=%v", build, err)
+	}
+}
