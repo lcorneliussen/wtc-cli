@@ -103,6 +103,28 @@ func TestStatusBitbucketDiscoveryReadsPastFirstPage(t *testing.T) {
 	}
 }
 
+func TestStatusBitbucketDiscoverySharesOneList(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Write([]byte(`{"values":[{"id":7,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"topic"}}},{"id":8,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"other"}}}]}`))
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	topic, err := statusDiscoverBranch("bitbucket.org", "example/widget", "topic")
+	other, otherErr := statusDiscoverBranch("bitbucket.org", "example/widget", "other")
+	missing, missingErr := statusDiscoverBranch("bitbucket.org", "example/widget", "absent")
+	if err != nil || otherErr != nil || missingErr != nil || topic != "7" || other != "8" || missing != "" || hits.Load() != 1 {
+		t.Fatalf("two branches did not share one list: %q %q %q hits=%d errs=%v %v %v", topic, other, missing, hits.Load(), err, otherErr, missingErr)
+	}
+}
+
 func TestStatusGitHubDiscoveryFallsBackWhenTheListIsFull(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	var lists, heads int
