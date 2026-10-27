@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
@@ -107,7 +106,7 @@ func addPRCommands(root *cobra.Command, asJSON *bool) {
 		if err := c.RunHook("pr.unlist.post", values); err != nil {
 			return err
 		}
-		summary := fmt.Sprintf("unlisted %s#%s from %s", args[0], args[1], filepath.Join(c.Collection, ".wtc-prs"))
+		summary := fmt.Sprintf("unlisted %s#%s from %s", args[0], args[1], c.PRFile())
 		if *asJSON {
 			return emit(envelope{OK: true, Summary: summary}, true)
 		}

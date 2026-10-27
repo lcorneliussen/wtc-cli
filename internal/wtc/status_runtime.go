@@ -55,6 +55,12 @@ func (c *Context) statusRuntime(snapshot *StatusSnapshot, all bool) {
 		for _, item := range snapshot.Runtime {
 			if item.Repo == row.Repo && item.Collection == row.Collection {
 				state := item.State
+				if item.Lifecycle != "" && state != "unknown" {
+					state = "tunnel missing"
+					if item.TunnelIntent == "stale" {
+						state = "choice stale"
+					}
+				}
 				if item.Kind == "resources" && state == "provision-hook-completed" {
 					state = "provisioned"
 				}
@@ -119,6 +125,13 @@ func RuntimeText(items []RuntimeItem) string {
 		if item.URL != "" {
 			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.URL))
 		}
+		if item.Kind == "endpoint" {
+			exposure := item.Exposure
+			if exposure == "" {
+				exposure = ExposureUnknown
+			}
+			fmt.Fprintf(&b, " · exposure: %s", runtimeTextSafe(exposure))
+		}
 		if item.ExitCode != nil {
 			fmt.Fprintf(&b, " · exit %d", *item.ExitCode)
 		}
@@ -133,6 +146,9 @@ func RuntimeText(items []RuntimeItem) string {
 		}
 		if item.Answering == "no" {
 			fmt.Fprintf(&b, " · not answering now: %s", runtimeTextSafe(item.AnswerDetail))
+		}
+		if item.Lifecycle != "" {
+			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.Lifecycle))
 		}
 		if item.Login != "" {
 			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.Login))

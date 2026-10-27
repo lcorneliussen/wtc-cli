@@ -20,6 +20,10 @@ type statusPRDetail struct {
 	MergedOn        string
 	Base            string
 	MergeCommit     string
+	HeadCommit      string
+	BaseCommit      string
+	MergeConflicts  []string
+	MergeSource     string
 	ChecksUnsettled bool
 }
 
@@ -147,10 +151,18 @@ func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 			Hash string `json:"hash"`
 		} `json:"merge_commit"`
 		Destination struct {
+			Commit struct {
+				Hash string `json:"hash"`
+			} `json:"commit"`
 			Branch struct {
 				Name string `json:"name"`
 			} `json:"branch"`
 		} `json:"destination"`
+		Source struct {
+			Commit struct {
+				Hash string `json:"hash"`
+			} `json:"commit"`
+		} `json:"source"`
 		Participants []struct {
 			Approved bool   `json:"approved"`
 			State    string `json:"state"`
@@ -163,7 +175,8 @@ func statusBBDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 		return statusPRDetail{}, fmt.Errorf("missing Bitbucket PR identity or state")
 	}
 	d := statusPRDetail{Number: fmt.Sprint(p.ID), State: strings.ToUpper(p.State),
-		Checks: "NONE", Merge: "UNKNOWN", Review: "none", Title: cleanPRField(p.Title), Base: p.Destination.Branch.Name}
+		Checks: "NONE", Merge: "UNKNOWN", Review: "none", Title: cleanPRField(p.Title), Base: p.Destination.Branch.Name,
+		HeadCommit: p.Source.Commit.Hash, BaseCommit: p.Destination.Commit.Hash}
 	if d.Title == "" {
 		d.Title = fallback.Title
 	}

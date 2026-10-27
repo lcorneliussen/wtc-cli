@@ -196,6 +196,9 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	}
 	_ = os.Remove(filepath.Join(bundle, "summary.md"))
 	_ = os.Remove(filepath.Join(bundle, "verdict"))
+	if _, err := refreshReviewConvergence(bundle, manifest); err != nil {
+		return ReviewRunResult{}, err
+	}
 	leadPrompt := filepath.Join(bundle, ".prompts", "lead.md")
 	if err := renderReviewPrompt(leadPrompt, string(leadTemplate), map[string]string{
 		"BUNDLE": bundle, "REPO_DIR": manifest.RepoDir, "SUMMARY_FILE": filepath.Join(bundle, "summary.md"),
@@ -240,6 +243,10 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	} else if blockers > 0 {
 		verdict = "changes-requested"
 	}
+	convergence, err := refreshReviewConvergence(bundle, manifest)
+	if err != nil {
+		return ReviewRunResult{}, err
+	}
 	if err := os.WriteFile(filepath.Join(bundle, "verdict"), []byte(verdict+"\n"), 0644); err != nil {
 		return ReviewRunResult{}, err
 	}
@@ -254,8 +261,12 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	if err != nil {
 		return ReviewRunResult{}, err
 	}
-	final := strings.TrimRight(strings.Join(clean, "\n"), "\n") + "\n\n" + stats + "\n\n" + statusLine + "\n"
-	final = alignReviewHeading(final, verdict)
+	final := strings.TrimRight(strings.Join(clean, "\n"), "\n")
+	if checkpoints := reviewConvergenceReport(convergence); checkpoints != "" {
+		final += "\n\n" + checkpoints
+	}
+	final += "\n\n" + stats + "\n\n" + statusLine + "\n"
+	final = reviewModeBody(alignReviewHeading(final, verdict), manifest)
 	if err := os.WriteFile(summaryPath, []byte(final), 0644); err != nil {
 		return ReviewRunResult{}, err
 	}

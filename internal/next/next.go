@@ -226,11 +226,22 @@ func baseName(base string) string {
 // in, without touching the worktree or the index (git merge-tree). ok is
 // false when git cannot tell (older than 2.38, or an unrelated history).
 func PredictMerge(dir, ref string) (conflicts []string, ok bool) {
-	// merge-tree also exits 1 for a ref it does not know.
-	if exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Run() != nil {
-		return nil, false
+	return PredictMergeAt(dir, "HEAD", ref)
+}
+
+// PredictMergeAt predicts a merge of two commits independently of the checked
+// out branch. Both refs are resolved before prediction; unavailable objects or
+// unsupported Git versions leave the result unknown.
+func PredictMergeAt(dir, head, base string) (conflicts []string, ok bool) {
+	commits := make([]string, 0, 2)
+	for _, ref := range []string{head, base} {
+		out, err := exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}").Output()
+		if err != nil {
+			return nil, false
+		}
+		commits = append(commits, strings.TrimSpace(string(out)))
 	}
-	out, err := exec.Command("git", "-C", dir, "merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref).Output()
+	out, err := exec.Command("git", "-C", dir, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", commits[0], commits[1]).Output()
 	if err == nil {
 		return nil, true
 	}
@@ -238,12 +249,14 @@ func PredictMerge(dir, ref string) (conflicts []string, ok bool) {
 	if !isExit || exit.ExitCode() != 1 {
 		return nil, false
 	}
-	// Exit 1: the first line is the tree, then one conflicted file a line.
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for _, l := range lines[1:] {
-		if l = strings.TrimSpace(l); l != "" {
-			conflicts = append(conflicts, l)
+	// Exit 1: the first NUL-delimited field is the tree, then conflicted paths.
+	fields := strings.Split(string(out), "\x00")
+	for _, path := range fields[1:] {
+		if path != "" {
+			conflicts = append(conflicts, path)
 		}
 	}
-	return conflicts, true
+	// A conflict exit without paths supplies no usable observation. Normal Git
+	// conflicts list paths; malformed or unsupported output stays unknown.
+	return conflicts, len(conflicts) > 0
 }

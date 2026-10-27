@@ -93,9 +93,17 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 	if err != nil {
 		return result, err
 	}
+	unlockWatchers, err := runtimeTarget.lockStatusWatchers()
+	if err != nil {
+		return result, err
+	}
+	defer unlockWatchers()
 	err = runtimeTarget.withRuntimeLock(func() error {
 		if err := runtimeTarget.retireRuntime(); err != nil {
 			return fmt.Errorf("runtime cleanup: %w", err)
+		}
+		if err := stopRetiredStatusWatchers(target); err != nil {
+			return err
 		}
 		postRan := false
 		for _, wt := range worktrees {
@@ -133,7 +141,6 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 				result.Warnings = append(result.Warnings, warning)
 			}
 		}
-		stopRetiredStatusWatchers(target)
 		if err := removeRetiredGeneratedFiles(target, runtimeTarget.AdHoc); err != nil {
 			return err
 		}
@@ -320,38 +327,15 @@ func (c *Context) closeRetiredWorkspaceID(name, expectedID string) (bool, string
 	return false, ""
 }
 
-func stopRetiredStatusWatchers(target string) {
-	output, err := exec.Command("ps", "ax", "-o", "pid=,args=").Output()
-	if err != nil {
-		return
-	}
-	tui := filepath.Join(target, "harness", "tools", "wtc-status-tui.sh")
-	oneshoot := filepath.Join(target, "harness", "tools", "wtc-status.sh")
-	for _, line := range strings.Split(string(output), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		args := strings.Join(fields[1:], " ")
-		if !strings.Contains(args, tui) && !(strings.Contains(args, oneshoot) && strings.Contains(args, "--tui")) {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[0])
-		if err == nil && pid != os.Getpid() {
-			if process, err := os.FindProcess(pid); err == nil {
-				_ = process.Kill()
-			}
-		}
-	}
-}
-
 func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 	files := []string{
 		"HANDOFF.md", ".env.collection", ".env.collection.local", "mise.toml", ".DS_Store",
 		"WTC-SCOPE.md", "SCOPE.md", ".env.toolchain",
-		".wtc-runtime.lock",
+		".wtc-runtime.lock", ".wtc-status-watchers.lock",
 		".wtc-prs", ".wtc-prs.lock", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
 		".wtc-catch-up.json", ".wtc-catch-up.json.md", ReviewModeFile,
+		".taba-prs", ".last-taba-status.yml", ".taba-status.json", ".taba-status.md",
+		".taba-catch-up.json", ".taba-catch-up.json.md",
 	}
 	if adHoc {
 		// An ad-hoc registry is remembered per user. Hand-written local

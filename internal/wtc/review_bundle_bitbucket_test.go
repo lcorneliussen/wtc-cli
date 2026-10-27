@@ -39,6 +39,10 @@ func TestBitbucketReviewCommentsUseSupportedJSONCommand(t *testing.T) {
 	bin := t.TempDir()
 	bb := filepath.Join(bin, "bb")
 	script := `#!/bin/sh
+if [ "$1" = --workspace ]; then
+  [ "$2" = example ] && [ "$3" = --repo ] && [ "$4" = app ] || exit 90
+  shift 4
+fi
 if [ "$*" != "--json pr comments list 7 --limit 1000 --no-truncate" ]; then
   echo "unexpected bb arguments: $*" >&2
   exit 2
@@ -50,7 +54,7 @@ printf '%s\n' '{"comments":[{"content":{"raw":"Review reply"},"created_on":"2026
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	dir := t.TempDir()
-	copyPublicReviewComments(dir, ReviewManifest{PR: "7", Forge: "bitbucket", RepoDir: dir})
+	copyPublicReviewComments(dir, ReviewManifest{PR: "7", Forge: "bitbucket", Slug: "example/app", RepoDir: dir})
 	transcript, err := os.ReadFile(filepath.Join(dir, "prior", "comments.md"))
 	if err != nil || !strings.Contains(string(transcript), "Review reply") {
 		t.Fatalf("Bitbucket reply was not included: %q %v", transcript, err)
@@ -81,7 +85,7 @@ func TestBitbucketReviewCommentsRejectIncompleteResponse(t *testing.T) {
 	oldStderr := os.Stderr
 	defer func() { os.Stderr = oldStderr }()
 	os.Stderr = write
-	copyPublicReviewComments(dir, ReviewManifest{PR: "7", Forge: "bitbucket", RepoDir: dir})
+	copyPublicReviewComments(dir, ReviewManifest{PR: "7", Forge: "bitbucket", Slug: "example/app", RepoDir: dir})
 	os.Stderr = oldStderr
 	write.Close()
 	warning, err := io.ReadAll(read)

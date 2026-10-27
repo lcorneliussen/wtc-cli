@@ -22,6 +22,10 @@ func TestStatusEnrichRecordsKeepsIdentityAcrossOutOfOrderReplies(t *testing.T) {
 	release := filepath.Join(state, "release")
 	defer os.WriteFile(release, []byte("ok"), 0644)
 	script := `#!/bin/sh
+if [ "$2" = "list" ]; then
+  printf '[]\n'
+  exit 0
+fi
 state="$WTC_TEST_STATE"
 while ! mkdir "$state/lock" 2>/dev/null; do sleep 0.01; done
 active=$(cat "$state/active")
@@ -149,7 +153,7 @@ printf '%s\n' '{"number":7,"state":"MERGED","title":"Finished change","mergedAt"
 		t.Fatalf("recorded merge was counted as a live check: %v", progress)
 	}
 	callData, err := os.ReadFile(calls)
-	if err != nil || strings.Count(string(callData), "called") != 1 {
+	if err != nil || strings.Count(string(callData), "called") != 2 {
 		t.Fatalf("merged PR was fetched again: %s %v", callData, err)
 	}
 	if err := c.UnlistPR("widget", "7"); err != nil {
@@ -283,7 +287,7 @@ printf '%s\n' '{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","s
 		t.Fatalf("unsettled merged cache hid fresh forge result: %+v", detail)
 	}
 	data, err := os.ReadFile(calls)
-	if err != nil || strings.Count(string(data), "called") != 1 {
+	if err != nil || strings.Count(string(data), "called") != 2 {
 		t.Fatalf("unsettled merge was not refreshed: %s %v", data, err)
 	}
 	statusWriteForgeCache(forge, slug, number, []byte(`{"number":7,"state":"MERGED","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}`))
@@ -292,13 +296,14 @@ printf '%s\n' '{"number":7,"state":"MERGED","mergedAt":"2026-09-30T12:00:00Z","s
 	}
 	detail = statusEnrichRecord(PRRecord{Repo: "widget", Number: number}, slug, forge)
 	data, err = os.ReadFile(calls)
-	if err != nil || detail.MergedOn != "2026-09-30T12:00:00Z" || strings.Count(string(data), "called") != 2 {
+	if err != nil || detail.MergedOn != "2026-09-30T12:00:00Z" || strings.Count(string(data), "called") != 4 {
 		t.Fatalf("untimed merged cache hid real merge time: %+v %s %v", detail, data, err)
 	}
 }
 
 func TestBitbucketMergeActivitySuppliesAuthoritativeTime(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
+	statusHideBitbucketLogin(t)
 	bin := t.TempDir()
 	script := `#!/bin/sh
 case "$2" in

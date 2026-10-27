@@ -1,6 +1,6 @@
 ---
 name: wtc-open
-description: Open or reshape a worktree collection in herdr — ensure the agent and status panes, add browse or shell panes on demand, trim idle ones, switch wide ↔ narrow, and start an agent only when the agent pane is empty. Use when the user says wtc-open, open the collection in herdr, switch to narrow/wide layout, add a browse or shell pane, trim panes, or fill missing panes after starting an agent first.
+description: Open or reshape a worktree collection in herdr — ensure the agent and status panes, add browse, shell or review panes on demand, trim idle ones, switch wide ↔ narrow, and start an agent only when the agent pane is empty. Use when the user says wtc-open, open the collection in herdr, switch to narrow/wide layout, add a browse, shell or review pane, trim panes, or fill missing panes after starting an agent first.
 ---
 
 # Open a collection in herdr
@@ -10,7 +10,7 @@ Mechanism: `wtc open`. Canon: `.wtc/instructions/herdr.md`.
 A workspace is ergonomics only — worktrees already exist. Opening is
 idempotent: reuse the workspace, keep a live agent, fill idle panes, and
 only reshape when asked (or when the layout is still partial). A workspace
-starts with agent and status only; browse and shell come on demand, because
+starts with agent and status only; browse, shell and review come on demand, because
 every pane holds one of the machine's capped pseudo-terminals.
 
 ## 1. Run it
@@ -20,12 +20,13 @@ From the collection root (or name the collection):
 ```bash
 wtc open                 # this collection; agent + status, auto layout
 wtc open --add browse    # add the browse pane (or shell); repeatable
+wtc open --add review    # pinned bundle or current PR diff (Hunk, or Git/less)
 wtc open --full          # agent, status, browse and shell
 wtc open --narrow        # stacked tabs; switch if needed
 wtc open --wide          # stacked columns; switch if needed
 wtc open --list          # pane-by-pane report; change nothing
 wtc open --dry-run       # plan only
-wtc open --trim          # close idle browse/shell panes (--all: every collection)
+wtc open --trim          # close idle browse/shell/review panes (--all: every collection)
 ```
 
 `WTC_PANES=full` in the control root's `wtc.env` makes `--full` the default.
@@ -61,9 +62,13 @@ force a reshape — pass `--narrow` or `--wide` and let the command move panes.
 ## 3. Panes on demand
 
 When a step needs a human to look at files, `wtc open --add browse`; for a
-spare prompt, `--add shell`. `--trim` closes a shell at its prompt and a
-browse Neovim without unsaved buffers — never agent or status, never a
-focused pane or a running command. Trim when the user asks, or when
+spare prompt, `--add shell`. For the pinned review range, `--add review`
+uses the latest applicable bundle or exact current PR commits. It sits in the
+wide right column or narrow tools tab and coexists with browse and shell.
+It requires Hunk or less; no tool is installed automatically.
+`--trim` closes a shell at its prompt, a browse Neovim without unsaved buffers,
+and a review viewer that exited to its shell prompt.
+It preserves agent and status panes, focused panes, and running commands. Trim when the user asks, or when
 `wtc open` warns that the machine is close to its pty cap.
 
 ## 4. What to report

@@ -3,7 +3,6 @@ package wtc
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 func statusParseBranchList(forge string, raw []byte, branch string) (string, error) {
@@ -46,60 +45,48 @@ func statusParseBranchList(forge string, raw []byte, branch string) (string, err
 	return "", nil
 }
 
-func statusBitbucketListCount(raw []byte) (int, error) {
-	var result struct {
-		PullRequests []json.RawMessage `json:"pullRequests"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return 0, err
-	}
-	return len(result.PullRequests), nil
-}
-
-// Discovery only asks for open PRs on the exact source branch. A failed call
-// never becomes a cached "none" answer.
 func statusDiscoverBranch(forge, slug, branch string) (string, error) {
 	if forge == "" || slug == "" || branch == "" {
 		return "", nil
 	}
-	if cached, ok := statusReadForgeEntry("branch", forge, slug, branch); ok {
-		if number, err := statusParseBranchList(forge, cached, branch); err == nil {
-			return number, nil
-		}
-	}
-	var raw []byte
-	var err error
-	switch forge {
-	case "github.com":
-		raw, err = statusJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "open", "--limit", "50", "--json", "number,headRefName")
-	case "bitbucket.org":
-		parts := strings.SplitN(slug, "/", 2)
-		raw, err = statusJSON("bb", "pr", "list", "-w", parts[0], "-r", parts[1], "--state", "OPEN", "--limit", "50", "--json")
-	default:
-		return "", fmt.Errorf("unsupported forge")
-	}
+	listed, truncated, err := statusOpenPRs(forge, slug)
 	if err != nil {
 		return "", err
 	}
-	number, err := statusParseBranchList(forge, raw, branch)
-	if err == nil && forge == "bitbucket.org" && number == "" {
-		count, countErr := statusBitbucketListCount(raw)
-		if countErr != nil {
-			return "", countErr
-		}
-		if count == 50 {
-			// The installed bb CLI paginates up to --limit. Ask for every
-			// page only when the first page has no branch match.
-			parts := strings.SplitN(slug, "/", 2)
-			raw, err = statusJSON("bb", "pr", "list", "-w", parts[0], "-r", parts[1], "--state", "OPEN", "--limit", "2147483647", "--json")
-			if err != nil {
-				return "", err
-			}
-			number, err = statusParseBranchList(forge, raw, branch)
+	for _, pr := range listed {
+		if pr.Number != "" && pr.Branch == branch {
+			return pr.Number, nil
 		}
 	}
-	if err == nil {
-		statusWriteForgeEntry("branch", forge, slug, branch, raw)
+	switch forge {
+	case "github.com":
+		if truncated || len(listed) >= statusOpenListLimit {
+			return statusDiscoverGitHubBranch(slug, branch)
+		}
+	case "bitbucket.org":
+		if truncated {
+			return statusDiscoverBitbucketBranch(slug, branch)
+		}
 	}
-	return number, err
+	return "", nil
+}
+
+func statusDiscoverGitHubBranch(slug, branch string) (string, error) {
+	raw, err := statusSingleFlight("branch", "github.com", slug, branch, func() ([]byte, error) {
+		return statusJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "open", "--limit", "20", "--json", "number,headRefName")
+	})
+	if err != nil {
+		return "", err
+	}
+	return statusParseBranchList("github.com", raw, branch)
+}
+
+func statusDiscoverBitbucketBranch(slug, branch string) (string, error) {
+	raw, err := statusSingleFlight("branch", "bitbucket.org", slug, branch, func() ([]byte, error) {
+		return statusFetchBBBranch(slug, branch)
+	})
+	if err != nil {
+		return "", err
+	}
+	return statusParseBBBranchList(raw, branch)
 }

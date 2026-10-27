@@ -146,12 +146,29 @@ checks and requested changes ask the corresponding skill. Push uses the
 existing personal account and confirmation flow; merge opens the pull request
 for the person. Refreshing the card alone does not execute these actions.
 
-Uncommitted files offer **Commit changes**: the conversation reviews and
-commits the intended changes, leaving publication to the person. GitHub's ↑
-can also commit pending files as part of preparing publication; Bitbucket's ↑
-publishes commits only. The expanded card shows the latest action result in
-full. A refused or failed publication appears as an error even when the
-gateway supplies only a status and message.
+Uncommitted files offer **Commit changes**: the conversation reviews intended
+changes and saves them as **local commits**. This does not push them or create
+a pull request. GitHub's ↑ can also commit pending files as part of preparing
+publication; Bitbucket's ↑ sends committed changes only, leaving uncommitted
+files local. With only uncommitted files, Bitbucket offers Commit changes
+instead of an empty push.
+
+**Pushing** sends commits to the branch on the forge. Its existing PR includes
+those commits automatically; a new draft PR is created if none exists. The
+result distinguishes confirmed PR creation from updates to an existing PR.
+When the host supplies only a URL, the card reports publication without
+claiming that it created a PR.
+
+A push to an existing PR keeps its title and description. If the scope changed,
+use **Review PR text** in the publication result: the conversation compares
+the text with the full current PR diff, preserves useful human edits, and
+proposes revisions for you to review. This neither edits the remote PR text
+nor requests a code review. PR text can then be edited on the forge or through
+a separately authorized operation.
+
+The expanded card shows the latest action result in full. A refused or failed
+publication appears as an error even when the gateway supplies only a status
+and message.
 
 OpenClaw binds publication to the owner's managed branch. Returning to the
 tip does not rebind that owner or permit publishing an arbitrary new branch:
@@ -499,6 +516,15 @@ seconds while they are open. `node --test openclaw-plugin/test/*.test.mjs`
 renders them against a minimal DOM.
 
 ## Install
+
+The plugin's visible name is **taba**, formerly wtc, with the selectable
+**束 taba** wordmark linking to [taba.sh](https://taba.sh/). This branding does
+not change its installed identity: the plugin ID is still `wtc`, its package
+is `openclaw-plugin-wtc`, and its settings stay under `plugins.entries.wtc`.
+Use the existing install/reload commands below. When upgrading to a release
+with this branding, install the matching CLI and plugin, then reload open
+Control UI tabs. The technical ID/config migration remains a later step in
+[the rename plan](https://taba.sh/wtc-is-now-taba/).
 
 On the gateway's host, as the user the gateway runs as. For a gateway built
 from an image by CI/CD, see [Gateway image and CI/CD](#gateway-image-and-cicd)

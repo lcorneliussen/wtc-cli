@@ -7,8 +7,8 @@
 // this panel publishes through that owner, the way the chat's own Publish PR
 // button does for a session's single checkout.
 const PLUGIN_ID = "wtc";
-const HOME = "https://github.com/lcorneliussen/wtc-cli";
-const TITLE = "wtc Collection";
+const HOME = "https://taba.sh/";
+const TITLE = "taba Collection";
 
 const el = (tag, props = {}, ...kids) => {
   const node = Object.assign(document.createElement(tag), props);
@@ -57,7 +57,7 @@ const personalAccount = (options) => {
   return mine?.state === "connected" && mine.account && mine.generation ? mine : null;
 };
 // Asks the gateway to publish; returns the confirmation it waits for, if any.
-async function publishRepo(host, agentId, r, say) {
+async function publishRepo(host, agentId, r, say, review) {
   const name = r.repo ?? r.project;
   const target = { sessionKey: r.sessionKey, agentId };
   const mine = personalAccount(await host.request("sessions.github.options", target));
@@ -71,18 +71,19 @@ async function publishRepo(host, agentId, r, say) {
     ...target, idempotencyKey: uuid(), selection: { source: "personal", account: mine.account, generation: mine.generation },
     ...(p?.title ? { title: p.title } : {}), ...(p?.body ? { body: p.body } : {}),
   });
-  return settle(host, target, name, out, say);
+  return settle(host, target, r, out, say, review);
 }
-async function confirmRepo(host, agentId, r, pending, say) {
+async function confirmRepo(host, agentId, r, pending, say, review) {
   const name = r.repo ?? r.project;
   const target = { sessionKey: r.sessionKey, agentId };
   say(`Pushing ${name}…`);
   const out = await host.request("sessions.github.confirm", { ...target, requestId: pending.requestId, ...pending.confirmation });
-  return settle(host, target, name, out, say);
+  return settle(host, target, r, out, say, review);
 }
 // What a publish or confirm came back with: done, failed, or a confirmation
 // to ask the person for (its account, generation and digest, from status).
-async function settle(host, target, name, out, say) {
+async function settle(host, target, r, out, say, review) {
+  const name = r.repo ?? r.project;
   if (out?.status === "needs_confirmation") {
     const status = await host.request("sessions.github.status", { ...target, requestId: out.requestId }).catch(() => null);
     const c = status?.confirmation ?? out.confirmation ?? null;
@@ -90,9 +91,29 @@ async function settle(host, target, name, out, say) {
     say(`${name}: confirm to push as @${c.account?.login ?? "you"}.`);
     return { requestId: out.requestId, confirmation: { generation: c.generation, account: c.account, requestDigest: c.requestDigest } };
   }
-  if (out?.status === "published") say(`${name}: pushed ${out.url ?? out.pullRequestUrl ?? ""}`.trim());
+  if (out?.status === "published") publicationResult(r, out, say, review);
   else say(`${name}: ${out?.status ?? "no answer"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${wtcMessage(out.message)}` : ""}`, true);
   return null;
+}
+
+// Report only what the publisher established. Some hosts return a PR URL
+// without saying whether this operation created it.
+function publicationResult(r, out, say, review) {
+  const name = r.repo ?? r.project;
+  const url = out.url ?? out.pullRequestUrl ?? "";
+  const number = String(url).match(/\/(?:pull|pull-requests)\/(\d+)(?:[/?#]|$)/)?.[1];
+  const pr = number ? `PR #${number}` : "PR";
+  const existing = out.created === false || (out.created == null && url && r.pullRequest?.state === "open" && r.pullRequest.url === url);
+  const message = out.created === true
+    ? `pushed commits and created ${r.forge === BITBUCKET ? "draft " : ""}${pr}.`
+    : existing
+      ? `pushed commits to existing ${pr}. Its title and description are unchanged.`
+      : `pushed branch commits.${number ? ` Pull request: ${pr}.` : ""}`;
+  say(`${name}: ${message}${url ? ` ${url}` : ""}`, false, number && review ? {
+    label: "Review PR text",
+    title: "Ask the conversation to review the PR title and description against its full current diff",
+    run: () => review(r, url),
+  } : null);
 }
 
 // The Bitbucket plugin's own publish: ask, then confirm what it names.
@@ -126,7 +147,7 @@ async function publishBitbucket(host, agentId, r, say, dest) {
   say(`${name}: confirm to push ${c.branch} (${String(c.head).slice(0, 7)}) to ${c.dest} as ${bitbucketAccount(c)}${left}.`);
   return { forge: BITBUCKET, requestId: out.requestId, confirmation: c };
 }
-async function confirmBitbucket(host, agentId, r, pending, say) {
+async function confirmBitbucket(host, agentId, r, pending, say, review) {
   const name = r.repo ?? r.project;
   say(`Pushing ${name}…`);
   const out = await bitbucketAction(host, agentId, r, "publish-confirm", { requestId: pending.requestId, requestDigest: pending.confirmation.requestDigest });
@@ -134,7 +155,7 @@ async function confirmBitbucket(host, agentId, r, pending, say) {
     say(`${name}: ${out?.status ?? "no answer"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${out.message}` : ""}`, true);
     return null;
   }
-  say(`${name}: ${out?.created ? "pushed, draft pull request opened" : "pushed"} ${out?.url ?? ""}`.trim());
+  publicationResult(r, out, say, review);
   return null;
 }
 
@@ -210,6 +231,10 @@ function watchCollection(host, sessionKey, agentId, onChange) {
     },
   };
 }
+const pauseCollection = (watch) => {
+  watch?.pause(true);
+  return () => watch?.pause(false);
+};
 
 // The collection card above the message box, where OpenClaw shows a task's
 // progress: collapsed, what is not pushed yet, the open pull requests with
@@ -322,7 +347,11 @@ const tunnelName = (t) => t.provider || (/trycloudflare\.com/.test(t.url ?? "") 
 const askConversation = (host, sessionKey, message) => host.request("sessions.send", { key: sessionKey, message });
 // Pushing goes to the repository's own branch and, without one yet, opens a
 // draft pull request for it.
-const pushTitle = (pr) => pr ? `Commit what is pending and push it to #${pr.number}` : "Commit what is pending, push the branch and open a draft pull request";
+const pushTitle = (pr, forge) => {
+  const operation = forge === BITBUCKET ? "Push committed changes" : "Commit pending changes and push the branch";
+  return pr ? `${operation} to PR #${pr.number}; its title and description are kept`
+    : `${operation}; create a draft pull request if none exists`;
+};
 // The title and description the agent proposed with wtc publish, which a new
 // pull request opens with; the gateway takes them only when it opens one.
 const proposalOf = (r) => (r.pullRequest ? null : r.proposal?.title || r.proposal?.body ? r.proposal : null);
@@ -410,6 +439,9 @@ const smallButton = (text, title, run) => {
   b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); void run(); };
   return b;
 };
+const resultAction = (action, say) => action ? smallButton(action.label, action.title, async () => {
+  try { await action.run(); } catch (err) { say(String(err?.message ?? err), true); }
+}) : null;
 // The gateway's portals to a service, by the port it listens on.
 const portalsOf = (g, data = {}) => {
   const port = portOf(g.url);
@@ -492,12 +524,14 @@ function newTunnel(g, svc, data = {}, { compact = false } = {}) {
   return pick;
 }
 
-// "wtc Collection", wtc linking to the project.
+// Visible branding can change while the plugin and CLI keep their legacy IDs.
 // version is what the collection reports: the plugin's and the gateway's wtc.
 const versionText = (v) => (v?.plugin || v?.wtc ? `plugin ${v.plugin ?? "?"}, wtc ${v.wtc ?? "?"}` : "");
 const brand = (size, version) => css(el("span", {},
-  css(el("a", { textContent: "wtc", href: HOME, target: "_blank", rel: "noopener noreferrer", title: `wtc — worktree collections (opens on GitHub)${version ? `\n${versionText(version)}` : ""}` }),
-    "color:var(--accent, inherit);text-decoration:none;font-weight:700"),
+  css(el("a", { href: HOME, target: "_blank", rel: "noopener noreferrer", ariaLabel: "taba home", title: `taba — Make room for the whole task. (opens taba.sh)${version ? `\n${versionText(version)}` : ""}` },
+    css(el("span", { textContent: "束", lang: "ja", ariaHidden: "true" }), "display:inline-grid;place-items:center;flex:none;width:1.3em;height:1.3em;border-radius:.35em;background:#234e42;color:#f7f7ed;font-family:'Hiragino Kaku Gothic ProN','Yu Gothic','Noto Sans CJK JP',sans-serif;font-size:1.15em;font-weight:500;letter-spacing:0;line-height:1"),
+    " ", el("span", { textContent: "taba" })),
+    "display:inline-flex;align-items:center;gap:.3em;color:var(--text-strong, inherit);text-decoration:none;font-weight:700"),
   el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
 
 // The collection as wtc status's tables, for the card and the panel alike: a
@@ -505,7 +539,7 @@ const brand = (size, version) => css(el("span", {},
 // done about a fact is done on it: the ↑ count pushes, the ↓ count catches up,
 // a conflict is resolved, a service's state starts or stops it.
 //
-// v is the view: { host, key(), agent(), svc, say(text), refresh(), pause(on),
+// v is the view: { host, key(), agent(), svc, say(text), refresh(), pause() → resume,
 // rerender() }. Narrow, a row wraps into two lines: what it is (the repository
 // and its branch, the service), then its facts under the header, still in
 // their columns.
@@ -526,13 +560,24 @@ function collectionTables(v) {
   async function askCommit(r) {
     if (acting.has(r.sessionKey)) return;
     acting.add(r.sessionKey);
-    v.say(`Asking the conversation to review and commit ${nameOf(r)}…`);
+    v.say(`Asking the conversation to create local commits for ${nameOf(r)}…`);
     v.rerender();
     try {
       await askSkill(v.host, v.key(), "wtc", `${nameOf(r)}: review and commit the intended uncommitted changes. Recheck its current state and branch policy first, and report the resulting commit. Leave publication for the person's push action.`);
-      v.say(`${nameOf(r)}: asked the conversation to review and commit the changes.`);
+      v.say(`${nameOf(r)}: asked the conversation to save intended changes as local commits. Pushing and opening a PR are separate.`);
     } catch (err) { v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
     finally { acting.delete(r.sessionKey); await v.refresh(); }
+  }
+  async function reviewPRText(r, url, conversationKey) {
+    if (v.key() !== conversationKey) return;
+    if (acting.has(r.sessionKey)) return;
+    acting.add(r.sessionKey);
+    try {
+      await askSkill(v.host, conversationKey, "wtc", `${nameOf(r)}: review the title and description of ${url} against the full current PR diff, including the latest pushed commits. Recheck the PR's current state and head first. Preserve useful human edits. If the text no longer describes the complete change, propose a revised title and description for the person to review; otherwise explain that it still fits. This is a review of the PR text, not a request for a code review. Do not change commits, push, merge, or edit the remote PR text in this step.`);
+      if (v.key() === conversationKey) v.say(`${nameOf(r)}: asked the conversation to review the PR title and description and propose any needed revisions.`);
+    } catch (err) {
+      if (v.key() === conversationKey) v.say(String(err?.message ?? err), true);
+    } finally { acting.delete(r.sessionKey); }
   }
   const nextLabel = (s) => ({ "return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", resolve: "Resolve conflicts", merge: "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", push: "Push", "merge-pr": "Open pull request" })[s.step] ?? s.step;
   const nextRoute = (s) => s.by === "person" && s.step === "merge-pr" ? "pr"
@@ -542,25 +587,28 @@ function collectionTables(v) {
     : s.by === "wtc" && !s.approve && JSON.stringify(s.command) === JSON.stringify(["wtc", "catch-up"]) ? "run" : null;
   async function actNext(r) {
     if (acting.has(r.sessionKey)) return;
+    const conversationKey = v.key();
+    const say = (...args) => { if (v.key() === conversationKey) v.say(...args); };
     acting.add(r.sessionKey);
     v.rerender();
     try {
-      const out = await call(v.host, "next", v.key(), v.agent(), { ownerSessionKey: r.sessionKey, key: r.next.key });
+      const out = await call(v.host, "next", conversationKey, v.agent(), { ownerSessionKey: r.sessionKey, key: r.next.key });
+      if (v.key() !== conversationKey) return;
       const fresh = out.repo;
       if (out.performed) {
-        await catchUpRepo(v.host, v.agent(), fresh, v.say, (input) => askSkill(v.host, v.key(), "wtc-catch-up", input), async () => out);
+        await catchUpRepo(v.host, v.agent(), fresh, say, (input) => v.key() === conversationKey ? askSkill(v.host, conversationKey, "wtc-catch-up", input) : undefined, async () => out);
       } else if (fresh?.next) {
         const step = fresh.next;
         switch (nextRoute(step)) {
-          case "publish": await publish(fresh); break;
+          case "publish": await publish(fresh, conversationKey); break;
           case "agent":
-            await askSkill(v.host, v.key(), step.skill ?? "wtc-catch-up", `${nameOf(fresh)}: ${step.reason}. Work on this repository only; recheck its state before acting.`);
-            v.say(`${nameOf(fresh)}: asked the conversation to ${nextLabel(step).toLowerCase()}.`);
+            await askSkill(v.host, conversationKey, step.skill ?? "wtc-catch-up", `${nameOf(fresh)}: ${step.reason}. Work on this repository only; recheck its state before acting.`);
+            say(`${nameOf(fresh)}: asked the conversation to ${nextLabel(step).toLowerCase()}.`);
             break;
-          default: v.say("The next step changed; refresh the collection before acting.", true);
+          default: say("The next step changed; refresh the collection before acting.", true);
         }
       }
-    } catch (err) { v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
+    } catch (err) { say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
     finally { acting.delete(r.sessionKey); await v.refresh(); }
   }
   function nextActions(repos) {
@@ -568,7 +616,7 @@ function collectionTables(v) {
     if (!rows.length) return null;
     return css(el("div", { className: "wtc-next-actions" }, muted("Next actions"), ...rows.map((r) => {
       const commit = !r.next && r.dirty > 0;
-      const step = r.next ?? { step: "commit", by: "agent", reason: `${plural(r.dirty, "uncommitted file")}. Review and commit the intended changes.` };
+      const step = r.next ?? { step: "commit", by: "agent", reason: `${plural(r.dirty, "uncommitted file")}. Save intended changes as local commits; pushing and opening a PR are separate.` };
       const route = commit ? "commit" : nextRoute(step);
       const action = route === "pr" && r.pullRequest?.url
         ? link(nextLabel(step), r.pullRequest.url)
@@ -581,8 +629,8 @@ function collectionTables(v) {
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
   const finished = (r) => r.pullRequest?.state === "merged";
-  const toPush = (r) => finished(r) ? 0 : r.unpublished || (!r.pullRequest ? r.ahead ?? 0 : 0);
-  const pushable = (r) => !r.error && !finished(r) && (r.dirty || toPush(r) > 0);
+  const toPush = (r) => finished(r) ? 0 : r.unpublished ?? (!r.pullRequest ? r.ahead ?? 0 : 0);
+  const pushable = (r) => !r.error && !finished(r) && ((r.forge !== BITBUCKET && r.dirty) || toPush(r) > 0);
   // A completed branch returns to the tip even if its commits are already
   // present there. Its PR leaves the repository row after that move.
   const toCatchUp = (r) => !r.error && (r.behind > 0 || finished(r));
@@ -640,21 +688,25 @@ function collectionTables(v) {
       bitbucket ? null : css(el("div", { textContent: "A GitHub identity under Agents → Tools is the agent's own; it is not used for pushing." }), "color:var(--muted, #888)")),
     "font-size:12px;line-height:1.45;display:grid;gap:4px;padding:8px 10px;border:1px solid var(--border-strong, rgba(128,128,128,.4));border-radius:12px");
   }
-  async function publish(r) {
+  async function publish(r, conversationKey = v.key()) {
+    if (v.key() !== conversationKey) return;
     if (!PUSHES.has(r.forge) || mine[r.forge] === false) return;
+    const say = (...args) => { if (v.key() === conversationKey) v.say(...args); };
+    const review = (repo, url) => reviewPRText(repo, url, conversationKey);
     busy.add(r.sessionKey);
-    v.say(`Preparing to push ${nameOf(r)}…`);
-    v.pause(true);
+    say(`Preparing to push ${nameOf(r)}…`);
+    const resume = v.pause();
     v.rerender();
     try {
       const pending = confirming.get(r.sessionKey);
       confirming.delete(r.sessionKey);
       const bitbucket = r.forge === BITBUCKET;
       const next = pending
-        ? await (bitbucket ? confirmBitbucket : confirmRepo)(v.host, v.agent(), r, pending, v.say)
+        ? await (bitbucket ? confirmBitbucket : confirmRepo)(v.host, v.agent(), r, pending, say, review)
         : bitbucket
-          ? await publishBitbucket(v.host, v.agent(), r, v.say, r.base ? baseOf(r) : undefined)
-          : await publishRepo(v.host, v.agent(), r, v.say);
+          ? await publishBitbucket(v.host, v.agent(), r, say, r.base ? baseOf(r) : undefined)
+          : await publishRepo(v.host, v.agent(), r, say, review);
+      if (v.key() !== conversationKey) return;
       if (next?.connect) { mine[r.forge] = null; showConnect = r.forge; v.reveal?.(); }
       else {
         // It is connected: look again rather than keep "not connected".
@@ -662,11 +714,11 @@ function collectionTables(v) {
         if (next) confirming.set(r.sessionKey, next);
       }
     } catch (err) {
-      v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true);
+      say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true);
     } finally {
       busy.delete(r.sessionKey);
-      v.pause(false);
-      await v.refresh();
+      resume?.();
+      if (v.key() === conversationKey) await v.refresh();
     }
   }
   async function catchUp(list) {
@@ -678,7 +730,11 @@ function collectionTables(v) {
     }
   }
   async function pushAll(list) {
-    for (const r of list) await publish(r);
+    const conversationKey = v.key();
+    for (const r of list) {
+      if (v.key() !== conversationKey) break;
+      await publish(r, conversationKey);
+    }
   }
   // A sub-session's commits go into the collection's checkout of the repository, as a
   // catch-up from its branch; a conflict is the agent's, as on ↓.
@@ -814,8 +870,8 @@ function collectionTables(v) {
   const REPO_COLUMNS = [
     { head: "Repo", width: "minmax(0,max-content)" },
     { head: "Branch", width: "minmax(0,1fr)", under: true },
-    { head: "±", title: "Changed files not committed yet", align: "center" },
-    { head: "↑", title: "Commits to push: click to push them, opening a draft pull request if there is none", align: "center" },
+    { head: "±", title: "Uncommitted files: Commit changes saves intended changes locally", align: "center" },
+    { head: "↑", title: "Push commits to the branch: its open PR includes them automatically; create a draft PR if none exists. Review the PR title and description when its scope changes", align: "center" },
     { head: "↓", title: "Commits on the base not merged in: click to catch up", align: "center" },
     { head: "PR", title: "The pull request" },
     { head: "C", title: "CI", align: "center" },
@@ -835,22 +891,23 @@ function collectionTables(v) {
   function pushCell(r, n) {
     if (!pushable(r)) return null;
     const label = n ? `↑ ${n}` : "↑";
-    const what = [r.dirty ? plural(r.dirty, "file") : "", n ? plural(n, "commit") : ""].filter(Boolean).join(" and ");
+    const what = [r.forge !== BITBUCKET && r.dirty ? plural(r.dirty, "uncommitted file") : "", n ? plural(n, "commit") : ""].filter(Boolean).join(" and ");
+    const activity = `${what} to ${r.forge !== BITBUCKET && r.dirty ? "publish" : "push"}`;
     const account = r.forge === BITBUCKET ? "Bitbucket login" : "GitHub account";
     if (!PUSHES.has(r.forge) || mine[r.forge] === false) {
       const why = r.forge === BITBUCKET ? "The gateway has no Bitbucket publish (the openclaw-bitbucket plugin, 0.3.0 or later)" : `The gateway does not push ${r.forge ?? "this forge"}'s repositories`;
-      return toned(label, TONE.pending, `${what} to push. ${why}, and the card does not hand pushing to the agent.`);
+      return toned(label, TONE.pending, `${activity}. ${why}, and the card does not hand pushing to the agent.`);
     }
     const pending = confirming.get(r.sessionKey);
     if (pending) {
       const as = pending.forge === BITBUCKET ? bitbucketAccount(pending.confirmation) : `@${pending.confirmation.account?.login ?? "you"}`;
-      return count(`confirm ${label}`, `Push ${what} of ${nameOf(r)} as ${as}`, TONE.success, () => publish(r));
+      return count(`confirm ${label}`, `${r.forge !== BITBUCKET && r.dirty ? "Commit pending changes and publish" : `Push ${what} of`} ${nameOf(r)} as ${as}`, TONE.success, () => publish(r));
     }
     // Bitbucket publishes commits only; files not committed stay behind.
     const left = r.forge === BITBUCKET && r.dirty ? ` Uncommitted files stay behind: ask the conversation to commit them first.` : "";
     // Asked again on the click, so a connection just made is used at once.
-    if (mine[r.forge] === null) return count(label, `${what} to push. Pushing needs your own ${account}: click to push, or for how to connect it`, TONE.none, () => publish(r));
-    return count(label, `${what} to push. ${pushTitle(r.pullRequest)}, with your own ${account}, after you confirm.${proposalTitle(r)}${left}`, TONE.pending, () => publish(r));
+    if (mine[r.forge] === null) return count(label, `${activity}. Pushing needs your own ${account}: click to push, or for how to connect it`, TONE.none, () => publish(r));
+    return count(label, `${activity}. ${pushTitle(r.pullRequest, r.forge)}, with your own ${account}, after you confirm.${proposalTitle(r)}${left}`, TONE.pending, () => publish(r));
   }
   function repoRow(r) {
     const pr = r.pullRequest;
@@ -1063,8 +1120,8 @@ export function latestUserText(messages) {
 export const isMainSession = (sessionKey) => /^agent:[^:]+:main$/.test(String(sessionKey ?? ""));
 // What Start asks the conversation to do.
 export const startMessage = (s, main = false) => main
-  ? `Start a new conversation for this task in wtc project ${s.project} with ${s.repos.join(", ")}: sessions_spawn with visible: true and a task that runs wtc add-repo ${s.repos.join(" ")} --project ${s.project} --worktree <a short name for this task> there, reads the project's AGENTS.md and adds what else the task needs. Send me its link.`
-  : `Start this conversation's collection in wtc project ${s.project} with ${s.repos.join(", ")}: wtc add-repo ${s.repos.join(" ")} --project ${s.project} --worktree <a short name for this task>. Then read the project's AGENTS.md and add what else the task needs.`;
+  ? `Start a new conversation for this task in taba project ${s.project} with ${s.repos.join(", ")}: sessions_spawn with visible: true and a task that runs wtc add-repo ${s.repos.join(" ")} --project ${s.project} --worktree <a short name for this task> there, reads the project's AGENTS.md and adds what else the task needs. Send me its link.`
+  : `Start this conversation's collection in taba project ${s.project} with ${s.repos.join(", ")}: wtc add-repo ${s.repos.join(" ")} --project ${s.project} --worktree <a short name for this task>. Then read the project's AGENTS.md and add what else the task needs.`;
 
 function mountComposer(container, context) {
   let ctx = context;
@@ -1090,7 +1147,8 @@ function mountComposer(container, context) {
     return b;
   };
   let noteFailed = false;
-  const say = (text, failed = false) => { note = text; noteFailed = failed; if (entry) render(entry); };
+  let noteAction = null;
+  const say = (text, failed = false, action = null) => { note = text; noteFailed = failed; noteAction = action; if (entry) render(entry); };
   // Narrow (a phone, a narrow window), rows wrap into two lines.
   let narrow = false;
   const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([e]) => {
@@ -1123,7 +1181,7 @@ function mountComposer(container, context) {
     get host() { return ctx.host; }, key: () => key, agent: () => agentOf(ctx), svc, say,
     // What a push needs (the how-to of connecting GitHub) shows open.
     reveal: () => { if (!card.open) { card.open = true; remember(true); } },
-    refresh: () => watch?.refresh(), pause: (on) => watch?.pause(on), rerender: () => entry && render(entry),
+    refresh: () => watch?.refresh(), pause: () => pauseCollection(watch), rerender: () => entry && render(entry),
   });
 
   // A conversation without a collection: where the draft being typed, or
@@ -1177,14 +1235,14 @@ function mountComposer(container, context) {
   };
   function renderSuggestion(s) {
     const main = isMainSession(key);
-    const what = css(el("span", {}, main ? "Start a conversation in wtc project " : "Work in wtc project ", el("strong", { textContent: s.project }), ` with ${s.repos.join(", ")}?`),
+    const what = css(el("span", {}, main ? "Start a conversation in taba project " : "Work in taba project ", el("strong", { textContent: s.project }), ` with ${s.repos.join(", ")}?`),
       "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
     what.title = `${s.source === "decision" ? "The decision model's" : "The words'"} suggestion for: ${suggestion.text}`;
     summary.replaceChildren(
       brand("14px", entry?.data?.version),
       what,
       css(el("span", {}, note ? noteNode(note, noteFailed) : null,
-        pill("Start", main ? "Ask the agent to start a conversation for this task in that wtc project" : "Ask the conversation to start this collection", () => {
+        pill("Start", main ? "Ask the agent to start a conversation for this task in that taba project" : "Ask the conversation to start this collection", () => {
           const fromDraft = suggestion?.fromDraft === true;
           dismissed.add(key);
           // Home never becomes a collection: once Start went out, it can be
@@ -1209,7 +1267,7 @@ function mountComposer(container, context) {
             void askConversation(ctx.host, key, `(wtc) ${startMessage(s, main)}`).then(done, fail);
           }
         }, true),
-        pill("Change…", "Pick another wtc project or repositories in the Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
+        pill("Change…", "Pick another taba project or repositories in the Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
         iconButton("✕", "Not now", () => { dismissed.add(key); card.remove(); })),
       "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:6px;white-space:nowrap"),
     );
@@ -1237,18 +1295,19 @@ function mountComposer(container, context) {
       brand("14px", entry.data.version),
       css(el("span", {}, ...(card.open ? [] : [...tables.totals(repos, groups), tables.nextSummary(repos)])), "flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding-left:6px"),
       // What an action is doing or why it failed shows here.
-      css(el("span", {}, note ? noteNode(note, noteFailed, "max-width:22em;overflow:hidden;text-overflow:ellipsis") : null,
+      css(el("span", {}, note ? noteNode(note, noteFailed, "min-width:0;max-width:22em;overflow:hidden;text-overflow:ellipsis") : null,
         iconButton("↻", `Updated ${ago(entry.at)}. Refresh`, () => void watch?.refresh()),
-        iconButton("⤢", "Open the wtc Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
+        iconButton("⤢", "Open the taba Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
         css(el("span", { textContent: card.open ? "⌃" : "⌄" }), "color:var(--muted, #888);padding:0 6px")),
-      "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
+      "flex:0 1 auto;min-width:0;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
     );
     tables.checkAccount(repos);
     detail.replaceChildren(...[tables.repoTable(repos, narrow, entry.data.subSessions),
       note ? css(el("div", { className: "wtc-action-result", role: noteFailed ? "alert" : "status", ariaLive: "polite" },
         css(el("strong", { textContent: noteFailed ? "Action failed" : "Latest action" }), "font-size:12px"),
         noteNode(note, noteFailed, "white-space:normal;overflow-wrap:anywhere"),
-        smallButton("Dismiss", "Dismiss the last action result", () => { note = ""; render(entry); })), "display:grid;gap:4px") : null,
+        resultAction(noteAction, say),
+        smallButton("Dismiss", "Dismiss the last action result", () => { note = ""; noteAction = null; render(entry); })), "display:grid;gap:4px") : null,
       tables.nextActions(repos), tables.notice(),
       repos.some((r) => r.pullRequests?.length) ? el("div", {}, el("div", { textContent: "Pull requests" }), tables.prTable(repos, narrow)) : null,
       groups.length ? tables.serviceTable(groups, entry.data, narrow) : null].filter(Boolean));
@@ -1266,6 +1325,8 @@ function mountComposer(container, context) {
     key = sessionKey;
     entry = null;
     note = "";
+    noteAction = null;
+    noteFailed = false;
     card.remove();
     if (sessionKey) watch = watchCollection(next.host, sessionKey, agentOf(next), render);
   }
@@ -1332,10 +1393,12 @@ function mountCollection(container, context) {
   root.append(header, log, body);
   let note = "";
   let noteFailed = false;
-  const say = (text, failed = false) => {
+  let noteAction = null;
+  const say = (text, failed = false, action = null) => {
     note = text;
     noteFailed = failed;
-    log.textContent = failed ? `⚠ ${text}` : text;
+    noteAction = action;
+    log.replaceChildren(...[noteNode(text, failed, "white-space:normal;overflow-wrap:anywhere"), resultAction(action, say)].filter(Boolean));
     log.setAttribute("role", failed ? "alert" : "status");
     log.setAttribute("aria-live", "polite");
     log.style.color = failed ? TONE.failure : "var(--muted, #888)";
@@ -1367,7 +1430,7 @@ function mountCollection(container, context) {
 
   const tables = collectionTables({
     get host() { return ctx.host; }, key: sessionKeyOf, agent: () => ctx.props.agentId, svc, say,
-    refresh: () => watch?.refresh(), pause: (on) => watch?.pause(on), rerender: () => render(),
+    refresh: () => watch?.refresh(), pause: () => pauseCollection(watch), rerender: () => render(),
   });
   // The panel is often narrow, beside the conversation or on a phone: rows
   // then wrap into two lines.
@@ -1588,18 +1651,18 @@ function mountCollection(container, context) {
         row(brand("12px", data.version)),
         row(css(el("span", { textContent: "No collection yet" }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit)"),
           css(el("span", {}, iconButton("↻", "Refresh", () => void watch?.refresh())), "margin-left:auto;display:flex;align-items:center;gap:2px")),
-        muted("A collection is this conversation's worktrees of a wtc project's repositories, for one task. Ask the conversation to work on a repository, or add one below.", "font-size:13px;display:block;margin-top:4px"),
+        muted("A collection is this conversation's worktrees of a taba project's repositories, for one task. Ask the conversation to work on a repository, or add one below.", "font-size:13px;display:block;margin-top:4px"),
       );
       const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
       body.replaceChildren(...[css(el("div", {}, heading("Add a repository"), adder), "display:grid;gap:10px"), ...warnings, footer(data)].filter(Boolean));
-      say(note, noteFailed);
+      say(note, noteFailed, noteAction);
       return;
     }
     header.replaceChildren(
       row(brand("12px", data.version)),
       row(css(el("span", { textContent: data.collection.label ?? data.collection.sessionKey }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit)"),
         css(el("span", {}, muted(`Updated ${ago(entry.at)}`), iconButton("↻", "Refresh", () => void watch?.refresh())), "margin-left:auto;display:flex;align-items:center;gap:2px")),
-      row(data.collection.project ? muted(data.collection.project === "ad-hoc" ? "ad-hoc wtc project" : `wtc project ${data.collection.project}`) : null, data.collection.project ? muted("·") : null,
+      row(data.collection.project ? muted(data.collection.project === "ad-hoc" ? "ad-hoc taba project" : `taba project ${data.collection.project}`) : null, data.collection.project ? muted("·") : null,
         branch ? mono(branch, "The collection's branch; a repository on another one shows its own") : null, branch ? muted("·") : null,
         muted(`${repos.length} ${repos.length === 1 ? "repository" : "repositories"}${groups.length ? ` · ${groups.filter((g) => g.running).length}/${plural(groups.length, "service")} running` : ""}`)),
       // Not when there is no folder: replaceChildren writes a null as "null".
@@ -1624,7 +1687,7 @@ function mountCollection(container, context) {
 
     const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
     body.replaceChildren(...[repoSection, prSection, serviceSection, ...warnings, footer(data)].filter(Boolean));
-    say(note, noteFailed);
+    say(note, noteFailed, noteAction);
   }
 
   const show = (next) => { if (!ctx.signal.aborted) { entry = next; render(); } };
@@ -1632,6 +1695,7 @@ function mountCollection(container, context) {
     watch?.dispose();
     watch = null;
     entry = null;
+    say("");
     const { sessionKey, agentId } = ctx.props ?? {};
     if (!sessionKey) {
       header.textContent = "No session selected.";

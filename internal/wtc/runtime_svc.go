@@ -331,6 +331,10 @@ func (c *Context) RemoveService(service string, shared bool) (RuntimeResult, err
 				return err
 			}
 			m.Tasks = []runtimeTask{}
+			for path, intent := range m.TunnelIntents {
+				intent.Definition = ""
+				m.TunnelIntents[path] = intent
+			}
 			return runtimeSaveManifest(m)
 		})
 		return RuntimeResult{Root: c.runtimeRoot(), Action: "rm", Items: c.RuntimeStatus()}, err
@@ -384,7 +388,11 @@ func (c *Context) Tunnel(opt TunnelOptions) (RuntimeResult, error) {
 		return RuntimeResult{}, err
 	}
 	group := repo.dir + "/" + name
-	plan, _, err := c.runtimePlan("dekit")
+	binary, err := c.runtimeBinary()
+	if err != nil {
+		return RuntimeResult{}, err
+	}
+	plan, _, err := c.runtimePlan(binary)
 	if err != nil {
 		return RuntimeResult{}, err
 	}
@@ -410,12 +418,12 @@ func (c *Context) Tunnel(opt TunnelOptions) (RuntimeResult, error) {
 			return RuntimeResult{}, fmt.Errorf("%s has no %s tunnel", group, opt.Provider)
 		}
 		var result RuntimeResult
+		var stopErr error
 		for _, t := range tunnels {
-			if result, err = c.RuntimeAction("down", t.Path, 0); err != nil {
-				return result, err
-			}
+			result, err = c.runtimeAction("down", t.Path, 0, &runtimeTunnelIntent{On: false, Definition: t.Definition})
+			stopErr = errors.Join(stopErr, err)
 		}
-		return result, nil
+		return result, stopErr
 	}
 	if opt.Provider == "" && len(tunnels) != 1 {
 		return RuntimeResult{}, fmt.Errorf("name the provider: tailscale, cloudflare, ngrok or devtunnel")
@@ -452,7 +460,7 @@ func (c *Context) Tunnel(opt TunnelOptions) (RuntimeResult, error) {
 		}); err != nil {
 			return RuntimeResult{}, err
 		}
-		if plan, _, err = c.runtimePlan("dekit"); err != nil {
+		if plan, _, err = c.runtimePlan(binary); err != nil {
 			return RuntimeResult{}, err
 		}
 		for _, t := range plan.Tasks {
@@ -470,7 +478,7 @@ func (c *Context) Tunnel(opt TunnelOptions) (RuntimeResult, error) {
 	if exposed && !opt.Public {
 		return RuntimeResult{}, fmt.Errorf("%s is reachable from the internet (%s); pass --public to open it", tunnel.Path, runtimeExposureWords(tunnel.Exposure))
 	}
-	return c.RuntimeAction("up", tunnel.Path, opt.Wait)
+	return c.runtimeAction("up", tunnel.Path, opt.Wait, &runtimeTunnelIntent{On: true, Definition: tunnel.Definition})
 }
 
 func runtimeExposureWords(exposure string) string {

@@ -21,6 +21,7 @@ type ReviewBundleOptions struct {
 	Dir       string
 	Round     int
 	Public    bool
+	Private   bool
 	NoCatchUp bool
 }
 
@@ -38,6 +39,8 @@ type ReviewManifest struct {
 	RepoDir    string `json:"repo_dir"`
 	Collection string `json:"collection"`
 	Public     bool   `json:"public"`
+	Audience   string `json:"audience"`
+	ModeReason string `json:"mode_reason"`
 	Downstream string `json:"downstream,omitempty"`
 	Upstream   string `json:"upstream,omitempty"`
 }
@@ -91,6 +94,9 @@ func (c *Context) BuildPublicReviewBundle(opt ReviewBundleOptions) (ReviewBundle
 }
 
 func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, error) {
+	if opt.Public && opt.Private {
+		return ReviewBundle{}, fmt.Errorf("--public and --private cannot be combined")
+	}
 	worktree, slug, forge, err := c.ReviewRepo(opt.Repo)
 	if err != nil {
 		return ReviewBundle{}, err
@@ -128,9 +134,7 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 		if forge == "github" {
 			raw, err = exec.Command("gh", "pr", "view", opt.PR, "--repo", slug, "--json", "title,body,baseRefName,headRefOid,headRefName,url").Output()
 		} else {
-			cmd := exec.Command("bb", "pr", "view", opt.PR, "--json")
-			cmd.Dir = worktree
-			raw, err = forgeOutput(cmd)
+			raw, err = reviewBitbucketCommand(ReviewManifest{RepoDir: worktree, Slug: slug}, []string{"pr", "view", opt.PR, "--json"}, nil)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: PR #%s metadata unavailable; bundle will use local refs\n"), opt.PR)
@@ -227,6 +231,9 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 		}
 		prURL = "https://" + host + "/" + slug + "/" + suffix + opt.PR
 	}
+	audience := reviewRepositoryAudience(worktree, forge, slug)
+	public, reason := c.reviewBundleMode(opt, forge, slug, audience)
+	opt.Public = public
 	headSHA, err := reviewRef(worktree, opt.Head)
 	if err != nil {
 		return ReviewBundle{}, err
@@ -318,7 +325,7 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 	if err := os.MkdirAll(filepath.Join(dir, "concerns"), 0755); err != nil {
 		return ReviewBundle{}, err
 	}
-	manifest := ReviewManifest{Repo: opt.Repo, PR: opt.PR, Forge: forge, Slug: slug, URL: prURL, BaseRef: baseRef, BaseSHA: baseSHA, HeadSHA: headSHA, HeadBranch: branch, Round: round, RepoDir: worktree, Collection: filepath.Base(c.Collection), Public: opt.Public}
+	manifest := ReviewManifest{Repo: opt.Repo, PR: opt.PR, Forge: forge, Slug: slug, URL: prURL, BaseRef: baseRef, BaseSHA: baseSHA, HeadSHA: headSHA, HeadBranch: branch, Round: round, RepoDir: worktree, Collection: filepath.Base(c.Collection), Public: opt.Public, Audience: audience, ModeReason: reason}
 	prText := fmt.Sprintf("# %s\n\n%s\n", prTitle, prBody)
 	if opt.PR == "" {
 		prText = fmt.Sprintf("# %s\n\n(branch-only review)\n", branch)
@@ -398,7 +405,7 @@ func writeReviewManifest(dir string, m ReviewManifest) error {
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), append(data, '\n'), 0644); err != nil {
 		return err
 	}
-	fields := [][2]string{{"REPO", m.Repo}, {"PR", m.PR}, {"FORGE", m.Forge}, {"SLUG", m.Slug}, {"URL", m.URL}, {"BASE_REF", m.BaseRef}, {"BASE_SHA", m.BaseSHA}, {"HEAD_SHA", m.HeadSHA}, {"HEAD_BRANCH", m.HeadBranch}, {"ROUND", strconv.Itoa(m.Round)}, {"REPO_DIR", m.RepoDir}, {"COLLECTION", m.Collection}, {"DOWNSTREAM", m.Downstream}, {"UPSTREAM", m.Upstream}}
+	fields := [][2]string{{"REPO", m.Repo}, {"PR", m.PR}, {"FORGE", m.Forge}, {"SLUG", m.Slug}, {"URL", m.URL}, {"BASE_REF", m.BaseRef}, {"BASE_SHA", m.BaseSHA}, {"HEAD_SHA", m.HeadSHA}, {"HEAD_BRANCH", m.HeadBranch}, {"ROUND", strconv.Itoa(m.Round)}, {"REPO_DIR", m.RepoDir}, {"COLLECTION", m.Collection}, {"PUBLIC", strconv.FormatBool(m.Public)}, {"REVIEW_MODE", m.Mode()}, {"AUDIENCE", m.Audience}, {"MODE_REASON", m.ModeReason}, {"DOWNSTREAM", m.Downstream}, {"UPSTREAM", m.Upstream}}
 	var b strings.Builder
 	b.WriteString("# review bundle manifest (sourceable)\n")
 	for _, field := range fields {
@@ -410,14 +417,29 @@ func writeReviewManifest(dir string, m ReviewManifest) error {
 var reviewConcernID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 func (c *Context) copyPublicReviewConcerns(dir, worktree, baseSHA, changed string) (int, error) {
-	// A public bundle reads only generic concerns from the review base. Local
-	// overlays and other repository snapshots may contain private identities.
+	// Public rules belong to the target at the review base. Never follow
+	// working-tree overlays or Git symlinks into another repository.
 	sourceSHA := baseSHA
-	paths, err := reviewGit(worktree, "ls-tree", "-r", "--name-only", sourceSHA, "review/concerns")
+	paths, err := reviewGit(worktree, "ls-tree", "-r", "-z", sourceSHA, "review/concerns", ".review/concerns")
 	if err != nil {
 		return 0, err
 	}
-	if len(strings.TrimSpace(string(paths))) == 0 {
+	var names []string
+	for _, entry := range strings.Split(string(paths), "\x00") {
+		path := entry
+		if sourceSHA != "" {
+			metadata, name, ok := strings.Cut(entry, "\t")
+			// Read blobs only: a symlink is repository data, not a rule file.
+			if !ok || !strings.HasPrefix(metadata, "100644 blob ") && !strings.HasPrefix(metadata, "100755 blob ") {
+				continue
+			}
+			path = name
+		}
+		if (strings.HasPrefix(path, "review/concerns/") || strings.HasPrefix(path, ".review/concerns/")) && strings.HasSuffix(path, ".md") {
+			names = append(names, path)
+		}
+	}
+	if len(names) == 0 {
 		sourceSHA = ""
 		defaults, err := DefaultPaths()
 		if err != nil {
@@ -429,17 +451,8 @@ func (c *Context) copyPublicReviewConcerns(dir, worktree, baseSHA, changed strin
 				embedded = append(embedded, path)
 			}
 		}
-		paths = []byte(strings.Join(embedded, "\n"))
+		names = embedded
 		fmt.Fprintln(os.Stderr, branding.Text("{{command}}: review base has no generic concerns; using versioned CLI defaults"))
-	}
-	var names []string
-	for _, path := range strings.Split(strings.TrimSpace(string(paths)), "\n") {
-		if strings.HasPrefix(path, "review/concerns/") && strings.HasSuffix(path, ".md") {
-			names = append(names, path)
-		}
-	}
-	if len(names) == 0 {
-		return 0, fmt.Errorf("review base has no generic concerns; public bundle cannot use local overlays")
 	}
 	sort.Strings(names)
 	count := 0

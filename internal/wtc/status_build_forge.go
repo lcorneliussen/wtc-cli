@@ -24,8 +24,10 @@ func statusGHBuild(slug, branch string) (*StatusBuild, error) {
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid GitHub repository slug")
 	}
-	raw, err := statusJSON("gh", "api", "graphql", "-f", "query="+statusGHBuildQuery,
-		"-f", "owner="+parts[0], "-f", "name="+parts[1], "-f", "ref=refs/heads/"+branch)
+	raw, err := statusSingleFlight("build", "github.com", slug, branch, func() ([]byte, error) {
+		return statusJSON("gh", "api", "graphql", "-f", "query="+statusGHBuildQuery,
+			"-f", "owner="+parts[0], "-f", "name="+parts[1], "-f", "ref=refs/heads/"+branch)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -126,8 +128,61 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 	if user == "" || pass == "" {
 		return nil, fmt.Errorf("no Bitbucket API credentials (log in with bb, or set BB_USERNAME and BB_API_TOKEN)")
 	}
-	query := url.Values{"sort": {"-created_on"}, "pagelen": {"30"}, "target.ref_name": {branch}}
-	endpoint := statusBBAPI + "/repositories/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]) + "/pipelines/?" + query.Encode()
+	var started time.Time
+	raw, live, err := statusFetchShared("pipelines", "bitbucket.org", slug, "recent", func() ([]byte, error) {
+		started = time.Now()
+		return statusBBPipelines(parts[0], parts[1], "", user, pass)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if live {
+		statusSaveLivePipelinePage(slug, raw, started)
+	}
+	if pageSince, ok := statusForgeEntrySince("pipelines", "bitbucket.org", slug, "recent"); ok {
+		if buildSince, ok := statusForgeEntrySince("build", "bitbucket.org", slug, branch); ok && buildSince.After(pageSince) {
+			if saved, ok := statusReadForgeEntryAny("build", "bitbucket.org", slug, branch); ok {
+				raw = saved
+			}
+		}
+	}
+	build, err := statusParseBBBuild(raw, slug, branch)
+	if err != nil {
+		return nil, err
+	}
+	if build != nil {
+		if audited, found := statusPreferAuditedBuild(slug, branch, build); found {
+			return audited, nil
+		}
+		return statusConfirmFullBuild(slug, branch, build, "page", user, pass), nil
+	}
+	if saved, ok := statusReadForgeEntryAny("build", "bitbucket.org", slug, branch); ok {
+		savedBuild, parseErr := statusParseBBBuild(saved, slug, branch)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		return statusConfirmFullBuild(slug, branch, savedBuild, "saved", user, pass), nil
+	}
+	raw, err = statusSingleFlight("build", "bitbucket.org", slug, branch, func() ([]byte, error) {
+		return statusBBPipelines(parts[0], parts[1], branch, user, pass)
+	})
+	if err != nil {
+		return nil, err
+	}
+	build, err = statusParseBBBuild(raw, slug, branch)
+	if err != nil {
+		return nil, err
+	}
+	statusMarkFullRefresh("bitbucket.org", slug, "build:"+branch)
+	return build, nil
+}
+
+func statusBBPipelines(workspace, repo, branch, user, pass string) ([]byte, error) {
+	query := url.Values{"sort": {"-created_on"}, "pagelen": {"30"}}
+	if branch != "" {
+		query.Set("target.ref_name", branch)
+	}
+	endpoint := statusBBAPI + "/repositories/" + url.PathEscape(workspace) + "/" + url.PathEscape(repo) + "/pipelines/?" + query.Encode()
 	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -144,13 +199,68 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 		return nil, err
 	}
 	if response.StatusCode == http.StatusNotFound {
-		// Pipelines are not enabled for this repository.
-		return nil, nil
+		// Pipelines are not enabled. Save an empty page so the next refresh
+		// does not spend another request on the same answer.
+		return []byte(`{"values":[]}`), nil
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("Bitbucket pipelines API returned %s", response.Status)
+		body := strings.TrimSpace(string(raw))
+		if len(body) > 200 {
+			body = body[:200]
+		}
+		return nil, fmt.Errorf("Bitbucket pipelines API returned %s: %s", response.Status, body)
 	}
-	return statusParseBBBuild(raw, slug, branch)
+	return raw, nil
+}
+
+func statusSaveLivePipelinePage(slug string, raw []byte, started time.Time) {
+	for _, branch := range statusPipelinePageBranches(raw) {
+		unlock, lockErr := statusLockCache(statusForgeEntryPath("build", "bitbucket.org", slug, branch))
+		build, err := statusParseBBBuild(raw, slug, branch)
+		if err == nil && build != nil && !statusPageAuditApplies(slug, branch, build) {
+			statusWriteForgeEntrySince("build", "bitbucket.org", slug, branch, raw, started)
+		}
+		if lockErr == nil {
+			unlock()
+		}
+	}
+}
+
+func statusPipelinePageBranches(raw []byte) []string {
+	var page struct {
+		Values []struct {
+			Target struct {
+				RefName  string `json:"ref_name"`
+				Selector struct {
+					Type string `json:"type"`
+				} `json:"selector"`
+			} `json:"target"`
+		} `json:"values"`
+	}
+	if json.Unmarshal(raw, &page) != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var branches []string
+	for _, run := range page.Values {
+		if run.Target.RefName == "" || seen[run.Target.RefName] {
+			continue
+		}
+		if run.Target.Selector.Type != "" && run.Target.Selector.Type != "branches" && run.Target.Selector.Type != "default" {
+			continue
+		}
+		seen[run.Target.RefName] = true
+		branches = append(branches, run.Target.RefName)
+	}
+	return branches
+}
+
+func statusPageAuditApplies(slug, branch string, pageBuild *StatusBuild) bool {
+	if pageBuild == nil {
+		return false
+	}
+	raw, ok := statusReadForgeEntryAny("full", "bitbucket.org", slug, "build:"+branch)
+	return ok && string(raw) == statusBuildFingerprint(pageBuild)
 }
 
 func statusParseBBBuild(raw []byte, slug, branch string) (*StatusBuild, error) {
