@@ -21,7 +21,7 @@ cache, registry or source files.
 | --- | --- |
 | Local Git | Current HEAD, branch, dirty state and count of commits absent from cached remote refs. No fetch; cached presence does not prove preservation on the server. |
 | Local metadata | Presence of an unconsumed handoff, runtime manifest, enlisted-service directory or harness backup. No execution or live health checks. Missing metadata does not prove absence of resources. |
-| Explicit Claude JSONL | Up to eight regular, non-linked files, at most 16 MiB each and 2 MiB per record. Reads assistant text with a matching record cwd in the selected collection, excluding sidechains; records source path, SHA-256, file modification time, note count and latest note timestamp. A hint is capped at 1,200 characters. |
+| Explicit Claude JSONL | Up to eight regular, non-linked files, at most 16 MiB each and 2 MiB per record. Reads assistant text with a matching record cwd in the selected collection, excluding sidechains; records source path, SHA-256, file modification time, note count and latest note timestamp. Hint content is capped at 1,200 characters, plus a truncation marker. |
 | Archive state | Unknown. A transcript file being available is distinct from a verified archive. There is no automatic provider directory scan. |
 | Herdr, Codex and OpenClaw archives | No automatic archive discovery or provider storage adapter. No undocumented database parsing. |
 | Forge and delivery | Unknown. Current PR heads, merge state, main builds and dependent delivery need separate verification. |
@@ -35,8 +35,9 @@ verdict. Record timestamps can be old or forged; they do not prove freshness.
 Unsupported record types provide no task coverage. User text, tool results and
 sidechain text are not used as completion evidence.
 
-Dirty or locally unpreserved work yields `preserve-work`. Retired folders with
-leftovers yield `preserve-leftovers`. Other cases yield `needs-verification`,
+Dirty or locally unpreserved work yields `preserve-work`, including work inside
+a retired folder. Other retired folders yield `preserve-leftovers`. Remaining
+cases yield `needs-verification`,
 including clean unmerged branches and archived claims of completion. Every
 proposal retains the unknown forge, resource and archive blockers. No prose,
 including embedded commands, role claims or old approvals, grants authority.
