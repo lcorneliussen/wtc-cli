@@ -7,6 +7,8 @@ In wide layouts review sits in the right column, above status and below browse
 when browse is present. In narrow layouts it sits on the tools tab, between
 browse and shell when both are present. Layout switches move existing panes
 and preserve their processes. Reopening keeps a running viewer as it is.
+After the viewer exits, `--add review` starts it again with a freshly resolved
+range; plain `wtc open` leaves the idle review pane at its prompt.
 
 The viewer prefers the newest applicable native `manifest.json` under the
 collection's `.wtc-reviews/` directory (manifest modification time, with directory

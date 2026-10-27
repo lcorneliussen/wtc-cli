@@ -246,6 +246,9 @@ func openPaneState(session string, pane openPaneInfo) (string, error) {
 func openPlanPanes(item *openItem, panes []openPaneInfo, opt openOptions) error {
 	var failures []error
 	for _, label := range []string{"agent", "browse", "review", "status"} {
+		if label == "review" && !openWants(opt, label) {
+			continue
+		}
 		if label == "agent" && opt.NoAgent || label == "browse" && opt.NoBrowse || label == "status" && opt.NoStatus {
 			continue
 		}
@@ -308,6 +311,10 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 			}
 			if state != "empty" && !strings.HasPrefix(state, "empty (") {
 				item.Actions = append(item.Actions, label+" live ("+state+")")
+				continue
+			}
+			if label == "review" && !openWants(opt, label) {
+				item.Actions = append(item.Actions, "review empty (use --add review to restart)")
 				continue
 			}
 			if label == "browse" {

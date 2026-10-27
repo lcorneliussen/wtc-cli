@@ -409,3 +409,30 @@ func TestOpenReviewResolvesHarnessAliasAndRejectsMultipleSiblingBundles(t *testi
 		t.Fatalf("ambiguous bundles accepted: %v", err)
 	}
 }
+
+func TestOpenIdleReviewRequiresExplicitRequest(t *testing.T) {
+	c, _, _, log, _ := openTestFixture(t)
+	if err := openCreateWorkspace(c, "test", "sample"); err != nil {
+		t.Fatal(err)
+	}
+	panes := []openPaneInfo{{Label: "review", ID: "p1"}}
+	opt := openOptions{Session: "test", NoAgent: true, NoStatus: true}
+	item := openItem{}
+	if err := openPlanPanes(&item, panes, opt); err != nil || len(item.Actions) != 0 {
+		t.Fatalf("unrequested idle review planned: %+v %v", item, err)
+	}
+	if err := openStartPanes(&item, c, panes, opt); err != nil {
+		t.Fatalf("plain open failed on idle optional review: %v", err)
+	}
+	if !strings.Contains(strings.Join(item.Actions, " "), "use --add review to restart") {
+		t.Fatalf("idle state unexplained: %+v", item)
+	}
+	calls, _ := os.ReadFile(log)
+	if strings.Contains(string(calls), "pane run ") {
+		t.Fatalf("unrequested viewer restarted: %s", calls)
+	}
+	opt.Tools = []string{"review"}
+	if err := openStartPanes(&item, c, panes, opt); err == nil || !strings.Contains(err.Error(), "no applicable review bundle or current PR") {
+		t.Fatalf("explicit review request lost its error: %v", err)
+	}
+}
