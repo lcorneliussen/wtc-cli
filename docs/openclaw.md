@@ -500,6 +500,15 @@ renders them against a minimal DOM.
 
 ## Install
 
+The plugin's visible name is **taba**, formerly wtc, with the selectable
+**束 taba** wordmark linking to [taba.sh](https://taba.sh/). This branding does
+not change its installed identity: the plugin ID is still `wtc`, its package
+is `openclaw-plugin-wtc`, and its settings stay under `plugins.entries.wtc`.
+Use the existing install/reload commands below. When upgrading to a release
+with this branding, install the matching CLI and plugin, then reload open
+Control UI tabs. The technical ID/config migration remains a later step in
+[the rename plan](https://taba.sh/wtc-is-now-taba/).
+
 On the gateway's host, as the user the gateway runs as. For a gateway built
 from an image by CI/CD, see [Gateway image and CI/CD](#gateway-image-and-cicd)
 instead. An agent asked to set wtc up starts with `wtc docs setup.md`.

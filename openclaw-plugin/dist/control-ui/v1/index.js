@@ -7,8 +7,8 @@
 // this panel publishes through that owner, the way the chat's own Publish PR
 // button does for a session's single checkout.
 const PLUGIN_ID = "wtc";
-const HOME = "https://github.com/lcorneliussen/wtc-cli";
-const TITLE = "wtc Collection";
+const HOME = "https://taba.sh/";
+const TITLE = "taba Collection";
 
 const el = (tag, props = {}, ...kids) => {
   const node = Object.assign(document.createElement(tag), props);
@@ -492,12 +492,14 @@ function newTunnel(g, svc, data = {}, { compact = false } = {}) {
   return pick;
 }
 
-// "wtc Collection", wtc linking to the project.
+// Visible branding can change while the plugin and CLI keep their legacy IDs.
 // version is what the collection reports: the plugin's and the gateway's wtc.
 const versionText = (v) => (v?.plugin || v?.wtc ? `plugin ${v.plugin ?? "?"}, wtc ${v.wtc ?? "?"}` : "");
 const brand = (size, version) => css(el("span", {},
-  css(el("a", { textContent: "wtc", href: HOME, target: "_blank", rel: "noopener noreferrer", title: `wtc — worktree collections (opens on GitHub)${version ? `\n${versionText(version)}` : ""}` }),
-    "color:var(--accent, inherit);text-decoration:none;font-weight:700"),
+  css(el("a", { href: HOME, target: "_blank", rel: "noopener noreferrer", ariaLabel: "taba home", title: `taba — Make room for the whole task. (opens taba.sh)${version ? `\n${versionText(version)}` : ""}` },
+    css(el("span", { textContent: "束", lang: "ja", ariaHidden: "true" }), "display:inline-grid;place-items:center;flex:none;width:1.3em;height:1.3em;border-radius:.35em;background:#234e42;color:#f7f7ed;font-family:'Hiragino Kaku Gothic ProN','Yu Gothic','Noto Sans CJK JP',sans-serif;font-size:1.15em;font-weight:500;letter-spacing:0;line-height:1"),
+    " ", el("span", { textContent: "taba" })),
+    "display:inline-flex;align-items:center;gap:.3em;color:var(--text-strong, inherit);text-decoration:none;font-weight:700"),
   el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
 
 // The collection as wtc status's tables, for the card and the panel alike: a
@@ -1063,8 +1065,8 @@ export function latestUserText(messages) {
 export const isMainSession = (sessionKey) => /^agent:[^:]+:main$/.test(String(sessionKey ?? ""));
 // What Start asks the conversation to do.
 export const startMessage = (s, main = false) => main
-  ? `Start a new conversation for this task in wtc project ${s.project} with ${s.repos.join(", ")}: sessions_spawn with visible: true and a task that runs wtc add-repo ${s.repos.join(" ")} --project ${s.project} --worktree <a short name for this task> there, reads the project's AGENTS.md and adds what else the task needs. Send me its link.`
-  : `Start this conversation's collection in wtc project ${s.project} with ${s.repos.join(", ")}: wtc add-repo ${s.repos.join(" ")} --project ${s.project} --worktree <a short name for this task>. Then read the project's AGENTS.md and add what else the task needs.`;
+  ? `Start a new conversation for this task in taba project ${s.project} with ${s.repos.join(", ")}: sessions_spawn with visible: true and a task that runs wtc add-repo ${s.repos.join(" ")} --project ${s.project} --worktree <a short name for this task> there, reads the project's AGENTS.md and adds what else the task needs. Send me its link.`
+  : `Start this conversation's collection in taba project ${s.project} with ${s.repos.join(", ")}: wtc add-repo ${s.repos.join(" ")} --project ${s.project} --worktree <a short name for this task>. Then read the project's AGENTS.md and add what else the task needs.`;
 
 function mountComposer(container, context) {
   let ctx = context;
@@ -1177,14 +1179,14 @@ function mountComposer(container, context) {
   };
   function renderSuggestion(s) {
     const main = isMainSession(key);
-    const what = css(el("span", {}, main ? "Start a conversation in wtc project " : "Work in wtc project ", el("strong", { textContent: s.project }), ` with ${s.repos.join(", ")}?`),
+    const what = css(el("span", {}, main ? "Start a conversation in taba project " : "Work in taba project ", el("strong", { textContent: s.project }), ` with ${s.repos.join(", ")}?`),
       "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
     what.title = `${s.source === "decision" ? "The decision model's" : "The words'"} suggestion for: ${suggestion.text}`;
     summary.replaceChildren(
       brand("14px", entry?.data?.version),
       what,
       css(el("span", {}, note ? noteNode(note, noteFailed) : null,
-        pill("Start", main ? "Ask the agent to start a conversation for this task in that wtc project" : "Ask the conversation to start this collection", () => {
+        pill("Start", main ? "Ask the agent to start a conversation for this task in that taba project" : "Ask the conversation to start this collection", () => {
           const fromDraft = suggestion?.fromDraft === true;
           dismissed.add(key);
           // Home never becomes a collection: once Start went out, it can be
@@ -1209,7 +1211,7 @@ function mountComposer(container, context) {
             void askConversation(ctx.host, key, `(wtc) ${startMessage(s, main)}`).then(done, fail);
           }
         }, true),
-        pill("Change…", "Pick another wtc project or repositories in the Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
+        pill("Change…", "Pick another taba project or repositories in the Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
         iconButton("✕", "Not now", () => { dismissed.add(key); card.remove(); })),
       "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:6px;white-space:nowrap"),
     );
@@ -1239,7 +1241,7 @@ function mountComposer(container, context) {
       // What an action is doing or why it failed shows here.
       css(el("span", {}, note ? noteNode(note, noteFailed, "max-width:22em;overflow:hidden;text-overflow:ellipsis") : null,
         iconButton("↻", `Updated ${ago(entry.at)}. Refresh`, () => void watch?.refresh()),
-        iconButton("⤢", "Open the wtc Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
+        iconButton("⤢", "Open the taba Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
         css(el("span", { textContent: card.open ? "⌃" : "⌄" }), "color:var(--muted, #888);padding:0 6px")),
       "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
     );
@@ -1588,7 +1590,7 @@ function mountCollection(container, context) {
         row(brand("12px", data.version)),
         row(css(el("span", { textContent: "No collection yet" }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit)"),
           css(el("span", {}, iconButton("↻", "Refresh", () => void watch?.refresh())), "margin-left:auto;display:flex;align-items:center;gap:2px")),
-        muted("A collection is this conversation's worktrees of a wtc project's repositories, for one task. Ask the conversation to work on a repository, or add one below.", "font-size:13px;display:block;margin-top:4px"),
+        muted("A collection is this conversation's worktrees of a taba project's repositories, for one task. Ask the conversation to work on a repository, or add one below.", "font-size:13px;display:block;margin-top:4px"),
       );
       const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
       body.replaceChildren(...[css(el("div", {}, heading("Add a repository"), adder), "display:grid;gap:10px"), ...warnings, footer(data)].filter(Boolean));
@@ -1599,7 +1601,7 @@ function mountCollection(container, context) {
       row(brand("12px", data.version)),
       row(css(el("span", { textContent: data.collection.label ?? data.collection.sessionKey }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit)"),
         css(el("span", {}, muted(`Updated ${ago(entry.at)}`), iconButton("↻", "Refresh", () => void watch?.refresh())), "margin-left:auto;display:flex;align-items:center;gap:2px")),
-      row(data.collection.project ? muted(data.collection.project === "ad-hoc" ? "ad-hoc wtc project" : `wtc project ${data.collection.project}`) : null, data.collection.project ? muted("·") : null,
+      row(data.collection.project ? muted(data.collection.project === "ad-hoc" ? "ad-hoc taba project" : `taba project ${data.collection.project}`) : null, data.collection.project ? muted("·") : null,
         branch ? mono(branch, "The collection's branch; a repository on another one shows its own") : null, branch ? muted("·") : null,
         muted(`${repos.length} ${repos.length === 1 ? "repository" : "repositories"}${groups.length ? ` · ${groups.filter((g) => g.running).length}/${plural(groups.length, "service")} running` : ""}`)),
       // Not when there is no folder: replaceChildren writes a null as "null".

@@ -1,7 +1,7 @@
 {
   "id": "wtc",
-  "name": "Worktree Collection",
-  "description": "Shows a conversation's worktree collection: its repositories with pending changes, pull requests with CI, and running services, in a panel and a card above the message box.",
+  "name": "taba",
+  "description": "Formerly wtc. Shows a conversation's worktree collection: its repositories with pending changes, pull requests with CI, and running services, in a panel and a card above the message box.",
   "version": "0.1.0",
   "uiCapabilities": [
     "panel",
@@ -24,7 +24,7 @@
       },
       "harnesses": {
         "type": "array",
-        "description": "This gateway's wtc projects: each a harness repository whose .harness-repos.yml lists the project's repositories. A collection works in one: its first wtc add-repo adds a worktree of the harness, and repository names resolve through its registry. None configured: every collection is ad hoc.",
+        "description": "This gateway's taba projects: each a harness repository whose .harness-repos.yml lists the project's repositories. A collection works in one: its first wtc add-repo adds a worktree of the harness, and repository names resolve through its registry. None configured: every collection is ad hoc.",
         "items": {
           "type": "object",
           "required": [
@@ -36,7 +36,7 @@
             "name": {
               "type": "string",
               "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
-              "description": "The wtc project's name, as wtc add-repo --project takes it."
+              "description": "The taba project's name, as wtc add-repo --project takes it."
             },
             "remote": {
               "type": "string",
@@ -69,7 +69,7 @@
       },
       "defaultHarness": {
         "type": "string",
-        "description": "The default wtc project: chooses between projects whose registries list the repositories a new collection adds, and stands in when none lists them (as the only configured project does). A project that lists them beats it; a repository the chosen project does not list is asked about."
+        "description": "The default taba project: chooses between projects whose registries list the repositories a new collection adds, and stands in when none lists them (as the only configured project does). A project that lists them beats it; a repository the chosen project does not list is asked about."
       },
       "sandboxGit": {
         "type": "object",
