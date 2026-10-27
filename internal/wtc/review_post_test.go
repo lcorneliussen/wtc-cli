@@ -41,6 +41,7 @@ func TestReviewPostReceiptsDedupAndResolve(t *testing.T) {
 	launcher := `#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_GH_LOG"
 case "$*" in
+  *'--json headRefOid,statusCheckRollup'*) printf '{"headRefOid":"1234567890abcdef1234567890abcdef12345678","statusCheckRollup":[{"conclusion":"FAILURE","status":"COMPLETED"}]}\n' ;;
   *'--json headRefOid'*) printf '{"headRefOid":"%s"}\n' "${FAKE_PR_HEAD:-1234567890abcdef1234567890abcdef12345678}" ;;
   *'--paginate --slurp'*) printf '[[]]\n' ;;
   *'api graphql'*'reviewThreads'*) printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"THREAD_1","isResolved":false,"comments":{"nodes":[{"databaseId":401}]}}]}}}}}\n' ;;
@@ -59,6 +60,8 @@ esac
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("FAKE_GH_LOG", log)
 	t.Setenv("FAKE_GH_BODY", filepath.Join(bin, "last-body.json"))
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_MIN_INTERVAL", "0")
 	c, err := OpenCollection(collection)
 	if err != nil {
 		t.Fatal(err)
@@ -66,6 +69,10 @@ esac
 	posted, err := c.PostReviewBundle(bundle, ReviewPostOptions{})
 	if err != nil || posted.CommentID != "301" || posted.InlinePosted != 1 || posted.InlineFailed != 0 {
 		t.Fatalf("post: %+v %v", posted, err)
+	}
+	published, err := os.ReadFile(filepath.Join(bin, "last-body.json"))
+	if err != nil || !strings.Contains(string(published), "Forge checks at publication") || !strings.Contains(string(published), "Confirmed failing check") {
+		t.Fatalf("publication hid checks that failed after review: %s %v", published, err)
 	}
 	if _, err := os.Stat(reviewReceiptPath(collection, "github", "example/app", "7", head, "301", "pass")); err != nil {
 		t.Fatalf("missing local posting receipt: %v", err)

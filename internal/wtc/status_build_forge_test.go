@@ -55,7 +55,7 @@ func TestStatusBBBuildReadsNewestBranchPipeline(t *testing.T) {
 	if err != nil || build == nil {
 		t.Fatalf("build = %+v, %v", build, err)
 	}
-	if gotUser != "builder" || !strings.Contains(gotPath, "/repositories/team/widget/pipelines/") || strings.Contains(gotPath, "target.ref_name=") {
+	if gotUser != "builder" || !strings.Contains(gotPath, "/repositories/team/widget/pipelines/") || strings.Contains(gotPath, "target.branch=") {
 		t.Fatalf("unexpected request %q as %q", gotPath, gotUser)
 	}
 	if *build.Build != "11" || *build.Checks != "SUCCESS" || *build.SHA != "bbbbbbb" ||
@@ -69,7 +69,7 @@ func TestStatusBBBuildSharesOnePipelinePage(t *testing.T) {
 	hits := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
-		if r.URL.Query().Get("target.ref_name") != "" {
+		if r.URL.Query().Get("target.branch") != "" {
 			t.Errorf("branch filter on a page that already lists both branches: %s", r.URL.RawQuery)
 		}
 		w.Write([]byte(`{"values":[
@@ -96,7 +96,7 @@ func TestStatusBBBuildSavesEveryBranchOnTheLivePage(t *testing.T) {
 	var phase atomic.Int32
 	var targeted atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("target.ref_name") != "" {
+		if r.URL.Query().Get("target.branch") != "" {
 			targeted.Add(1)
 			t.Errorf("targeted lookup %s", r.URL.RawQuery)
 		}
@@ -135,7 +135,7 @@ func TestStatusBBBuildKeepsASavedBranchTheRecentPageOmits(t *testing.T) {
 	hits, targeted := 0, 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
-		if r.URL.Query().Get("target.ref_name") == "main" {
+		if r.URL.Query().Get("target.branch") == "main" {
 			targeted++
 			w.Write([]byte(`{"values":[{"build_number":11,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"bbbbbbb"}}}]}`))
 			return
@@ -192,7 +192,7 @@ func TestStatusBBBuildKeepsTheRunSeenOnTheRecentPage(t *testing.T) {
 	t.Setenv("WTC_FORGE_CACHE_AGE", "1")
 	var phase atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("target.ref_name") == "main" {
+		if r.URL.Query().Get("target.branch") == "main" {
 			w.Write([]byte(`{"values":[{"build_number":5,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"aaaaaaa"}}}]}`))
 			return
 		}

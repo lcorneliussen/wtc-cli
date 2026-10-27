@@ -98,7 +98,7 @@ func TestStatusPipelineFullRefreshLogsWhatThePageMissed(t *testing.T) {
 	hits, targeted := 0, 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
-		if r.URL.Query().Get("target.ref_name") == "main" {
+		if r.URL.Query().Get("target.branch") == "main" {
 			targeted++
 			w.Write([]byte(`{"values":[{"build_number":12,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"ccccccc"}}}]}`))
 			return
@@ -140,7 +140,7 @@ func TestStatusDuePipelineAuditKeepsTheCorrection(t *testing.T) {
 	t.Setenv("BB_API_TOKEN", "token")
 	var targeted atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("target.ref_name") == "main" {
+		if r.URL.Query().Get("target.branch") == "main" {
 			targeted.Add(1)
 			w.Write([]byte(`{"values":[{"build_number":12,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"ccccccc"}}}]}`))
 			return
@@ -177,7 +177,7 @@ func TestStatusPipelineAuditFetchesOnceAcrossCallers(t *testing.T) {
 	started := make(chan struct{})
 	var once sync.Once
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("target.ref_name") == "main" {
+		if r.URL.Query().Get("target.branch") == "main" {
 			targeted.Add(1)
 			once.Do(func() { close(started) })
 			<-release
@@ -280,7 +280,7 @@ func TestStatusEmptyPipelineAuditStaysEmpty(t *testing.T) {
 	t.Setenv("BB_API_TOKEN", "token")
 	var targeted atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("target.ref_name") == "main" {
+		if r.URL.Query().Get("target.branch") == "main" {
 			targeted.Add(1)
 			w.Write([]byte(`{"values":[]}`))
 			return
