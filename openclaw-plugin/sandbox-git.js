@@ -108,7 +108,7 @@ export function startSandboxGit({ host, port, run, openclaw, listSessionEntries,
 
   // The session a connection's sandbox works for, and the repositories its
   // collection may read.
-  // A delivery asks Docker again: an address a container gave up may
+  // A delivery or project discovery asks Docker again: an address a container gave up may
   // already be another's.
   const identify = async (address, fresh = false) => {
     let container = (await containersByAddress(fresh)).get(address);
@@ -230,7 +230,7 @@ export function startSandboxGit({ host, port, run, openclaw, listSessionEntries,
         // The caller controls neither identity nor project selection. Do not
         // return command diagnostics, which can contain gateway paths/config.
         try {
-          const r = await run(["wtc", "openclaw", "sandbox-projects", ...[...new Set(allowed)].flatMap((p) => ["--project", p])], { cwd: who.self.dir, timeoutMs: 30000 });
+          const r = await run(["wtc", "openclaw", "sandbox-projects", ...[...new Set(allowed)].flatMap((p) => ["--project", p])], { cwd: who.self.dir, timeoutMs: 30000, env: { WTC_GATEWAY_GIT: "" } });
           if (r.code !== 0) return send(res, 503, { error: "gateway project metadata unavailable" });
           const result = JSON.parse(r.stdout);
           if (!Array.isArray(result.projects) || result.projects.some((p) => !allowed.includes(p.name))) throw new Error("invalid project metadata");

@@ -15,7 +15,7 @@ import (
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
 
-const sandboxMetadata = `{"collection":"42-fix","collection_project":"platform","projects":[{"name":"platform","harness":"https://github.com/example/platform-harness.git","ref":"main","default":true,"project_id":"harness-id","repos":[{"name":"api","remote":"https://github.com/example/api.git","role":"HTTP service","default_ref":"origin/develop","project_id":"api-id"}]}]}`
+const sandboxMetadata = `{"collection":"42-fix","collection_project":"platform","projects":[{"name":"platform","harness":"https://github.com/example/platform-harness.git","ref":"main","default":true,"project_id":"harness-id","destination":"main","repos":[{"name":"api","remote":"https://github.com/example/api.git","role":"HTTP service","default_ref":"origin/develop","project_id":"api-id","destination":"develop"}]}]}`
 
 func sandboxMetadataServer(t *testing.T, status int, body string) *httptest.Server {
 	t.Helper()
@@ -65,7 +65,7 @@ func TestSandboxProjectsAndAddRepoUseGatewayMetadata(t *testing.T) {
 	if _, err := addRepoPlan(t, "api", "--worktree", "42-fix", "--project", "hidden", "--separate"); err == nil || !strings.Contains(err.Error(), "is in wtc project platform") {
 		t.Fatalf("changed existing project: %v", err)
 	}
-	if _, err := addRepoPlan(t, "api", "--worktree", "43-new", "--project", "hidden", "--separate"); err == nil || !strings.Contains(err.Error(), "no wtc project hidden") {
+	if _, err := addRepoPlan(t, "api", "--worktree", "43-new", "--project", "hidden", "--separate"); err == nil || !strings.Contains(err.Error(), "another collection") {
 		t.Fatalf("unlisted project: %v", err)
 	}
 }
@@ -108,7 +108,9 @@ func TestSandboxProjectFailuresNeverFallBackToAdHoc(t *testing.T) {
 }
 
 func TestSandboxDiscoveryDoesNotAuthorizeCloning(t *testing.T) {
-	sandboxMetadataServer(t, 200, strings.ReplaceAll(sandboxMetadata, `,"project_id":"api-id"`, ""))
+	body := strings.ReplaceAll(sandboxMetadata, `,"project_id":"api-id"`, "")
+	body = strings.ReplaceAll(body, `"default_ref":"origin/develop"`, `"default_ref":""`)
+	sandboxMetadataServer(t, 200, body)
 	if _, err := addRepoPlan(t, "api", "--worktree", "42-fix"); err == nil || !strings.Contains(err.Error(), "grants no clone permission") {
 		t.Fatalf("listing granted clone permission: %v", err)
 	}
@@ -133,7 +135,7 @@ func TestSandboxProjectProjectionFiltersAndRedacts(t *testing.T) {
 	}
 	h := openclaw.Harness{Name: "platform", Remote: "https://user:secret@github.com/example-org/platform-harness", Ref: "main"}
 	for _, remote := range []string{"https://user:secret@github.com/example-org/api.git?token=secret", "/fixture/secret-repository", "file:///fixture/secret-repository"} {
-		p := sandboxProjectMetadata(gatewayProject{Name: h.Name, Ref: h.Ref}, h, harnessRegistry{repos: []wtc.Repo{{Name: "api", Remote: remote}}})
+		p := sandboxProjectMetadata(gatewayProject{Name: h.Name, Ref: h.Ref}, h, harnessRegistry{repos: []wtc.Repo{{Name: "api", Remote: remote}}}, "")
 		body, _ := json.Marshal(p)
 		for _, forbidden := range []string{"secret", "token", "/fixture"} {
 			if strings.Contains(string(body), forbidden) {
@@ -141,7 +143,7 @@ func TestSandboxProjectProjectionFiltersAndRedacts(t *testing.T) {
 			}
 		}
 	}
-	p := sandboxProjectMetadata(gatewayProject{}, h, harnessRegistry{err: errors.New("/fixture/private-config secret")})
+	p := sandboxProjectMetadata(gatewayProject{}, h, harnessRegistry{err: errors.New("/fixture/private-config secret")}, "")
 	if p.Error != "project registry unavailable on the gateway" {
 		t.Fatalf("diagnostic leaked: %+v", p)
 	}
@@ -223,7 +225,7 @@ func TestSandboxProjectsUseExistingHarnessWorktree(t *testing.T) {
 	dir := filepath.Join(state, "worktrees", "platform-harness", "42-fix")
 	git(filepath.Join(state, "repos", "platform-harness"), "worktree", "add", "-q", "-b", "openclaw/42-fix", dir)
 	t.Chdir(dir)
-	registry := platformRegistry + "  - name: tools\n    remote: https://github.com/example-org/tools.git\n    default_ref: origin/develop\n"
+	registry := platformRegistry + "  - name: tools\n    remote: https://github.com/example-org/tools.git\n    default_ref: origin/main\n"
 	if err := os.WriteFile(filepath.Join(dir, ".harness-repos.yml"), []byte(registry), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +238,7 @@ func TestSandboxProjectsUseExistingHarnessWorktree(t *testing.T) {
 	}
 	sandboxMetadataServer(t, 200, body)
 	plan, err := addRepoPlan(t, "tools", "--worktree", "42-fix", "--separate")
-	if err != nil || summary(plan) != "tools@tools:origin/develop" {
+	if err != nil || summary(plan) != "tools@tools:origin/main" {
 		t.Fatalf("existing harness was spawned again: %s %v", summary(plan), err)
 	}
 }
@@ -296,8 +298,8 @@ func TestSandboxWorkerAndBitbucketPlansWriteNoGatewayState(t *testing.T) {
 		wantError               bool
 	}{
 		{"worker missing project", "https://github.com/example/api.git", "", []string{"--worker", "part", "--work", "test"}, true},
-		{"worker known project", "https://github.com/example/api.git", "api-id", []string{"--worker", "part", "--work", "test"}, false},
-		{"worker explicit base", "https://github.com/example/api.git", "api-id", []string{"--worker", "part", "--work", "test", "--base", "feature"}, false},
+		{"worker known project", "https://github.com/example/api.git", "api-id", []string{"--worker", "part", "--work", "test"}, true},
+		{"worker explicit base", "https://github.com/example/api.git", "api-id", []string{"--worker", "part", "--work", "test", "--base", "feature"}, true},
 		{"Bitbucket missing project", "https://bitbucket.org/example/api.git", "", []string{"--separate"}, true},
 		{"Bitbucket known project", "https://bitbucket.org/example/api.git", "api-id", []string{"--separate"}, false},
 	} {
@@ -311,7 +313,7 @@ func TestSandboxWorkerAndBitbucketPlansWriteNoGatewayState(t *testing.T) {
 			args := append([]string{"api", "--worktree", "42-fix"}, tc.args...)
 			plan, err := addRepoPlan(t, args...)
 			if tc.wantError {
-				if err == nil || !strings.Contains(err.Error(), "grants no clone permission") {
+				if err == nil || !(strings.Contains(err.Error(), "gateway collection session") || strings.Contains(err.Error(), "grants no clone permission")) {
 					t.Fatalf("expected refusal: %+v %v", plan, err)
 				}
 				return
@@ -320,5 +322,53 @@ func TestSandboxWorkerAndBitbucketPlansWriteNoGatewayState(t *testing.T) {
 				t.Fatalf("known project: %+v %v", plan, err)
 			}
 		})
+	}
+}
+
+func TestSandboxPlansRequireExistingPublicationDestination(t *testing.T) {
+	for _, tc := range []struct {
+		name, destination string
+		args              []string
+		rejected          bool
+	}{
+		{"registry differs", "main", nil, true},
+		{"recorded destination matches", "develop", nil, false},
+		{"unknown destination", "", nil, true},
+		{"explicit matching base", "main", []string{"--base", "main"}, false},
+		{"explicit different base", "develop", []string{"--base", "feature"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.Replace(sandboxMetadata, `"destination":"develop"`, `"destination":"`+tc.destination+`"`, 1)
+			sandboxMetadataServer(t, 200, body)
+			plan, err := addRepoPlan(t, append([]string{"api", "--worktree", "42-fix", "--separate"}, tc.args...)...)
+			if tc.rejected {
+				if err == nil || len(plan) != 0 || !strings.Contains(err.Error(), "gateway base record") {
+					t.Fatalf("unsafe destination: %+v %v", plan, err)
+				}
+				return
+			}
+			if err != nil || len(plan) != 2 {
+				t.Fatalf("safe destination: %+v %v", plan, err)
+			}
+		})
+	}
+}
+
+func TestSandboxProjectsGatewayAdapterRefusesSandboxTransport(t *testing.T) {
+	saved := runOpenClaw
+	runOpenClaw = func(...string) (string, error) { t.Fatal("sandbox adapter read local gateway config"); return "", nil }
+	t.Cleanup(func() { runOpenClaw = saved })
+	t.Setenv(openclaw.GatewayGitEnv, "http://127.0.0.1:1")
+	body, err := executeSandboxProjects(t, "--project", "hidden")
+	if err == nil || body != "" || !strings.Contains(err.Error(), "authenticated gateway service") {
+		t.Fatalf("local bypass: %s %v", body, err)
+	}
+}
+
+func TestSandboxUnsupportedHarnessIsContained(t *testing.T) {
+	_, _ = harnessGateway(t)
+	project := sandboxProjectMetadata(gatewayProject{Name: "platform", Ref: "main"}, openclaw.Harness{Remote: "https://example.invalid/harness.git"}, harnessRegistry{}, "")
+	if project.Error == "" || project.Harness != "" || len(project.Repos) != 0 {
+		t.Fatalf("unsupported harness: %+v", project)
 	}
 }

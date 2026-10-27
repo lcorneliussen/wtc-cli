@@ -177,6 +177,9 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 	// A sandbox emits intents only. Gateway base and project records must
 	// never be written into a sandbox's private filesystem.
 	recordsGatewayState := !sandbox
+	if sandbox && worker != "" {
+		return errors.New("prepare worker plans in the gateway collection session: a read-only sandbox cannot record or inherit their publication base")
+	}
 	if worktree == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			worktree = openclaw.CurrentWorktree(cwd)
@@ -229,6 +232,9 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 		if worker != "" {
 			instructions = workerTask(target, repo, work)
 		}
+		if sandbox && branch != "" && (add.project == "" || add.destination == "" || branch != add.destination) {
+			return fmt.Errorf("%s needs a gateway base record for %s: prepare this add-repo plan in the gateway collection session; the read-only sandbox cannot change its publication destination", repo, branch)
+		}
 		if sandbox && gitURL != "" {
 			// Discovery can identify an existing gateway project, but never
 			// creates a clone or changes a base. These are intents only;
@@ -237,6 +243,8 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 				project, gitURL = add.project, ""
 			} else if openclaw.ParseOrigin(gitURL).Forge != openclaw.ForgeGitHub || worker != "" || !separate {
 				return fmt.Errorf("%s is not available as a gateway project. Ask the person to add it on the gateway; a listed project grants no clone permission", repo)
+			} else {
+				instructions = "Work on " + repo + " for " + target + ". Wait for instructions from the collection's session."
 			}
 		} else if !sandbox && gitURL != "" {
 			origin := openclaw.ParseOrigin(gitURL)
@@ -339,6 +347,7 @@ func workerTask(worktree, repo, work string) string {
 // gateway's default. resolved marks a remote from a harness.
 type repoToAdd struct {
 	arg, branch string
+	destination string // existing gateway destination; no base record is written by a sandbox
 	project     string // existing gateway project ID, supplied by permitted sandbox metadata
 	resolved    bool
 }
@@ -398,8 +407,8 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 		return nil, nil, reg.err
 	}
 	var adds []repoToAdd
-	if reg.worktree == "" && !reg.hasWorktree && !worker {
-		adds = append(adds, repoToAdd{arg: h.Remote, branch: h.Ref, resolved: true, project: reg.projectID})
+	if !reg.hasHarnessWorktree() && !worker {
+		adds = append(adds, repoToAdd{arg: h.Remote, branch: h.Ref, resolved: true, project: reg.projectID, destination: reg.destination})
 	}
 	var unlisted []string
 	for _, r := range repos {
@@ -413,6 +422,7 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 		if ok {
 			add.arg, add.resolved = entry.Remote, true
 			add.project = reg.projectIDs[entry.Name]
+			add.destination = reg.destinations[entry.Name]
 			if add.branch == "" {
 				add.branch = strings.TrimPrefix(entry.DefaultRef, "origin/")
 			}
@@ -452,7 +462,7 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 				}
 			}
 		}
-		return nil, nil, unlistedError(*h, worktree, repos, unlisted, recorded == "", reg.worktree != "" || reg.hasWorktree, elsewhere)
+		return nil, nil, unlistedError(*h, worktree, repos, unlisted, recorded == "", reg.hasHarnessWorktree(), elsewhere)
 	}
 	return adds, h, nil
 }
@@ -510,15 +520,20 @@ func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string
 
 // harnessRegistry is a harness's registry as a collection sees it: from its
 // worktree of the harness when it has one, else from the gateway's clone of
-// the harness at its configured ref.
+// the harness at its configured ref. Local resolution retains the path;
+// sandbox snapshots carry only presence and safe metadata.
 type harnessRegistry struct {
-	hasWorktree bool // current collection presence without exposing the gateway path
-	projectID   string
-	projectIDs  map[string]string
-	repos       []wtc.Repo
-	worktree    string
-	err         error
+	destination  string
+	destinations map[string]string
+	hasWorktree  bool // current collection presence without exposing the gateway path
+	projectID    string
+	projectIDs   map[string]string
+	repos        []wtc.Repo
+	worktree     string
+	err          error
 }
+
+func (r harnessRegistry) hasHarnessWorktree() bool { return r.worktree != "" || r.hasWorktree }
 
 func (r harnessRegistry) find(name string) (wtc.Repo, bool) {
 	for _, repo := range r.repos {

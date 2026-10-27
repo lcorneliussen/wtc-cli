@@ -14,15 +14,17 @@ type DiscoveryProject struct {
 	Repos       []ProjectRepository `json:"repos"`
 	Error       string              `json:"error,omitempty"`
 	ProjectID   string              `json:"project_id,omitempty"`
+	Destination string              `json:"destination,omitempty"`
 	HasWorktree bool                `json:"has_worktree,omitempty"`
 }
 
 type ProjectRepository struct {
-	Name       string `json:"name"`
-	Remote     string `json:"remote"`
-	Role       string `json:"role,omitempty"`
-	DefaultRef string `json:"default_ref,omitempty"`
-	ProjectID  string `json:"project_id,omitempty"`
+	Name        string `json:"name"`
+	Remote      string `json:"remote"`
+	Role        string `json:"role,omitempty"`
+	DefaultRef  string `json:"default_ref,omitempty"`
+	ProjectID   string `json:"project_id,omitempty"`
+	Destination string `json:"destination,omitempty"`
 }
 
 // SandboxProjects contains only operator-allowed metadata. It grants no Git
@@ -41,11 +43,22 @@ func (g *HTTPGateway) Projects() (SandboxProjects, error) {
 	}
 	if err == nil {
 		for _, project := range p.Projects {
-			if project.Name == "" || project.Harness == "" || project.Ref == "" || project.Repos == nil {
+			if project.Name == "" || (project.Harness == "" && project.Error == "") || project.Ref == "" || project.Repos == nil {
 				err = errors.New("gateway project metadata unavailable: incomplete project")
 				break
 			}
 		}
 	}
 	return p, err
+}
+
+// ProjectDestination is where a worktree in collection would be measured,
+// caught up and published, without creating or changing a base record.
+func ProjectDestination(dir, collection string) string {
+	if collection != "" {
+		if base := RecordedBase(dir, collection); base != "" {
+			return base
+		}
+	}
+	return defaultBaseBranch(dir)
 }

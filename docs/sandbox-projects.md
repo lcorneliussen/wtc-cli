@@ -44,17 +44,29 @@ wtc doctor
 ```
 
 Repository names and default branches resolve from one permitted snapshot per
-plan. If the collection has a worktree of its harness, that worktree's registry
-(including unpublished edits) is used and the harness is not added again. A registered repository uses its gateway project ID. `add-repo` prints
-session-spawn intents; it performs no gateway writes and does not record project
-selection in the sandbox filesystem. An existing collection's project is kept
-when planning for that collection. If no project record exists yet, the
-collection's existing harness worktree establishes its project; ambiguous
-metadata is refused. `doctor` reports the gateway discovery source
-or that discovery is unavailable. A denied, malformed or unreachable discovery
-response fails `projects` and `add-repo`; it does not silently fall back to an
-empty local configuration. An empty permitted project list is distinct from a
-discovery failure.
+plan. If the authenticated collection has a worktree of its harness, that
+worktree's registry (including unpublished edits) is used and the harness is not
+added again. A registered repository uses its gateway project ID. An existing
+collection's project is kept; a unique existing harness worktree establishes the
+project when no separate record exists yet.
+
+`add-repo` emits intents only and writes no gateway or sandbox project records.
+It permits a chosen base only when the gateway already measures and publishes
+that collection's repository to that destination. If a registry default or
+`--base` needs a new gateway base record, the plan is refused before any intents
+are emitted. Prepare that plan in the gateway collection session instead.
+Worker plans and plans for another collection are also refused in a sandbox:
+the read-only interface cannot record worker base inheritance or inspect another
+collection's unpublished registry state. A separate GitHub clone intent with no
+explicit starting branch retains the existing gateway authorization step.
+
+`doctor` reports the gateway discovery source or that discovery is unavailable.
+A denied, malformed or unreachable discovery response fails `projects` and
+`add-repo`; it does not silently fall back to an empty local configuration.
+An empty permitted project list is distinct from a discovery failure. Keep
+gateway configuration and state out of sandbox mounts. The hidden gateway
+adapter rejects calls configured for sandbox transport; HTTP discovery is the
+authenticated interface.
 
 **Listing grants no clone, worktree, publication or Git read permission.**
 The gateway still authorizes session-spawn intents. The Git service continues

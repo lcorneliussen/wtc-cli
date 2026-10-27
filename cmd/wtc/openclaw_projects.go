@@ -48,7 +48,7 @@ func localGatewayProjects(allowed []string, worktree string) ([]gatewayProject, 
 			p.Repos = append(p.Repos, gatewayProjectRepo{Name: r.Name, Remote: r.Remote, Role: r.Role})
 		}
 		if allowed != nil {
-			p = sandboxProjectMetadata(p, h, reg)
+			p = sandboxProjectMetadata(p, h, reg, worktree)
 		}
 		projects = append(projects, p)
 	}
@@ -58,10 +58,17 @@ func localGatewayProjects(allowed []string, worktree string) ([]gatewayProject, 
 // sandboxProjectMetadata projects registry data without credentials, local
 // paths, arbitrary config keys, or command diagnostics. Unsupported remotes
 // make the project's registry unavailable rather than exposing filesystem data.
-func sandboxProjectMetadata(p gatewayProject, h openclaw.Harness, reg harnessRegistry) gatewayProject {
-	p.Harness, _ = projectMetadataRemote(h.Remote)
+func sandboxProjectMetadata(p gatewayProject, h openclaw.Harness, reg harnessRegistry, worktree string) gatewayProject {
+	var err error
+	p.Harness, err = projectMetadataRemote(h.Remote)
+	if err != nil {
+		p.Error = "project harness metadata unavailable on the gateway"
+		p.Repos = []gatewayProjectRepo{}
+		return p
+	}
 	if dir := openclaw.GatewayProjectDir(gatewayStateDir(), openclaw.ParseOrigin(p.Harness)); dir != "" {
 		p.ProjectID = filepath.Base(dir)
+		p.Destination = openclaw.ProjectDestination(dir, worktree)
 	}
 	p.Repos = []gatewayProjectRepo{}
 	p.HasWorktree = reg.worktree != ""
@@ -79,13 +86,14 @@ func sandboxProjectMetadata(p gatewayProject, h openclaw.Harness, reg harnessReg
 		repo := gatewayProjectRepo{Name: r.Name, Remote: remote, Role: r.Role, DefaultRef: r.DefaultRef}
 		if dir := openclaw.GatewayProjectDir(gatewayStateDir(), openclaw.ParseOrigin(remote)); dir != "" {
 			repo.ProjectID = filepath.Base(dir)
+			repo.Destination = openclaw.ProjectDestination(dir, worktree)
 		}
 		p.Repos = append(p.Repos, repo)
 	}
 	return p
 }
 
-var metadataRepoPart = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
+var metadataRepoPart = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 func projectMetadataRemote(remote string) (string, error) {
 	if strings.Contains(remote, "://") {
@@ -97,7 +105,7 @@ func projectMetadataRemote(remote string) (string, error) {
 		remote = u.String()
 	}
 	o := openclaw.ParseOrigin(remote)
-	if !metadataRepoPart.MatchString(o.Owner) || !metadataRepoPart.MatchString(o.Repo) {
+	if !metadataRepoPart.MatchString(o.Owner) || !metadataRepoPart.MatchString(o.Repo) || o.Owner == "." || o.Owner == ".." || o.Repo == "." || o.Repo == ".." {
 		return "", fmt.Errorf("unsupported remote")
 	}
 	_, _, canonical, err := openclaw.ProjectSource(remote)

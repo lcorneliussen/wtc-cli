@@ -11,13 +11,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// This command is called only by the gateway service with its operator-owned
-// allowlist. The sandbox cannot choose these arguments over HTTP.
+// This host adapter reads local gateway configuration. The HTTP service
+// supplies its operator-owned allowlist; requests cannot choose these flags.
+// A sandbox transport invocation must use the authenticated HTTP route.
 func sandboxProjectsCommand() *cobra.Command {
 	var allowed []string
 	cmd := &cobra.Command{Use: "sandbox-projects", Hidden: true, Args: cobra.NoArgs}
 	cmd.Flags().StringArrayVar(&allowed, "project", nil, "Operator-allowed project (repeatable)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if openclaw.GatewayFromEnv(os.Getenv) != nil {
+			return errors.New("sandbox project discovery must use the authenticated gateway service")
+		}
 		if len(allowed) == 0 {
 			return errors.New("project discovery is not enabled for this agent")
 		}
@@ -69,19 +73,23 @@ func harnessProjectContext(worktree string) (openclaw.GatewayConfig, map[string]
 	if err != nil {
 		return openclaw.GatewayConfig{}, nil, "", err
 	}
+	if metadata.Collection == "" || metadata.Collection != worktree {
+		return openclaw.GatewayConfig{}, nil, "", errors.New("prepare plans for another collection in its gateway collection session: sandbox metadata describes only this session's collection")
+	}
 	var cfg openclaw.GatewayConfig
 	for _, p := range metadata.Projects {
 		cfg.Harnesses = append(cfg.Harnesses, openclaw.Harness{Name: p.Name, Remote: p.Harness, Ref: p.Ref})
 		if p.Default {
 			cfg.DefaultHarness = p.Name
 		}
-		reg := harnessRegistry{projectID: p.ProjectID, projectIDs: map[string]string{}, hasWorktree: metadata.Collection == worktree && p.HasWorktree}
+		reg := harnessRegistry{projectID: p.ProjectID, projectIDs: map[string]string{}, destination: p.Destination, destinations: map[string]string{}, hasWorktree: p.HasWorktree}
 		if p.Error != "" {
 			reg.err = errors.New(p.Error)
 		}
 		for _, r := range p.Repos {
 			reg.repos = append(reg.repos, wtc.Repo{Name: r.Name, Remote: r.Remote, Role: r.Role, DefaultRef: r.DefaultRef})
 			reg.projectIDs[r.Name] = r.ProjectID
+			reg.destinations[r.Name] = r.Destination
 		}
 		registries[p.Name] = reg
 	}

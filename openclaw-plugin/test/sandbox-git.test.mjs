@@ -201,6 +201,7 @@ test("discovery uses only authenticated agent policy, stays read-only, and refre
   const load = fixture.commands.find(({ argv }) => argv[0] === "wtc");
   assert.deepEqual(load.argv, ["wtc", "openclaw", "sandbox-projects", "--project", "platform"]);
   assert.equal(load.opts.cwd, "/fixture/api");
+  assert.deepEqual(load.opts.env, { WTC_GATEWAY_GIT: "" });
   assert.equal((await fetch(`${base}/web/info/refs?service=git-upload-pack`)).status, 404, "metadata granted Git access outside the collection");
   assert.equal((await fetch(`${base}/wtc/projects`, { method: "POST" })).status, 404);
   fixture.setAgent("unlisted");
