@@ -300,6 +300,12 @@ leaves the reviewer re-reading the diff to guess whether you agreed:
 - **Needs a decision that isn't yours** (scope, product behaviour, a breaking
   change) → surface it to the user rather than answering for them.
 
+For an invariant-level defect, trace the affected readers/writers and fix the
+shared class, with deterministic ordering evidence for races. Answer scope or
+repeated-major design checkpoints before another round of point fixes. Keep
+additional behavior in an explicitly scoped follow-up when appropriate;
+review feedback does not authorize expanding the task.
+
 ```bash
 gh api repos/{owner}/{repo}/pulls/<n>/comments/<comment-id>/replies -f body='…'
 gh pr comment <n> --body '…'      # for top-level conversation
