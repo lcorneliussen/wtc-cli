@@ -17,6 +17,9 @@ func TestRetireCollectionRunsTeardownAndKeepsRemoteRefs(t *testing.T) {
 	target := result.Collection
 	fixtureFile(t, filepath.Join(target, "SCOPE.md"), "Disposable task context.\n", 0644)
 	fixtureFile(t, filepath.Join(target, ".wtc-prs.lock"), "", 0600)
+	for _, name := range []string{".taba-prs", ".taba-status.json", ".taba-status.md", ".last-taba-status.yml", ".taba-catch-up.json", ".taba-catch-up.json.md"} {
+		fixtureFile(t, filepath.Join(target, name), "", 0644)
+	}
 	// A dev build is generated and must not keep the folder alive.
 	fixtureFile(t, filepath.Join(target, ".wtc", "dev", "wtc"), "#!/bin/sh\n", 0755)
 	fixtureFile(t, filepath.Join(target, ".wtc", "dev", "version"), "0.1.40-dev.1+dev.gabc1234\n", 0644)

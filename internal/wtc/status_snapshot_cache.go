@@ -144,7 +144,10 @@ func (c *Context) WriteStatusSnapshot(snapshot StatusSnapshot) error {
 }
 
 func (c *Context) ReadStatusSnapshot() (StatusSnapshot, error) {
-	path := filepath.Join(c.Collection, ".wtc-status.json")
+	path, err := collectionStateInput(c.Collection, ".wtc-status.json", ".taba-status.json")
+	if err != nil {
+		return StatusSnapshot{}, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return StatusSnapshot{}, err
@@ -160,8 +163,12 @@ func (c *Context) ReadStatusSnapshot() (StatusSnapshot, error) {
 }
 
 func (c *Context) CachedStatusAge() (int, error) {
-	for _, name := range []string{".wtc-status.json", ".last-wtc-status.yml"} {
-		info, err := os.Stat(filepath.Join(c.Collection, name))
+	for _, pair := range [][2]string{{".wtc-status.json", ".taba-status.json"}, {".last-wtc-status.yml", ".last-taba-status.yml"}} {
+		path, err := collectionStateInput(c.Collection, pair[0], pair[1])
+		if err != nil {
+			return 0, err
+		}
+		info, err := os.Stat(path)
 		if err == nil {
 			age := int(time.Since(info.ModTime()).Seconds())
 			if age < 0 {
@@ -179,7 +186,11 @@ func (c *Context) CachedStatusAge() (int, error) {
 // LegacyStatusText is the plain fallback when the canonical cache is absent.
 // It only claims the columns present in the old YAML file.
 func (c *Context) LegacyStatusText() (string, error) {
-	data, err := os.ReadFile(filepath.Join(c.Collection, ".last-wtc-status.yml"))
+	path, err := collectionStateInput(c.Collection, ".last-wtc-status.yml", ".last-taba-status.yml")
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -195,7 +206,7 @@ func (c *Context) LegacyStatusText() (string, error) {
 		return "", err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s — cached %ds old (.last-wtc-status.yml; no .wtc-status.json)\n", legacy.Collection, age)
+	fmt.Fprintf(&b, "%s — cached %ds old (%s; no .wtc-status.json or .taba-status.json)\n", legacy.Collection, age, filepath.Base(path))
 	fmt.Fprintf(&b, "%-16s %-24s %-8s %-4s %-4s %s\n", "REPO", "BRANCH", "PR", "AHEAD", "BEHIND", "TREE")
 	for _, row := range legacy.Repos {
 		pr := ""

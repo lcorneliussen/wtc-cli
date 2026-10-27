@@ -334,6 +334,8 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 		".wtc-runtime.lock", ".wtc-status-watchers.lock",
 		".wtc-prs", ".wtc-prs.lock", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
 		".wtc-catch-up.json", ".wtc-catch-up.json.md", ReviewModeFile,
+		".taba-prs", ".last-taba-status.yml", ".taba-status.json", ".taba-status.md",
+		".taba-catch-up.json", ".taba-catch-up.json.md",
 	}
 	if adHoc {
 		// An ad-hoc registry is remembered per user. Hand-written local
