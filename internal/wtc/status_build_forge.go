@@ -128,21 +128,21 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 	if user == "" || pass == "" {
 		return nil, fmt.Errorf("no Bitbucket API credentials (log in with bb, or set BB_USERNAME and BB_API_TOKEN)")
 	}
-	// One recent page answers for every branch on it, and that run is saved
-	// under the branch. A branch that later drops off the page keeps that
-	// saved run. A branch that has never been seen still gets its own lookup.
+	// A live recent page is saved for every branch on it. An audited correction
+	// for that same page result is left in place. A branch the page omits
+	// keeps its saved run, and one that has never been seen gets its own lookup.
 	raw, live, err := statusFetchShared("pipelines", "bitbucket.org", slug, "recent", func() ([]byte, error) {
 		return statusBBPipelines(parts[0], parts[1], "", user, pass)
 	})
 	if err != nil {
 		return nil, err
 	}
+	if live {
+		statusSaveLivePipelinePage(slug, raw)
+	}
 	build, err := statusParseBBBuild(raw, slug, branch)
 	if err != nil {
 		return nil, err
-	}
-	if build != nil && live {
-		statusWriteForgeEntry("build", "bitbucket.org", slug, branch, raw)
 	}
 	if build != nil {
 		if audited := statusPreferAuditedBuild(slug, branch, build); audited != nil {
@@ -205,6 +205,53 @@ func statusBBPipelines(workspace, repo, branch, user, pass string) ([]byte, erro
 		return nil, fmt.Errorf("Bitbucket pipelines API returned %s: %s", response.Status, body)
 	}
 	return raw, nil
+}
+
+func statusSaveLivePipelinePage(slug string, raw []byte) {
+	for _, branch := range statusPipelinePageBranches(raw) {
+		build, err := statusParseBBBuild(raw, slug, branch)
+		if err != nil || build == nil || statusPageAuditApplies(slug, branch, build) {
+			continue
+		}
+		statusWriteForgeEntry("build", "bitbucket.org", slug, branch, raw)
+	}
+}
+
+func statusPipelinePageBranches(raw []byte) []string {
+	var page struct {
+		Values []struct {
+			Target struct {
+				RefName  string `json:"ref_name"`
+				Selector struct {
+					Type string `json:"type"`
+				} `json:"selector"`
+			} `json:"target"`
+		} `json:"values"`
+	}
+	if json.Unmarshal(raw, &page) != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var branches []string
+	for _, run := range page.Values {
+		if run.Target.RefName == "" || seen[run.Target.RefName] {
+			continue
+		}
+		if run.Target.Selector.Type != "" && run.Target.Selector.Type != "branches" && run.Target.Selector.Type != "default" {
+			continue
+		}
+		seen[run.Target.RefName] = true
+		branches = append(branches, run.Target.RefName)
+	}
+	return branches
+}
+
+func statusPageAuditApplies(slug, branch string, pageBuild *StatusBuild) bool {
+	if pageBuild == nil {
+		return false
+	}
+	raw, ok := statusReadForgeEntryAny("full", "bitbucket.org", slug, "build:"+branch)
+	return ok && string(raw) == statusBuildFingerprint(pageBuild)
 }
 
 func statusParseBBBuild(raw []byte, slug, branch string) (*StatusBuild, error) {

@@ -178,6 +178,32 @@ func TestStatusCappedListDoesNotRefetchAnOpenPullRequest(t *testing.T) {
 	}
 }
 
+func TestStatusCappedListStillAudits(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_FULL_REFRESH", "60")
+	views := filepath.Join(t.TempDir(), "views")
+	t.Setenv("WTC_TEST_GH_VIEWS", views)
+	var items []string
+	for i := 0; i < statusOpenListLimit; i++ {
+		items = append(items, fmt.Sprintf(`{"number":%d,"state":"OPEN","title":"Other","headRefName":"other-%d"}`, i+101, i))
+	}
+	script := "#!/bin/sh\ncase \"$2\" in\n  list) printf '%s\\n' '[" + strings.Join(items, ",") + "]' ;;\n  view) printf 'viewed\\n' >> \"$WTC_TEST_GH_VIEWS\"; printf '%s\\n' '{\"number\":7,\"state\":\"OPEN\",\"title\":\"Audited\"}' ;;\n  *) exit 2 ;;\nesac\n"
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	statusWriteForgeCache("github.com", "example/widget", "7", []byte(`{"number":7,"state":"OPEN","title":"Saved"}`))
+	detail := statusEnrichRecord(PRRecord{Number: "7"}, "example/widget", "github.com")
+	if detail.Title != "Audited" || statusTestFileLines(t, views) != 1 {
+		t.Fatalf("capped list skipped the audit: %+v views=%d", detail, statusTestFileLines(t, views))
+	}
+	again := statusEnrichRecord(PRRecord{Number: "7"}, "example/widget", "github.com")
+	if again.Title != "Audited" || statusTestFileLines(t, views) != 1 {
+		t.Fatalf("capped audit repeated inside the interval: %+v views=%d", again, statusTestFileLines(t, views))
+	}
+}
+
 func TestStatusSingleFlightFetchesOnce(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	var calls atomic.Int32

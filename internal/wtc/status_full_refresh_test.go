@@ -118,6 +118,15 @@ func TestStatusPipelineFullRefreshLogsWhatThePageMissed(t *testing.T) {
 	if err != nil || second == nil || *second.Build != "12" || hits != 2 || targeted != 1 {
 		t.Fatalf("pipeline audit repeated inside the interval: %+v hits=%d targeted=%d err=%v", second, hits, targeted, err)
 	}
+	t.Setenv("WTC_FORGE_CACHE_AGE", "1")
+	past := time.Now().Add(-2 * time.Second)
+	if err := os.Chtimes(statusForgeEntryPath("pipelines", "bitbucket.org", "team/widget", "recent"), past, past); err != nil {
+		t.Fatal(err)
+	}
+	third, err := statusBBBuild("team/widget", "main")
+	if err != nil || third == nil || *third.Build != "12" || *third.Checks != "FAILURE" || hits != 3 || targeted != 1 {
+		t.Fatalf("a fresh copy of the same page replaced the audited build: %+v hits=%d targeted=%d err=%v", third, hits, targeted, err)
+	}
 }
 
 func statusReadAuditLog(t *testing.T) string {

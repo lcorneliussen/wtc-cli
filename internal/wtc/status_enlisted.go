@@ -167,7 +167,7 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 			// A capped list can omit an open pull request. Absence is not a close.
 			if cached, ok := statusReadForgeEntryAny("pr", forge, slug, record.Number); ok {
 				if detail, parseErr := statusParseForgeDetail(forge, cached, record); parseErr == nil {
-					return detail
+					return statusConfirmFullPR(record, slug, forge, detail, "capped")
 				}
 			}
 			return statusViewPR(record, slug, forge, false)

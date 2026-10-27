@@ -90,6 +90,46 @@ func TestStatusBBBuildSharesOnePipelinePage(t *testing.T) {
 	}
 }
 
+func TestStatusBBBuildSavesEveryBranchOnTheLivePage(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_CACHE_AGE", "1")
+	var phase atomic.Int32
+	var targeted atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("target.ref_name") != "" {
+			targeted.Add(1)
+			t.Errorf("targeted lookup %s", r.URL.RawQuery)
+		}
+		if phase.Load() == 0 {
+			w.Write([]byte(`{"values":[
+				{"build_number":11,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"bbbbbbb"}}},
+				{"build_number":4,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"other","selector":{"type":"branches"},"commit":{"hash":"ccccccc"}}}]}`))
+			return
+		}
+		w.Write([]byte(`{"values":[{"build_number":20,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"ddddddd"}}}]}`))
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	statusWriteForgeEntry("build", "bitbucket.org", "team/widget", "other", []byte(`{"values":[{"build_number":1,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"other","selector":{"type":"branches"},"commit":{"hash":"aaaaaaa"}}}]}`))
+	if _, err := statusBBBuild("team/widget", "main"); err != nil {
+		t.Fatal(err)
+	}
+	phase.Store(1)
+	past := time.Now().Add(-2 * time.Second)
+	if err := os.Chtimes(statusForgeEntryPath("pipelines", "bitbucket.org", "team/widget", "recent"), past, past); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := statusBBBuild("team/widget", "other")
+	if err != nil || kept == nil || *kept.Build != "4" || targeted.Load() != 0 {
+		t.Fatalf("branch read from the shared page was not saved: %+v targeted=%d err=%v", kept, targeted.Load(), err)
+	}
+}
+
 func TestStatusBBBuildKeepsASavedBranchTheRecentPageOmits(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	hits, targeted := 0, 0
