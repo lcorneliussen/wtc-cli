@@ -158,8 +158,8 @@ const publicationMarker = "OpenClaw-Publication:"
 // ref, so the evidence is local: the branch's reflog remembers the commits
 // the gateway marked, also after an amend or a rebase moved the branch off
 // them. A remote-tracking ref recorded by a fetch or a personal push takes
-// precedence when it contains the marked commit and is in HEAD. A remote
-// update ahead of HEAD does not prove that local history was rewritten.
+// precedence when it contains the marked commit and is in HEAD. With a marker,
+// an ahead remote is ignored; without one, the remote is the only evidence.
 func (c *Checkout) publishedHead() string {
 	branch := c.Branch()
 	remote, _ := git(c.Dir, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch)

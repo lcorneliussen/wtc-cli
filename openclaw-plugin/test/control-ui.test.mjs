@@ -493,6 +493,7 @@ test("publication keeps the successful PR result and shows a local-status warnin
       await settle();
       assert.match(host.textContent, /pushed commits to existing PR #8/);
       assert.match(host.textContent, /Warning: Local status could not be updated/);
+      assert.doesNotMatch(host.textContent, /Action failed/);
       assert.match(host.textContent, /fetch and prune origin/);
       assert.ok([...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Review PR text"));
     } finally {

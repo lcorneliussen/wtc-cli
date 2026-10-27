@@ -114,7 +114,7 @@ function publicationResult(r, out, say, review) {
     : existing
       ? `pushed commits to existing ${pr}. Its title and description are unchanged.`
       : `pushed branch commits.${number ? ` Pull request: ${pr}.` : ""}`;
-  say(`${name}: ${message}${url ? ` ${url}` : ""}${out.warning ? ` Warning: ${out.warning}` : ""}`, !!out.warning, number && review ? {
+  say(`${name}: ${message}${url ? ` ${url}` : ""}${out.warning ? ` Warning: ${out.warning}` : ""}`, false, number && review ? {
     label: "Review PR text",
     title: "Ask the conversation to review the PR title and description against its full current diff",
     run: () => review(r, url),
