@@ -32,6 +32,14 @@ when supported by a specific file and line. Prefix actionable titles with
 Existing debt outside the change belongs in notes unless this PR makes it worse.
 Never demand a refactor solely to avoid a useful comment.
 
+Intentional behavior does not excuse an inaccurate explanation. A comment can
+misdescribe an intentional sentinel, refusal or inference; name the misleading
+claim and propose a clarification without silently changing the behavior.
+Judge the explanation separately from a request to change the chosen policy.
+Purely optional style preferences belong in notes and have no gate significance.
+Do not suppress a demonstrated clarity defect merely because an author calls
+the underlying behavior intentional.
+
 Severities:
 
 - **major** — a misleading comment or workaround description hides a realistic

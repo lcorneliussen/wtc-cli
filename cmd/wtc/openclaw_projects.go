@@ -2,6 +2,11 @@ package main
 
 import (
 	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/lcorneliussen/wtc-cli/internal/branding"
@@ -9,43 +14,102 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// gatewayProject is a wtc project on a gateway: a configured harness, whose
-// registry names the repositories a collection in it can work with.
-type gatewayProject struct {
-	Name    string               `json:"name"`
-	Harness string               `json:"harness"`
-	Ref     string               `json:"ref"`
-	Default bool                 `json:"default,omitempty"`
-	Repos   []gatewayProjectRepo `json:"repos"`
-	Error   string               `json:"error,omitempty"`
-}
-
-type gatewayProjectRepo struct {
-	Name   string `json:"name"`
-	Remote string `json:"remote"`
-	Role   string `json:"role,omitempty"`
-}
+type gatewayProject = openclaw.DiscoveryProject
+type gatewayProjectRepo = openclaw.ProjectRepository
 
 // gatewayProjects lists the gateway's wtc projects with their repositories,
 // read from the gateway's clone of each harness.
 func gatewayProjects() ([]gatewayProject, error) {
+	if gw := openclaw.GatewayFromEnv(os.Getenv); gw != nil {
+		p, err := gw.Projects()
+		return p.Projects, err
+	}
+	return localGatewayProjects(nil, "")
+}
+
+// A nil allowlist is the gateway's local listing. A non-nil list is the
+// sandbox projection: filter before reading registries and omit raw errors.
+func localGatewayProjects(allowed []string, worktree string) ([]gatewayProject, error) {
 	cfg, err := gatewayConfig()
 	if err != nil {
 		return nil, err
 	}
 	projects := []gatewayProject{}
 	for _, h := range cfg.Harnesses {
+		if allowed != nil && !slices.Contains(allowed, h.Name) {
+			continue
+		}
 		p := gatewayProject{Name: h.Name, Harness: h.Remote, Ref: h.Ref, Default: h.Name == cfg.DefaultHarness, Repos: []gatewayProjectRepo{}}
-		reg := readHarnessRegistry(h, "")
+		reg := readHarnessRegistry(h, worktree)
 		if reg.err != nil {
 			p.Error = reg.err.Error()
 		}
 		for _, r := range reg.repos {
 			p.Repos = append(p.Repos, gatewayProjectRepo{Name: r.Name, Remote: r.Remote, Role: r.Role})
 		}
+		if allowed != nil {
+			p = sandboxProjectMetadata(p, h, reg, worktree)
+		}
 		projects = append(projects, p)
 	}
 	return projects, nil
+}
+
+// sandboxProjectMetadata projects registry data without credentials, local
+// paths, arbitrary config keys, or command diagnostics. Unsupported remotes
+// make the project's registry unavailable rather than exposing filesystem data.
+func sandboxProjectMetadata(p gatewayProject, h openclaw.Harness, reg harnessRegistry, worktree string) gatewayProject {
+	var err error
+	p.Harness, err = projectMetadataRemote(h.Remote)
+	if err != nil || p.Harness == "" {
+		p.Error = "project harness metadata unavailable on the gateway"
+		p.Repos = []gatewayProjectRepo{}
+		return p
+	}
+	if dir := openclaw.GatewayProjectDir(gatewayStateDir(), openclaw.ParseOrigin(p.Harness)); dir != "" {
+		p.ProjectID = filepath.Base(dir)
+		p.Destination = openclaw.ProjectDestination(dir, worktree)
+	}
+	p.Repos = []gatewayProjectRepo{}
+	p.HasWorktree = reg.worktree != ""
+	if reg.err != nil {
+		p.Error = "project registry unavailable on the gateway"
+		return p
+	}
+	for _, r := range reg.repos {
+		remote, err := projectMetadataRemote(r.Remote)
+		if err != nil || remote == "" {
+			p.Error = "project registry contains an unsupported remote"
+			p.Repos = []gatewayProjectRepo{}
+			return p
+		}
+		repo := gatewayProjectRepo{Name: r.Name, Remote: remote, Role: r.Role, DefaultRef: r.DefaultRef}
+		if dir := openclaw.GatewayProjectDir(gatewayStateDir(), openclaw.ParseOrigin(remote)); dir != "" {
+			repo.ProjectID = filepath.Base(dir)
+			repo.Destination = openclaw.ProjectDestination(dir, worktree)
+		}
+		p.Repos = append(p.Repos, repo)
+	}
+	return p
+}
+
+var metadataRepoPart = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
+func projectMetadataRemote(remote string) (string, error) {
+	if strings.Contains(remote, "://") {
+		u, err := url.Parse(remote)
+		if err != nil {
+			return "", fmt.Errorf("unsupported remote")
+		}
+		u.RawQuery, u.Fragment, u.RawFragment = "", "", ""
+		remote = u.String()
+	}
+	o := openclaw.ParseOrigin(remote)
+	if !metadataRepoPart.MatchString(o.Owner) || !metadataRepoPart.MatchString(o.Repo) || o.Owner == "." || o.Owner == ".." || o.Repo == "." || o.Repo == ".." {
+		return "", fmt.Errorf("unsupported remote")
+	}
+	_, _, canonical, err := openclaw.ProjectSource(remote)
+	return canonical, err
 }
 
 func addProjectsCommand(root *cobra.Command, asJSON *bool) {

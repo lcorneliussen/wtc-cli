@@ -43,7 +43,7 @@ func addSandboxGitCommands(oc *cobra.Command) {
 		}
 		return json.NewEncoder(os.Stdout).Encode(d)
 	}
-	oc.AddCommand(session, deliver)
+	oc.AddCommand(session, deliver, sandboxProjectsCommand())
 }
 
 // sandboxCatchUp is wtc catch-up in a sandbox that reaches the gateway's git
@@ -108,5 +108,12 @@ func sandboxChecks(gw *openclaw.HTTPGateway, getenv func(string) string, run fun
 		push.OK = false
 		push.Detail = "a credential that may push is here: " + strings.Join(found, ", ") + ". A sandbox reads from the gateway and pushes nothing; remove it from the sandbox's environment"
 	}
-	return []doctorCheck{fetch, push}
+	projects := doctorCheck{Name: "projects"}
+	if p, err := gw.Projects(); err != nil {
+		projects.Detail = "gateway project discovery unavailable: " + err.Error()
+	} else {
+		projects.OK = true
+		projects.Detail = fmt.Sprintf("read-only from the gateway (%d operator-allowed projects); listing grants no repository access", len(p.Projects))
+	}
+	return []doctorCheck{fetch, push, projects}
 }
