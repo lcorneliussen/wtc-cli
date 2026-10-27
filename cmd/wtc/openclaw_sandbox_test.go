@@ -25,7 +25,7 @@ func TestSandboxChecks(t *testing.T) {
 	nothing := func(name string, args ...string) (string, error) { return "", errors.New("no") }
 
 	checks := sandboxChecks(gw, func(string) string { return "" }, nothing)
-	if len(checks) != 2 || !checks[0].OK || !strings.Contains(checks[0].Detail, "2 repos: api, web") || !checks[1].OK {
+	if len(checks) != 3 || !checks[0].OK || !strings.Contains(checks[0].Detail, "2 repos: api, web") || !checks[1].OK {
 		t.Fatalf("a clean sandbox: %+v", checks)
 	}
 

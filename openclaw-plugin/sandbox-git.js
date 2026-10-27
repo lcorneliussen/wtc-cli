@@ -77,7 +77,7 @@ const MAX_BUNDLE = 512 * 1024 * 1024;
 // startSandboxGit listens on host:port. run is the plugin's command runner;
 // openclaw is the argv that runs the openclaw CLI; collectionOf and
 // worktreeOf are the plugin's.
-export function startSandboxGit({ host, port, run, openclaw, listSessionEntries, collectionOf, worktreeOf, logger }) {
+export function startSandboxGit({ host, port, run, openclaw, listSessionEntries, collectionOf, worktreeOf, projectsByAgent, logger }) {
   let containers = { at: 0, byAddress: new Map() };
   // Running sandbox containers by their addresses, asked again at most every
   // ten seconds, or when an address is not known.
@@ -88,16 +88,18 @@ export function startSandboxGit({ host, port, run, openclaw, listSessionEntries,
     let running = [];
     try {
       const json = list.stdout.slice(list.stdout.indexOf("{"));
-      running = (JSON.parse(json).containers ?? []).filter((c) => c.running && c.containerName && c.backendId === "docker");
+      running = (list.code === 0 ? JSON.parse(json).containers ?? [] : []).filter((c) => c.running && c.containerName && c.backendId === "docker");
     } catch {
       logger?.warn?.(`wtc sandbox git: openclaw sandbox list failed: ${(list.stderr || list.stdout).slice(0, 300)}`);
     }
     if (running.length > 0) {
       const inspect = await run(["docker", "inspect", "--format", "{{.Name}}{{range .NetworkSettings.Networks}} {{.IPAddress}}{{end}}", ...running.map((c) => c.containerName)], { timeoutMs: 30000 });
-      for (const line of inspect.stdout.split("\n")) {
+      for (const line of (inspect.code === 0 ? inspect.stdout : "").split("\n")) {
         const [name, ...addresses] = line.trim().split(/\s+/);
         const container = running.find((c) => `/${c.containerName}` === name || c.containerName === name);
-        for (const address of addresses) if (container && address) byAddress.set(address, container);
+        for (const address of addresses) if (container && address) {
+          byAddress.set(address, byAddress.has(address) && byAddress.get(address) !== container ? null : container);
+        }
       }
     }
     containers = { at: Date.now(), byAddress };
@@ -113,7 +115,7 @@ export function startSandboxGit({ host, port, run, openclaw, listSessionEntries,
     if (!container && !fresh) container = (await containersByAddress(true)).get(address);
     if (!container) return { error: "this address is no sandbox container of the gateway's" };
     const id = projectionWorktreeId(container.workspaceDir);
-    const agentId = String(container.sessionKey ?? "").split(":")[1];
+    const agentId = String(container.sessionKey ?? "").match(/^agent:([^:]+):.+$/)?.[1];
     if (!id || !agentId) return { error: "this sandbox works on no managed worktree" };
     const owners = [...listSessionEntries({ agentId })].filter((s) => s.entry?.worktree?.id === id);
     if (owners.length !== 1) return { error: "no single session owns this sandbox's worktree" };
@@ -128,7 +130,7 @@ export function startSandboxGit({ host, port, run, openclaw, listSessionEntries,
       if (entry.worktree?.branch) repo.branches.add(entry.worktree.branch);
       repos.set(name, repo);
     }
-    return { self: { name: self.entry.projectId, dir: worktreeOf(self.entry) }, repos };
+    return { agentId, self: { name: self.entry.projectId, dir: worktreeOf(self.entry) }, repos };
   };
 
   const send = (res, status, body) => {
@@ -206,16 +208,38 @@ export function startSandboxGit({ host, port, run, openclaw, listSessionEntries,
   };
 
   const server = createServer(async (req, res) => {
+    let projectsRequest = false;
     try {
+      const url = new URL(req.url, "http://gateway");
+      projectsRequest = req.method === "GET" && url.pathname === "/wtc/projects";
+      if (projectsRequest) res.setHeader("cache-control", "no-store");
       const address = String(req.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
       const delivery = req.method === "POST" && req.url.startsWith("/wtc/deliver");
-      const who = await identify(address, delivery);
+      const who = await identify(address, delivery || projectsRequest);
       if (who.error) {
         req.resume();
         return send(res, 403, { error: who.error });
       }
-      const url = new URL(req.url, "http://gateway");
       const parts = url.pathname.split("/").filter(Boolean);
+      if (url.pathname === "/wtc/projects" && req.method === "GET") {
+        const allowed = Object.hasOwn(projectsByAgent ?? {}, who.agentId) ? projectsByAgent[who.agentId] : null;
+        if (!Array.isArray(allowed) || allowed.length === 0 || !allowed.every((p) => typeof p === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(p) && p !== "none" && p !== "ad-hoc")) {
+          return send(res, 403, { error: "project discovery is not enabled for this agent" });
+        }
+        if (!who.self.dir) return send(res, 403, { error: "this session owns no repository" });
+        // The caller controls neither identity nor project selection. Do not
+        // return command diagnostics, which can contain gateway paths/config.
+        try {
+          const r = await run(["wtc", "openclaw", "sandbox-projects", ...[...new Set(allowed)].flatMap((p) => ["--project", p])], { cwd: who.self.dir, timeoutMs: 30000 });
+          if (r.code !== 0) return send(res, 503, { error: "gateway project metadata unavailable" });
+          const result = JSON.parse(r.stdout);
+          if (!Array.isArray(result.projects) || result.projects.some((p) => !allowed.includes(p.name))) throw new Error("invalid project metadata");
+          res.setHeader("cache-control", "no-store");
+          return send(res, 200, result);
+        } catch {
+          return send(res, 503, { error: "gateway project metadata unavailable" });
+        }
+      }
       if (parts[0] === "wtc" && parts[1] === "session" && req.method === "GET") {
         if (!who.self.dir) return send(res, 404, { error: "this session owns no repository" });
         const r = await run(["wtc", "openclaw", "sandbox-session"], { cwd: who.self.dir, timeoutMs: 60000 });
@@ -241,7 +265,7 @@ export function startSandboxGit({ host, port, run, openclaw, listSessionEntries,
       }
       return send(res, 404, { error: repo ? "not a git request" : `no repository ${parts[0] ?? ""} in this sandbox's collection` });
     } catch (err) {
-      if (!res.headersSent) send(res, 500, { error: String(err?.message ?? err) });
+      if (!res.headersSent) send(res, projectsRequest ? 503 : 500, { error: projectsRequest ? "gateway project metadata unavailable" : String(err?.message ?? err) });
       else res.destroy();
     }
   });

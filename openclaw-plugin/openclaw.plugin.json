@@ -52,7 +52,11 @@
       },
       "pullRequestEvents": {
         "type": "string",
-        "enum": ["wake", "queue", "off"],
+        "enum": [
+          "wake",
+          "queue",
+          "off"
+        ],
         "default": "wake",
         "description": "How a collection's conversation hears that a pull request of it was opened, merged or closed, became ready, failed or passed its checks, was approved, got a request for changes or conflicts with its base: wake gives it a turn now, queue tells it on its next turn, off says nothing."
       },
@@ -89,6 +93,24 @@
             "type": "string",
             "default": "0.0.0.0",
             "description": "The address to listen on: the gateway's address on the sandboxes' network, or all."
+          },
+          "projectsByAgent": {
+            "type": "object",
+            "description": "Read-only project discovery allowlist by authenticated agent ID. Omitted or empty: denied. Each named project exposes its harness and full registry metadata to that agent; it grants no clone, worktree or publication permission.",
+            "additionalProperties": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "not": {
+                  "enum": [
+                    "none",
+                    "ad-hoc"
+                  ]
+                }
+              }
+            }
           }
         }
       }

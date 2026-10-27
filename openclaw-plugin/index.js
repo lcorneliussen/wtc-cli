@@ -767,6 +767,7 @@ export default {
           server = startSandboxGit({
             host: sandboxGit.host ?? "0.0.0.0",
             port: sandboxGit.port,
+            projectsByAgent: sandboxGit.projectsByAgent,
             run,
             openclaw: onPath("openclaw") ? ["openclaw"] : [process.execPath, path.resolve(process.argv[1] ?? "")],
             listSessionEntries: (params) => api.runtime.agent.session.listSessionEntries(params),
