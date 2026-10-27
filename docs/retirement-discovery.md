@@ -32,7 +32,9 @@ not a claim of a stable provider archive API. Missing, malformed, oversized,
 changing or unmatched inputs remain incomplete evidence. The latest matching
 assistant text is labeled **untrusted hint**, not interpreted as a completion
 verdict. Record timestamps can be old or forged; they do not prove freshness.
-Unsupported record types provide no task coverage. User text, tool results and
+Removed recorded subdirectories are matched through their longest existing
+ancestor; escaping or broken links remain unmatched. Unsupported record types
+provide no task coverage. User text, tool results and
 sidechain text are not used as completion evidence.
 
 Dirty or locally unpreserved work yields `preserve-work`, including work inside

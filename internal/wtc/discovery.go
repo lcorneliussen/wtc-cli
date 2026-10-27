@@ -301,9 +301,36 @@ func discoveryCWD(target, cwd string) bool {
 	if !filepath.IsAbs(cwd) {
 		return false
 	}
-	resolved, err := filepath.EvalSymlinks(cwd)
-	if err != nil {
-		return false
+	// Archived task directories may be gone. Resolve the existing ancestor,
+	// retaining missing components without accepting a broken or escaping link.
+	ancestor := cwd
+	var missing []string
+	var resolved string
+	for {
+		var err error
+		resolved, err = filepath.EvalSymlinks(ancestor)
+		if err == nil {
+			info, e := os.Stat(resolved)
+			if e != nil || !info.IsDir() {
+				return false
+			}
+			break
+		}
+		if !os.IsNotExist(err) {
+			return false
+		}
+		if _, e := os.Lstat(ancestor); !os.IsNotExist(e) {
+			return false
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			return false
+		}
+		missing = append(missing, filepath.Base(ancestor))
+		ancestor = parent
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		resolved = filepath.Join(resolved, missing[i])
 	}
 	base, err := filepath.EvalSymlinks(target)
 	if err != nil {

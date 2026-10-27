@@ -308,3 +308,36 @@ func TestDiscoveryAdHocCannotSelectSibling(t *testing.T) {
 		t.Fatalf("ad-hoc current selection: %+v %v", r, err)
 	}
 }
+
+func TestDiscoveryRemovedTranscriptDirectoryPreservesScopeAndHintBound(t *testing.T) {
+	c, target := discoveryFixture(t)
+	fixtureFile(t, filepath.Join(target, RetiredMarkerFile), `{"schema_version":1}`, 0600)
+	fixtureFile(t, filepath.Join(target, "widget", "rescue.txt"), "preserve", 0600)
+	note := strings.Repeat("界", 2000)
+	source := discoveryTranscriptFixture(t, filepath.Join(target, "removed-repo", "removed-subdir"), note)
+	r, err := c.DiscoverRetirement("finished", []string{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Disposition != "preserve-work" || r.Transcripts[0].MatchedNotes != 1 || r.Transcripts[0].ArchiveState != "unknown" {
+		t.Fatalf("lost work or historical provenance: %+v", r)
+	}
+	hint := r.Transcripts[0].UntrustedHint
+	if !strings.HasSuffix(hint, "… [truncated]") || len([]rune(strings.TrimSuffix(hint, "… [truncated]"))) != 1200 {
+		t.Fatal("large historical hint lost its output bound")
+	}
+	outside := t.TempDir()
+	for name, destination := range map[string]string{"escape": outside, "broken": filepath.Join(outside, "missing")} {
+		if err := os.Symlink(destination, filepath.Join(target, name)); err != nil {
+			t.Fatal(err)
+		}
+		source := discoveryTranscriptFixture(t, filepath.Join(target, name, "removed-subdir"), "Unrelated")
+		r, err := c.DiscoverRetirement("finished", []string{source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Transcripts[0].MatchedNotes != 0 {
+			t.Fatalf("accepted %s link as local historical cwd", name)
+		}
+	}
+}
