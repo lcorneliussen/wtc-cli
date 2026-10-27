@@ -316,8 +316,8 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 					tail += "  "
 				}
 				text := statusTUISafe(statusRuntimeTunnelLabel(item))
-				// Unknown exposure needs attention; known exposure is labeled,
-				// and its color follows the task's health.
+				// Unknown exposure needs attention; public exposure is labeled.
+				// Known exposure follows the task's health color.
 				_, tone := statusRuntimeMark(item)
 				if item.Exposure != wtc.ExposurePublic && statusRuntimeExposed(item) && statusRuntimeLive(item) && !statusRuntimeTrouble(item) {
 					tone = statusToneWarning
