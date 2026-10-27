@@ -92,6 +92,7 @@ type Context struct {
 }
 
 var validRepoName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
+var errNotInCollection = errors.New("not inside a worktree collection (harness/.harness-repos.yml not found)")
 
 func Discover(start string) (*Context, error) {
 	abs, err := filepath.Abs(start)
@@ -103,11 +104,10 @@ func Discover(start string) (*Context, error) {
 		if RetiredFolder(dir) {
 			return nil, retiredFolderError(dir)
 		}
-		for _, marker := range []string{filepath.Join(AdHocConfigDir, adHocRegistryFile), filepath.Join("harness", ".harness-repos.yml")} {
-			candidate := filepath.Join(dir, marker)
-			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-				return OpenCollection(dir)
-			}
+		if present, err := collectionMarker(dir); err != nil {
+			return nil, err
+		} else if present {
+			return OpenCollection(dir)
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -115,7 +115,7 @@ func Discover(start string) (*Context, error) {
 		}
 		dir = parent
 	}
-	return nil, errors.New(branding.Text("not inside a worktree collection (harness/.harness-repos.yml not found); run `{{command}} init` to make this folder an ad-hoc collection"))
+	return nil, fmt.Errorf(branding.Text("%w; run `{{command}} init` to make this folder an ad-hoc collection"), errNotInCollection)
 }
 
 func OpenCollection(dir string) (*Context, error) {
@@ -131,8 +131,14 @@ func OpenCollection(dir string) (*Context, error) {
 	// its repositories: a gateway's folder may link a repository called
 	// harness and stays ad hoc. wtc init never makes that config inside a
 	// harness collection.
-	if adHoc, err := os.Stat(filepath.Join(abs, AdHocConfigDir, adHocRegistryFile)); err == nil && !adHoc.IsDir() {
-		c.Harness, c.AdHoc = filepath.Join(abs, AdHocConfigDir), true
+	config, err := collectionDirectoryInput(abs, "config")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(config); err == nil {
+		c.Harness, c.AdHoc = config, true
+	} else if !os.IsNotExist(err) {
+		return nil, err
 	} else if info, err := os.Stat(filepath.Join(c.Harness, ".harness-repos.yml")); err != nil || info.IsDir() {
 		return nil, fmt.Errorf("not a collection: %s", abs)
 	}
@@ -176,7 +182,13 @@ func ParseRegistry(b []byte) (Registry, error) {
 }
 
 func (c *Context) load() error {
-	b, err := os.ReadFile(c.registryPath())
+	registry := c.registryPath()
+	if info, err := os.Stat(registry); err != nil {
+		return err
+	} else if !info.Mode().IsRegular() {
+		return fmt.Errorf("registry must be a regular file: %s", registry)
+	}
+	b, err := os.ReadFile(registry)
 	if err != nil {
 		return err
 	}

@@ -348,6 +348,9 @@ func (c *Context) BuildReviewBundle(opt ReviewBundleOptions) (ReviewBundle, erro
 	if err := writeReviewManifest(dir, manifest); err != nil {
 		return ReviewBundle{}, err
 	}
+	if _, err := writeReviewChecks(dir, manifest); err != nil {
+		return ReviewBundle{}, err
+	}
 	var concerns int
 	if opt.Public {
 		concerns, err = c.copyPublicReviewConcerns(dir, worktree, baseSHA, string(changed))

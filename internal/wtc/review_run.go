@@ -128,6 +128,11 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	if err != nil {
 		return ReviewRunResult{}, err
 	}
+	if _, err := writeReviewChecks(bundle, manifest); err != nil {
+		return ReviewRunResult{}, err
+	}
+	concernTemplate = []byte(reviewCheckPrompt(string(concernTemplate)))
+	leadTemplate = []byte(reviewCheckPrompt(string(leadTemplate)))
 	for _, dir := range []string{"findings", ".logs", ".prompts", "stats"} {
 		if err := os.MkdirAll(filepath.Join(bundle, dir), 0755); err != nil {
 			return ReviewRunResult{}, err
@@ -265,7 +270,7 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 	if checkpoints := reviewConvergenceReport(convergence); checkpoints != "" {
 		final += "\n\n" + checkpoints
 	}
-	final += "\n\n" + stats + "\n\n" + statusLine + "\n"
+	final += "\n\n" + reviewChecksReport(bundle, manifest) + "\n\n" + stats + "\n\n" + statusLine + "\n"
 	final = reviewModeBody(alignReviewHeading(final, verdict), manifest)
 	if err := os.WriteFile(summaryPath, []byte(final), 0644); err != nil {
 		return ReviewRunResult{}, err

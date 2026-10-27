@@ -42,18 +42,19 @@ func devBuildDir(collection string) string {
 }
 
 // FindCollectionRoot walks up from start to the collection root, recognized
-// by the same markers as Discover (a harness registry or an ad-hoc one),
-// without loading the collection.
+// by the same boundaries as Discover: a harness registry or the selected
+// ad-hoc config directory, even when incomplete. It does not load the collection;
+// invalid namespace paths stop the walk.
 func FindCollectionRoot(start string) string {
 	dir, err := filepath.Abs(start)
 	if err != nil {
 		return ""
 	}
 	for {
-		for _, marker := range []string{filepath.Join("harness", ".harness-repos.yml"), filepath.Join(AdHocConfigDir, adHocRegistryFile)} {
-			if info, err := os.Stat(filepath.Join(dir, marker)); err == nil && !info.IsDir() {
-				return dir
-			}
+		if present, err := collectionMarker(dir); err != nil {
+			return ""
+		} else if present {
+			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -70,7 +71,10 @@ func ReadDevBuild(collection string) *DevBuild {
 	if collection == "" {
 		return nil
 	}
-	dir := devBuildDir(collection)
+	dir, err := collectionDirectoryInput(collection, "dev")
+	if err != nil || safeGeneratedParent(collection, dir) != nil {
+		return nil
+	}
 	binary := filepath.Join(dir, "wtc")
 	info, err := os.Lstat(binary)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&0111 == 0 || info.Mode()&0022 != 0 || !ownedByCurrentUser(info) {
@@ -186,6 +190,9 @@ func InstallDevBuild(collection, source string) (*DevBuild, error) {
 		return nil, err
 	}
 	dir := devBuildDir(collection)
+	if err := safeGeneratedParent(collection, dir); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
@@ -211,9 +218,25 @@ func InstallDevBuild(collection, source string) (*DevBuild, error) {
 }
 
 func UninstallDevBuild(collection string) (bool, error) {
-	dir := devBuildDir(collection)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return false, nil
+	// Removing only the selected build could reactivate the alternate one.
+	// Validate both slots before deleting either; never follow a linked parent.
+	dirs := []string{devBuildDir(collection), filepath.Join(collection, ".taba", "dev")}
+	for _, dir := range dirs {
+		if err := safeGeneratedParent(collection, dir); err != nil {
+			return false, err
+		}
 	}
-	return true, os.RemoveAll(dir)
+	removed := false
+	for _, dir := range dirs {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return removed, err
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return removed, err
+		}
+		removed = true
+	}
+	return removed, nil
 }

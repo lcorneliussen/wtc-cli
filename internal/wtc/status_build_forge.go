@@ -180,7 +180,7 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 func statusBBPipelines(workspace, repo, branch, user, pass string) ([]byte, error) {
 	query := url.Values{"sort": {"-created_on"}, "pagelen": {"30"}}
 	if branch != "" {
-		query.Set("target.ref_name", branch)
+		query.Set("target.branch", branch)
 	}
 	endpoint := statusBBAPI + "/repositories/" + url.PathEscape(workspace) + "/" + url.PathEscape(repo) + "/pipelines/?" + query.Encode()
 	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
@@ -231,6 +231,7 @@ func statusPipelinePageBranches(raw []byte) []string {
 		Values []struct {
 			Target struct {
 				RefName  string `json:"ref_name"`
+				Source   string `json:"source"`
 				Selector struct {
 					Type string `json:"type"`
 				} `json:"selector"`
@@ -243,14 +244,18 @@ func statusPipelinePageBranches(raw []byte) []string {
 	seen := map[string]bool{}
 	var branches []string
 	for _, run := range page.Values {
-		if run.Target.RefName == "" || seen[run.Target.RefName] {
+		name := run.Target.RefName
+		if name == "" && statusPRPipelineSelector(run.Target.Selector.Type) {
+			name = run.Target.Source
+		}
+		if name == "" || seen[name] {
 			continue
 		}
-		if run.Target.Selector.Type != "" && run.Target.Selector.Type != "branches" && run.Target.Selector.Type != "default" {
+		if !statusHeadPipelineSelector(run.Target.Selector.Type) {
 			continue
 		}
-		seen[run.Target.RefName] = true
-		branches = append(branches, run.Target.RefName)
+		seen[name] = true
+		branches = append(branches, name)
 	}
 	return branches
 }
@@ -276,6 +281,7 @@ func statusParseBBBuild(raw []byte, slug, branch string) (*StatusBuild, error) {
 			Target struct {
 				RefType  string `json:"ref_type"`
 				RefName  string `json:"ref_name"`
+				Source   string `json:"source"`
 				Selector struct {
 					Type string `json:"type"`
 				} `json:"selector"`
@@ -289,9 +295,12 @@ func statusParseBBBuild(raw []byte, slug, branch string) (*StatusBuild, error) {
 		return nil, fmt.Errorf("Bitbucket pipelines JSON: %w", err)
 	}
 	for _, run := range page.Values {
-		// Custom and pull-request pipelines also carry the branch name; only a
-		// branch pipeline describes the branch itself.
-		if run.Target.RefName != branch || (run.Target.Selector.Type != "" && run.Target.Selector.Type != "branches" && run.Target.Selector.Type != "default") {
+		// PR pipelines build the source head too; custom pipelines remain separate.
+		name := run.Target.RefName
+		if name == "" && statusPRPipelineSelector(run.Target.Selector.Type) {
+			name = run.Target.Source
+		}
+		if name != branch || !statusHeadPipelineSelector(run.Target.Selector.Type) {
 			continue
 		}
 		build := &StatusBuild{Branch: branch, Build: statusString(strconv.Itoa(run.BuildNumber)),
@@ -320,4 +329,16 @@ func statusForgeBuild(forge, slug, branch string) (*StatusBuild, error) {
 		return statusBBBuild(slug, branch)
 	}
 	return nil, nil
+}
+
+func statusHeadPipelineSelector(selector string) bool {
+	switch selector {
+	case "", "branches", "default", "pullrequests", "pull-requests":
+		return true
+	}
+	return false
+}
+
+func statusPRPipelineSelector(selector string) bool {
+	return selector == "pullrequests" || selector == "pull-requests"
 }
