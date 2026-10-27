@@ -148,15 +148,25 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	// detail has not changed, so the full pull request is not fetched.
 	if listed, err := statusOpenPRs(forge, slug); err == nil {
 		if item, ok := listed[record.Number]; ok {
-			if detail, ok := statusDetailFromOpenItem(record, slug, forge, item); ok {
-				return detail
+			detail, used, matched := statusDetailFromOpenItem(record, slug, forge, item)
+			if !used {
+				return statusViewPR(record, slug, forge, false)
 			}
-			return statusViewPR(record, slug, forge, false)
+			source := "list"
+			if matched {
+				source = "stamp"
+			}
+			return statusConfirmFullPR(record, slug, forge, detail, source)
 		}
 		if detail, ok := statusReadCachedDetail(record, slug, forge); ok && detail.State != "OPEN" && detail.State != "DRAFT" {
-			return detail
+			return statusConfirmFullPR(record, slug, forge, detail, "list-omitted")
 		}
-		return statusViewPR(record, slug, forge, true)
+		viewed := statusViewPR(record, slug, forge, true)
+		if statusFullRefreshDue(forge, slug, record.Number) && (viewed.State == "OPEN" || viewed.State == "DRAFT") {
+			statusLogIncrementalMiss(forge, slug, "#"+record.Number, "list-omitted", "state:"+viewed.State)
+			statusMarkFullRefresh(forge, slug, record.Number)
+		}
+		return viewed
 	}
 	if detail, ok := statusReadCachedDetail(record, slug, forge); ok {
 		return detail
@@ -239,6 +249,9 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 	if len(pending) != 0 {
 		c.statusProgress(fmt.Sprintf("Checking %d live pull requests", len(pending)))
 	}
+	previousNote := statusAuditNote
+	statusAuditNote = func(message string) { c.statusProgress(message) }
+	defer func() { statusAuditNote = previousNote }()
 	const parallel = 4
 	limit := make(chan struct{}, parallel)
 	done := make(chan struct{}, len(pending))

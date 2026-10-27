@@ -137,11 +137,21 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 		return nil, err
 	}
 	build, err := statusParseBBBuild(raw, slug, branch)
-	if err != nil || build != nil {
-		return build, err
+	if err != nil {
+		return nil, err
+	}
+	if build != nil {
+		if audited := statusPreferAuditedBuild(slug, branch, build); audited != nil {
+			return audited, nil
+		}
+		return statusConfirmFullBuild(slug, branch, build, "page", user, pass), nil
 	}
 	if saved, ok := statusReadForgeEntryAny("build", "bitbucket.org", slug, branch); ok {
-		return statusParseBBBuild(saved, slug, branch)
+		savedBuild, parseErr := statusParseBBBuild(saved, slug, branch)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		return statusConfirmFullBuild(slug, branch, savedBuild, "saved", user, pass), nil
 	}
 	raw, err = statusSingleFlight("build", "bitbucket.org", slug, branch, func() ([]byte, error) {
 		return statusBBPipelines(parts[0], parts[1], branch, user, pass)
@@ -149,7 +159,12 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 	if err != nil {
 		return nil, err
 	}
-	return statusParseBBBuild(raw, slug, branch)
+	build, err = statusParseBBBuild(raw, slug, branch)
+	if err != nil {
+		return nil, err
+	}
+	statusMarkFullRefresh("bitbucket.org", slug, "build:"+branch)
+	return build, nil
 }
 
 func statusBBPipelines(workspace, repo, branch, user, pass string) ([]byte, error) {

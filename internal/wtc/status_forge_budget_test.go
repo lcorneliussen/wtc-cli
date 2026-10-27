@@ -13,6 +13,8 @@ func TestMain(m *testing.M) {
 	// The shared allowance would turn a second forge call in a test into a
 	// cache hit or a refusal. Tests opt back in when they cover the allowance.
 	os.Setenv("WTC_FORGE_MIN_INTERVAL", "0")
+	// A full audit on the first enrich would hide the incremental tests.
+	os.Setenv("WTC_FORGE_FULL_REFRESH", "0")
 	os.Exit(m.Run())
 }
 

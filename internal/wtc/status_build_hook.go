@@ -243,6 +243,9 @@ func (c *Context) statusBuildFacts(snapshot *StatusSnapshot) error {
 	if len(jobs) == 0 {
 		return nil
 	}
+	previousNote := statusAuditNote
+	statusAuditNote = func(message string) { c.statusProgress(message) }
+	defer func() { statusAuditNote = previousNote }()
 	results := make([]*StatusBuild, len(jobs))
 	limit := make(chan struct{}, 4)
 	var workers sync.WaitGroup

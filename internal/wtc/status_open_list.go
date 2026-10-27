@@ -70,21 +70,21 @@ func statusEncodeOpenPRs(prs []statusOpenPR) ([]byte, error) {
 	}{PRs: prs})
 }
 
-func statusDetailFromOpenItem(record PRRecord, slug, forge string, item statusOpenPR) (statusPRDetail, bool) {
+func statusDetailFromOpenItem(record PRRecord, slug, forge string, item statusOpenPR) (statusPRDetail, bool, bool) {
 	if stamp, ok := statusReadForgeEntryAny("stamp", forge, slug, record.Number); ok && string(stamp) == item.Fingerprint {
 		if cached, ok := statusReadForgeEntryAny("pr", forge, slug, record.Number); ok {
 			if detail, err := statusParseForgeDetail(forge, cached, record); err == nil {
-				return detail, true
+				return detail, true, true
 			}
 		}
 	}
 	detail, err := statusParseForgeDetail(forge, item.Raw, record)
 	if err != nil {
-		return statusPRDetail{}, false
+		return statusPRDetail{}, false, false
 	}
 	statusWriteForgeCache(forge, slug, record.Number, item.Raw)
 	statusWriteForgeEntry("stamp", forge, slug, record.Number, []byte(item.Fingerprint))
-	return detail, true
+	return detail, true, false
 }
 
 type statusGHListItem struct {
