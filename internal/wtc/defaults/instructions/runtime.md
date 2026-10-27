@@ -227,7 +227,8 @@ service endpoint. `--stop` records off, including when stopping fails; retry the
 stop to confirm shutdown. Ordinary `down` keeps the choice. Service `up` and
 `restart` restore enabled tunnels after checking the provider login, including
 previously approved public tunnels. Untargeted `restart` restores them only for
-services that were running. Without an explicit choice, declaration defaults
+services that were running. Untargeted `up` restores them for autostart or
+already running services. Without an explicit choice, declaration defaults
 keep their existing behavior.
 
 Approval belongs to the current tunnel definition. Changing its command,

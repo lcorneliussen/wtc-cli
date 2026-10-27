@@ -55,8 +55,11 @@ func (c *Context) statusRuntime(snapshot *StatusSnapshot, all bool) {
 		for _, item := range snapshot.Runtime {
 			if item.Repo == row.Repo && item.Collection == row.Collection {
 				state := item.State
-				if item.Lifecycle != "" {
+				if item.Lifecycle != "" && state != "unknown" {
 					state = "tunnel missing"
+					if item.TunnelIntent == "stale" {
+						state = "choice stale"
+					}
 				}
 				if item.Kind == "resources" && state == "provision-hook-completed" {
 					state = "provisioned"

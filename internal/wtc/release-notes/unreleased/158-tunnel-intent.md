@@ -1,4 +1,4 @@
-# Remember collection tunnel choices
+## Services
 
 - Service `down` preserves explicit tunnel on/off intent; `up` and `restart` restore enabled tunnels after provider checks. `wtc svc tunnel --stop` keeps them off, overriding declaration defaults.
 - Choices are collection-local and bound to the approved definition. Changed or removed declarations need a fresh choice before reopening; public tunnels still require explicit approval.

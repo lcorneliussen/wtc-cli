@@ -227,3 +227,72 @@ func TestTunnelIntentRemovingLastServiceInvalidatesApproval(t *testing.T) {
 		t.Fatalf("removed approval reused: %+v", item)
 	}
 }
+
+func TestTunnelIntentUntargetedRestartLeavesStoppedServiceOff(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	chooseTunnel(t, c, false)
+	intentAction(t, c, "down", "web")
+	// Keep another service live so untargeted restart has work to do.
+	fragment := runtimeSharedFragment(filepath.Join(c.Collection, "widget"))
+	data, _ := os.ReadFile(fragment)
+	fixtureFile(t, fragment, string(data)+" worker/main:\n  cmd: [synthetic-worker]\n", 0644)
+	intentAction(t, c, "up", "worker")
+	intentAction(t, c, "restart", "")
+	if item := intentTunnel(t, c); item.State != "idle" || item.TunnelIntent != "on" {
+		t.Fatalf("restart revived stopped service: %+v", item)
+	}
+	runtimeLoginCheck = func(string) string { return "synthetic login expired" }
+	if _, err := c.RuntimeAction("restart", "widget/web", 0); err == nil || !strings.Contains(err.Error(), "login expired") {
+		t.Fatalf("restart hid provider failure: %v", err)
+	}
+	if item := intentTunnel(t, c); item.State != "idle" || item.Lifecycle == "" || item.Login == "" {
+		t.Fatalf("restart diagnostics missing: %+v", item)
+	}
+}
+
+func TestTunnelIntentUntargetedUpRespectsStoppedNonAutostartService(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	fragment := runtimeSharedFragment(filepath.Join(c.Collection, "widget"))
+	data, _ := os.ReadFile(fragment)
+	fixtureFile(t, fragment, strings.Replace(string(data), "autostart: true", "autostart: false", 1), 0644)
+	chooseTunnel(t, c, false)
+	intentAction(t, c, "down", "web")
+	if _, err := c.RuntimeAction("up", "", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if item := intentTunnel(t, c); item.State != "idle" || item.TunnelIntent != "on" {
+		t.Fatalf("up revived stopped nonautostart service: %+v", item)
+	}
+	intentAction(t, c, "up", "widget/web/server")
+	intentAction(t, c, "down", "widget/web/tunnel")
+	intentAction(t, c, "up", "")
+	if item := intentTunnel(t, c); item.State != "ready" {
+		t.Fatalf("up did not restore live service's tunnel: %+v", item)
+	}
+}
+
+func TestTunnelIntentUnknownRunnerRemainsUnknown(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	chooseTunnel(t, c, false)
+	for _, command := range []string{"runner status", "ls"} {
+		fixtureFile(t, filepath.Join(c.runtimeRoot(), "fail-action"), command, 0600)
+		item := intentTunnel(t, c)
+		if item.State != "unknown" || item.Error == "" || item.Lifecycle != "" || item.TunnelIntent != "on" {
+			t.Fatalf("unknown misreported as missing: %+v", item)
+		}
+	}
+}
+
+func TestTunnelIntentExplicitOffCannotBeBypassedByExactTarget(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	chooseTunnel(t, c, false)
+	chooseTunnel(t, c, true)
+	for _, action := range []string{"up", "restart"} {
+		if _, err := c.RuntimeAction(action, "widget/web/tunnel", 0); err == nil {
+			t.Fatalf("%s bypassed explicit off", action)
+		}
+		if item := intentTunnel(t, c); item.State != "idle" || item.TunnelIntent != "off" {
+			t.Fatalf("%s opened off tunnel: %+v", action, item)
+		}
+	}
+}

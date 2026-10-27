@@ -118,8 +118,8 @@ func (c statusRuntimeColumn) header() string {
 	return strings.ToUpper(c.provider)
 }
 
-// statusRuntimeTunnelShown is true for a tunnel that is in use or starts by
-// default; a configured tunnel nobody started stays out of the table.
+// statusRuntimeTunnelShown includes tunnels in use, declaration defaults,
+// explicit on choices and lifecycle problems.
 func statusRuntimeTunnelShown(item wtc.RuntimeItem) bool {
 	switch item.State {
 	case "starting", "running", "ready", "failed", "exited":
@@ -239,6 +239,10 @@ func (l statusRuntimeLayout) urlAt(g statusRuntimeGroup, x int) string {
 // statusRuntimeState shortens the hook fact the way the repo summary does.
 func statusRuntimeState(item wtc.RuntimeItem) string {
 	switch {
+	case item.State == "unknown":
+		return "unknown"
+	case item.TunnelIntent == "stale":
+		return "choice stale"
 	case item.Lifecycle != "":
 		return "tunnel missing"
 	case item.Kind == "resources" && item.State == "provision-hook-completed":
@@ -254,9 +258,8 @@ func statusRuntimeState(item wtc.RuntimeItem) string {
 	return item.State
 }
 
-// statusRuntimeTrouble is a live task (ready or running) that doesn't answer
-// now, or a live tunnel whose provider client cannot serve: ready is only a
-// startup probe.
+// statusRuntimeTrouble includes tunnel lifecycle problems and live tasks that
+// cannot answer or whose provider cannot serve: ready is only a startup probe.
 func statusRuntimeTrouble(item wtc.RuntimeItem) bool {
 	running := item.State == "ready" || item.State == "running"
 	return item.Lifecycle != "" || running && (item.Answering == "no" || item.Login != "")

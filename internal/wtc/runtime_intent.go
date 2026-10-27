@@ -7,8 +7,6 @@ type runtimeTunnelIntent struct {
 	Definition string `json:"definition"`
 }
 
-type runtimeTunnelChoice struct{ runtimeTunnelIntent }
-
 func runtimeTunnelLifecycle(items []RuntimeItem) {
 	for i := range items {
 		item := &items[i]
@@ -19,7 +17,7 @@ func runtimeTunnelLifecycle(items []RuntimeItem) {
 			item.Lifecycle = "tunnel declaration changed; choose the tunnel again"
 		} else if item.TunnelIntent == "on" {
 			switch item.State {
-			case "ready", "running", "starting", "checking":
+			case "ready", "running", "starting", "checking", "unknown":
 			default:
 				item.Lifecycle = "tunnel intended on but not running"
 			}

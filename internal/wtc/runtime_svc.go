@@ -419,7 +419,7 @@ func (c *Context) Tunnel(opt TunnelOptions) (RuntimeResult, error) {
 		}
 		var result RuntimeResult
 		for _, t := range tunnels {
-			if result, err = c.runtimeAction("down", t.Path, 0, &runtimeTunnelChoice{runtimeTunnelIntent: runtimeTunnelIntent{On: false, Definition: t.Definition}}); err != nil {
+			if result, err = c.runtimeAction("down", t.Path, 0, &runtimeTunnelIntent{On: false, Definition: t.Definition}); err != nil {
 				return result, err
 			}
 		}
@@ -478,7 +478,7 @@ func (c *Context) Tunnel(opt TunnelOptions) (RuntimeResult, error) {
 	if exposed && !opt.Public {
 		return RuntimeResult{}, fmt.Errorf("%s is reachable from the internet (%s); pass --public to open it", tunnel.Path, runtimeExposureWords(tunnel.Exposure))
 	}
-	return c.runtimeAction("up", tunnel.Path, opt.Wait, &runtimeTunnelChoice{runtimeTunnelIntent: runtimeTunnelIntent{On: true, Definition: tunnel.Definition}})
+	return c.runtimeAction("up", tunnel.Path, opt.Wait, &runtimeTunnelIntent{On: true, Definition: tunnel.Definition})
 }
 
 func runtimeExposureWords(exposure string) string {

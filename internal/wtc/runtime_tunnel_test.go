@@ -321,7 +321,7 @@ func TestServiceUpAndRestartLeaveAStoppedPublicTunnelClosed(t *testing.T) {
 	if _, err := c.Tunnel(TunnelOptions{Service: "echo", Provider: "cloudflare", Public: true}); err != nil {
 		t.Fatal(err)
 	}
-	// Explicit stop records off; an idle observation alone preserves on.
+	// Explicit stop records off, so service actions must leave the public tunnel closed.
 	fixtureFile(t, filepath.Join(c.runtimeRoot(), "fake-tasks.json"), `{"tasks":[{"path":"widget/echo/cloudflare","state":"idle"}]}`, 0600)
 	if _, err := c.Tunnel(TunnelOptions{Service: "echo", Provider: "cloudflare", Stop: true}); err != nil {
 		t.Fatal(err)
