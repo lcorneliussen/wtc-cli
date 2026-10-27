@@ -255,7 +255,7 @@ func (c *Context) RunReviewBundle(bundle string, opt ReviewRunOptions) (ReviewRu
 		return ReviewRunResult{}, err
 	}
 	final := strings.TrimRight(strings.Join(clean, "\n"), "\n") + "\n\n" + stats + "\n\n" + statusLine + "\n"
-	final = alignReviewHeading(final, verdict)
+	final = reviewModeBody(alignReviewHeading(final, verdict), manifest)
 	if err := os.WriteFile(summaryPath, []byte(final), 0644); err != nil {
 		return ReviewRunResult{}, err
 	}

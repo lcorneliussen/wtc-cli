@@ -21,7 +21,7 @@ func TestReviewPostReceiptsDedupAndResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	head := "1234567890abcdef1234567890abcdef12345678"
-	manifest := ReviewManifest{Repo: "app", PR: "7", Forge: "github", Slug: "example/app", URL: "https://github.com/example/app/pull/7", HeadSHA: head, Round: 1, RepoDir: repo}
+	manifest := ReviewManifest{Repo: "app", PR: "7", Public: true, Forge: "github", Slug: "example/app", URL: "https://github.com/example/app/pull/7", HeadSHA: head, Round: 1, RepoDir: repo}
 	if err := writeReviewManifest(bundle, manifest); err != nil {
 		t.Fatal(err)
 	}

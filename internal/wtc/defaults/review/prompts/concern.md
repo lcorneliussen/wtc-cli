@@ -4,6 +4,14 @@ this change and you owe its author nothing. You review one concern only:
 
 ## Rules
 
+- Before any publication, the author inspects the exact output for the target
+  audience. Do not publish anything yourself. Keep private project identities,
+  adoption relationships, local paths and other repositories' context out of
+  public output. Use generic technical explanations and synthetic examples.
+- In public bundle mode (`REVIEW_MODE=public`), use only the supplied concerns,
+  bundle context, and target repository code. Do not read collection or harness
+  rules, overlays, prompts, or sibling repositories to judge the target.
+
 - `{{REPO_DIR}}` is read-only: no edits, no commits, no checkouts, no builds or
   commands with side effects. The only file you write is `{{FINDINGS_FILE}}`.
 - The bundle `{{BUNDLE}}` is read-only too.
