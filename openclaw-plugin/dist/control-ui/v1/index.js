@@ -628,7 +628,7 @@ function collectionTables(v) {
     } catch (err) { say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
     finally { acting.delete(r.sessionKey); if(active(conversationKey))await v.refresh(); }
   }
-  let selection = new Map(), batchResults = new Map(), batchPreview = null, dispatched = new Set();
+  let selection = new Map(), batchResults = new Map(), batchLabels = new Map(), batchPreview = null, dispatched = new Set();
   let batchKey = null, batchRunning = false, batchCancelled = false;
   const handoffKey = (r, step) => `${r.sessionKey}:${r.choices ? step.key.split(":").at(-1) : step.key}`;
   const choicesOf = (r) => r.choices?.actions ?? (r.next ? [{ ...r.next, available: true }] : []);
@@ -638,6 +638,7 @@ function collectionTables(v) {
     const sent = dispatched;
     const reservations = new Set();
     const results = new Map(); batchResults = results;
+    batchLabels = new Map(targets.map(({ repo }) => [repo.sessionKey, nameOf(repo)]));
     batchRunning = true; batchCancelled = false; batchPreview = null;
     const update = () => { if (active(conversation)) v.rerender(); };
     const agents = [];
@@ -697,7 +698,7 @@ function collectionTables(v) {
   }
   function nextActions(repos) {
     const rows = repos.filter(actionable);
-    if (batchKey !== v.key()) { batchKey = v.key(); selection = new Map(); batchResults = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true; }
+    if (batchKey !== v.key()) { batchKey = v.key(); selection = new Map(); batchResults = new Map(); batchLabels = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true; }
     const currentKeys = new Set(rows.flatMap((r) => choicesOf(r).map((a) => handoffKey(r, a))));
     for (const key of dispatched) if (!currentKeys.has(key)) dispatched.delete(key);
     if (!rows.length && !batchResults.size) return null;
@@ -732,7 +733,7 @@ function collectionTables(v) {
       return css(el("div", {}, check, css(el("strong", { textContent: nameOf(r) }), "font-size:12px"), alternatives, action,
         muted(dispatched.has(handoffKey(r, step)) ? "Sent to conversation; wait for completion before retrying" : stale ? "Selection is stale; unselect and choose again" : `${step.reason}${step.approve ? ` · ${step.approve} approval` : ` · ${step.by}`}`),
         batchResults.has(r.sessionKey) ? muted(batchResults.get(r.sessionKey)) : null), "display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0");
-    }), ...[...batchResults].filter(([key]) => !rows.some((r) => r.sessionKey === key)).map(([key, result]) => muted(`${key}: ${result}`))), "display:grid;gap:6px;padding:8px 0");
+    }), ...[...batchResults].filter(([key]) => !rows.some((r) => r.sessionKey === key)).map(([key, result]) => muted(`${batchLabels.get(key) ?? "Repository"}: ${result}`))), "display:grid;gap:6px;padding:8px 0");
   }
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
