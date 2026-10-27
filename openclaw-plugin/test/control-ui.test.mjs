@@ -108,6 +108,7 @@ const failing = new Set();
 // The Bitbucket plugin: absent unless a test installs it with a login (or null).
 let bitbucket;
 let bitbucketRefusedAction;
+let bitbucketConfirmResult;
 const hostRequest = async (method, params) => {
   if (failing.has(method)) throw new Error(`${method} failed`);
   if (method === "plugins.sessionAction" && params.pluginId === "bitbucket") {
@@ -118,7 +119,7 @@ const hostRequest = async (method, params) => {
     if (params.actionId === "publish") {
       return { ok: true, result: bitbucket ? { status: "needs_confirmation", requestId: "bb-1", confirmation: { account: bitbucket.user, name: bitbucket.name, requestDigest: "bd1", branch: "openclaw/test", head: "abcdef0123", dest: "main", uncommitted: 0 } } : { status: "not_connected" } };
     }
-    if (params.actionId === "publish-confirm") return { ok: true, result: { status: "published", created: true, url: "https://bitbucket.org/ws/hooks/pull-requests/3" } };
+    if (params.actionId === "publish-confirm") return { ok: true, result: bitbucketConfirmResult ?? { status: "published", created: true, url: "https://bitbucket.org/ws/hooks/pull-requests/3" } };
   }
   if (method === "sessions.github.options") return { personal, shared: { source: "system-detected", login: "octo-bot" } };
   if (method === "sessions.github.status") return { confirmation: { generation: personal?.generation, account: personal?.account, requestDigest: "d1" } };
@@ -312,10 +313,11 @@ test("pending files offer a commit handoff and publication refusal is a visible 
     await settle();
     assert.deepEqual(calls.map((c) => c.method), ["sessions.send"]);
     assert.match(calls[0].message, /^\/skill wtc site: review and commit/);
-    assert.match(host.textContent, /site: asked the conversation to review and commit/);
+    assert.match(host.textContent, /site: asked the conversation to save intended changes as local commits/);
+    assert.match(host.textContent, /Pushing and opening a PR are separate/);
     personal = { state: "connected", account: { id: 1, login: "octo" }, generation: "g1" };
     githubPublishResult = { status: "blocked", message: "The managed branch cannot publish yet. Review and commit its intended changes first." };
-    const push = [...host.all()].find((n) => n.tagName === "BUTTON" && /^14 files to push/.test(n.title));
+    const push = [...host.all()].find((n) => n.tagName === "BUTTON" && /^14 uncommitted files to publish/.test(n.title));
     assert.ok(push);
     calls.length = 0;
     await push.onclick();
@@ -429,6 +431,90 @@ test("composer: Bitbucket is pushed by the Bitbucket plugin, with the person's o
   view.dispose();
 });
 
+test("publication results distinguish new and existing Bitbucket PRs and offer text review in both views", async () => {
+  for (const kind of ["composer", "panel"]) for (const created of [true, false]) {
+    bitbucket = { user: "ada@example.com", name: "Ada" };
+    bitbucketConfirmResult = { status: "published", created, url: "https://bitbucket.org/example/docs/pull-requests/8" };
+    const { host, view } = await mount(kind, collection([repo("docs", { forge: "bitbucket", unpublished: 2, dirty: 1 })]));
+    try {
+      calls.length = 0;
+      const push = [...host.all()].find((n) => n.tagName === "BUTTON" && /^2 commits to push/.test(n.title));
+      assert.ok(push);
+      assert.doesNotMatch(push.title, /Commit pending changes/);
+      assert.match(push.title, /Uncommitted files stay behind/);
+      await push.onclick();
+      await settle();
+      await [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "confirm ↑ 2").onclick();
+      await settle();
+      assert.match(host.textContent, created ? /pushed commits and created draft PR #8/ : /pushed commits to existing PR #8\. Its title and description are unchanged/);
+      assert.equal(calls.some((c) => c.method === "sessions.send"), false, "publishing alone does not start text review");
+      const review = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Review PR text");
+      assert.ok(review, `${kind}: result keeps its follow-up after refresh`);
+      review.onclick({ preventDefault() {}, stopPropagation() {} });
+      await settle();
+      const request = calls.find((c) => c.method === "sessions.send");
+      assert.ok(request);
+      assert.notEqual(request.sessionKey, "agent:main:owner:docs");
+      assert.match(request.message, /\/skill wtc docs: review the title and description of https:\/\/bitbucket.org\/example\/docs\/pull-requests\/8/);
+      assert.match(request.message, /full current PR diff/);
+      assert.match(request.message, /Preserve useful human edits/);
+      assert.match(request.message, /propose a revised title and description/);
+      assert.match(request.message, /not a request for a code review/);
+      assert.match(host.textContent, /asked the conversation to review the PR title and description/);
+      assert.equal([...host.all()].some((n) => n.tagName === "BUTTON" && n.textContent === "Review PR text"), false);
+    } finally {
+      view.dispose();
+      bitbucket = undefined;
+      bitbucketConfirmResult = undefined;
+    }
+  }
+});
+
+test("Bitbucket dirty files offer local commits instead of an empty push", async () => {
+  bitbucket = { user: "ada@example.com", name: "Ada" };
+  for (const kind of ["composer", "panel"]) {
+    const { host, view } = await mount(kind, collection([repo("docs", { forge: "bitbucket", dirty: 2 })]));
+    try {
+      assert.ok([...host.all()].some((n) => n.tagName === "BUTTON" && n.textContent === "Commit changes"));
+      assert.equal([...host.all()].some((n) => n.tagName === "BUTTON" && /to push/.test(n.title)), false);
+    } finally { view.dispose(); }
+  }
+  bitbucket = undefined;
+});
+
+test("a PR text review handoff failure is visible and never claims the text was updated", async () => {
+  for (const kind of ["composer", "panel"]) {
+    bitbucket = { user: "ada@example.com", name: "Ada" };
+    bitbucketConfirmResult = { status: "published", created: false, url: "https://bitbucket.org/example/docs/pull-requests/8" };
+    const { host, view } = await mount(kind, collection([repo("docs", { forge: "bitbucket", unpublished: 1 })]));
+    try {
+      await [...host.all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+      await settle();
+      await [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "confirm ↑ 1").onclick();
+      await settle();
+      failing.add("sessions.send");
+      [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Review PR text").onclick({ preventDefault() {}, stopPropagation() {} });
+      await settle();
+      assert.ok([...host.all()].some((n) => (n.role ?? n.attributes.role) === "alert" && /sessions.send failed/.test(n.textContent)));
+      assert.doesNotMatch(host.textContent, /asked the conversation|updated.*description/);
+    } finally { failing.delete("sessions.send"); view.dispose(); bitbucket = undefined; bitbucketConfirmResult = undefined; }
+  }
+});
+
+test("a GitHub URL alone does not claim a new PR was created", async () => {
+  personal = { state: "connected", account: { id: 1, login: "octo" }, generation: "g1" };
+  const previous = githubPublishResult;
+  githubPublishResult = { status: "published", url: "https://github.com/example/docs/pull/8" };
+  const { host, view } = await mount("composer", collection([repo("docs", { unpublished: 1 })]));
+  try {
+    await [...host.all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+    await settle();
+    assert.match(host.textContent, /pushed branch commits\. Pull request: PR #8/);
+    assert.doesNotMatch(host.textContent, /created (draft )?PR/);
+    assert.ok([...host.all()].some((n) => n.tagName === "BUTTON" && n.textContent === "Review PR text"));
+  } finally { view.dispose(); personal = null; githubPublishResult = previous; }
+});
+
 test("composer: a push is the person's, with their own account, after they confirm", async () => {
   const { host, view } = await mount("composer", busy);
   const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
@@ -474,17 +560,17 @@ test("composer: a new pull request opens with the title and description the agen
   await settle();
   const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
   const push = (what) => [...card().all()].find((n) => n.tagName === "BUTTON" && n.title.startsWith(what));
-  assert.match(push("1 file to push").title, /Title: "Add a web preview", with the agent's description\./);
+  assert.match(push("1 uncommitted file to publish").title, /Title: "Add a web preview", with the agent's description\./);
   assert.match([...card().all()].find((n) => n.tagName === "BUTTON" && /Bitbucket/.test(n.title)).title, /Title: "Add a web preview"\.$/);
-  assert.match(push("1 commit to push. Commit what is pending, push the branch and open a draft pull request, with your own GitHub").title, /proposed no title or description/);
-  assert.doesNotMatch(push("1 commit to push. Commit what is pending and push it to #7").title, /Title|proposed/);
+  assert.match(push("1 commit to push. Commit pending changes and push the branch; create a draft pull request if none exists, with your own GitHub").title, /proposed no title or description/);
+  assert.doesNotMatch(push("1 commit to push. Commit pending changes and push the branch to PR #7").title, /Title|proposed/);
   calls.length = 0;
-  await push("1 file to push").onclick();
+  await push("1 uncommitted file to publish").onclick();
   await settle();
   const published = calls.find((c) => c.method === "sessions.github.publish");
   assert.equal(published.title, "Add a web preview");
   assert.equal(published.body, "What, why, and how it was checked.");
-  await push("1 commit to push. Commit what is pending and push it to #7").onclick();
+  await push("1 commit to push. Commit pending changes and push the branch to PR #7").onclick();
   await settle();
   const again = calls.filter((c) => c.method === "sessions.github.publish").at(-1);
   assert.equal("title" in again || "body" in again, false);
