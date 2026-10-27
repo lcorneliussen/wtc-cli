@@ -24,7 +24,7 @@ func TestBitbucketReviewPostResolveWithoutAPICredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	head := "1234567890abcdef1234567890abcdef12345678"
-	manifest := ReviewManifest{Repo: "app", PR: "7", Forge: "bitbucket", Slug: "example/app", URL: "https://bitbucket.org/example/app/pull-requests/7", HeadSHA: head, Round: 1, RepoDir: repo}
+	manifest := ReviewManifest{Repo: "app", PR: "7", Public: true, Forge: "bitbucket", Slug: "example/app", URL: "https://bitbucket.org/example/app/pull-requests/7", HeadSHA: head, Round: 1, RepoDir: repo}
 	if err := writeReviewManifest(bundle, manifest); err != nil {
 		t.Fatal(err)
 	}
@@ -39,6 +39,10 @@ func TestBitbucketReviewPostResolveWithoutAPICredentials(t *testing.T) {
 	bin := t.TempDir()
 	log := filepath.Join(bin, "calls.log")
 	launcher := `#!/bin/sh
+if [ "$1" = --workspace ]; then
+  [ "$2" = example ] && [ "$3" = --repo ] && [ "$4" = app ] || exit 90
+  shift 4
+fi
 printf '%s\n' "$*" >> "$FAKE_BB_LOG"
 case "$*" in
   'pr view 7 --json') printf '{"source":{"commit":{"hash":"1234567890abcdef1234567890abcdef12345678"}}}\n' ;;
@@ -168,6 +172,10 @@ func TestBitbucketReviewStatusRequiresCurrentHeadAndLocalReceipt(t *testing.T) {
 	}
 	bin := t.TempDir()
 	launcher := `#!/bin/sh
+if [ "$1" = --workspace ]; then
+  [ "$2" = example ] && [ "$3" = --repo ] && [ "$4" = app ] || exit 90
+  shift 4
+fi
 case "$*" in
   'pr view 7 --json') printf '{"source":{"commit":{"hash":"%s"}}}\n' "$FAKE_BB_HEAD" ;;
   'pr comments list 7 --all --json') printf '{"values":[{"id":301,"content":{"raw":"wtc-review v1 head=%s verdict=pass blockers=0 round=1"},"created_on":"2026-01-01T00:00:00Z","links":{"html":{"href":"https://bitbucket.org/example/app/pull-requests/7#comment-301"}}}]}\n' "$FAKE_BB_REVIEW_HEAD" ;;

@@ -29,7 +29,7 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	}
 	var base, head, dir string
 	var round int
-	var public, noCatchUp bool
+	var public, private, noCatchUp bool
 	var startOpen, startNoOpen bool
 	start := &cobra.Command{Use: "start <repo>#<number> [repo ...]", Short: branding.Text("Create a review-only collection for someone else's PR ({{command}} new --pr … --review)"), Args: cobra.MinimumNArgs(1)}
 	start.Flags().BoolVar(&startOpen, "open", false, "Open the new collection in herdr")
@@ -53,7 +53,9 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 	bundle.Flags().StringVar(&head, "head", "HEAD", "Head commit ref")
 	bundle.Flags().StringVar(&dir, "dir", "", "Bundle directory")
 	bundle.Flags().IntVar(&round, "round", 0, "Review round (default: next)")
-	bundle.Flags().BoolVar(&public, "public", false, "Exclude local overlays and related repository snapshots")
+	bundle.Flags().BoolVar(&public, "public", false, "Use target-only rules and exclude other repository context")
+	bundle.Flags().BoolVar(&private, "private", false, "Include harness overlays and repository context (cannot post to public/unknown targets)")
+	bundle.MarkFlagsMutuallyExclusive("public", "private")
 	bundle.Flags().BoolVar(&noCatchUp, "no-catch-up", false, "Skip PR collection catch-up (PR branch checkout still runs)")
 	bundle.RunE = func(cmd *cobra.Command, args []string) error {
 		c, err := context()
@@ -64,13 +66,14 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 		if len(args) == 2 {
 			pr = args[1]
 		}
-		result, err := c.BuildReviewBundle(wtc.ReviewBundleOptions{Repo: args[0], PR: pr, Base: base, Head: head, Dir: dir, Round: round, Public: public, NoCatchUp: noCatchUp})
+		result, err := c.BuildReviewBundle(wtc.ReviewBundleOptions{Repo: args[0], PR: pr, Base: base, Head: head, Dir: dir, Round: round, Public: public, Private: private, NoCatchUp: noCatchUp})
 		if err != nil {
 			return err
 		}
 		if *asJSON {
 			return emit(envelope{OK: true, Data: result, Summary: result.Dir}, true)
 		}
+		fmt.Fprintf(os.Stderr, "Review bundle mode: %s (audience: %s; %s)\n", result.Manifest.Mode(), result.Manifest.Audience, result.Manifest.ModeReason)
 		fmt.Println(result.Dir)
 		return nil
 	}

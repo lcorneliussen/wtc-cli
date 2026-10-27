@@ -26,10 +26,16 @@ the new head.
    summoning it. If no hosted run exists (often on drafts), proceed locally;
    do not trigger one just to satisfy this step. A clean hosted review still
    requires a separate local pass. Recheck activity after every new head.
-2. Build a bundle with `wtc review bundle <repo> <pr>`. For a public or
-   unknown-audience PR, add `--public` to exclude other repositories and local
-   concern overlays. A known PR checks out its branch and catches up the
-   collection before the diff; `--no-catch-up` skips that refresh. Branch-only
+2. Build a bundle with `wtc review bundle <repo> <pr>`. Public or unknown
+   visibility, a different forge/owner, or an unknown harness namespace defaults
+   to public mode. It uses only target base-commit concerns (or CLI defaults),
+   embedded prompts, and public prior rounds. `--public` forces this isolation;
+   `--private` explicitly includes harness overlays and other repository context.
+   Inspect the selected mode and reason in the output and manifest. Private
+   bundles cannot be posted unless fresh forge evidence confirms a private
+   destination, even with `--force`. Normally an upstream project runs its own
+   gate rather than a consuming harness judging it. A known PR checks out its
+   branch and catches up the collection before the diff; `--no-catch-up` skips that refresh. Branch-only
    reviews use current local refs. Inspect the bundle before giving it to an
    external reviewer.
 3. Run `wtc review run <bundle-dir>` without `--post`. Inspect `summary.md`

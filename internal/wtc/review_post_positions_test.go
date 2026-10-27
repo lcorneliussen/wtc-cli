@@ -21,7 +21,7 @@ func reviewPositionFixture(t *testing.T, findings string) (*Context, string, str
 		t.Fatal(err)
 	}
 	head := "1234567890abcdef1234567890abcdef12345678"
-	if err := writeReviewManifest(bundle, ReviewManifest{Repo: "app", PR: "7", Forge: "github", Slug: "example/app", HeadSHA: head, Round: 1, RepoDir: repo}); err != nil {
+	if err := writeReviewManifest(bundle, ReviewManifest{Repo: "app", PR: "7", Public: true, Forge: "github", Slug: "example/app", HeadSHA: head, Round: 1, RepoDir: repo}); err != nil {
 		t.Fatal(err)
 	}
 	summary := "**Local review: pass**\n\nFindings remain visible in this summary.\n\n`wtc-review v1 head=" + head + " verdict=pass blockers=0 round=1 lead=test:`\n"

@@ -94,7 +94,7 @@ func copyPublicReviewComments(dir string, manifest ReviewManifest) {
 		return
 	}
 	if manifest.Forge == "bitbucket" {
-		raw, err := reviewForgeCommand(manifest.RepoDir, "bb", []string{"--json", "pr", "comments", "list", manifest.PR, "--limit", "1000", "--no-truncate"}, nil)
+		raw, err := reviewBitbucketCommand(manifest, []string{"--json", "pr", "comments", "list", manifest.PR, "--limit", "1000", "--no-truncate"}, nil)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: Bitbucket review comments unavailable: %v\n"), err)
 			return
