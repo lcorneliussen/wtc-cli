@@ -231,6 +231,10 @@ function watchCollection(host, sessionKey, agentId, onChange) {
     },
   };
 }
+const pauseCollection = (watch) => {
+  watch?.pause(true);
+  return () => watch?.pause(false);
+};
 
 // The collection card above the message box, where OpenClaw shows a task's
 // progress: collapsed, what is not pushed yet, the open pull requests with
@@ -533,7 +537,7 @@ const brand = (size, version) => css(el("span", {},
 // done about a fact is done on it: the ↑ count pushes, the ↓ count catches up,
 // a conflict is resolved, a service's state starts or stops it.
 //
-// v is the view: { host, key(), agent(), svc, say(text), refresh(), pause(on),
+// v is the view: { host, key(), agent(), svc, say(text), refresh(), pause() → resume,
 // rerender() }. Narrow, a row wraps into two lines: what it is (the repository
 // and its branch, the service), then its facts under the header, still in
 // their columns.
@@ -570,7 +574,7 @@ function collectionTables(v) {
       await askSkill(v.host, conversationKey, "wtc", `${nameOf(r)}: review the title and description of ${url} against the full current PR diff, including the latest pushed commits. Recheck the PR's current state and head first. Preserve useful human edits. If the text no longer describes the complete change, propose a revised title and description for the person to review; otherwise explain that it still fits. This is a review of the PR text, not a request for a code review. Do not change commits, push, merge, or edit the remote PR text in this step.`);
       if (v.key() === conversationKey) v.say(`${nameOf(r)}: asked the conversation to review the PR title and description and propose any needed revisions.`);
     } catch (err) {
-      if (v.key() === conversationKey) throw err;
+      if (v.key() === conversationKey) v.say(String(err?.message ?? err), true);
     } finally { acting.delete(r.sessionKey); }
   }
   const nextLabel = (s) => ({ "return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", resolve: "Resolve conflicts", merge: "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", push: "Push", "merge-pr": "Open pull request" })[s.step] ?? s.step;
@@ -679,14 +683,14 @@ function collectionTables(v) {
       bitbucket ? null : css(el("div", { textContent: "A GitHub identity under Agents → Tools is the agent's own; it is not used for pushing." }), "color:var(--muted, #888)")),
     "font-size:12px;line-height:1.45;display:grid;gap:4px;padding:8px 10px;border:1px solid var(--border-strong, rgba(128,128,128,.4));border-radius:12px");
   }
-  async function publish(r) {
+  async function publish(r, conversationKey = v.key()) {
+    if (v.key() !== conversationKey) return;
     if (!PUSHES.has(r.forge) || mine[r.forge] === false) return;
-    const conversationKey = v.key();
     const say = (...args) => { if (v.key() === conversationKey) v.say(...args); };
     const review = (repo, url) => reviewPRText(repo, url, conversationKey);
     busy.add(r.sessionKey);
-    v.say(`Preparing to push ${nameOf(r)}…`);
-    v.pause(true);
+    say(`Preparing to push ${nameOf(r)}…`);
+    const resume = v.pause();
     v.rerender();
     try {
       const pending = confirming.get(r.sessionKey);
@@ -697,6 +701,7 @@ function collectionTables(v) {
         : bitbucket
           ? await publishBitbucket(v.host, v.agent(), r, say, r.base ? baseOf(r) : undefined)
           : await publishRepo(v.host, v.agent(), r, say, review);
+      if (v.key() !== conversationKey) return;
       if (next?.connect) { mine[r.forge] = null; showConnect = r.forge; v.reveal?.(); }
       else {
         // It is connected: look again rather than keep "not connected".
@@ -707,8 +712,8 @@ function collectionTables(v) {
       say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true);
     } finally {
       busy.delete(r.sessionKey);
-      v.pause(false);
-      await v.refresh();
+      resume?.();
+      if (v.key() === conversationKey) await v.refresh();
     }
   }
   async function catchUp(list) {
@@ -720,7 +725,11 @@ function collectionTables(v) {
     }
   }
   async function pushAll(list) {
-    for (const r of list) await publish(r);
+    const conversationKey = v.key();
+    for (const r of list) {
+      if (v.key() !== conversationKey) break;
+      await publish(r, conversationKey);
+    }
   }
   // A sub-session's commits go into the collection's checkout of the repository, as a
   // catch-up from its branch; a conflict is the agent's, as on ↓.
@@ -1167,7 +1176,7 @@ function mountComposer(container, context) {
     get host() { return ctx.host; }, key: () => key, agent: () => agentOf(ctx), svc, say,
     // What a push needs (the how-to of connecting GitHub) shows open.
     reveal: () => { if (!card.open) { card.open = true; remember(true); } },
-    refresh: () => watch?.refresh(), pause: (on) => watch?.pause(on), rerender: () => entry && render(entry),
+    refresh: () => watch?.refresh(), pause: () => pauseCollection(watch), rerender: () => entry && render(entry),
   });
 
   // A conversation without a collection: where the draft being typed, or
@@ -1416,7 +1425,7 @@ function mountCollection(container, context) {
 
   const tables = collectionTables({
     get host() { return ctx.host; }, key: sessionKeyOf, agent: () => ctx.props.agentId, svc, say,
-    refresh: () => watch?.refresh(), pause: (on) => watch?.pause(on), rerender: () => render(),
+    refresh: () => watch?.refresh(), pause: () => pauseCollection(watch), rerender: () => render(),
   });
   // The panel is often narrow, beside the conversation or on a phone: rows
   // then wrap into two lines.

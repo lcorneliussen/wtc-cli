@@ -100,6 +100,7 @@ let preserved = {};
 let catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
 let nextResult;
 let githubPublishResult = { status: "needs_confirmation", requestId: "req-1" };
+let githubConfirmResult;
 let controlledSend;
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
@@ -140,8 +141,8 @@ const hostRequest = async (method, params) => {
   if (method === "plugins.sessionAction" && params.actionId === "catch-up") return catchUpResult;
   if (method === "plugins.sessionAction" && params.actionId === "next") return nextResult;
   if (method === "sessions.delete") return { ok: true, key: params.key, deleted: true, archived: [], ...(preserved[params.key] ? { worktreePreserved: preserved[params.key] } : {}) };
-  if (method === "sessions.github.publish") return githubPublishResult;
-  if (method === "sessions.github.confirm") return { status: "published", url: "https://github.com/octo/api/pull/7" };
+  if (method === "sessions.github.publish") return typeof githubPublishResult === "function" ? githubPublishResult(params) : githubPublishResult;
+  if (method === "sessions.github.confirm") return typeof githubConfirmResult === "function" ? githubConfirmResult(params) : githubConfirmResult ?? { status: "published", url: "https://github.com/octo/api/pull/7" };
   return {};
 };
 
@@ -570,6 +571,46 @@ for (const kind of ["composer", "panel"]) test(`${kind}: a delayed PR text revie
     assert.doesNotMatch(host.textContent, /The old PR text review failed/);
     assert.equal([...host.all()].some((n) => (n.role ?? n.attributes.role) === "alert"), false);
   } finally { view.dispose(); controlledSend = undefined; bitbucket = undefined; bitbucketConfirmResult = undefined; }
+});
+
+for (const phase of ["prepare", "confirm"]) for (const switchConversation of [false, true]) test(`composer: ${phase} batch ${switchConversation ? "stops after switching conversations" : "completes in its original conversation"}`, async () => {
+  personal = { state: "connected", account: { id: 1, login: "octo" }, generation: "g1" };
+  const previous = githubPublishResult;
+  const prepared = { status: "needs_confirmation", requestId: "req-1" };
+  githubPublishResult = prepared;
+  const { host, view } = await mount("composer", collection([repo("api", { unpublished: 1 }), repo("docs", { unpublished: 1 })]));
+  try {
+    const push = () => titled(host, "Push api, docs, each to its pull request or a new draft one");
+    if (phase === "confirm") { await push().onclick(); await settle(); }
+    let finish;
+    const delayed = new Promise((resolve) => { finish = resolve; });
+    const published = (params) => ({ status: "published", url: `https://github.com/example/${params.sessionKey.endsWith(":api") ? "api" : "docs"}/pull/8` });
+    if (phase === "prepare") githubPublishResult = (params) => params.sessionKey.endsWith(":api") ? delayed : prepared;
+    else githubConfirmResult = (params) => params.sessionKey.endsWith(":api") ? delayed : published(params);
+    calls.length = 0;
+    const pending = push().onclick();
+    await settle();
+    if (switchConversation) {
+      const nextKey = `agent:main:other:${++sessions}`;
+      collections.set(nextKey, { ...collection([repo("other")]), collection: { sessionKey: nextKey } });
+      view.update({ props: { sessionKey: nextKey, agentId: "main" }, host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} });
+    }
+    finish(phase === "prepare" ? prepared : published({ sessionKey: "agent:main:owner:api" }));
+    await pending;
+    await settle();
+    const method = phase === "prepare" ? "sessions.github.publish" : "sessions.github.confirm";
+    assert.equal(calls.filter((c) => c.method === method).length, switchConversation ? 1 : 2);
+    const review = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Review PR text");
+    if (switchConversation) {
+      assert.equal(review, undefined);
+      assert.doesNotMatch(host.textContent, /Preparing to push docs|docs: pushed/);
+    } else if (phase === "confirm") {
+      assert.ok(review);
+      review.onclick({ preventDefault() {}, stopPropagation() {} });
+      await settle();
+      assert.match(calls.find((c) => c.method === "sessions.send").message, /docs: review.*example\/docs\/pull\/8/);
+    }
+  } finally { view.dispose(); personal = null; githubPublishResult = previous; githubConfirmResult = undefined; }
 });
 
 test("composer: a push is the person's, with their own account, after they confirm", async () => {
