@@ -100,6 +100,7 @@ let preserved = {};
 let catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } } };
 let nextResult;
 let githubPublishResult = { status: "needs_confirmation", requestId: "req-1" };
+let controlledSend;
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
 let personal = null;
@@ -134,6 +135,7 @@ const hostRequest = async (method, params) => {
     return { ok: true, result: /site/.test(params.payload.text) ? { project: "wtc", repos: ["wtc-site"], source: "match" } : null };
   }
   calls.push({ method, ...params });
+  if (method === "sessions.send" && controlledSend) return controlledSend;
   if (method === "plugins.sessionAction" && params.actionId === "svc") return svcResult;
   if (method === "plugins.sessionAction" && params.actionId === "catch-up") return catchUpResult;
   if (method === "plugins.sessionAction" && params.actionId === "next") return nextResult;
@@ -544,6 +546,30 @@ test("PR text review never follows a publication into another conversation", asy
       assert.equal(calls.some((c) => c.method === "sessions.send"), false);
     } finally { view.dispose(); bitbucket = undefined; bitbucketConfirmResult = undefined; }
   }
+});
+
+for (const kind of ["composer", "panel"]) test(`${kind}: a delayed PR text review failure stays in its original conversation`, async () => {
+  bitbucket = { user: "ada@example.com", name: "Ada" };
+  bitbucketConfirmResult = { status: "published", created: false, url: "https://bitbucket.org/example/docs/pull-requests/8" };
+  const { host, view } = await mount(kind, collection([repo("docs", { forge: "bitbucket", unpublished: 1 })]));
+  try {
+    await [...host.all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+    await settle();
+    await [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "confirm ↑ 1").onclick();
+    await settle();
+    let reject;
+    controlledSend = new Promise((resolve, fail) => { reject = fail; });
+    [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Review PR text").onclick({ preventDefault() {}, stopPropagation() {} });
+    await settle();
+    const nextKey = `agent:main:other:${++sessions}`;
+    collections.set(nextKey, { ...collection([repo("other")]), collection: { sessionKey: nextKey } });
+    view.update({ props: { sessionKey: nextKey, agentId: "main" }, host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} });
+    await settle();
+    reject(new Error("The old PR text review failed"));
+    await settle();
+    assert.doesNotMatch(host.textContent, /The old PR text review failed/);
+    assert.equal([...host.all()].some((n) => (n.role ?? n.attributes.role) === "alert"), false);
+  } finally { view.dispose(); controlledSend = undefined; bitbucket = undefined; bitbucketConfirmResult = undefined; }
 });
 
 test("composer: a push is the person's, with their own account, after they confirm", async () => {

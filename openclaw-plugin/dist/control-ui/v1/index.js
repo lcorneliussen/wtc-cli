@@ -569,6 +569,8 @@ function collectionTables(v) {
     try {
       await askSkill(v.host, conversationKey, "wtc", `${nameOf(r)}: review the title and description of ${url} against the full current PR diff, including the latest pushed commits. Recheck the PR's current state and head first. Preserve useful human edits. If the text no longer describes the complete change, propose a revised title and description for the person to review; otherwise explain that it still fits. This is a review of the PR text, not a request for a code review. Do not change commits, push, merge, or edit the remote PR text in this step.`);
       if (v.key() === conversationKey) v.say(`${nameOf(r)}: asked the conversation to review the PR title and description and propose any needed revisions.`);
+    } catch (err) {
+      if (v.key() === conversationKey) throw err;
     } finally { acting.delete(r.sessionKey); }
   }
   const nextLabel = (s) => ({ "return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", resolve: "Resolve conflicts", merge: "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", push: "Push", "merge-pr": "Open pull request" })[s.step] ?? s.step;
