@@ -77,6 +77,7 @@ func TestStatusErrorsQuoteTheRightStream(t *testing.T) {
 
 func TestStatusReadsBitbucketJSONPastPipeCap(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
+	statusHideBitbucketLogin(t)
 	fakeLargeBB(t, map[string]string{
 		"view":     `{"id":9,"state":"MERGED","updated_on":"2026-10-01T15:00:00Z","merge_commit":{"date":"2026-09-29T12:00:00Z"}}`,
 		"activity": `{"activities":[{"update":{"state":"MERGED","date":"2026-09-30T12:00:00Z"}}]}`,

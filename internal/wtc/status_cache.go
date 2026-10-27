@@ -66,6 +66,10 @@ func statusReadForgeEntry(kind, forge, slug, key string) ([]byte, bool) {
 	return statusReadForgeEntryWithAge(kind, forge, slug, key, statusForgeCacheAge())
 }
 
+func statusReadForgeEntryAny(kind, forge, slug, key string) ([]byte, bool) {
+	return statusReadForgeEntryWithAge(kind, forge, slug, key, 365*24*time.Hour)
+}
+
 func statusReadForgeEntryWithAge(kind, forge, slug, key string, age time.Duration) ([]byte, bool) {
 	path := statusForgeEntryPath(kind, forge, slug, key)
 	if !statusSecureCacheDir(filepath.Dir(path)) {
@@ -81,6 +85,34 @@ func statusReadForgeEntryWithAge(kind, forge, slug, key string, age time.Duratio
 
 func statusWriteForgeCache(forge, slug, number string, data []byte) {
 	statusWriteForgeEntry("pr", forge, slug, number, data)
+}
+
+// statusWriteForgeEntrySince publishes data fetched by a request that started
+// at started, unless the record already holds a response from a later request.
+// Callers hold the record lock when it can be taken; without it two writers can
+// still interleave between the check and the write.
+func statusWriteForgeEntrySince(kind, forge, slug, key string, data []byte, started time.Time) bool {
+	if len(data) == 0 {
+		return false
+	}
+	if saved, ok := statusForgeEntrySince(kind, forge, slug, key); ok && saved.After(started) {
+		return false
+	}
+	statusWriteForgeEntry(kind, forge, slug, key, data)
+	statusWriteForgeEntry("since", forge, slug, kind+":"+key, []byte(strconv.FormatInt(started.UnixNano(), 10)))
+	return true
+}
+
+func statusForgeEntrySince(kind, forge, slug, key string) (time.Time, bool) {
+	saved, ok := statusReadForgeEntryAny("since", forge, slug, kind+":"+key)
+	if !ok {
+		return time.Time{}, false
+	}
+	nanos, err := strconv.ParseInt(string(saved), 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return time.Unix(0, nanos), true
 }
 
 func statusWriteForgeEntry(kind, forge, slug, key string, data []byte) {

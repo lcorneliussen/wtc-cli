@@ -172,6 +172,9 @@ func (c *Context) statusBuild(hook string, request statusBuildRequest) *StatusBu
 	if err == errStatusBuildDefault {
 		build, err = statusForgeBuild(request.Forge, request.Slug, request.Branch)
 	}
+	if errors.Is(err, errForgeBudget) || errors.Is(err, errForgeCooling) {
+		return nil
+	}
 	if err != nil {
 		// One unreachable provider must not cost the rest of the refresh.
 		message := strings.TrimSpace(err.Error())
@@ -243,6 +246,9 @@ func (c *Context) statusBuildFacts(snapshot *StatusSnapshot) error {
 	if len(jobs) == 0 {
 		return nil
 	}
+	previousNote := statusAuditNote
+	statusAuditNote = func(message string) { c.statusProgress(message) }
+	defer func() { statusAuditNote = previousNote }()
 	results := make([]*StatusBuild, len(jobs))
 	limit := make(chan struct{}, 4)
 	var workers sync.WaitGroup

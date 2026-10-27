@@ -2,6 +2,7 @@ package wtc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -42,7 +43,9 @@ func statusBBCompleteMergeTime(detail statusPRDetail, slug string) statusPRDetai
 	if len(parts) != 2 {
 		return detail
 	}
-	raw, err := statusJSON("bb", "pr", "activity", detail.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
+	raw, err := statusSingleFlight("activity", "bitbucket.org", slug, detail.Number, func() ([]byte, error) {
+		return statusJSON("bb", "pr", "activity", detail.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
+	})
 	if err == nil {
 		detail.MergedOn = statusBBMergeEventTime(raw)
 	}
@@ -89,6 +92,10 @@ func statusUnknownDetail(record PRRecord) statusPRDetail {
 	return statusPRDetail{Number: record.Number, State: "UNKNOWN", Checks: "NONE", Merge: "UNKNOWN", Review: "none", Title: record.Title}
 }
 
+func statusDeferredDetail(record PRRecord) statusPRDetail {
+	return statusPRDetail{Number: record.Number, Checks: "PENDING", Title: record.Title}
+}
+
 func statusParseForgeDetail(forge string, raw []byte, record PRRecord) (statusPRDetail, error) {
 	var detail statusPRDetail
 	var err error
@@ -106,42 +113,138 @@ func statusParseForgeDetail(forge string, raw []byte, record PRRecord) (statusPR
 	return detail, err
 }
 
+func statusCachedSettledMerge(record PRRecord, slug, forge string) (statusPRDetail, bool) {
+	// Reuse merged forge detail until its final facts are written to the
+	// collection registry; the registry then avoids later forge calls.
+	cached, ok := statusReadMergedForgeCache(forge, slug, record.Number)
+	if !ok {
+		return statusPRDetail{}, false
+	}
+	detail, err := statusParseForgeDetail(forge, cached, record)
+	if err != nil || detail.State != "MERGED" || detail.MergedOn == "" || detail.ChecksUnsettled || detail.Checks == "PENDING" {
+		return statusPRDetail{}, false
+	}
+	return detail, true
+}
+
+func statusReadCachedDetail(record PRRecord, slug, forge string) (statusPRDetail, bool) {
+	cached, ok := statusReadForgeCache(forge, slug, record.Number)
+	if !ok {
+		return statusPRDetail{}, false
+	}
+	detail, err := statusParseForgeDetail(forge, cached, record)
+	if err != nil {
+		return statusPRDetail{}, false
+	}
+	if forge == "bitbucket.org" {
+		detail = statusBBCompleteMergeTime(detail, slug)
+	}
+	return detail, true
+}
+
 func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	if slug == "" || forge == "" {
 		return statusUnknownDetail(record)
 	}
-	if cached, ok := statusReadForgeCache(forge, slug, record.Number); ok {
-		if detail, err := statusParseForgeDetail(forge, cached, record); err == nil {
-			if forge == "bitbucket.org" {
-				detail = statusBBCompleteMergeTime(detail, slug)
-			}
-			return detail
-		}
+	if detail, ok := statusCachedSettledMerge(record, slug, forge); ok {
+		return detail
 	}
-	// Reuse merged forge detail until its final facts are written to the
-	// collection registry; the registry then avoids later forge calls.
-	if cached, ok := statusReadMergedForgeCache(forge, slug, record.Number); ok {
-		if detail, err := statusParseForgeDetail(forge, cached, record); err == nil && detail.State == "MERGED" && detail.MergedOn != "" && !detail.ChecksUnsettled && detail.Checks != "PENDING" {
-			return detail
+	if listed, truncated, err := statusOpenPRs(forge, slug); err == nil {
+		if item, ok := listed[record.Number]; ok {
+			return statusEnrichListed(record, slug, forge, item)
+		}
+		if truncated {
+			if cached, ok := statusReadForgeEntryAny("pr", forge, slug, record.Number); ok {
+				if detail, parseErr := statusParseForgeDetail(forge, cached, record); parseErr == nil {
+					return statusConfirmFullPR(record, slug, forge, detail, "capped")
+				}
+			}
+			return statusViewPR(record, slug, forge, false)
+		}
+		if detail, ok := statusReadCachedDetail(record, slug, forge); ok && detail.State != "OPEN" && detail.State != "DRAFT" {
+			return statusConfirmFullPR(record, slug, forge, detail, "list-omitted")
+		}
+		viewed := statusViewPR(record, slug, forge, true)
+		if statusFullRefreshDue(forge, slug, record.Number) && (viewed.State == "OPEN" || viewed.State == "DRAFT") {
+			statusLogIncrementalMiss(forge, slug, "#"+record.Number, "list-omitted", "state:"+viewed.State)
+			statusMarkFullRefresh(forge, slug, record.Number)
+		}
+		return viewed
+	}
+	if detail, ok := statusReadCachedDetail(record, slug, forge); ok {
+		return detail
+	}
+	return statusViewPR(record, slug, forge, false)
+}
+
+func statusEnrichListed(record PRRecord, slug, forge string, item statusOpenPR) statusPRDetail {
+	unlock, lockErr := statusLockCache(statusForgeEntryPath("pr", forge, slug, record.Number))
+	detail, used, matched := statusDetailFromOpenItem(record, slug, forge, item)
+	if !used {
+		if lockErr == nil {
+			unlock()
+		}
+		return statusViewPR(record, slug, forge, false)
+	}
+	source := "list"
+	if matched {
+		source = "stamp"
+	}
+	detail = statusConfirmFullPRLocked(record, slug, forge, detail, source)
+	if lockErr == nil {
+		unlock()
+	}
+	return detail
+}
+
+func statusViewPR(record PRRecord, slug, forge string, bypassCache bool) statusPRDetail {
+	fetch := func() ([]byte, error) {
+		switch forge {
+		case "github.com":
+			return statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,mergeable,reviewRequests,latestReviews,mergedAt,baseRefName,mergeCommit")
+		case "bitbucket.org":
+			parts := strings.SplitN(slug, "/", 2)
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid Bitbucket repository slug")
+			}
+			return statusJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
+		default:
+			return nil, fmt.Errorf("unsupported forge")
 		}
 	}
 	var raw []byte
 	var err error
-	switch forge {
-	case "github.com":
-		raw, err = statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,mergeable,reviewRequests,latestReviews,mergedAt,baseRefName,mergeCommit")
-	case "bitbucket.org":
-		parts := strings.SplitN(slug, "/", 2)
-		raw, err = statusJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
+	if bypassCache {
+		unlock, lockErr := statusLockCache(statusForgeEntryPath("pr", forge, slug, record.Number))
+		if lockErr == nil {
+			defer unlock()
+		}
+		if _, ok := statusReadForgeEntry("omit", forge, slug, record.Number); ok {
+			if cached, ok := statusReadCachedDetail(record, slug, forge); ok {
+				return cached
+			}
+		}
+		stale, _ := statusReadForgeEntryAny("pr", forge, slug, record.Number)
+		started := time.Now()
+		var live bool
+		raw, live, err = statusWithForgeBudget(forge, stale, fetch)
+		if live && len(raw) > 0 {
+			statusWriteForgeEntrySince("pr", forge, slug, record.Number, raw, started)
+			statusWriteForgeEntry("omit", forge, slug, record.Number, []byte("ok"))
+		}
+	} else {
+		raw, err = statusSingleFlight("pr", forge, slug, record.Number, fetch)
 	}
 	if err == nil {
 		if detail, parseErr := statusParseForgeDetail(forge, raw, record); parseErr == nil {
-			statusWriteForgeCache(forge, slug, record.Number, raw)
 			if forge == "bitbucket.org" {
 				detail = statusBBCompleteMergeTime(detail, slug)
 			}
 			return detail
 		}
+	}
+	if errors.Is(err, errForgeBudget) || errors.Is(err, errForgeCooling) {
+		return statusDeferredDetail(record)
 	}
 	return statusUnknownDetail(record)
 }
@@ -176,6 +279,9 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 	if len(pending) != 0 {
 		c.statusProgress(fmt.Sprintf("Checking %d live pull requests", len(pending)))
 	}
+	previousNote := statusAuditNote
+	statusAuditNote = func(message string) { c.statusProgress(message) }
+	defer func() { statusAuditNote = previousNote }()
 	const parallel = 4
 	limit := make(chan struct{}, parallel)
 	done := make(chan struct{}, len(pending))

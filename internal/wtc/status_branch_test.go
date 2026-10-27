@@ -2,10 +2,14 @@ package wtc
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestStatusBranchListMatchesExactSourceBranch(t *testing.T) {
@@ -61,28 +65,244 @@ esac
 	if cached := statusEnrichRecord(PRRecord{Number: number}, "example/widget", "github.com"); cached.State != "OPEN" {
 		t.Fatalf("valid detail cache missed: %+v", cached)
 	}
-	if _, err := statusDiscoverBranch("github.com", "example/widget", "different"); err == nil {
+	if number, err := statusDiscoverBranch("github.com", "example/widget", "different"); err != nil || number != "" {
+		t.Fatalf("branch absent from a successful list: %q %v", number, err)
+	}
+	if _, err := statusDiscoverBranch("github.com", "example/other", "topic"); err == nil {
 		t.Fatal("failed discovery was treated as a negative result")
 	}
 }
 
 func TestStatusBitbucketDiscoveryReadsPastFirstPage(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	bin := t.TempDir()
-	items := make([]string, 50)
-	for i := range items {
-		items[i] = fmt.Sprintf(`{"id":%d,"source":{"branch":{"name":"other-%d"}}}`, i+1, i)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	var sawFields bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Query().Get("fields"), "updated_on") && strings.Contains(r.URL.Query().Get("fields"), "comment_count") {
+			sawFields = true
+		}
+		if r.URL.Query().Get("page") == "2" {
+			w.Write([]byte(`{"values":[{"id":99,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"topic"}}}]}`))
+			return
+		}
+		items := make([]string, 50)
+		for i := range items {
+			items[i] = fmt.Sprintf(`{"id":%d,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"other-%d"}}}`, i+1, i)
+		}
+		fmt.Fprintf(w, `{"values":[%s],"next":"http://%s%s?page=2"}`, strings.Join(items, ","), r.Host, r.URL.Path)
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	number, err := statusDiscoverBranch("bitbucket.org", "example/widget", "topic")
+	if err != nil || number != "99" || !sawFields {
+		t.Fatalf("branch beyond first page was missed: %q %v fields %v", number, err, sawFields)
 	}
-	first := `{"pullRequests":[` + strings.Join(items, ",") + `]}`
-	last := `{"pullRequests":[{"id":99,"source":{"branch":{"name":"topic"}}}]}`
-	script := "#!/bin/sh\ncase \"$*\" in\n  *2147483647*) printf '%s\\n' '" + last + "' ;;\n  *) printf '%s\\n' '" + first + "' ;;\nesac\n"
-	if err := os.WriteFile(filepath.Join(bin, "bb"), []byte(script), 0755); err != nil {
+}
+
+func TestStatusBitbucketDiscoverySharesOneList(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Write([]byte(`{"values":[{"id":7,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"topic"}}},{"id":8,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"other"}}}]}`))
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	topic, err := statusDiscoverBranch("bitbucket.org", "example/widget", "topic")
+	other, otherErr := statusDiscoverBranch("bitbucket.org", "example/widget", "other")
+	missing, missingErr := statusDiscoverBranch("bitbucket.org", "example/widget", "absent")
+	if err != nil || otherErr != nil || missingErr != nil || topic != "7" || other != "8" || missing != "" || hits.Load() != 1 {
+		t.Fatalf("two branches did not share one list: %q %q %q hits=%d errs=%v %v %v", topic, other, missing, hits.Load(), err, otherErr, missingErr)
+	}
+}
+
+func TestStatusBitbucketListChargesEveryPage(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	t.Setenv("WTC_FORGE_MIN_INTERVAL", "60")
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if r.URL.Query().Get("page") == "2" {
+			w.Write([]byte(`{"values":[{"id":2,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"other"}}}]}`))
+			return
+		}
+		fmt.Fprintf(w, `{"values":[{"id":1,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"topic"}}}],"next":"http://%s%s?page=2"}`, r.Host, r.URL.Path)
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	listed, truncated, err := statusOpenPRs("bitbucket.org", "example/widget")
+	if err != nil || !truncated || hits.Load() != 1 || listed["1"].Number != "1" || listed["2"].Number != "" {
+		t.Fatalf("second page was not charged: listed=%v truncated=%v hits=%d err=%v", listed, truncated, hits.Load(), err)
+	}
+}
+
+func TestStatusBitbucketDiscoveryLooksUpABranchTheCappedListOmits(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	var lists, branches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("q") != "" {
+			branches.Add(1)
+			if !strings.Contains(r.URL.Query().Get("q"), "topic") {
+				t.Errorf("branch query = %s", r.URL.RawQuery)
+			}
+			w.Write([]byte(`{"values":[{"id":9,"source":{"branch":{"name":"topic"}}}]}`))
+			return
+		}
+		lists.Add(1)
+		page := r.URL.Query().Get("page")
+		if page == "" {
+			page = "1"
+		}
+		var n int
+		fmt.Sscan(page, &n)
+		if n < 11 {
+			fmt.Fprintf(w, `{"values":[{"id":%d,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"other-%d"}}}],"next":"http://%s%s?page=%d"}`, n, n, r.Host, r.URL.Path, n+1)
+			return
+		}
+		fmt.Fprintf(w, `{"values":[{"id":%d,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"other-%d"}}}]}`, n, n)
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	number, err := statusDiscoverBranch("bitbucket.org", "example/widget", "topic")
+	if err != nil || number != "9" || lists.Load() != 10 || branches.Load() != 1 {
+		t.Fatalf("capped list did not look up the branch: %q lists=%d branches=%d err=%v", number, lists.Load(), branches.Load(), err)
+	}
+	again, err := statusDiscoverBranch("bitbucket.org", "example/widget", "other-1")
+	if err != nil || again != "1" || lists.Load() != 10 || branches.Load() != 1 {
+		t.Fatalf("branch on the capped list was looked up again: %q lists=%d branches=%d err=%v", again, lists.Load(), branches.Load(), err)
+	}
+}
+
+func TestStatusGitHubDiscoveryFallsBackWhenTheListIsFull(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	var lists, heads int
+	bin := t.TempDir()
+	var items []string
+	for i := 0; i < statusOpenListLimit; i++ {
+		items = append(items, fmt.Sprintf(`{"number":%d,"headRefName":"other-%d","state":"OPEN","title":"Other"}`, i+1, i))
+	}
+	full := "[" + strings.Join(items, ",") + "]"
+	script := "#!/bin/sh\ncase \"$*\" in\n  *--head*) printf 'head\\n' >> \"$WTC_TEST_HEADS\"; printf '[{\"number\":9,\"headRefName\":\"topic\"}]\\n' ;;\n  *) printf 'list\\n' >> \"$WTC_TEST_LISTS\"; printf '%s\\n' '" + full + "' ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	number, err := statusDiscoverBranch("bitbucket.org", "example/widget", "topic")
-	if err != nil || number != "99" {
-		t.Fatalf("branch beyond first page was missed: %q %v", number, err)
+	t.Setenv("WTC_TEST_LISTS", filepath.Join(t.TempDir(), "lists"))
+	t.Setenv("WTC_TEST_HEADS", filepath.Join(t.TempDir(), "heads"))
+	number, err := statusDiscoverBranch("github.com", "example/widget", "topic")
+	if err != nil || number != "9" {
+		t.Fatalf("full list did not fall back to the branch: %q %v", number, err)
+	}
+	other, err := statusDiscoverBranch("github.com", "example/widget", "other-0")
+	if err != nil || other != "1" {
+		t.Fatalf("branch on the full list was missed: %q %v", other, err)
+	}
+	lists = statusTestFileLines(t, os.Getenv("WTC_TEST_LISTS"))
+	heads = statusTestFileLines(t, os.Getenv("WTC_TEST_HEADS"))
+	if lists != 1 || heads != 1 {
+		t.Fatalf("list calls=%d head calls=%d", lists, heads)
+	}
+}
+
+func TestStatusCappedListDoesNotRefetchAnOpenPullRequest(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_FULL_REFRESH", "0")
+	views := filepath.Join(t.TempDir(), "views")
+	t.Setenv("WTC_TEST_GH_VIEWS", views)
+	var items []string
+	for i := 0; i < statusOpenListLimit; i++ {
+		items = append(items, fmt.Sprintf(`{"number":%d,"state":"OPEN","title":"Other","headRefName":"other-%d"}`, i+101, i))
+	}
+	script := "#!/bin/sh\ncase \"$2\" in\n  list) printf '%s\\n' '[" + strings.Join(items, ",") + "]' ;;\n  view) printf 'viewed\\n' >> \"$WTC_TEST_GH_VIEWS\"; printf '%s\\n' '{\"number\":7,\"state\":\"OPEN\",\"title\":\"Still open\"}' ;;\n  *) exit 2 ;;\nesac\n"
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	statusWriteForgeCache("github.com", "example/widget", "7", []byte(`{"number":7,"state":"OPEN","title":"Saved"}`))
+	detail := statusEnrichRecord(PRRecord{Number: "7"}, "example/widget", "github.com")
+	if detail.Title != "Saved" || statusTestFileLines(t, views) != 0 {
+		t.Fatalf("capped list refetched an open pull request: %+v views=%d", detail, statusTestFileLines(t, views))
+	}
+}
+
+func TestStatusCappedListStillAudits(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_FULL_REFRESH", "60")
+	views := filepath.Join(t.TempDir(), "views")
+	t.Setenv("WTC_TEST_GH_VIEWS", views)
+	var items []string
+	for i := 0; i < statusOpenListLimit; i++ {
+		items = append(items, fmt.Sprintf(`{"number":%d,"state":"OPEN","title":"Other","headRefName":"other-%d"}`, i+101, i))
+	}
+	script := "#!/bin/sh\ncase \"$2\" in\n  list) printf '%s\\n' '[" + strings.Join(items, ",") + "]' ;;\n  view) printf 'viewed\\n' >> \"$WTC_TEST_GH_VIEWS\"; printf '%s\\n' '{\"number\":7,\"state\":\"OPEN\",\"title\":\"Audited\"}' ;;\n  *) exit 2 ;;\nesac\n"
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	statusWriteForgeCache("github.com", "example/widget", "7", []byte(`{"number":7,"state":"OPEN","title":"Saved"}`))
+	detail := statusEnrichRecord(PRRecord{Number: "7"}, "example/widget", "github.com")
+	if detail.Title != "Audited" || statusTestFileLines(t, views) != 1 {
+		t.Fatalf("capped list skipped the audit: %+v views=%d", detail, statusTestFileLines(t, views))
+	}
+	again := statusEnrichRecord(PRRecord{Number: "7"}, "example/widget", "github.com")
+	if again.Title != "Audited" || statusTestFileLines(t, views) != 1 {
+		t.Fatalf("capped audit repeated inside the interval: %+v views=%d", again, statusTestFileLines(t, views))
+	}
+}
+
+func TestStatusSingleFlightFetchesOnce(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	fetch := func() ([]byte, error) {
+		calls.Add(1)
+		started <- struct{}{}
+		<-release
+		return []byte(`{"ok":true}`), nil
+	}
+	errc := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := statusSingleFlight("probe", "github.com", "example/widget", "shared", fetch)
+			errc <- err
+		}()
+	}
+	<-started
+	select {
+	case <-started:
+		t.Fatal("two fetches ran at once")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	for range 2 {
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("calls = %d", calls.Load())
 	}
 }
 
