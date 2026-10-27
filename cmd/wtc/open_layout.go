@@ -24,7 +24,7 @@ func openRenamePane(session, pane, label string) error {
 }
 
 // openLayoutState classifies a workspace by its agent and status panes. The
-// browse and shell tool panes are optional: a missing one is not damage, but
+// browse, review and shell tool panes are optional: a missing one is not damage, but
 // one that is present has to sit where the layout puts it.
 func openLayoutState(session, workspace string) (string, []openPaneInfo, error) {
 	panes, err := openPanes(session, workspace)
@@ -37,11 +37,12 @@ func openLayoutState(session, workspace string) (string, []openPaneInfo, error) 
 	}
 	agent, status := openPaneByLabel(panes, "agent"), openPaneByLabel(panes, "status")
 	browse, shell := openPaneByLabel(panes, "browse"), openPaneByLabel(panes, "shell")
+	review := openPaneByLabel(panes, "review")
 	if agent.ID == "" || status.ID == "" || agent.TabID != status.TabID {
 		return "partial", panes, nil
 	}
 	tools := []openPaneInfo{}
-	for _, pane := range []openPaneInfo{browse, shell} {
+	for _, pane := range []openPaneInfo{browse, review, shell} {
 		if pane.ID != "" {
 			tools = append(tools, pane)
 		}
@@ -53,8 +54,8 @@ func openLayoutState(session, workspace string) (string, []openPaneInfo, error) 
 			}
 		}
 		pairs := [][2]string{{agent.ID, status.ID}}
-		if len(tools) == 2 {
-			pairs = append(pairs, [2]string{browse.ID, shell.ID})
+		for i := 1; i < len(tools); i++ {
+			pairs = append(pairs, [2]string{tools[i-1].ID, tools[i].ID})
 		}
 		for _, pair := range pairs {
 			stacked, err := openStacked(session, pair[0], pair[1])
@@ -88,10 +89,38 @@ func openLayoutState(session, workspace string) (string, []openPaneInfo, error) 
 	if openSameColumn(session, agent.ID, status.ID) {
 		return "partial", panes, nil
 	}
+	var pairs [][2]string
+	for _, pane := range []openPaneInfo{browse, review} {
+		if pane.ID != "" {
+			pairs = append(pairs, [2]string{pane.ID, status.ID})
+		}
+	}
+	if browse.ID != "" && review.ID != "" {
+		pairs = append(pairs, [2]string{browse.ID, review.ID})
+	}
+	for _, pair := range pairs {
+		stacked, err := openStacked(session, pair[0], pair[1])
+		if err != nil {
+			return "", nil, err
+		}
+		if !stacked {
+			return "partial", panes, nil
+		}
+	}
 	if shell.ID == "" || openSameColumn(session, agent.ID, shell.ID) {
 		return "wide", panes, nil
 	}
 	return "partial", panes, nil
+}
+
+func openToolPanes(panes []openPaneInfo) []openPaneInfo {
+	var tools []openPaneInfo
+	for _, label := range []string{"browse", "review", "shell"} {
+		if pane := openPaneByLabel(panes, label); pane.ID != "" {
+			tools = append(tools, pane)
+		}
+	}
+	return tools
 }
 
 func openAgentHome(panes []openPaneInfo) string {
@@ -161,7 +190,16 @@ func openMoveBeside(session, workspace, pane, target, direction, ratio string) e
 // openRestackNarrow repairs a narrow workspace whose tabs hold the right panes
 // side by side instead of stacked.
 func openRestackNarrow(session, workspace string, panes []openPaneInfo) error {
-	for _, stack := range [][3]string{{"agent", "status", "0.65"}, {"browse", "shell", "0.80"}} {
+	stacks := [][3]string{{"agent", "status", "0.65"}}
+	tools := openToolPanes(panes)
+	for i := 1; i < len(tools); i++ {
+		ratio := "0.50"
+		if tools[i].Label == "shell" {
+			ratio = "0.80"
+		}
+		stacks = append(stacks, [3]string{tools[i-1].Label, tools[i].Label, ratio})
+	}
+	for _, stack := range stacks {
 		upper, lower := openPaneByLabel(panes, stack[0]).ID, openPaneByLabel(panes, stack[1]).ID
 		if upper == "" || lower == "" {
 			continue
@@ -191,20 +229,20 @@ func openSwitchNarrow(session, workspace, agent, cwd string, panes []openPaneInf
 			return err
 		}
 	}
-	browse := openPaneByLabel(panes, "browse").ID
-	shell := openPaneByLabel(panes, "shell").ID
-	if browse != "" {
-		if _, err := openHerdr(session, "pane", "move", browse, "--new-tab", "--workspace", workspace, "--label", "tools", "--no-focus"); err != nil {
-			return err
-		}
-	}
-	if shell != "" && browse != "" {
-		if err := openMoveBelow(session, workspace, shell, browse, "0.80"); err != nil {
-			return err
-		}
-	} else if shell != "" {
-		if _, err := openHerdr(session, "pane", "move", shell, "--new-tab", "--workspace", workspace, "--label", "tools", "--no-focus"); err != nil {
-			return err
+	tools := openToolPanes(panes)
+	for i, pane := range tools {
+		if i == 0 {
+			if _, err := openHerdr(session, "pane", "move", pane.ID, "--new-tab", "--workspace", workspace, "--label", "tools", "--no-focus"); err != nil {
+				return err
+			}
+		} else {
+			ratio := "0.50"
+			if pane.Label == "shell" {
+				ratio = "0.80"
+			}
+			if err := openMoveBelow(session, workspace, pane.ID, tools[i-1].ID, ratio); err != nil {
+				return err
+			}
 		}
 	}
 	if status := openPaneByLabel(panes, "status").ID; status != "" {
@@ -228,16 +266,28 @@ func openSwitchWide(session, workspace, agent, cwd string, panes []openPaneInfo)
 		return fmt.Errorf("cannot find agent tab")
 	}
 	browse := openPaneByLabel(panes, "browse").ID
+	review := openPaneByLabel(panes, "review").ID
+	top := browse
+	if top == "" {
+		top = review
+	}
 	shell := openPaneByLabel(panes, "shell").ID
 	status := openPaneByLabel(panes, "status").ID
-	if browse != "" {
-		if _, err := openHerdr(session, "pane", "move", browse, "--tab", main, "--split", "right", "--target-pane", agent, "--ratio", "0.40", "--no-focus"); err != nil {
+	if top != "" {
+		if err := openMoveBeside(session, workspace, top, agent, "right", "0.40"); err != nil {
 			return err
 		}
 	}
+	bottom := top
+	if browse != "" && review != "" {
+		if err := openMoveBelow(session, workspace, review, browse, "0.50"); err != nil {
+			return err
+		}
+		bottom = review
+	}
 	switch {
-	case status != "" && browse != "":
-		if err := openMoveBelow(session, workspace, status, browse, "0.65"); err != nil {
+	case status != "" && top != "":
+		if err := openMoveBelow(session, workspace, status, bottom, "0.65"); err != nil {
 			return err
 		}
 	case status != "":
@@ -246,8 +296,8 @@ func openSwitchWide(session, workspace, agent, cwd string, panes []openPaneInfo)
 		}
 	default:
 		base, direction, ratio := agent, "right", "0.40"
-		if browse != "" {
-			base, direction, ratio = browse, "down", "0.65"
+		if top != "" {
+			base, direction, ratio = bottom, "down", "0.65"
 		}
 		created, err := openSplit(session, base, direction, ratio, cwd)
 		if err != nil {
@@ -258,7 +308,7 @@ func openSwitchWide(session, workspace, agent, cwd string, panes []openPaneInfo)
 		}
 	}
 	if shell != "" {
-		if _, err := openHerdr(session, "pane", "move", shell, "--tab", main, "--split", "down", "--target-pane", agent, "--ratio", "0.80", "--no-focus"); err != nil {
+		if err := openMoveBelow(session, workspace, shell, agent, "0.80"); err != nil {
 			return err
 		}
 	}
@@ -296,23 +346,53 @@ func openEnsureLayout(session, workspace, cwd, desired string) (string, error) {
 	return "switched", err
 }
 
-// openAddTool adds one browse or shell pane where the layout puts it: on the
+// openAddTool adds one browse, review or shell pane where the layout puts it: on the
 // tools tab in narrow, beside the agent in wide. A pane that has to sit above
 // an existing one is split off it, and the existing pane moves below.
 func openAddTool(session, workspace, cwd, layout, kind string, panes []openPaneInfo) (string, error) {
 	agent := openPaneByLabel(panes, "agent").ID
 	status := openPaneByLabel(panes, "status").ID
 	browse := openPaneByLabel(panes, "browse").ID
-	shell := openPaneByLabel(panes, "shell").ID
 	var id string
 	var err error
+	review := openPaneByLabel(panes, "review").ID
+	tools := openToolPanes(panes)
 	switch {
-	case layout == "narrow" && kind == "browse" && shell != "":
-		if id, err = openSplit(session, shell, "right", "0.50", cwd); err == nil {
-			err = openMoveBelow(session, workspace, shell, id, "0.80")
+	case layout == "narrow" && len(tools) > 0:
+		order := map[string]int{"browse": 0, "review": 1, "shell": 2}
+		var upper, lower string
+		for _, pane := range tools {
+			if order[pane.Label] < order[kind] {
+				upper = pane.ID
+			} else if lower == "" {
+				lower = pane.ID
+			}
 		}
-	case layout == "narrow" && kind == "shell" && browse != "":
-		id, err = openSplit(session, browse, "down", "0.80", cwd)
+		ratio := "0.50"
+		if kind == "shell" {
+			ratio = "0.80"
+		}
+		if upper != "" {
+			id, err = openSplit(session, upper, "down", ratio, cwd)
+		} else {
+			id, err = openSplit(session, lower, "right", "0.50", cwd)
+		}
+		if err == nil && lower != "" {
+			previous := id
+			for _, pane := range tools {
+				if order[pane.Label] < order[kind] {
+					continue
+				}
+				lowerRatio := "0.50"
+				if pane.Label == "shell" {
+					lowerRatio = "0.80"
+				}
+				if err = openMoveBelow(session, workspace, pane.ID, previous, lowerRatio); err != nil {
+					break
+				}
+				previous = pane.ID
+			}
+		}
 	case layout == "narrow":
 		var created openHerdrResponse
 		created, err = openHerdr(session, "tab", "create", "--workspace", workspace, "--cwd", cwd, "--label", "tools", "--no-focus")
@@ -321,11 +401,22 @@ func openAddTool(session, workspace, cwd, layout, kind string, panes []openPaneI
 		}
 	case agent == "":
 		return "", fmt.Errorf("workspace %s has no agent pane to add %s beside", workspace, kind)
-	case kind == "browse" && status != "":
+	case kind == "review" && browse != "":
+		if id, err = openSplit(session, browse, "down", "0.50", cwd); err == nil && status != "" {
+			err = openMoveBelow(session, workspace, status, id, "0.65")
+		}
+	case kind == "browse" && review != "":
+		if id, err = openSplit(session, review, "right", "0.50", cwd); err == nil {
+			err = openMoveBelow(session, workspace, review, id, "0.50")
+			if err == nil && status != "" {
+				err = openMoveBelow(session, workspace, status, review, "0.65")
+			}
+		}
+	case (kind == "browse" || kind == "review") && status != "":
 		if id, err = openSplit(session, status, "right", "0.50", cwd); err == nil {
 			err = openMoveBelow(session, workspace, status, id, "0.65")
 		}
-	case kind == "browse":
+	case kind == "browse" || kind == "review":
 		id, err = openSplit(session, agent, "right", "0.40", cwd)
 	default:
 		id, err = openSplit(session, agent, "down", "0.80", cwd)
