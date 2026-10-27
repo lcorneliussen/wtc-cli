@@ -143,6 +143,15 @@ func statusReadCachedDetail(record PRRecord, slug, forge string) (statusPRDetail
 }
 
 func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
+	detail := statusEnrichRecordMetadata(record, slug, forge)
+	if forge == "bitbucket.org" && (detail.State == "OPEN" || detail.State == "DRAFT") {
+		evidence := statusBBHeadChecks(slug, detail.HeadCommit, false)
+		detail.Checks, detail.ChecksUnsettled = evidence.Result, !evidence.Complete || evidence.Result == "PENDING"
+	}
+	return detail
+}
+
+func statusEnrichRecordMetadata(record PRRecord, slug, forge string) statusPRDetail {
 	if slug == "" || forge == "" {
 		return statusUnknownDetail(record)
 	}
