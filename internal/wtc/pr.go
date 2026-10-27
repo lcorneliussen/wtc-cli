@@ -40,7 +40,16 @@ func ValidatePRIdentity(repo, number string) error {
 	return nil
 }
 
-func (c *Context) PRFile() string { return filepath.Join(c.Collection, ".wtc-prs") }
+// PRFile reports the selected registry path. Readers and mutators also check
+// selection errors; a broken legacy path must not hide an alternate registry.
+func (c *Context) PRFile() string {
+	path, _ := c.prInput()
+	return path
+}
+
+func (c *Context) prInput() (string, error) {
+	return collectionStateInput(c.Collection, ".wtc-prs", ".taba-prs")
+}
 
 func cleanPRField(s string) string { return strings.Join(strings.Fields(s), " ") }
 
@@ -121,7 +130,11 @@ func parseMergeCommit(line string) (repo, number, sha, base string, ok bool) {
 }
 
 func (c *Context) ListPRs() ([]PRRecord, error) {
-	f, err := os.Open(c.PRFile())
+	path, err := c.prInput()
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -182,7 +195,9 @@ func (c *Context) rewritePRs(removeRepo, removeNumber string, add *PRRecord) err
 }
 
 func (c *Context) withPRLock(action func() error) error {
-	path := c.PRFile() + ".lock"
+	// Keep the legacy lock shared with older clients, even when reading an
+	// alternate registry. Select the input only after acquiring this lock.
+	path := filepath.Join(c.Collection, ".wtc-prs.lock")
 	fd, err := unix.Open(path, unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
 	if err != nil {
 		return fmt.Errorf("open PR registry lock: %w", err)
@@ -201,7 +216,10 @@ func (c *Context) withPRLock(action func() error) error {
 }
 
 func (c *Context) rewritePRsLocked(removeRepo, removeNumber string, add *PRRecord) error {
-	path := c.PRFile()
+	path, err := c.prInput()
+	if err != nil {
+		return err
+	}
 	info, err := os.Lstat(path)
 	if err == nil && !info.Mode().IsRegular() {
 		return fmt.Errorf("refusing non-regular PR file: %s", path)
@@ -251,7 +269,10 @@ func (c *Context) writePRFile(data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), c.PRFile())
+	// Phase 0 still writes the legacy name. The caller read the selected
+	// registry under the shared lock, so this carries every alternate row
+	// forward before the legacy output becomes authoritative.
+	return os.Rename(tmp.Name(), filepath.Join(c.Collection, ".wtc-prs"))
 }
 
 // recordMergedPRs freezes facts that cannot change after a merge. The extra
@@ -293,7 +314,10 @@ func (c *Context) recordMergedPRs(records []PRRecord, details []statusPRDetail) 
 }
 
 func (c *Context) recordMergedPRsLocked(records []PRRecord, updates map[string]statusPRDetail) (int, error) {
-	path := c.PRFile()
+	path, err := c.prInput()
+	if err != nil {
+		return 0, err
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return 0, err

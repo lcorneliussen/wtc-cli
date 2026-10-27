@@ -1,0 +1,3 @@
+## Rename preparation
+
+- **PR and status readers accept taba filenames.** PR enlistments read `.taba-prs` when `.wtc-prs` is absent; cached status accepts `.taba-status.json` and `.last-taba-status.yml` under the same legacy-first rule. PR mutations carry the selected registry into the legacy output under the existing shared lock, preserving rows and merge facts. Status refreshes and default catch-up reports keep legacy output names. Retirement also removes the corresponding alternate report/cache files. No automatic migration or runtime-identity change is included. See [collection-state compatibility](https://github.com/lcorneliussen/wtc-cli/blob/main/docs/rename-collection-state.md) and [phase 0](https://github.com/lcorneliussen/wtc-cli/issues/201).

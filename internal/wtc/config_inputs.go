@@ -45,3 +45,24 @@ func skillBaseInput(dir string) (string, error) {
 func MachineEnvFile(root string) (string, error) {
 	return legacyInput(root, "wtc.env", "taba.env")
 }
+
+// collectionStateInput selects a readable state file without creating it.
+// Directories and special files must fail rather than mask alternate state or
+// block a read. A missing pair still selects the legacy default.
+func collectionStateInput(collection, legacy, current string) (string, error) {
+	path, err := legacyInput(collection, legacy, current)
+	if err != nil {
+		return path, err
+	}
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return path, nil
+	}
+	if err != nil {
+		return path, err
+	}
+	if !info.Mode().IsRegular() {
+		return path, &os.PathError{Op: "read", Path: path, Err: os.ErrInvalid}
+	}
+	return path, nil
+}
