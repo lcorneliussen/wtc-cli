@@ -52,7 +52,7 @@ func TestGeneratedChoices(t *testing.T) {
 				if !a.Available && (a.Blocked == "" || c.Select(a.Key) != nil) {
 					t.Fatal("blocked action dispatchable")
 				}
-				if a.Step.Step == "merge-pr" && a.Available && (tc.Facts.Dirty > 0 || tc.Facts.ToPush > 0 || tc.Facts.PR.Mergeable != "mergeable") {
+				if a.Step.Step == "merge-pr" && a.Available && (tc.Facts.Dirty > 0 || tc.Facts.ToPush > 0 || tc.Facts.Behind > 0 || tc.Facts.PR == nil || tc.Facts.PR.State != "open" || tc.Facts.PR.Draft || tc.Facts.PR.Checks != "success" || tc.Facts.PR.Review != "approved" || tc.Facts.PR.Mergeable != "mergeable") {
 					t.Fatal("unsafe merge suggestion")
 				}
 				if tc.Facts.PR != nil && tc.Facts.PR.State == "merged" && a.Step.Step == "push" {

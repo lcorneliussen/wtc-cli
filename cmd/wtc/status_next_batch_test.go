@@ -156,3 +156,61 @@ func TestStatusNextPendingHandoffRequiresExplicitRetry(t *testing.T) {
 		t.Fatal("explicit retry did not reset pending marker")
 	}
 }
+
+func TestStatusNextCancellationAtDispatchBoundary(t *testing.T) {
+	for _, boundary := range []string{"status-command", "busy-command", "status-url", "workspace-prompt", "pane-prompt"} {
+		t.Run(boundary, func(t *testing.T) {
+			c, rows := batchFixture(t)
+			r := rows[0]
+			r.Choices = nil
+			switch boundary {
+			case "status-command", "busy-command":
+				r.Next = &next.Step{Step: "catch-up", By: next.ByWTC, Key: "k", Command: []string{"wtc", "catch-up", "task", "--repos", "api"}}
+			case "status-url":
+				r.Next = &next.Step{Step: "merge-pr", By: next.ByPerson, Key: "url"}
+				r.PR = &wtc.StatusPRFacts{URL: "https://example.invalid/pr/7"}
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			writes := 0
+			run := statusNextRunner{
+				readStatus: func(*wtc.Context) (wtc.StatusSnapshot, error) {
+					if boundary == "status-command" || boundary == "status-url" {
+						cancel()
+					}
+					return wtc.StatusSnapshot{Repos: []wtc.StatusRepo{r}}, nil
+				},
+				busy: func(*wtc.Context) (string, error) {
+					if boundary == "busy-command" {
+						cancel()
+					}
+					return "", nil
+				},
+				command: func(*wtc.Context, []string) (string, error) { writes++; return "unexpected", nil },
+				openURL: func(string) error { writes++; return nil },
+				herdr: func(_ string, args ...string) (openHerdrResponse, error) {
+					var out openHerdrResponse
+					switch args[0] {
+					case "workspace":
+						if boundary == "workspace-prompt" {
+							cancel()
+						}
+						out.Result.Workspaces = []openWorkspaceInfo{{ID: "w", Label: "task"}}
+					case "pane":
+						if boundary == "pane-prompt" {
+							cancel()
+						}
+						out.Result.Panes = []openPaneInfo{{ID: "p", Label: "agent", Agent: "codex", AgentStatus: "idle"}}
+					case "agent":
+						writes++
+					}
+					return out, nil
+				},
+			}
+			result := statusNextBatch(ctx, c, []wtc.StatusRepo{r}, run)().(statusNextDoneMsg)
+			if writes != 0 {
+				t.Fatalf("dispatch started after cancellation: %s (%d)", result.text, writes)
+			}
+		})
+	}
+}

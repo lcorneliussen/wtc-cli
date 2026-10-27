@@ -421,7 +421,9 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 					m.nextRunning, m.nextNotice = true, "Rechecking the selected step…"
-					return m, statusNextRun(m.context, repos[m.selectedNext])
+					ctx, cancel := context.WithCancel(context.Background())
+					m.nextCancel = cancel
+					return m, statusNextRunInContext(ctx, m.context, repos[m.selectedNext], statusNextDefaultRunner(), false)
 				}
 			}
 			return m, nil

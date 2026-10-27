@@ -164,7 +164,11 @@ func statusNextDefaultRunner() statusNextRunner {
 	}
 }
 
-func statusNextRunWith(c *wtc.Context, selected wtc.StatusRepo, run statusNextRunner, deferHandoff ...bool) tea.Cmd {
+func statusNextRunWith(c *wtc.Context, selected wtc.StatusRepo, run statusNextRunner) tea.Cmd {
+	return statusNextRunInContext(context.Background(), c, selected, run, false)
+}
+
+func statusNextRunInContext(ctx context.Context, c *wtc.Context, selected wtc.StatusRepo, run statusNextRunner, deferHandoff bool) tea.Cmd {
 	return func() tea.Msg {
 		failed := func(err error) tea.Msg { return statusNextDoneMsg{err: err} }
 		if c == nil || selected.Collection == "" || selected.Collection == "." || selected.Collection == ".." || filepath.Base(selected.Collection) != selected.Collection {
@@ -182,6 +186,9 @@ func statusNextRunWith(c *wtc.Context, selected wtc.StatusRepo, run statusNextRu
 		if err != nil {
 			return failed(err)
 		}
+		if err := ctx.Err(); err != nil {
+			return failed(err)
+		}
 		if argv, ok := statusNextCommand(r); ok {
 			state, err := run.busy(owner)
 			if err != nil {
@@ -190,6 +197,9 @@ func statusNextRunWith(c *wtc.Context, selected wtc.StatusRepo, run statusNextRu
 			if state != "" {
 				return failed(fmt.Errorf("the collection's agent is %s; leave the checkout with its owner", state))
 			}
+			if err := ctx.Err(); err != nil {
+				return failed(err)
+			}
 			out, err := run.command(owner, argv)
 			return statusNextDoneMsg{text: out, err: err}
 		}
@@ -197,6 +207,9 @@ func statusNextRunWith(c *wtc.Context, selected wtc.StatusRepo, run statusNextRu
 			target := statusTUIURL(r.PR.URL)
 			if target == "" {
 				return failed(fmt.Errorf("the pull request has no web URL"))
+			}
+			if err := ctx.Err(); err != nil {
+				return failed(err)
 			}
 			return statusNextDoneMsg{text: "Opened the pull request", err: run.openURL(target)}
 		}
@@ -208,20 +221,30 @@ func statusNextRunWith(c *wtc.Context, selected wtc.StatusRepo, run statusNextRu
 			return failed(fmt.Errorf("this step needs its owner's action"))
 		}
 		prompt := fmt.Sprintf("/skill %s %s: %s. Work on this repository only; recheck its state before acting. Carry out only this selected step; report follow-up actions for separate selection.", skill, r.Dir, r.Next.Reason)
-		if len(deferHandoff) > 0 && deferHandoff[0] {
+		if deferHandoff {
 			return statusNextDoneMsg{handoff: &statusNextHandoff{owner: owner, repo: r, prompt: prompt}}
 		}
-		return statusNextPrompt(owner, r, prompt, run)
+		return statusNextPrompt(owner, r, prompt, run, ctx)
 	}
 }
 
-func statusNextPrompt(owner *wtc.Context, r wtc.StatusRepo, prompt string, run statusNextRunner) tea.Msg {
+func statusNextPrompt(owner *wtc.Context, r wtc.StatusRepo, prompt string, run statusNextRunner, contexts ...context.Context) tea.Msg {
 	failed := func(err error) tea.Msg { return statusNextDoneMsg{err: err} }
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
+	if err := ctx.Err(); err != nil {
+		return failed(err)
+	}
 	instruction := statusNextDoneMsg{text: "Ask the collection's agent: " + prompt}
 	// A plain terminal provides the exact instruction. In herdr, submit
 	// only to this collection's idle agent, never a running or blocked one.
 	session := openSession(owner, "")
 	workspaces, err := run.herdr(session, "workspace", "list")
+	if err := ctx.Err(); err != nil {
+		return failed(err)
+	}
 	if err != nil {
 		return instruction
 	}
@@ -230,12 +253,18 @@ func statusNextPrompt(owner *wtc.Context, r wtc.StatusRepo, prompt string, run s
 			continue
 		}
 		panes, err := run.herdr(session, "pane", "list", "--workspace", workspace.ID)
+		if err := ctx.Err(); err != nil {
+			return failed(err)
+		}
 		if err != nil {
 			return failed(err)
 		}
 		pane := openPaneByLabel(panes.Result.Panes, "agent")
 		if pane.ID == "" || pane.Agent == "" || (pane.AgentStatus != "idle" && pane.AgentStatus != "done") {
 			return instruction
+		}
+		if err := ctx.Err(); err != nil {
+			return failed(err)
 		}
 		_, err = run.herdr(session, "agent", "prompt", pane.ID, prompt)
 		result := statusNextDoneMsg{text: "Asked the collection's agent to " + strings.ToLower(statusNextLabel(r.Next)), err: err}
@@ -261,7 +290,7 @@ func statusNextBatch(ctx context.Context, c *wtc.Context, targets []wtc.StatusRe
 				lines = append(lines, r.Dir+": cancelled before dispatch")
 				continue
 			}
-			result := statusNextRunWith(c, r, run, true)().(statusNextDoneMsg)
+			result := statusNextRunInContext(ctx, c, r, run, true)().(statusNextDoneMsg)
 			if result.handoff != nil {
 				key := result.handoff.owner.Collection
 				if _, ok := groups[key]; !ok {
@@ -306,7 +335,7 @@ func statusNextBatch(ctx context.Context, c *wtc.Context, targets []wtc.StatusRe
 				}
 				continue
 			}
-			result := statusNextPrompt(current[0].owner, current[0].repo, prompt, run).(statusNextDoneMsg)
+			result := statusNextPrompt(current[0].owner, current[0].repo, prompt, run, ctx).(statusNextDoneMsg)
 			if result.err != nil {
 				lines = append(lines, key+": handoff failed: "+result.err.Error())
 			} else {

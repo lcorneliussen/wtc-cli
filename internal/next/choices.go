@@ -8,7 +8,7 @@ import (
 
 // Choice keeps unavailable alternatives visible without making them executable.
 // The key binds every action to the same complete input, including unpublished
-// work and remote evidence; the legacy next key is retained separately.
+// work and remote evidence; next projects the recommendation and shares its key.
 type Choice struct {
 	Step
 	Available bool   `json:"available"`
