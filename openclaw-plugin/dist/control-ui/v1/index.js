@@ -527,11 +527,12 @@ function newTunnel(g, svc, data = {}, { compact = false } = {}) {
 // Visible branding can change while the plugin and CLI keep their legacy IDs.
 // version is what the collection reports: the plugin's and the gateway's wtc.
 const versionText = (v) => (v?.plugin || v?.wtc ? `plugin ${v.plugin ?? "?"}, wtc ${v.wtc ?? "?"}` : "");
+// Use the word's baseline for the link; the centered logo must not supply it.
 const brand = (size, version) => css(el("span", {},
   css(el("a", { href: HOME, target: "_blank", rel: "noopener noreferrer", ariaLabel: "taba home", title: `taba — Make room for the whole task. (opens taba.sh)${version ? `\n${versionText(version)}` : ""}` },
-    css(el("span", { textContent: "束", lang: "ja", ariaHidden: "true" }), "display:inline-grid;place-items:center;flex:none;width:1.3em;height:1.3em;border-radius:.35em;background:#234e42;color:#f7f7ed;font-family:'Hiragino Kaku Gothic ProN','Yu Gothic','Noto Sans CJK JP',sans-serif;font-size:1.15em;font-weight:500;letter-spacing:0;line-height:1"),
+    css(el("span", { textContent: "束", lang: "ja", ariaHidden: "true" }), "display:inline-grid;place-items:center;align-self:center;flex:none;width:1.3em;height:1.3em;border-radius:.35em;background:#234e42;color:#f7f7ed;font-family:'Hiragino Kaku Gothic ProN','Yu Gothic','Noto Sans CJK JP',sans-serif;font-size:1.15em;font-weight:500;letter-spacing:0;line-height:1"),
     " ", el("span", { textContent: "taba" })),
-    "display:inline-flex;align-items:center;gap:.3em;color:var(--text-strong, inherit);text-decoration:none;font-weight:700"),
+    "display:inline-flex;align-items:baseline;gap:.3em;color:var(--text-strong, inherit);text-decoration:none;font-weight:700"),
   el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
 
 // The collection as wtc status's tables, for the card and the panel alike: a
