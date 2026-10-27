@@ -16,10 +16,6 @@ const (
 	statusGHOpenFields  = "number,title,state,isDraft,updatedAt,reviewDecision,mergeStateStatus,mergeable,baseRefName,headRefName,statusCheckRollup,reviewRequests,latestReviews"
 )
 
-// statusOpenPR is one row of the light open-list read. Fingerprint is the
-// part status compares with the saved detail: last modified, comment and
-// task counts, review, and check markers. Raw is enough to refresh the
-// detail when that fingerprint changes, so a full view is not required.
 type statusOpenPR struct {
 	Number      string          `json:"number"`
 	Branch      string          `json:"branch"`
@@ -267,6 +263,50 @@ func statusFetchBBOpenList(slug string) ([]byte, error) {
 		})
 	}
 	return statusEncodeOpenPRs(prs, truncated)
+}
+
+func statusFetchBBBranch(slug, branch string) ([]byte, error) {
+	user, pass := bitbucketCredentials()
+	if user == "" || pass == "" {
+		return nil, fmt.Errorf("no Bitbucket API credentials")
+	}
+	parts := strings.SplitN(slug, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid Bitbucket repository slug")
+	}
+	query := url.Values{}
+	query.Set("state", "OPEN")
+	query.Set("pagelen", "10")
+	query.Set("fields", "values.id,values.source.branch.name")
+	query.Set("q", `source.branch.name="`+statusBBQueryString(branch)+`"`)
+	endpoint := statusBBAPI + "/repositories/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]) + "/pullrequests?" + query.Encode()
+	return statusBBGET(endpoint, user, pass)
+}
+
+func statusBBQueryString(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value)
+}
+
+func statusParseBBBranchList(raw []byte, branch string) (string, error) {
+	var body struct {
+		Values []struct {
+			ID     int `json:"id"`
+			Source struct {
+				Branch struct {
+					Name string `json:"name"`
+				} `json:"branch"`
+			} `json:"source"`
+		} `json:"values"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return "", err
+	}
+	for _, pr := range body.Values {
+		if pr.ID > 0 && pr.Source.Branch.Name == branch {
+			return fmt.Sprint(pr.ID), nil
+		}
+	}
+	return "", nil
 }
 
 func statusBBGET(endpoint, user, pass string) ([]byte, error) {

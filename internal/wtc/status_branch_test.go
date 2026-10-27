@@ -125,6 +125,48 @@ func TestStatusBitbucketDiscoverySharesOneList(t *testing.T) {
 	}
 }
 
+func TestStatusBitbucketDiscoveryLooksUpABranchTheCappedListOmits(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	var lists, branches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("q") != "" {
+			branches.Add(1)
+			if !strings.Contains(r.URL.Query().Get("q"), "topic") {
+				t.Errorf("branch query = %s", r.URL.RawQuery)
+			}
+			w.Write([]byte(`{"values":[{"id":9,"source":{"branch":{"name":"topic"}}}]}`))
+			return
+		}
+		lists.Add(1)
+		page := r.URL.Query().Get("page")
+		if page == "" {
+			page = "1"
+		}
+		var n int
+		fmt.Sscan(page, &n)
+		if n < 11 {
+			fmt.Fprintf(w, `{"values":[{"id":%d,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"other-%d"}}}],"next":"http://%s%s?page=%d"}`, n, n, r.Host, r.URL.Path, n+1)
+			return
+		}
+		fmt.Fprintf(w, `{"values":[{"id":%d,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"other-%d"}}}]}`, n, n)
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	number, err := statusDiscoverBranch("bitbucket.org", "example/widget", "topic")
+	if err != nil || number != "9" || lists.Load() != 10 || branches.Load() != 1 {
+		t.Fatalf("capped list did not look up the branch: %q lists=%d branches=%d err=%v", number, lists.Load(), branches.Load(), err)
+	}
+	again, err := statusDiscoverBranch("bitbucket.org", "example/widget", "other-1")
+	if err != nil || again != "1" || lists.Load() != 10 || branches.Load() != 1 {
+		t.Fatalf("branch on the capped list was looked up again: %q lists=%d branches=%d err=%v", again, lists.Load(), branches.Load(), err)
+	}
+}
+
 func TestStatusGitHubDiscoveryFallsBackWhenTheListIsFull(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	var lists, heads int

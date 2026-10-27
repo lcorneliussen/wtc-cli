@@ -158,10 +158,6 @@ func statusLockCache(path string) (func(), error) {
 	}, nil
 }
 
-// statusWithForgeBudget runs fetch when this forge still has allowance.
-// A rate-limit response pauses the forge. A saved body is returned instead
-// of calling again while the pause or the allowance says to wait. live is
-// false when that body is the saved fallback rather than a new response.
 func statusWithForgeBudget(forge string, stale []byte, fetch func() ([]byte, error)) (body []byte, live bool, err error) {
 	if statusForgeCooling(forge) {
 		if len(stale) > 0 {
@@ -188,9 +184,6 @@ func statusWithForgeBudget(forge string, stale []byte, fetch func() ([]byte, err
 	return raw, true, nil
 }
 
-// statusSingleFlight returns the fresh cached body, or fetches it once while
-// other status processes wait. The allowance is shared across every record.
-// A live response refreshes the entry even when its bytes did not change.
 func statusSingleFlight(kind, forge, slug, key string, fetch func() ([]byte, error)) ([]byte, error) {
 	raw, _, err := statusFetchShared(kind, forge, slug, key, fetch)
 	return raw, err

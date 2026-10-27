@@ -1,11 +1,14 @@
 package wtc
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -126,6 +129,146 @@ func TestStatusPipelineFullRefreshLogsWhatThePageMissed(t *testing.T) {
 	third, err := statusBBBuild("team/widget", "main")
 	if err != nil || third == nil || *third.Build != "12" || *third.Checks != "FAILURE" || hits != 3 || targeted != 1 {
 		t.Fatalf("a fresh copy of the same page replaced the audited build: %+v hits=%d targeted=%d err=%v", third, hits, targeted, err)
+	}
+}
+
+func TestStatusDuePipelineAuditKeepsTheCorrection(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_FULL_REFRESH", "60")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	var targeted atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("target.ref_name") == "main" {
+			targeted.Add(1)
+			w.Write([]byte(`{"values":[{"build_number":12,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"ccccccc"}}}]}`))
+			return
+		}
+		w.Write([]byte(`{"values":[{"build_number":11,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"bbbbbbb"}}}]}`))
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	first, err := statusBBBuild("team/widget", "main")
+	if err != nil || first == nil || *first.Build != "12" || targeted.Load() != 1 {
+		t.Fatalf("audit = %+v targeted=%d err=%v", first, targeted.Load(), err)
+	}
+	past := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(statusForgeEntryPath("full", "bitbucket.org", "team/widget", "build:main"), past, past); err != nil {
+		t.Fatal(err)
+	}
+	statusForgeCool("bitbucket.org", time.Minute)
+	kept, err := statusBBBuild("team/widget", "main")
+	if err != nil || kept == nil || *kept.Build != "12" || *kept.Checks != "FAILURE" || targeted.Load() != 1 {
+		t.Fatalf("expired audit fell back to the page: %+v targeted=%d err=%v", kept, targeted.Load(), err)
+	}
+}
+
+func TestStatusPipelineAuditFetchesOnceAcrossCallers(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_FULL_REFRESH", "60")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	var targeted atomic.Int32
+	release := make(chan struct{})
+	started := make(chan struct{})
+	var once sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("target.ref_name") == "main" {
+			targeted.Add(1)
+			once.Do(func() { close(started) })
+			<-release
+			w.Write([]byte(`{"values":[{"build_number":12,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"ccccccc"}}}]}`))
+			return
+		}
+		w.Write([]byte(`{"values":[{"build_number":11,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"bbbbbbb"}}}]}`))
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	errc := make(chan error, 2)
+	for range 2 {
+		go func() {
+			build, err := statusBBBuild("team/widget", "main")
+			if err != nil || build == nil || *build.Build != "12" {
+				errc <- fmt.Errorf("build=%v err=%v", build, err)
+				return
+			}
+			errc <- nil
+		}()
+	}
+	<-started
+	time.Sleep(50 * time.Millisecond)
+	if targeted.Load() != 1 {
+		t.Fatalf("targeted audits before release = %d", targeted.Load())
+	}
+	close(release)
+	for range 2 {
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if targeted.Load() != 1 {
+		t.Fatalf("targeted audits = %d", targeted.Load())
+	}
+}
+
+func TestStatusPullRequestAuditFetchesOnceAcrossCallers(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_FULL_REFRESH", "60")
+	dir := t.TempDir()
+	views := filepath.Join(dir, "views")
+	started := filepath.Join(dir, "started")
+	release := filepath.Join(dir, "release")
+	t.Setenv("WTC_TEST_VIEWS", views)
+	t.Setenv("WTC_TEST_STARTED", started)
+	t.Setenv("WTC_TEST_RELEASE", release)
+	bin := t.TempDir()
+	script := "#!/bin/sh\nprintf 'x\\n' >> \"$WTC_TEST_VIEWS\"\ntouch \"$WTC_TEST_STARTED\"\nwhile [ ! -f \"$WTC_TEST_RELEASE\" ]; do sleep 0.01; done\nprintf '%s\\n' '{\"number\":7,\"state\":\"OPEN\",\"title\":\"Audited\"}'\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	record := PRRecord{Number: "7", Title: "Saved"}
+	errc := make(chan error, 2)
+	for range 2 {
+		go func() {
+			detail := statusConfirmFullPR(record, "example/widget", "github.com", statusPRDetail{Number: "7", State: "OPEN", Title: "Saved"}, "stamp")
+			if detail.Title != "Audited" {
+				errc <- fmt.Errorf("detail=%+v", detail)
+				return
+			}
+			errc <- nil
+		}()
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(started); err != nil {
+		t.Fatal("audit did not start")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if statusTestFileLines(t, views) != 1 {
+		t.Fatalf("views = %d", statusTestFileLines(t, views))
+	}
+	if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if statusTestFileLines(t, views) != 1 {
+		t.Fatalf("views = %d", statusTestFileLines(t, views))
 	}
 }
 

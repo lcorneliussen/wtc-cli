@@ -149,8 +149,6 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	if detail, ok := statusCachedSettledMerge(record, slug, forge); ok {
 		return detail
 	}
-	// The open list is the light read. A matching stamp means the saved
-	// detail has not changed, so the full pull request is not fetched.
 	if listed, truncated, err := statusOpenPRs(forge, slug); err == nil {
 		if item, ok := listed[record.Number]; ok {
 			detail, used, matched := statusDetailFromOpenItem(record, slug, forge, item)
@@ -164,7 +162,6 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 			return statusConfirmFullPR(record, slug, forge, detail, source)
 		}
 		if truncated {
-			// A capped list can omit an open pull request. Absence is not a close.
 			if cached, ok := statusReadForgeEntryAny("pr", forge, slug, record.Number); ok {
 				if detail, parseErr := statusParseForgeDetail(forge, cached, record); parseErr == nil {
 					return statusConfirmFullPR(record, slug, forge, detail, "capped")
@@ -206,8 +203,6 @@ func statusViewPR(record PRRecord, slug, forge string, bypassCache bool) statusP
 	var raw []byte
 	var err error
 	if bypassCache {
-		// The open list no longer contains this pull request, so a fresh
-		// open body would hide the merge or decline.
 		stale, _ := statusReadForgeEntryAny("pr", forge, slug, record.Number)
 		var live bool
 		raw, live, err = statusWithForgeBudget(forge, stale, fetch)

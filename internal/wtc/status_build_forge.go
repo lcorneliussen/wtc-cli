@@ -128,9 +128,6 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 	if user == "" || pass == "" {
 		return nil, fmt.Errorf("no Bitbucket API credentials (log in with bb, or set BB_USERNAME and BB_API_TOKEN)")
 	}
-	// A live recent page is saved for every branch on it. An audited correction
-	// for that same page result is left in place. A branch the page omits
-	// keeps its saved run, and one that has never been seen gets its own lookup.
 	raw, live, err := statusFetchShared("pipelines", "bitbucket.org", slug, "recent", func() ([]byte, error) {
 		return statusBBPipelines(parts[0], parts[1], "", user, pass)
 	})
@@ -209,11 +206,14 @@ func statusBBPipelines(workspace, repo, branch, user, pass string) ([]byte, erro
 
 func statusSaveLivePipelinePage(slug string, raw []byte) {
 	for _, branch := range statusPipelinePageBranches(raw) {
+		unlock, lockErr := statusLockCache(statusForgeEntryPath("build", "bitbucket.org", slug, branch))
 		build, err := statusParseBBBuild(raw, slug, branch)
-		if err != nil || build == nil || statusPageAuditApplies(slug, branch, build) {
-			continue
+		if err == nil && build != nil && !statusPageAuditApplies(slug, branch, build) {
+			statusWriteForgeEntry("build", "bitbucket.org", slug, branch, raw)
 		}
-		statusWriteForgeEntry("build", "bitbucket.org", slug, branch, raw)
+		if lockErr == nil {
+			unlock()
+		}
 	}
 }
 

@@ -45,9 +45,6 @@ func statusParseBranchList(forge string, raw []byte, branch string) (string, err
 	return "", nil
 }
 
-// Discovery reads the shared open list. A failed call never becomes a cached
-// "none" answer. GitHub's list is capped, so a full page falls back to one
-// query for that branch.
 func statusDiscoverBranch(forge, slug, branch string) (string, error) {
 	if forge == "" || slug == "" || branch == "" {
 		return "", nil
@@ -61,14 +58,35 @@ func statusDiscoverBranch(forge, slug, branch string) (string, error) {
 			return pr.Number, nil
 		}
 	}
-	if forge == "github.com" && (truncated || len(listed) >= statusOpenListLimit) {
-		raw, err := statusSingleFlight("branch", forge, slug, branch, func() ([]byte, error) {
-			return statusJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "open", "--limit", "20", "--json", "number,headRefName")
-		})
-		if err != nil {
-			return "", err
+	switch forge {
+	case "github.com":
+		if truncated || len(listed) >= statusOpenListLimit {
+			return statusDiscoverGitHubBranch(slug, branch)
 		}
-		return statusParseBranchList(forge, raw, branch)
+	case "bitbucket.org":
+		if truncated {
+			return statusDiscoverBitbucketBranch(slug, branch)
+		}
 	}
 	return "", nil
+}
+
+func statusDiscoverGitHubBranch(slug, branch string) (string, error) {
+	raw, err := statusSingleFlight("branch", "github.com", slug, branch, func() ([]byte, error) {
+		return statusJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "open", "--limit", "20", "--json", "number,headRefName")
+	})
+	if err != nil {
+		return "", err
+	}
+	return statusParseBranchList("github.com", raw, branch)
+}
+
+func statusDiscoverBitbucketBranch(slug, branch string) (string, error) {
+	raw, err := statusSingleFlight("branch", "bitbucket.org", slug, branch, func() ([]byte, error) {
+		return statusFetchBBBranch(slug, branch)
+	})
+	if err != nil {
+		return "", err
+	}
+	return statusParseBBBranchList(raw, branch)
 }

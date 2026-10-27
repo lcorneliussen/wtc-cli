@@ -11,8 +11,6 @@ import (
 	"github.com/lcorneliussen/wtc-cli/internal/envcompat"
 )
 
-// statusAuditNote receives miss lines while a refresh is collecting progress.
-// The durable copy is always incremental-misses.log in the status cache.
 var statusAuditNote func(string)
 
 func statusFullRefreshEvery() time.Duration {
@@ -149,11 +147,15 @@ func statusFetchPRRaw(record PRRecord, slug, forge string) ([]byte, error) {
 	return raw, err
 }
 
-// statusConfirmFullPR does the list comparison first, then a real view when
-// this pull request's last full read is old. The view wins. A difference is
-// logged so the stamp can be taught what it failed to notice.
 func statusConfirmFullPR(record PRRecord, slug, forge string, incremental statusPRDetail, source string) statusPRDetail {
+	unlock, lockErr := statusLockCache(statusForgeEntryPath("pr", forge, slug, record.Number))
+	if lockErr == nil {
+		defer unlock()
+	}
 	if !statusFullRefreshDue(forge, slug, record.Number) {
+		if cached, ok := statusReadCachedDetail(record, slug, forge); ok {
+			return cached
+		}
 		return incremental
 	}
 	raw, err := statusFetchPRRaw(record, slug, forge)
@@ -173,33 +175,41 @@ func statusConfirmFullPR(record PRRecord, slug, forge string, incremental status
 	return full
 }
 
-// statusConfirmFullBuild compares the shared pipeline page, or a saved
-// branch lookup, with that branch's own query.
 func statusConfirmFullBuild(slug, branch string, incremental *StatusBuild, source, user, pass string) *StatusBuild {
+	unlock, lockErr := statusLockCache(statusForgeEntryPath("build", "bitbucket.org", slug, branch))
+	if lockErr == nil {
+		defer unlock()
+	}
+	corrected := statusAuditedCorrection(slug, branch, incremental)
 	if !statusFullRefreshDue("bitbucket.org", slug, "build:"+branch) {
+		if corrected != nil {
+			return corrected
+		}
 		return incremental
+	}
+	fallback := incremental
+	if corrected != nil {
+		fallback = corrected
 	}
 	parts := strings.SplitN(slug, "/", 2)
 	if len(parts) != 2 {
-		return incremental
+		return fallback
 	}
 	if statusForgeCooling("bitbucket.org") || !statusTakeForgeToken("bitbucket.org") {
-		return incremental
+		return fallback
 	}
 	raw, err := statusBBPipelines(parts[0], parts[1], branch, user, pass)
 	if err != nil {
 		if statusRateLimited(err) {
 			statusForgeCool("bitbucket.org", statusRetryAfter(err))
 		}
-		return incremental
+		return fallback
 	}
 	full, parseErr := statusParseBBBuild(raw, slug, branch)
 	if parseErr != nil {
-		return incremental
+		return fallback
 	}
 	statusWriteForgeEntry("build", "bitbucket.org", slug, branch, raw)
-	// Remember which page result this full read corrected. While the page
-	// still says that, later refreshes keep the full read.
 	statusWriteForgeEntry("full", "bitbucket.org", slug, "build:"+branch, []byte(statusBuildFingerprint(incremental)))
 	statusLogIncrementalMiss("bitbucket.org", slug, branch, source, statusBuildDiff(incremental, full))
 	return full
@@ -212,6 +222,13 @@ func statusBuildFingerprint(build *StatusBuild) string {
 
 func statusPreferAuditedBuild(slug, branch string, pageBuild *StatusBuild) *StatusBuild {
 	if pageBuild == nil || statusFullRefreshDue("bitbucket.org", slug, "build:"+branch) {
+		return nil
+	}
+	return statusAuditedCorrection(slug, branch, pageBuild)
+}
+
+func statusAuditedCorrection(slug, branch string, pageBuild *StatusBuild) *StatusBuild {
+	if pageBuild == nil {
 		return nil
 	}
 	raw, ok := statusReadForgeEntryAny("full", "bitbucket.org", slug, "build:"+branch)

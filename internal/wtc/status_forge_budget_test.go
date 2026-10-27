@@ -10,12 +10,13 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Allowance state lives in the shared temp cache and would outlive one
-	// test. Zero turns it off. Tests that cover the allowance set it back.
-	os.Setenv("WTC_FORGE_MIN_INTERVAL", "0")
-	// A full audit on the first enrich would hide the incremental tests.
-	os.Setenv("WTC_FORGE_FULL_REFRESH", "0")
+	statusTurnOffSharedForgeBudgetAndAudit()
 	os.Exit(m.Run())
+}
+
+func statusTurnOffSharedForgeBudgetAndAudit() {
+	os.Setenv("WTC_FORGE_MIN_INTERVAL", "0")
+	os.Setenv("WTC_FORGE_FULL_REFRESH", "0")
 }
 
 func TestStatusRateLimitedRecognizesGitHubAndBitbucket(t *testing.T) {
