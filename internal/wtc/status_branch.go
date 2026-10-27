@@ -52,7 +52,7 @@ func statusDiscoverBranch(forge, slug, branch string) (string, error) {
 	if forge == "" || slug == "" || branch == "" {
 		return "", nil
 	}
-	listed, err := statusOpenPRs(forge, slug)
+	listed, truncated, err := statusOpenPRs(forge, slug)
 	if err != nil {
 		return "", err
 	}
@@ -61,7 +61,7 @@ func statusDiscoverBranch(forge, slug, branch string) (string, error) {
 			return pr.Number, nil
 		}
 	}
-	if forge == "github.com" && len(listed) >= statusOpenListLimit {
+	if forge == "github.com" && (truncated || len(listed) >= statusOpenListLimit) {
 		raw, err := statusSingleFlight("branch", forge, slug, branch, func() ([]byte, error) {
 			return statusJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "open", "--limit", "20", "--json", "number,headRefName")
 		})

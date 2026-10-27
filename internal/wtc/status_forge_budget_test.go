@@ -10,8 +10,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// The shared allowance would turn a second forge call in a test into a
-	// cache hit or a refusal. Tests opt back in when they cover the allowance.
+	// Allowance state lives in the shared temp cache and would outlive one
+	// test. Zero turns it off. Tests that cover the allowance set it back.
 	os.Setenv("WTC_FORGE_MIN_INTERVAL", "0")
 	// A full audit on the first enrich would hide the incremental tests.
 	os.Setenv("WTC_FORGE_FULL_REFRESH", "0")
@@ -33,8 +33,10 @@ func TestStatusRateLimitedRecognizesGitHubAndBitbucket(t *testing.T) {
 	if got := statusRetryAfter(errorString("HTTP 429: secondary rate limit Retry-After: 30")); got != 30*time.Second {
 		t.Fatalf("retry after = %s", got)
 	}
-	if statusRateLimited(errorString("gh pr view 7: exit status 1: pull request not found")) {
-		t.Fatal("a missing pull request was treated as a rate limit")
+	if statusRateLimited(errorString("gh pr view 7: exit status 1: pull request not found")) ||
+		statusRateLimited(errorString("gh pr view 429 --repo example/widget: exit status 1: pull request not found")) ||
+		statusRateLimited(errorString("gh pr list --head topic-429-wip: exit status 1: branch not found")) {
+		t.Fatal("a 429 inside the command arguments was treated as a rate limit")
 	}
 }
 
@@ -121,6 +123,57 @@ func TestStatusBitbucketBuildIsCachedAndARateLimitKeepsIt(t *testing.T) {
 	}
 	if hits != 2 {
 		t.Fatalf("cooling still called Bitbucket, hits %d", hits)
+	}
+}
+
+func TestStatusIdenticalLiveResponseStaysFresh(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_CACHE_AGE", "1")
+	calls := 0
+	fetch := func() ([]byte, error) {
+		calls++
+		return []byte(`{"ok":true}`), nil
+	}
+	if _, err := statusSingleFlight("probe", "github.com", "example/widget", "same", fetch); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-2 * time.Second)
+	path := statusForgeEntryPath("probe", "github.com", "example/widget", "same")
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := statusSingleFlight("probe", "github.com", "example/widget", "same", fetch); err != nil || calls != 2 {
+		t.Fatalf("expired identical body was not refetched: calls=%d err=%v", calls, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || time.Since(info.ModTime()) > time.Second {
+		t.Fatalf("identical live response left the cache expired: %v", err)
+	}
+	if _, err := statusSingleFlight("probe", "github.com", "example/widget", "same", fetch); err != nil || calls != 2 {
+		t.Fatalf("fresh identical entry was fetched again: calls=%d err=%v", calls, err)
+	}
+}
+
+func TestStatusBuildBudgetIsNotAnErrorCell(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	statusForgeCool("github.com", time.Minute)
+	build := (&Context{}).statusBuild("", statusBuildRequest{Forge: "github.com", Slug: "example/widget", Branch: "main"})
+	if build != nil {
+		t.Fatalf("a skipped build was shown as an error: %+v", build)
+	}
+}
+
+func TestStatusPullRequestBudgetIsPending(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nexit 2\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	statusForgeCool("github.com", time.Minute)
+	detail := statusEnrichRecord(PRRecord{Number: "7", Title: "Waiting"}, "example/widget", "github.com")
+	if detail.State == "UNKNOWN" || detail.Checks != "PENDING" || detail.Title != "Waiting" {
+		t.Fatalf("a skipped pull request was shown as unknown: %+v", detail)
 	}
 }
 

@@ -1,7 +1,6 @@
 package wtc
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -33,7 +32,7 @@ var (
 	errForgeBudget  = errors.New("forge request budget spent")
 )
 
-var statusRateLimitedText = regexp.MustCompile(`(?i)(?:^|[^0-9])429(?:[^0-9]|$)|too many requests|rate limit exceeded|rate limit for this resource|secondary rate limit`)
+var statusRateLimitedText = regexp.MustCompile(`(?i)http\s+429|returned\s+429|too many requests|rate limit exceeded|rate limit for this resource|secondary rate limit`)
 var statusRetryAfterText = regexp.MustCompile(`(?i)retry[- ]after:?\s*(\d+)`)
 
 func statusRateLimited(err error) bool {
@@ -161,54 +160,60 @@ func statusLockCache(path string) (func(), error) {
 
 // statusWithForgeBudget runs fetch when this forge still has allowance.
 // A rate-limit response pauses the forge. A saved body is returned instead
-// of calling again while the pause or the allowance says to wait.
-func statusWithForgeBudget(forge string, stale []byte, fetch func() ([]byte, error)) ([]byte, error) {
+// of calling again while the pause or the allowance says to wait. live is
+// false when that body is the saved fallback rather than a new response.
+func statusWithForgeBudget(forge string, stale []byte, fetch func() ([]byte, error)) (body []byte, live bool, err error) {
 	if statusForgeCooling(forge) {
 		if len(stale) > 0 {
-			return stale, nil
+			return stale, false, nil
 		}
-		return nil, errForgeCooling
+		return nil, false, errForgeCooling
 	}
 	if !statusTakeForgeToken(forge) {
 		if len(stale) > 0 {
-			return stale, nil
+			return stale, false, nil
 		}
-		return nil, errForgeBudget
+		return nil, false, errForgeBudget
 	}
 	raw, err := fetch()
 	if err != nil {
 		if statusRateLimited(err) {
 			statusForgeCool(forge, statusRetryAfter(err))
 			if len(stale) > 0 {
-				return stale, nil
+				return stale, false, nil
 			}
 		}
-		return nil, err
+		return nil, false, err
 	}
-	return raw, nil
+	return raw, true, nil
 }
 
 // statusSingleFlight returns the fresh cached body, or fetches it once while
 // other status processes wait. The allowance is shared across every record.
+// A live response refreshes the entry even when its bytes did not change.
 func statusSingleFlight(kind, forge, slug, key string, fetch func() ([]byte, error)) ([]byte, error) {
+	raw, _, err := statusFetchShared(kind, forge, slug, key, fetch)
+	return raw, err
+}
+
+func statusFetchShared(kind, forge, slug, key string, fetch func() ([]byte, error)) ([]byte, bool, error) {
 	if data, ok := statusReadForgeEntry(kind, forge, slug, key); ok {
-		return data, nil
+		return data, false, nil
 	}
 	stale, _ := statusReadForgeEntryAny(kind, forge, slug, key)
 	unlock, lockErr := statusLockCache(statusForgeEntryPath(kind, forge, slug, key))
 	if lockErr == nil {
 		defer unlock()
 		if data, ok := statusReadForgeEntry(kind, forge, slug, key); ok {
-			return data, nil
+			return data, false, nil
 		}
 	}
-	raw, err := statusWithForgeBudget(forge, stale, fetch)
+	raw, live, err := statusWithForgeBudget(forge, stale, fetch)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if len(stale) > 0 && bytes.Equal(raw, stale) {
-		return raw, nil
+	if live {
+		statusWriteForgeEntry(kind, forge, slug, key, raw)
 	}
-	statusWriteForgeEntry(kind, forge, slug, key, raw)
-	return raw, nil
+	return raw, live, nil
 }

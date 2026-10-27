@@ -2,6 +2,7 @@ package wtc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -91,6 +92,10 @@ func statusUnknownDetail(record PRRecord) statusPRDetail {
 	return statusPRDetail{Number: record.Number, State: "UNKNOWN", Checks: "NONE", Merge: "UNKNOWN", Review: "none", Title: record.Title}
 }
 
+func statusDeferredDetail(record PRRecord) statusPRDetail {
+	return statusPRDetail{Number: record.Number, Checks: "PENDING", Title: record.Title}
+}
+
 func statusParseForgeDetail(forge string, raw []byte, record PRRecord) (statusPRDetail, error) {
 	var detail statusPRDetail
 	var err error
@@ -146,7 +151,7 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	}
 	// The open list is the light read. A matching stamp means the saved
 	// detail has not changed, so the full pull request is not fetched.
-	if listed, err := statusOpenPRs(forge, slug); err == nil {
+	if listed, truncated, err := statusOpenPRs(forge, slug); err == nil {
 		if item, ok := listed[record.Number]; ok {
 			detail, used, matched := statusDetailFromOpenItem(record, slug, forge, item)
 			if !used {
@@ -157,6 +162,15 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 				source = "stamp"
 			}
 			return statusConfirmFullPR(record, slug, forge, detail, source)
+		}
+		if truncated {
+			// A capped list can omit an open pull request. Absence is not a close.
+			if cached, ok := statusReadForgeEntryAny("pr", forge, slug, record.Number); ok {
+				if detail, parseErr := statusParseForgeDetail(forge, cached, record); parseErr == nil {
+					return detail
+				}
+			}
+			return statusViewPR(record, slug, forge, false)
 		}
 		if detail, ok := statusReadCachedDetail(record, slug, forge); ok && detail.State != "OPEN" && detail.State != "DRAFT" {
 			return statusConfirmFullPR(record, slug, forge, detail, "list-omitted")
@@ -195,18 +209,13 @@ func statusViewPR(record PRRecord, slug, forge string, bypassCache bool) statusP
 		// The open list no longer contains this pull request, so a fresh
 		// open body would hide the merge or decline.
 		stale, _ := statusReadForgeEntryAny("pr", forge, slug, record.Number)
-		raw, err = statusWithForgeBudget(forge, stale, fetch)
-		if err != nil && len(stale) > 0 {
-			raw, err = stale, nil
-		}
-		if err == nil && len(raw) > 0 {
+		var live bool
+		raw, live, err = statusWithForgeBudget(forge, stale, fetch)
+		if live && len(raw) > 0 {
 			statusWriteForgeCache(forge, slug, record.Number, raw)
 		}
 	} else {
 		raw, err = statusSingleFlight("pr", forge, slug, record.Number, fetch)
-		if err == nil {
-			statusWriteForgeCache(forge, slug, record.Number, raw)
-		}
 	}
 	if err == nil {
 		if detail, parseErr := statusParseForgeDetail(forge, raw, record); parseErr == nil {
@@ -215,6 +224,9 @@ func statusViewPR(record PRRecord, slug, forge string, bypassCache bool) statusP
 			}
 			return detail
 		}
+	}
+	if errors.Is(err, errForgeBudget) || errors.Is(err, errForgeCooling) {
+		return statusDeferredDetail(record)
 	}
 	return statusUnknownDetail(record)
 }

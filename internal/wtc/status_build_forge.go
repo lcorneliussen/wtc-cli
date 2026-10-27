@@ -128,9 +128,10 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 	if user == "" || pass == "" {
 		return nil, fmt.Errorf("no Bitbucket API credentials (log in with bb, or set BB_USERNAME and BB_API_TOKEN)")
 	}
-	// One recent page covers every branch. A newer run for this branch is on
-	// that page; an older saved lookup stays current when the branch is absent.
-	raw, err := statusSingleFlight("pipelines", "bitbucket.org", slug, "recent", func() ([]byte, error) {
+	// One recent page answers for every branch on it, and that run is saved
+	// under the branch. A branch that later drops off the page keeps that
+	// saved run. A branch that has never been seen still gets its own lookup.
+	raw, live, err := statusFetchShared("pipelines", "bitbucket.org", slug, "recent", func() ([]byte, error) {
 		return statusBBPipelines(parts[0], parts[1], "", user, pass)
 	})
 	if err != nil {
@@ -139,6 +140,9 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 	build, err := statusParseBBBuild(raw, slug, branch)
 	if err != nil {
 		return nil, err
+	}
+	if build != nil && live {
+		statusWriteForgeEntry("build", "bitbucket.org", slug, branch, raw)
 	}
 	if build != nil {
 		if audited := statusPreferAuditedBuild(slug, branch, build); audited != nil {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -119,6 +120,78 @@ func TestStatusBBBuildKeepsASavedBranchTheRecentPageOmits(t *testing.T) {
 	second, err := statusBBBuild("team/widget", "main")
 	if err != nil || second == nil || *second.Build != "11" || hits != 3 || targeted != 1 {
 		t.Fatalf("saved branch was fetched again: %+v hits=%d targeted=%d err=%v", second, hits, targeted, err)
+	}
+}
+
+func TestStatusBBBuild404IsCachedEmpty(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	first, err := statusBBBuild("team/widget", "main")
+	if err != nil || first != nil || hits != 2 {
+		t.Fatalf("404 build = %+v hits=%d err=%v", first, hits, err)
+	}
+	second, err := statusBBBuild("team/widget", "main")
+	if err != nil || second != nil || hits != 2 {
+		t.Fatalf("404 was fetched again: %+v hits=%d err=%v", second, hits, err)
+	}
+}
+
+func TestStatusBBBuildKeepsTheRunSeenOnTheRecentPage(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_CACHE_AGE", "1")
+	var phase atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("target.ref_name") == "main" {
+			w.Write([]byte(`{"values":[{"build_number":5,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"aaaaaaa"}}}]}`))
+			return
+		}
+		switch phase.Load() {
+		case 0:
+			w.Write([]byte(`{"values":[{"build_number":1,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"other","selector":{"type":"branches"},"commit":{"hash":"1111111"}}}]}`))
+		case 1:
+			w.Write([]byte(`{"values":[{"build_number":41,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"bbbbbbb"}}}]}`))
+		default:
+			w.Write([]byte(`{"values":[{"build_number":9,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"other","selector":{"type":"branches"},"commit":{"hash":"cccccccc"}}}]}`))
+		}
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	first, err := statusBBBuild("team/widget", "main")
+	if err != nil || first == nil || *first.Build != "5" {
+		t.Fatalf("first saved build = %+v %v", first, err)
+	}
+	phase.Store(1)
+	past := time.Now().Add(-2 * time.Second)
+	if err := os.Chtimes(statusForgeEntryPath("pipelines", "bitbucket.org", "team/widget", "recent"), past, past); err != nil {
+		t.Fatal(err)
+	}
+	seen, err := statusBBBuild("team/widget", "main")
+	if err != nil || seen == nil || *seen.Build != "41" {
+		t.Fatalf("page build was not kept: %+v %v", seen, err)
+	}
+	phase.Store(2)
+	if err := os.Chtimes(statusForgeEntryPath("pipelines", "bitbucket.org", "team/widget", "recent"), past, past); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := statusBBBuild("team/widget", "main")
+	if err != nil || kept == nil || *kept.Build != "41" {
+		t.Fatalf("branch fell back to an older build: %+v %v", kept, err)
 	}
 }
 

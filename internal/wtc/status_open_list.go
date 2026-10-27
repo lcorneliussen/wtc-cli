@@ -27,7 +27,7 @@ type statusOpenPR struct {
 	Raw         json.RawMessage `json:"raw"`
 }
 
-func statusOpenPRs(forge, slug string) (map[string]statusOpenPR, error) {
+func statusOpenPRs(forge, slug string) (map[string]statusOpenPR, bool, error) {
 	raw, err := statusSingleFlight("openprs", forge, slug, "open", func() ([]byte, error) {
 		switch forge {
 		case "github.com":
@@ -39,11 +39,11 @@ func statusOpenPRs(forge, slug string) (map[string]statusOpenPR, error) {
 		}
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	list, err := statusParseOpenPRs(raw)
+	list, truncated, err := statusParseOpenPRs(raw)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	byNumber := make(map[string]statusOpenPR, len(list))
 	for _, pr := range list {
@@ -51,23 +51,25 @@ func statusOpenPRs(forge, slug string) (map[string]statusOpenPR, error) {
 			byNumber[pr.Number] = pr
 		}
 	}
-	return byNumber, nil
+	return byNumber, truncated, nil
 }
 
-func statusParseOpenPRs(raw []byte) ([]statusOpenPR, error) {
+func statusParseOpenPRs(raw []byte) ([]statusOpenPR, bool, error) {
 	var body struct {
-		PRs []statusOpenPR `json:"prs"`
+		PRs       []statusOpenPR `json:"prs"`
+		Truncated bool           `json:"truncated"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return body.PRs, nil
+	return body.PRs, body.Truncated, nil
 }
 
-func statusEncodeOpenPRs(prs []statusOpenPR) ([]byte, error) {
+func statusEncodeOpenPRs(prs []statusOpenPR, truncated bool) ([]byte, error) {
 	return json.Marshal(struct {
-		PRs []statusOpenPR `json:"prs"`
-	}{PRs: prs})
+		PRs       []statusOpenPR `json:"prs"`
+		Truncated bool           `json:"truncated"`
+	}{PRs: prs, Truncated: truncated})
 }
 
 func statusDetailFromOpenItem(record PRRecord, slug, forge string, item statusOpenPR) (statusPRDetail, bool, bool) {
@@ -156,7 +158,7 @@ func statusFetchGHOpenList(slug string) ([]byte, error) {
 			Raw:         rawItem,
 		})
 	}
-	return statusEncodeOpenPRs(prs)
+	return statusEncodeOpenPRs(prs, len(items) >= statusOpenListLimit)
 }
 
 type statusBBListItem struct {
@@ -223,6 +225,7 @@ func statusFetchBBOpenList(slug string) ([]byte, error) {
 	endpoint := statusBBAPI + "/repositories/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]) + "/pullrequests?" + query.Encode()
 	var items []statusBBListItem
 	seen := map[string]bool{}
+	truncated := false
 	for page := 0; page < 10 && endpoint != ""; page++ {
 		raw, err := statusBBGET(endpoint, user, pass)
 		if err != nil {
@@ -236,7 +239,12 @@ func statusFetchBBOpenList(slug string) ([]byte, error) {
 			return nil, fmt.Errorf("Bitbucket pull request list JSON: %w", err)
 		}
 		items = append(items, body.Values...)
-		if body.Next == "" || len(body.Values) == 0 || seen[body.Next] || !statusSameOrigin(endpoint, body.Next) {
+		more := body.Next != "" && len(body.Values) > 0 && !seen[body.Next] && statusSameOrigin(endpoint, body.Next)
+		if !more {
+			break
+		}
+		if page == 9 {
+			truncated = true
 			break
 		}
 		seen[body.Next] = true
@@ -258,7 +266,7 @@ func statusFetchBBOpenList(slug string) ([]byte, error) {
 			Raw:         rawItem,
 		})
 	}
-	return statusEncodeOpenPRs(prs)
+	return statusEncodeOpenPRs(prs, truncated)
 }
 
 func statusBBGET(endpoint, user, pass string) ([]byte, error) {
