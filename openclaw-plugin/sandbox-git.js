@@ -80,7 +80,8 @@ const MAX_BUNDLE = 512 * 1024 * 1024;
 export function startSandboxGit({ host, port, run, openclaw, listSessionEntries, collectionOf, worktreeOf, projectsByAgent, logger }) {
   let containers = { at: 0, byAddress: new Map() };
   // Running sandbox containers by their addresses, asked again at most every
-  // ten seconds, or when an address is not known.
+  // ten seconds, or when an address is not known. An address shared by
+  // multiple containers maps to null and cannot authorize a session.
   const containersByAddress = async (force) => {
     if (!force && Date.now() - containers.at < 10000) return containers.byAddress;
     const byAddress = new Map();
@@ -113,6 +114,7 @@ export function startSandboxGit({ host, port, run, openclaw, listSessionEntries,
   const identify = async (address, fresh = false) => {
     let container = (await containersByAddress(fresh)).get(address);
     if (!container && !fresh) container = (await containersByAddress(true)).get(address);
+    if (container === null) return { error: "this address belongs to more than one sandbox container" };
     if (!container) return { error: "this address is no sandbox container of the gateway's" };
     const id = projectionWorktreeId(container.workspaceDir);
     const agentId = String(container.sessionKey ?? "").match(/^agent:([^:]+):.+$/)?.[1];

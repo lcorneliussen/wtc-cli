@@ -111,7 +111,7 @@ func TestSandboxDiscoveryDoesNotAuthorizeCloning(t *testing.T) {
 	body := strings.ReplaceAll(sandboxMetadata, `,"project_id":"api-id"`, "")
 	body = strings.ReplaceAll(body, `"default_ref":"origin/develop"`, `"default_ref":""`)
 	sandboxMetadataServer(t, 200, body)
-	if _, err := addRepoPlan(t, "api", "--worktree", "42-fix"); err == nil || !strings.Contains(err.Error(), "grants no clone permission") {
+	if _, err := addRepoPlan(t, "api", "--worktree", "42-fix"); err == nil || !strings.Contains(err.Error(), "grants no clone permission") || !strings.Contains(err.Error(), "cannot be resolved from this sandbox") || !strings.Contains(err.Error(), "gateway collection session") {
 		t.Fatalf("listing granted clone permission: %v", err)
 	}
 	// A separate GitHub conversation still produces the existing URL intent;

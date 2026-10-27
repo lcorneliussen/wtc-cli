@@ -249,7 +249,13 @@ test("failed or ambiguous container lookup cannot authorize discovery", async (t
         if (argv[0] === "docker") return { code: mode === "inspect failure" ? 1 : 0, stdout: "/one 127.0.0.1\n/two 127.0.0.1\n", stderr: "" };
         throw new Error("identity failure reached metadata command");
       } });
-      assert.equal((await fetch(`${await fixture.url()}/wtc/projects`)).status, 403);
+      const response = await fetch(`${await fixture.url()}/wtc/projects`);
+      assert.equal(response.status, 403);
+      if (mode === "duplicate address") {
+        assert.deepEqual(await response.json(), { error: "this address belongs to more than one sandbox container" });
+      } else {
+        assert.deepEqual(await response.json(), { error: "this address is no sandbox container of the gateway's" });
+      }
     });
   }
 });

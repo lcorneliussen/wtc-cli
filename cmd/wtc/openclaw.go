@@ -242,7 +242,7 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 			if add.project != "" {
 				project, gitURL = add.project, ""
 			} else if openclaw.ParseOrigin(gitURL).Forge != openclaw.ForgeGitHub || worker != "" || !separate {
-				return fmt.Errorf("%s is not available as a gateway project. Ask the person to add it on the gateway; a listed project grants no clone permission", repo)
+				return fmt.Errorf("%s cannot be resolved from this sandbox's allowed project metadata. Use the registered project name or prepare this add-repo plan in the gateway collection session; listing grants no clone permission", repo)
 			} else {
 				instructions = "Work on " + repo + " for " + target + ". Wait for instructions from the collection's session."
 			}

@@ -41,8 +41,8 @@ func sandboxProjectsCommand() *cobra.Command {
 					return errors.New("gateway collection metadata unavailable")
 				}
 			}
-			// A sandbox emits no binding write. An existing harness worktree
-			// establishes the collection's project when no record exists yet.
+			// An existing harness worktree establishes the collection's project
+			// when no separate record exists; multiple candidates are refused.
 			if result.CollectionProject == "" {
 				for _, project := range projects {
 					if project.HasWorktree {
