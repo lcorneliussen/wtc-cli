@@ -1,3 +1,0 @@
-## Rename preparation
-
-- **Help and command hints follow the invoked name.** Invoking the executable as `taba` selects that name for command paths, examples, diagnostic prefixes and authored command hints; `wtc` keeps its current spelling. Dev-build handover preserves the invocation. File paths, environment variables, plugin/skill IDs, protocol markers and executable packaging remain unchanged; no rename notice is added. See [invocation-aware command names](https://github.com/lcorneliussen/wtc-cli/blob/main/docs/rename-invocation.md) ([#201](https://github.com/lcorneliussen/wtc-cli/issues/201)).
