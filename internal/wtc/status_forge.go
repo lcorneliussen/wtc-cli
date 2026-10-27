@@ -77,6 +77,7 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 		Mergeable        string `json:"mergeable"`
 		MergedAt         string `json:"mergedAt"`
 		BaseRefName      string `json:"baseRefName"`
+		HeadRefOid       string `json:"headRefOid"`
 		MergeCommit      *struct {
 			OID string `json:"oid"`
 		} `json:"mergeCommit"`
@@ -97,7 +98,7 @@ func statusGHDetail(raw []byte, fallback PRRecord) (statusPRDetail, error) {
 	checks, unsettled := statusCheckResult(p.StatusCheckRollup)
 	d := statusPRDetail{Number: fmt.Sprint(p.Number), State: strings.ToUpper(p.State),
 		Checks: checks, ChecksUnsettled: unsettled, Merge: p.MergeStateStatus,
-		Title: cleanPRField(p.Title), MergedOn: p.MergedAt, Base: p.BaseRefName}
+		Title: cleanPRField(p.Title), MergedOn: p.MergedAt, Base: p.BaseRefName, HeadCommit: p.HeadRefOid}
 	if strings.EqualFold(p.Mergeable, "CONFLICTING") {
 		d.Merge = "CONFLICTING"
 	}
