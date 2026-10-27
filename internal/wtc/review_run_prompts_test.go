@@ -72,7 +72,7 @@ printf '{"concern":"%s","status":"ok","findings":[]}\n' "$id" > "$bundle/finding
 	opt := ReviewRunOptions{Strong: "test:", Standard: "test:", Fast: "test:", Lead: "test:", Parallel: 1}
 	run := func() ReviewRunResult {
 		t.Helper()
-		bundle, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "app", Base: "main", NoCatchUp: true})
+		bundle, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "app", Base: "main", Private: true, NoCatchUp: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +115,7 @@ printf '{"concern":"%s","status":"ok","findings":[]}\n' "$id" > "$bundle/finding
 	if err := os.MkdirAll(filepath.Join(harness, "review", "prompts", "concern.md"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	bundle, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "app", Base: "main", NoCatchUp: true})
+	bundle, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "app", Base: "main", Private: true, NoCatchUp: true})
 	if err != nil {
 		t.Fatal(err)
 	}

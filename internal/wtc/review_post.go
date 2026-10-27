@@ -79,13 +79,23 @@ func reviewForgeCommand(worktree, name string, args []string, input []byte) ([]b
 	return out, nil
 }
 
+// Pin CLI fallbacks to the same destination whose audience was checked. The
+// worktree origin or a user's default bb workspace may name another repository.
+func reviewBitbucketCommand(m ReviewManifest, args []string, input []byte) ([]byte, error) {
+	parts := splitReviewSlug(m.Slug)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, fmt.Errorf("invalid Bitbucket repository slug")
+	}
+	return reviewForgeCommand(m.RepoDir, "bb", append([]string{"--workspace", parts[0], "--repo", parts[1]}, args...), input)
+}
+
 func reviewPRHead(manifest ReviewManifest) (string, error) {
 	var out []byte
 	var err error
 	if manifest.Forge == "github" {
 		out, err = reviewForgeCommand(manifest.RepoDir, "gh", []string{"pr", "view", manifest.PR, "--repo", manifest.Slug, "--json", "headRefOid"}, nil)
 	} else if manifest.Forge == "bitbucket" {
-		out, err = reviewForgeCommand(manifest.RepoDir, "bb", []string{"pr", "view", manifest.PR, "--json"}, nil)
+		out, err = reviewBitbucketCommand(manifest, []string{"pr", "view", manifest.PR, "--json"}, nil)
 	} else {
 		return "", fmt.Errorf("unknown forge %q", manifest.Forge)
 	}
@@ -127,6 +137,9 @@ func (c *Context) PostReviewBundle(bundle string, opt ReviewPostOptions) (Review
 	}
 	if worktree != manifest.RepoDir || slug != manifest.Slug || forge != manifest.Forge {
 		return ReviewPostResult{}, fmt.Errorf("bundle repository does not match this collection")
+	}
+	if err := reviewPublicationAllowed(manifest); err != nil {
+		return ReviewPostResult{}, err
 	}
 	mode := opt.Mode
 	if mode == "" {
@@ -186,11 +199,13 @@ func (c *Context) PostReviewBundle(bundle string, opt ReviewPostOptions) (Review
 			_ = os.Remove(reviewReceiptPath(c.Collection, manifest.Forge, manifest.Slug, manifest.PR, manifest.HeadSHA, cid, verdict))
 		}
 	}
+	body = reviewModeBody(body, manifest)
 	finalBody := body
 	if mode == "summary" {
 		finalBody = presentReviewSummary(body, manifest, reviewSourceFiles(manifest))
 		body = fmt.Sprintf("⏳ **Local review: posting findings**\n\nRound %d, head `%s`.\n\n`wtc-review v1 head=%s verdict=pending blockers=0 round=%d lead=pending`\n", manifest.Round, manifest.HeadSHA[:7], manifest.HeadSHA, manifest.Round)
 	}
+	body = reviewModeBody(body, manifest)
 	var posted ReviewPostResult
 	if cid != "" {
 		posted, err = postReviewComment(manifest, cid, body)
@@ -266,7 +281,7 @@ func postReviewComment(m ReviewManifest, cid, body string) (ReviewPostResult, er
 	} else {
 		args = []string{"pr", "comments", "edit", m.PR, cid, body}
 	}
-	out, err := reviewForgeCommand(m.RepoDir, "bb", args, nil)
+	out, err := reviewBitbucketCommand(m, args, nil)
 	if err != nil {
 		return ReviewPostResult{}, err
 	}
@@ -411,7 +426,7 @@ func priorReviewInlineKeys(m ReviewManifest, bundle string) map[string]bool {
 			keys[match[1]] = true
 		}
 	} else {
-		out, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "list", m.PR, "--all", "--json"}, nil)
+		out, err := reviewBitbucketCommand(m, []string{"pr", "comments", "list", m.PR, "--all", "--json"}, nil)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: read prior Bitbucket inline comments: %v\n"), err)
 			return nil
@@ -539,7 +554,7 @@ func postReviewInline(m ReviewManifest, bundle string) (posted, failed, skipped 
 						row.Error = err.Error()
 					}
 				} else if len(body) <= 8192 && !strings.HasPrefix(body, "-") {
-					out, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "add", m.PR, body, "--file", f.File, "--line-to", strconv.Itoa(f.Line), "--json"}, nil)
+					out, err := reviewBitbucketCommand(m, []string{"pr", "comments", "add", m.PR, body, "--file", f.File, "--line-to", strconv.Itoa(f.Line), "--json"}, nil)
 					if err == nil {
 						var result struct {
 							ID int64 `json:"id"`

@@ -58,12 +58,16 @@ type StatusRepo struct {
 }
 
 type StatusPRFacts struct {
-	Number string `json:"number"`
-	URL    string `json:"url,omitempty"`
-	Checks string `json:"checks"`
-	Merge  string `json:"merge"`
-	Review string `json:"review"`
-	Draft  bool   `json:"draft"`
+	Number         string   `json:"number"`
+	URL            string   `json:"url,omitempty"`
+	Checks         string   `json:"checks"`
+	Merge          string   `json:"merge"`
+	Review         string   `json:"review"`
+	Draft          bool     `json:"draft"`
+	MergeConflicts []string `json:"merge_conflicts,omitempty"`
+	MergeSource    string   `json:"merge_source,omitempty"`
+	MergeHead      string   `json:"merge_head,omitempty"`
+	MergeBase      string   `json:"merge_base,omitempty"`
 }
 
 type StatusBuild struct {
@@ -109,6 +113,10 @@ type StatusPRRow struct {
 	MergedOn        *string       `json:"merged_on"`
 	Draft           bool          `json:"draft"`
 	OnBranch        bool          `json:"on_branch"`
+	MergeConflicts  []string      `json:"merge_conflicts,omitempty"`
+	MergeSource     string        `json:"merge_source,omitempty"`
+	MergeHead       string        `json:"merge_head,omitempty"`
+	MergeBase       string        `json:"merge_base,omitempty"`
 }
 
 type StatusRetired struct {

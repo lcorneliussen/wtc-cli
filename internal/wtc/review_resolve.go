@@ -39,6 +39,9 @@ func (c *Context) ResolveReviewBundle(bundle string, opt ReviewResolveOptions) (
 	if worktree != manifest.RepoDir || slug != manifest.Slug || forge != manifest.Forge {
 		return ReviewResolveResult{}, fmt.Errorf("bundle repository does not match this collection")
 	}
+	if err := reviewPublicationAllowed(manifest); err != nil {
+		return ReviewResolveResult{}, err
+	}
 	rows := readInlineRecords(bundle)
 	result := ReviewResolveResult{}
 	for i := range rows {
@@ -97,13 +100,13 @@ func replyReviewInline(m ReviewManifest, id, body string) error {
 	if len(body) > 8192 || strings.HasPrefix(body, "-") {
 		return fmt.Errorf("Bitbucket reply requires API credentials for a long or flag-like body")
 	}
-	_, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "reply", m.PR, id, body}, nil)
+	_, err := reviewBitbucketCommand(m, []string{"pr", "comments", "reply", m.PR, id, body}, nil)
 	return err
 }
 
 func resolveReviewInline(m ReviewManifest, id, threadID string) error {
 	if m.Forge == "bitbucket" {
-		_, err := reviewForgeCommand(m.RepoDir, "bb", []string{"pr", "comments", "resolve", m.PR, id}, nil)
+		_, err := reviewBitbucketCommand(m, []string{"pr", "comments", "resolve", m.PR, id}, nil)
 		return err
 	}
 	mutation := `mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}`

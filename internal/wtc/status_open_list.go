@@ -181,11 +181,17 @@ type statusBBListItem struct {
 	CommentCount int    `json:"comment_count"`
 	TaskCount    int    `json:"task_count"`
 	Source       struct {
+		Commit struct {
+			Hash string `json:"hash"`
+		} `json:"commit"`
 		Branch struct {
 			Name string `json:"name"`
 		} `json:"branch"`
 	} `json:"source"`
 	Destination struct {
+		Commit struct {
+			Hash string `json:"hash"`
+		} `json:"commit"`
 		Branch struct {
 			Name string `json:"name"`
 		} `json:"branch"`
@@ -215,6 +221,8 @@ func (p statusBBListItem) fingerprint() string {
 		strconv.Itoa(approved),
 		strconv.Itoa(changes),
 		p.Destination.Branch.Name,
+		p.Source.Commit.Hash,
+		p.Destination.Commit.Hash,
 		p.Title,
 	}, "|")
 }
@@ -229,7 +237,7 @@ func statusFetchBBOpenList(slug string) ([]byte, error) {
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid Bitbucket repository slug")
 	}
-	fields := "values.id,values.updated_on,values.comment_count,values.task_count,values.state,values.draft,values.title,values.source.branch.name,values.destination.branch.name,values.participants.approved,values.participants.state,next"
+	fields := "values.id,values.updated_on,values.comment_count,values.task_count,values.state,values.draft,values.title,values.source.branch.name,values.source.commit.hash,values.destination.branch.name,values.destination.commit.hash,values.participants.approved,values.participants.state,next"
 	query := url.Values{}
 	query.Set("state", "OPEN")
 	query.Set("pagelen", "50")

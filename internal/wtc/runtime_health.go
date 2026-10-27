@@ -89,7 +89,7 @@ func runtimeProviderLogin(provider string) string {
 	run := func(program string, args ...string) ([]byte, bool) {
 		binary, err := exec.LookPath(program)
 		if err != nil && program == "tailscale" {
-			binary, err = "/Applications/Tailscale.app/Contents/MacOS/Tailscale", nil
+			binary, err = runtimeTailscaleApp, nil
 		}
 		if err != nil {
 			return nil, false

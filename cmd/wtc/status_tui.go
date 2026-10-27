@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -1319,6 +1320,16 @@ func runStatusTUI(c *wtc.Context, all, procs, reposOnly, noFetch, noClick bool, 
 		// cache another wtc may have written; states follow from Init.
 		model.snapshot.Runtime = c.RuntimeEnlisted()
 	}
-	_, err := tea.NewProgram(model).Run()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cleanup, err := c.RegisterStatusWatcher(cancel)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	_, err = tea.NewProgram(model, tea.WithContext(ctx)).Run()
+	if ctx.Err() != nil {
+		return nil // The watcher lease was cancelled.
+	}
 	return err
 }

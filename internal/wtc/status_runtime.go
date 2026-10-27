@@ -119,6 +119,13 @@ func RuntimeText(items []RuntimeItem) string {
 		if item.URL != "" {
 			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.URL))
 		}
+		if item.Kind == "endpoint" {
+			exposure := item.Exposure
+			if exposure == "" {
+				exposure = ExposureUnknown
+			}
+			fmt.Fprintf(&b, " · exposure: %s", runtimeTextSafe(exposure))
+		}
 		if item.ExitCode != nil {
 			fmt.Fprintf(&b, " · exit %d", *item.ExitCode)
 		}

@@ -185,13 +185,20 @@ func (l statusRuntimeLayout) tunnelStart(provider string) int {
 	return -1
 }
 
-// statusRuntimeTunnelLabel is what a tunnel cell shows: its slug once the
-// address is known, else its state.
+// statusRuntimeTunnelLabel shows the address or state with an explicit label
+// for public or unknown exposure.
 func statusRuntimeTunnelLabel(item wtc.RuntimeItem) string {
-	if item.URL == "" {
-		return statusRuntimeState(item)
+	label := statusRuntimeState(item)
+	if item.URL != "" {
+		label = statusRuntimeSlug(item.URL)
 	}
-	return statusRuntimeSlug(item.URL)
+	if item.Exposure == wtc.ExposurePublic {
+		return label + " [public]"
+	}
+	if statusRuntimeExposed(item) {
+		return label + " [exposure unknown]"
+	}
+	return label
 }
 
 func statusRuntimeLinksWidth(tunnels []wtc.RuntimeItem) int {
@@ -298,7 +305,6 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 				local = statusTUIStyle(local, statusToneDim)
 			}
 		}
-		// A tunnel that may be reachable from the internet is warning-toned.
 		var tail string
 		for n, c := range l.tunnels {
 			if n > 0 {
@@ -310,10 +316,10 @@ func statusTUIRuntimeLines(snapshot wtc.StatusSnapshot, width int, styled bool) 
 					tail += "  "
 				}
 				text := statusTUISafe(statusRuntimeTunnelLabel(item))
-				// Like the port: the state colour, except that a running tunnel on
-				// the internet is warning-toned, unless it is in trouble (red).
+				// Unknown exposure needs attention; public exposure is labeled.
+				// Known exposure follows the task's health color.
 				_, tone := statusRuntimeMark(item)
-				if statusRuntimeExposed(item) && statusRuntimeLive(item) && !statusRuntimeTrouble(item) {
+				if item.Exposure != wtc.ExposurePublic && statusRuntimeExposed(item) && statusRuntimeLive(item) && !statusRuntimeTrouble(item) {
 					tone = statusToneWarning
 				}
 				if styled && statusTUIURL(item.URL) != "" && statusRuntimeLive(item) {

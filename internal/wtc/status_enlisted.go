@@ -351,7 +351,8 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 			forgeByRepo[record.Repo] = origin
 		}
 		slug, forge := origin.slug, origin.forge
-		detail := details[i]
+		detail := statusPredictBBMerge(details[i], forge, slug, snapshot.Repos)
+		mergeHead, mergeBase := statusMergeProvenance(detail)
 		worktreeDir := record.Repo
 		harnessName, _ := c.HarnessRepoName()
 		if record.Repo == "harness" || record.Repo == harnessName {
@@ -375,7 +376,8 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 					prURL = prURLForStatus(forge, slug, record.Number)
 				}
 				snapshot.Repos[branchRow].PR = &StatusPRFacts{Number: detail.Number, Checks: detail.Checks,
-					URL: prURL, Merge: detail.Merge, Review: detail.Review, Draft: detail.State == "DRAFT"}
+					URL: prURL, Merge: detail.Merge, Review: detail.Review, Draft: detail.State == "DRAFT",
+					MergeConflicts: detail.MergeConflicts, MergeSource: detail.MergeSource, MergeHead: mergeHead, MergeBase: mergeBase}
 			}
 		}
 		if detail.State == "CLOSED" || detail.State == "DECLINED" || detail.State == "SUPERSEDED" {
@@ -392,7 +394,8 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 			Merge: statusString(detail.Merge), Review: statusString(detail.Review), Title: detail.Title,
 			DisplayTitle: detail.Title, Slug: slug, URL: statusString(url), MergedOn: statusString(detail.MergedOn),
 			Draft: detail.State == "DRAFT", OnBranch: detail.State == "MERGED" && branchRow >= 0, MergeCommit: detail.MergeCommit, Base: detail.Base,
-			Archived: detail.State == "MERGED" && branchRow < 0 && statusArchived(detail.MergedOn, time.Now()),
+			Archived:       detail.State == "MERGED" && branchRow < 0 && statusArchived(detail.MergedOn, time.Now()),
+			MergeConflicts: detail.MergeConflicts, MergeSource: detail.MergeSource, MergeHead: mergeHead, MergeBase: mergeBase,
 		}
 		if row.OnBranch {
 			row.DisplayTitle = "MERGED — still on " + record.Branch + "; catch-up  " + detail.Title
@@ -409,11 +412,13 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		if err != nil || number == "" {
 			continue
 		}
-		detail := statusEnrichRecord(PRRecord{Repo: row.Repo, Number: number}, slug, forge)
+		detail := statusPredictBBMerge(statusEnrichRecord(PRRecord{Repo: row.Repo, Number: number}, slug, forge), forge, slug, snapshot.Repos)
+		mergeHead, mergeBase := statusMergeProvenance(detail)
 		if detail.State == "OPEN" || detail.State == "DRAFT" {
 			statusPRBase(&snapshot, i, detail.Base)
 			snapshot.Repos[i].PR = &StatusPRFacts{Number: detail.Number, Checks: detail.Checks,
-				URL: prURLForStatus(forge, slug, number), Merge: detail.Merge, Review: detail.Review, Draft: detail.State == "DRAFT"}
+				URL: prURLForStatus(forge, slug, number), Merge: detail.Merge, Review: detail.Review, Draft: detail.State == "DRAFT",
+				MergeConflicts: detail.MergeConflicts, MergeSource: detail.MergeSource, MergeHead: mergeHead, MergeBase: mergeBase}
 		}
 	}
 	if includeBuild {

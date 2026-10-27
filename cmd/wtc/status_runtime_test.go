@@ -116,6 +116,7 @@ func TestStatusRuntimeURLLabels(t *testing.T) {
 
 func TestStatusRuntimeHasAColumnPerTunnelProvider(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
 	item := func(name, kind, provider, url string, public bool) wtc.RuntimeItem {
 		return wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Path: "widget/web/" + name, Group: "widget/web", Kind: kind, State: "ready", URL: url, Provider: provider, Exposure: map[bool]string{true: wtc.ExposurePublic, false: wtc.ExposureTailnet}[public]}
 	}
@@ -144,8 +145,8 @@ func TestStatusRuntimeHasAColumnPerTunnelProvider(t *testing.T) {
 			t.Errorf("%s opened %q", name, got)
 		}
 	}
-	if !strings.Contains(lines[y], "\x1b[33mcalm-river") || !strings.Contains(lines[y], "\x1b[32m:8443") {
-		t.Errorf("public tunnel not warning-toned or running tailnet tunnel not green: %q", lines[y])
+	if !strings.Contains(lines[y], "\x1b[32mcalm-river [public]") || !strings.Contains(lines[y], "\x1b[32m:8443") {
+		t.Errorf("healthy tunnels are not green or public exposure is unlabeled: %q", lines[y])
 	}
 	if hover := statusRuntimeHover(snapshot.Runtime[2]); !strings.Contains(hover, "public, reachable from the internet") {
 		t.Errorf("hover does not say public: %q", hover)
@@ -165,6 +166,45 @@ func TestStatusRuntimeHasAColumnPerTunnelProvider(t *testing.T) {
 	snapshot.Runtime[2].Autostart = true
 	if plain := render(); !strings.Contains(plain, "CLOUDFLARE") || !strings.Contains(plain, ":8443     stopped") {
 		t.Fatalf("default tunnel not shown with its state: %s", plain)
+	}
+}
+
+func TestStatusRuntimeTunnelExposureLabelsAndHealthTone(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	for _, tc := range []struct {
+		name, exposure, state, answering, login, label, tone string
+		noURL                                                bool
+	}{
+		{name: "healthy public", exposure: wtc.ExposurePublic, state: "ready", label: "preview [public]", tone: statusToneSuccess},
+		{name: "public starting", exposure: wtc.ExposurePublic, state: "starting", label: "preview [public]", tone: statusToneWarning},
+		{name: "public failed", exposure: wtc.ExposurePublic, state: "failed", label: "preview [public]", tone: statusToneFailure},
+		{name: "public unreachable", exposure: wtc.ExposurePublic, state: "ready", answering: "no", label: "preview [public]", tone: statusToneFailure},
+		{name: "public needs login", exposure: wtc.ExposurePublic, state: "ready", login: "login expired", label: "preview [public]", tone: statusToneFailure},
+		{name: "unknown exposure", state: "ready", label: "preview [exposure unknown]", tone: statusToneWarning},
+		{name: "protected", exposure: wtc.ExposureProtected, state: "ready", label: "preview", tone: statusToneSuccess},
+		{name: "public stopped", exposure: wtc.ExposurePublic, state: "idle", label: "stopped [public]", tone: statusToneDim, noURL: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Group: "widget/web", Path: "widget/web/tunnel", Kind: "endpoint", Provider: "cloudflare", URL: "https://preview.trycloudflare.com", State: tc.state, Exposure: tc.exposure, Answering: tc.answering, Login: tc.login}
+			if tc.noURL {
+				item.URL, item.Autostart = "", true
+			}
+			lines := statusTUIRuntimeLines(wtc.StatusSnapshot{Runtime: []wtc.RuntimeItem{item}}, 120, true)
+			text := strings.Join(lines, "\n")
+			if !strings.Contains(ansi.Strip(text), tc.label) || !strings.Contains(text, "\x1b["+tc.tone+"m"+tc.label) {
+				t.Fatalf("expected %q with tone %s: %q", tc.label, tc.tone, text)
+			}
+			if tc.exposure != wtc.ExposurePublic && strings.Contains(ansi.Strip(text), "[public]") {
+				t.Fatal("unconfirmed exposure labeled public")
+			}
+		})
+	}
+	t.Setenv("NO_COLOR", "1")
+	item := wtc.RuntimeItem{Collection: "fixture", Repo: "widget", Dir: "widget", Group: "widget/web", Path: "widget/web/tunnel", Kind: "endpoint", State: "ready", URL: "https://preview.trycloudflare.com", Exposure: wtc.ExposurePublic}
+	text := strings.Join(statusTUIRuntimeLines(wtc.StatusSnapshot{Runtime: []wtc.RuntimeItem{item}}, 120, true), "\n")
+	if !strings.Contains(ansi.Strip(text), "preview [public]") || strings.Contains(text, "\x1b[32m") {
+		t.Fatalf("exposure should remain visible without color: %q", text)
 	}
 }
 
