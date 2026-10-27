@@ -127,7 +127,7 @@ func TestOpenReviewPRFallbackUsesExactRemoteIdentity(t *testing.T) {
 				endpoint := func(sha string) map[string]any {
 					return map[string]any{"branch": map[string]string{"name": "feature"}, "commit": map[string]string{"hash": sha}, "repository": map[string]string{"full_name": "example/example"}}
 				}
-				pr = map[string]any{"id": 7, "state": "OPEN", "source": endpoint(head), "destination": endpoint(base)}
+				pr = map[string]any{"id": 7, "state": "OPEN", "source": endpoint(head), "destination": endpoint(base), "description": strings.Repeat("synthetic ", 20000)}
 			}
 			cli := "gh"
 			if forge == "bitbucket" {
@@ -136,6 +136,11 @@ func TestOpenReviewPRFallbackUsesExactRemoteIdentity(t *testing.T) {
 			dataPath := filepath.Join(bin, "pr.json")
 			write := func(v any) {
 				t.Helper()
+				if forge == "bitbucket" {
+					if list, ok := v.([]any); ok {
+						v = map[string]any{"pullRequests": list}
+					}
+				}
 				data, _ := json.Marshal(v)
 				if err := os.WriteFile(dataPath, data, 0644); err != nil {
 					t.Fatal(err)

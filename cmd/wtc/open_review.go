@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,7 +29,25 @@ func openReviewOutput(dir, program string, args ...string) ([]byte, error) {
 	cmd.Dir = dir
 	// A missing partial-clone object must not cause an implicit fetch.
 	cmd.Env = append(os.Environ(), "GIT_NO_LAZY_FETCH=1", "GIT_NO_REPLACE_OBJECTS=1")
-	return cmd.Output()
+	if program != "bb" {
+		return cmd.Output()
+	}
+	// Like the existing forge reader, use a regular file for CLIs that can
+	// exit before a large JSON write to a pipe has drained.
+	file, err := os.CreateTemp("", "wtc-open-review-*.json")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(file.Name())
+	defer file.Close()
+	cmd.Stdout = file
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return io.ReadAll(file)
 }
 
 func openReviewGit(dir string, args ...string) (string, error) {
@@ -201,6 +220,10 @@ func openReviewPRRange(c *wtc.Context) (openReviewRange, error) {
 				args = []string{"pr", "view", numbers[0], "--json"}
 			}
 		}
+		if forge == "bitbucket" {
+			owner, name, _ := strings.Cut(slug, "/")
+			args = append(args, "--workspace", owner, "--repo", name)
+		}
 		data, err := openReviewOutput(dir, program, args...)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("%s: cannot read current PR metadata", repo))
@@ -215,12 +238,16 @@ func openReviewPRRange(c *wtc.Context) (openReviewRange, error) {
 			err = json.Unmarshal(data, &prs)
 		} else {
 			var wrapped struct {
-				Values []openReviewPR `json:"values"`
+				Values       []openReviewPR `json:"values"`
+				PullRequests []openReviewPR `json:"pullRequests"`
 			}
 			err = json.Unmarshal(data, &prs)
 			if err != nil {
 				err = json.Unmarshal(data, &wrapped)
 				prs = wrapped.Values
+				if prs == nil {
+					prs = wrapped.PullRequests
+				}
 			}
 		}
 		if err != nil {
