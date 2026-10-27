@@ -1317,7 +1317,7 @@ test("cancelling a batch or switching conversations prevents queued handoffs", a
       for (let i=0;i<6;i++) await settle();
       assert.equal(calls.filter((c) => c.method === "sessions.send").length, 0);
       if (switchView) assert.doesNotMatch(host.textContent, /api needs|completion pending/);
-      else assert.match(host.textContent, /Cancelled before handoff/);
+      else assert.match(host.textContent, /Cancelled before dispatch/);
     } finally { view.dispose(); nextResult = undefined; }
   }
 });
