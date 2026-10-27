@@ -123,6 +123,7 @@ const hostRequest = async (method, params) => {
   if (method === "sessions.github.options") return { personal, shared: { source: "system-detected", login: "octo-bot" } };
   if (method === "sessions.github.status") return { confirmation: { generation: personal?.generation, account: personal?.account, requestDigest: "d1" } };
   if (method === "plugins.sessionAction" && params.actionId === "collection") {
+    assert.equal(params.pluginId, "wtc", "visible branding must retain the installed plugin's action routing");
     const data = collections.get(params.sessionKey);
     return data instanceof Error ? { ok: false, error: data.message } : { ok: true, result: data };
   }
@@ -196,7 +197,7 @@ test("panel: no collection yet says what one is, not the conversation's label", 
   const { host, view } = await mount("panel", { ...collection([]), collection: { label: "[OpenClaw heartbeat poll]", sessionKey: "agent:main:dashboard:new" }, version: { plugin: "0.1.50-dev+g317ca2a.20261023.0912", wtc: "0.1.50-dev+g317ca2a.20261023.0912" } });
   const all = texts(host);
   assert.ok(all.includes("No collection yet"));
-  assert.ok(all.some((t) => /^A collection is this conversation's worktrees of a wtc project's repositories/.test(t ?? "")));
+  assert.ok(all.some((t) => /^A collection is this conversation's worktrees of a taba project's repositories/.test(t ?? "")));
   assert.ok(all.includes("Add a repository"));
   assert.ok(!all.some((t) => /heartbeat poll|^null$|0 repositories|None running/.test(t ?? "")));
   assert.ok(all.includes("plugin 0.1.50-dev+g317ca2a.20261023.0912, wtc 0.1.50-dev+g317ca2a.20261023.0912"));
@@ -207,16 +208,19 @@ test("panel: no collection yet says what one is, not the conversation's label", 
   bare.view.dispose();
 });
 
-test("composer: the wtc tooltip names the plugin's and the gateway's versions", async () => {
-  const { host, view } = await mount("composer", { ...busy, version: { plugin: "1.2.3", wtc: "1.2.4-dev+gabc1234" } });
-  await settle();
-  const wtcLink = [...host.all()].find((n) => n.tagName === "A" && n.textContent === "wtc");
-  assert.match(wtcLink.title, /\nplugin 1\.2\.3, wtc 1\.2\.4-dev\+gabc1234$/);
-  view.dispose();
+test("the branded link names the plugin's and gateway's versions in both views", async () => {
+  for (const kind of ["composer", "panel"]) {
+    const { host, view } = await mount(kind, { ...busy, version: { plugin: "1.2.3", wtc: "1.2.4-dev+gabc1234" } });
+    await settle();
+    const brandLink = [...host.all()].find((n) => n.tagName === "A" && n.textContent === "束 taba");
+    assert.equal(brandLink.href, "https://taba.sh/");
+    assert.match(brandLink.title, /\nplugin 1\.2\.3, wtc 1\.2\.4-dev\+gabc1234$/);
+    view.dispose();
+  }
 });
 
-test("panel: the collection's wtc project", async () => {
-  for (const [project, want] of [["wtc", "wtc project wtc"], ["ad-hoc", "ad-hoc wtc project"]]) {
+test("panel: the collection's taba project", async () => {
+  for (const [project, want] of [["wtc", "taba project wtc"], ["ad-hoc", "ad-hoc taba project"]]) {
     const { host, view } = await mount("panel", { ...busy, collection: { ...busy.collection, project } });
     assert.ok(texts(host).includes(want), want);
     view.dispose();
@@ -673,13 +677,13 @@ test("composer: without a collection, the card suggests where the latest message
   assert.equal(latestUserText([{ role: "user", content: "lets work on the site" }, { role: "assistant", content: "ok" }, { role: "user", content: [{ type: "text", text: "[OpenClaw heartbeat poll]" }] }]), "lets work on the site");
   assert.equal(latestUserText([]), "");
   // What Start sent was acted on: nothing to suggest until the person writes again.
-  assert.equal(latestUserText([{ role: "user", content: "the site" }, { role: "user", content: "(wtc) Start this conversation's collection in wtc project wtc with wtc-site: …" }]), "");
+  assert.equal(latestUserText([{ role: "user", content: "the site" }, { role: "user", content: "(wtc) Start this conversation's collection in taba project wtc with wtc-site: …" }]), "");
   assert.equal(latestUserText([{ role: "user", content: "lets work on the site\n\n(wtc) Start a new conversation …" }, { role: "user", content: "and the footer" }]), "and the footer");
   const { host, view } = await mount("composer", collection([]), [{ role: "user", content: [{ type: "text", text: "lets work on the site" }] }]);
   await settle();
   const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
   assert.ok(card(), "a suggestion card");
-  assert.ok(texts(card()).some((t) => /^Work in wtc project /.test(t ?? "")));
+  assert.ok(texts(card()).some((t) => /^Work in taba project /.test(t ?? "")));
   const ask = calls.find((c) => c.actionId === "suggest");
   assert.deepEqual(ask.payload, { text: "lets work on the site" });
   calls.length = 0;
@@ -791,7 +795,7 @@ test("composer: the draft is suggested about once typing pauses, and Start sends
     await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
     await flush();
     assert.equal(sent.length, 1);
-    assert.ok(sent[0].startsWith("lets work on the site\n\n(wtc) Start this conversation's collection in wtc project wtc"));
+    assert.ok(sent[0].startsWith("lets work on the site\n\n(wtc) Start this conversation's collection in taba project wtc"));
     assert.equal(calls.some((c) => c.method === "sessions.send"), false, "through the composer's own send");
     view.dispose();
   } finally {
@@ -816,7 +820,7 @@ test("composer: in Home, Start asks for a conversation of its own; a refused sen
     mock.timers.tick(800);
     await flush();
     const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
-    assert.ok(texts(card()).some((t) => /^Start a conversation in wtc project /.test(t ?? "")));
+    assert.ok(texts(card()).some((t) => /^Start a conversation in taba project /.test(t ?? "")));
     // Refused: the draft as written comes back, and the card with it.
     await [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Start").onclick({ preventDefault() {}, stopPropagation() {} });
     await flush();

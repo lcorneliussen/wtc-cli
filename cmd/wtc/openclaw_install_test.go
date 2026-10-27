@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,17 @@ func TestWriteOpenClawPluginStampsTheVersion(t *testing.T) {
 	}
 	for _, f := range []string{"package.json", "openclaw.plugin.json"} {
 		data, _ := os.ReadFile(filepath.Join(dir, f))
+		var metadata map[string]any
+		if err := json.Unmarshal(data, &metadata); err != nil {
+			t.Fatalf("installed %s is invalid JSON: %v", f, err)
+		}
+		key, want := "id", "wtc"
+		if f == "package.json" {
+			key, want = "name", "openclaw-plugin-wtc"
+		}
+		if metadata[key] != want {
+			t.Errorf("installed %s changes the existing %s: %v", f, key, metadata[key])
+		}
 		if !strings.Contains(string(data), `"version": "1.2.3"`) {
 			t.Errorf("%s is not stamped with the version:\n%s", f, data)
 		}
