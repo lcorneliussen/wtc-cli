@@ -7,13 +7,14 @@ import (
 
 // DiscoveryProject is the read-only project metadata available to a session.
 type DiscoveryProject struct {
-	Name      string              `json:"name"`
-	Harness   string              `json:"harness"`
-	Ref       string              `json:"ref"`
-	Default   bool                `json:"default,omitempty"`
-	Repos     []ProjectRepository `json:"repos"`
-	Error     string              `json:"error,omitempty"`
-	ProjectID string              `json:"project_id,omitempty"`
+	Name        string              `json:"name"`
+	Harness     string              `json:"harness"`
+	Ref         string              `json:"ref"`
+	Default     bool                `json:"default,omitempty"`
+	Repos       []ProjectRepository `json:"repos"`
+	Error       string              `json:"error,omitempty"`
+	ProjectID   string              `json:"project_id,omitempty"`
+	HasWorktree bool                `json:"has_worktree,omitempty"`
 }
 
 type ProjectRepository struct {

@@ -124,7 +124,7 @@ func TestSandboxProjectProjectionFiltersAndRedacts(t *testing.T) {
 	_, _ = harnessGateway(t)
 	t.Setenv(openclaw.GatewayGitEnv, "")
 	withGatewayConfig(t, `{"harnesses":[{"name":"platform","remote":"https://user:secret@github.com/example-org/platform-harness"},{"name":"hidden","remote":"https://github.com/example-org/hidden-harness"},{"name":"gone","remote":"https://github.com/example-org/gone-harness"}],"defaultHarness":"hidden"}`)
-	projects, err := localGatewayProjects([]string{"platform", "gone"})
+	projects, err := localGatewayProjects([]string{"platform", "gone"}, "")
 	if err != nil || len(projects) != 2 || projects[0].Default || projects[0].Harness != "https://github.com/example-org/platform-harness.git" || projects[0].Repos[0].DefaultRef != "origin/develop" || projects[0].Repos[0].ProjectID != "api" {
 		t.Fatalf("projection: %+v %v", projects, err)
 	}
@@ -196,5 +196,129 @@ func TestSandboxProjectsGatewayCommandReturnsOnlyAllowedMetadata(t *testing.T) {
 	}
 	if strings.Contains(string(body), "hidden") {
 		t.Fatalf("unallowed metadata: %s", body)
+	}
+}
+
+func executeSandboxProjects(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	cmd := sandboxProjectsCommand()
+	cmd.SetArgs(args)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = w
+	err = cmd.Execute()
+	os.Stdout = stdout
+	w.Close()
+	body, _ := io.ReadAll(r)
+	r.Close()
+	return string(body), err
+}
+
+func TestSandboxProjectsUseExistingHarnessWorktree(t *testing.T) {
+	state, git := harnessGateway(t)
+	withGatewayConfig(t, `{"harnesses":[{"name":"platform","remote":"https://github.com/example-org/platform-harness"}]}`)
+	dir := filepath.Join(state, "worktrees", "platform-harness", "42-fix")
+	git(filepath.Join(state, "repos", "platform-harness"), "worktree", "add", "-q", "-b", "openclaw/42-fix", dir)
+	t.Chdir(dir)
+	registry := platformRegistry + "  - name: tools\n    remote: https://github.com/example-org/tools.git\n    default_ref: origin/develop\n"
+	if err := os.WriteFile(filepath.Join(dir, ".harness-repos.yml"), []byte(registry), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The harness worktree establishes the project even before a separate
+	// collection record exists. Unpublished registry edits are visible.
+	body, err := executeSandboxProjects(t, "--project", "platform")
+	var metadata openclaw.SandboxProjects
+	if err != nil || json.Unmarshal([]byte(body), &metadata) != nil || metadata.Collection != "42-fix" || metadata.CollectionProject != "platform" || !metadata.Projects[0].HasWorktree || len(metadata.Projects[0].Repos) != 3 {
+		t.Fatalf("worktree metadata: %s %v", body, err)
+	}
+	sandboxMetadataServer(t, 200, body)
+	plan, err := addRepoPlan(t, "tools", "--worktree", "42-fix", "--separate")
+	if err != nil || summary(plan) != "tools@tools:origin/develop" {
+		t.Fatalf("existing harness was spawned again: %s %v", summary(plan), err)
+	}
+}
+
+func TestSandboxProjectsEnforceRecordedCollectionVisibility(t *testing.T) {
+	for _, project := range []string{"platform", "hidden"} {
+		t.Run(project, func(t *testing.T) {
+			state, git := harnessGateway(t)
+			withGatewayConfig(t, `{"harnesses":[{"name":"platform","remote":"https://github.com/example-org/platform-harness"}]}`)
+			dir := filepath.Join(state, "worktrees", "api", "42-fix")
+			git(filepath.Join(state, "repos", "api"), "worktree", "add", "-q", "-b", "openclaw/42-fix", dir)
+			t.Chdir(dir)
+			folder := openclaw.NewCollectionFolder(state, "42-fix", project)
+			if err := wtc.RecordGatewayHarness(folder, project, "https://github.com/example-org/"+project+"-harness"); err != nil {
+				t.Fatal(err)
+			}
+			body, err := executeSandboxProjects(t, "--project", "platform")
+			if project == "hidden" {
+				if err == nil || body != "" {
+					t.Fatalf("unallowed collection disclosed: %s %v", body, err)
+				}
+				return
+			}
+			var result openclaw.SandboxProjects
+			if err != nil || json.Unmarshal([]byte(body), &result) != nil || result.CollectionProject != project {
+				t.Fatalf("allowed binding: %s %v", body, err)
+			}
+		})
+	}
+}
+
+func TestSandboxRemoteProjectionSupportsForgeTransports(t *testing.T) {
+	for _, tc := range []struct{ remote, want string }{
+		{"https://user:secret@bitbucket.org/example/api.git?token=secret#secret", "https://bitbucket.org/example/api.git"},
+		{"ssh://git@github.com/example/api.git", "https://github.com/example/api.git"},
+		{"git@bitbucket.org:example/api.git", "https://bitbucket.org/example/api.git"},
+		{"https://github.com/exa%20mple/api.git", ""},
+		{"https://github.com/example/api%20name.git", ""},
+	} {
+		got, err := projectMetadataRemote(tc.remote)
+		if tc.want == "" {
+			if err == nil {
+				t.Fatalf("odd name accepted: %q", got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Fatalf("remote projection: %q %v; want %q", got, err, tc.want)
+		}
+	}
+}
+
+func TestSandboxWorkerAndBitbucketPlansWriteNoGatewayState(t *testing.T) {
+	for _, tc := range []struct {
+		name, remote, projectID string
+		args                    []string
+		wantError               bool
+	}{
+		{"worker missing project", "https://github.com/example/api.git", "", []string{"--worker", "part", "--work", "test"}, true},
+		{"worker known project", "https://github.com/example/api.git", "api-id", []string{"--worker", "part", "--work", "test"}, false},
+		{"worker explicit base", "https://github.com/example/api.git", "api-id", []string{"--worker", "part", "--work", "test", "--base", "feature"}, false},
+		{"Bitbucket missing project", "https://bitbucket.org/example/api.git", "", []string{"--separate"}, true},
+		{"Bitbucket known project", "https://bitbucket.org/example/api.git", "api-id", []string{"--separate"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.ReplaceAll(sandboxMetadata, "https://github.com/example/api.git", tc.remote)
+			body = strings.ReplaceAll(body, `,"project_id":"api-id"`, "")
+			if tc.projectID != "" {
+				body = strings.Replace(body, `"name":"api"`, `"name":"api","project_id":"`+tc.projectID+`"`, 1)
+			}
+			sandboxMetadataServer(t, 200, body)
+			args := append([]string{"api", "--worktree", "42-fix"}, tc.args...)
+			plan, err := addRepoPlan(t, args...)
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "grants no clone permission") {
+					t.Fatalf("expected refusal: %+v %v", plan, err)
+				}
+				return
+			}
+			if err != nil || len(plan) == 0 || plan[len(plan)-1].Args.ProjectID != tc.projectID {
+				t.Fatalf("known project: %+v %v", plan, err)
+			}
+		})
 	}
 }

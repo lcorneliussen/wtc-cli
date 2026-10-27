@@ -52,11 +52,7 @@
       },
       "pullRequestEvents": {
         "type": "string",
-        "enum": [
-          "wake",
-          "queue",
-          "off"
-        ],
+        "enum": ["wake", "queue", "off"],
         "default": "wake",
         "description": "How a collection's conversation hears that a pull request of it was opened, merged or closed, became ready, failed or passed its checks, was approved, got a request for changes or conflicts with its base: wake gives it a turn now, queue tells it on its next turn, off says nothing."
       },

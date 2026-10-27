@@ -44,10 +44,13 @@ wtc doctor
 ```
 
 Repository names and default branches resolve from one permitted snapshot per
-plan. A registered repository uses its gateway project ID. `add-repo` prints
+plan. If the collection has a worktree of its harness, that worktree's registry
+(including unpublished edits) is used and the harness is not added again. A registered repository uses its gateway project ID. `add-repo` prints
 session-spawn intents; it performs no gateway writes and does not record project
 selection in the sandbox filesystem. An existing collection's project is kept
-when planning for that collection. `doctor` reports the gateway discovery source
+when planning for that collection. If no project record exists yet, the
+collection's existing harness worktree establishes its project; ambiguous
+metadata is refused. `doctor` reports the gateway discovery source
 or that discovery is unavailable. A denied, malformed or unreachable discovery
 response fails `projects` and `add-repo`; it does not silently fall back to an
 empty local configuration. An empty permitted project list is distinct from a

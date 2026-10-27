@@ -174,6 +174,9 @@ pull request with them. One left out keeps what was recorded before.`,
 // worktree of the harness itself first; a worker never does.
 func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separate, adHoc bool, worker, work string) error {
 	sandbox := openclaw.GatewayFromEnv(os.Getenv) != nil
+	// A sandbox emits intents only. Gateway base and project records must
+	// never be written into a sandbox's private filesystem.
+	recordsGatewayState := !sandbox
 	if worktree == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			worktree = openclaw.CurrentWorktree(cwd)
@@ -257,14 +260,14 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 				return fmt.Errorf("%s is not on the gateway yet. Ask the person to add %s with Add repository in the Collection panel, then run this again. Only if they want %s as a conversation of its own: --separate", repo, arg, repo)
 			}
 		}
-		if !sandbox && gitURL == "" && branch != "" {
+		if recordsGatewayState && gitURL == "" && branch != "" {
 			if dir := openclaw.GatewayProjectDirByName(gatewayStateDir(), project); dir != "" {
 				if err := openclaw.RecordBase(dir, target, branch); err != nil {
 					return fmt.Errorf("recording %s as the base of %s: %w", branch, repo, err)
 				}
 			}
 		}
-		if !sandbox && worker != "" && baseFlag != "" {
+		if recordsGatewayState && worker != "" && baseFlag != "" {
 			// An explicit base that is a branch only here, another worker's or
 			// the task's before it is published, is where the worker starts.
 			// It is still measured and caught up against the task's base.
@@ -275,7 +278,7 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 				}
 			}
 		}
-		if worker != "" && baseFlag == "" {
+		if recordsGatewayState && worker != "" && baseFlag == "" {
 			// A worker builds on the task's work so far, when the task has a
 			// branch in this repository, and is measured and caught up
 			// against the task's base.
@@ -303,7 +306,7 @@ func addRepoIntents(repos []string, worktree, baseRef, harnessFlag string, separ
 			projects = append(projects, project)
 		}
 	}
-	if worker == "" && !sandbox {
+	if worker == "" && recordsGatewayState {
 		// Only a plan that can be carried out binds the collection: to its
 		// harness, or, when the person chose none, to none, so that a later
 		// add-repo does not bind it to a harness after all.
@@ -395,7 +398,7 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 		return nil, nil, reg.err
 	}
 	var adds []repoToAdd
-	if reg.worktree == "" && !worker {
+	if reg.worktree == "" && !reg.hasWorktree && !worker {
 		adds = append(adds, repoToAdd{arg: h.Remote, branch: h.Ref, resolved: true, project: reg.projectID})
 	}
 	var unlisted []string
@@ -449,7 +452,7 @@ func harnessRepos(repos []string, worktree, branch, flag string, adHoc, worker b
 				}
 			}
 		}
-		return nil, nil, unlistedError(*h, worktree, repos, unlisted, recorded == "", reg.worktree != "", elsewhere)
+		return nil, nil, unlistedError(*h, worktree, repos, unlisted, recorded == "", reg.worktree != "" || reg.hasWorktree, elsewhere)
 	}
 	return adds, h, nil
 }
@@ -509,11 +512,12 @@ func unlistedError(h openclaw.Harness, worktree string, repos, unlisted []string
 // worktree of the harness when it has one, else from the gateway's clone of
 // the harness at its configured ref.
 type harnessRegistry struct {
-	projectID  string
-	projectIDs map[string]string
-	repos      []wtc.Repo
-	worktree   string
-	err        error
+	hasWorktree bool // current collection presence without exposing the gateway path
+	projectID   string
+	projectIDs  map[string]string
+	repos       []wtc.Repo
+	worktree    string
+	err         error
 }
 
 func (r harnessRegistry) find(name string) (wtc.Repo, bool) {

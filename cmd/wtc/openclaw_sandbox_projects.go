@@ -21,17 +21,32 @@ func sandboxProjectsCommand() *cobra.Command {
 		if len(allowed) == 0 {
 			return errors.New("project discovery is not enabled for this agent")
 		}
-		projects, err := localGatewayProjects(allowed)
+		result := openclaw.SandboxProjects{}
+		if cwd, err := os.Getwd(); err == nil {
+			result.Collection = openclaw.CurrentWorktree(cwd)
+		}
+		projects, err := localGatewayProjects(allowed, result.Collection)
 		if err != nil {
 			return errors.New("gateway project metadata unavailable")
 		}
-		result := openclaw.SandboxProjects{Projects: projects}
-		if cwd, err := os.Getwd(); err == nil {
-			result.Collection = openclaw.CurrentWorktree(cwd)
-			if folder := openclaw.CollectionFolder(gatewayStateDir(), result.Collection); result.Collection != "" && folder != "" {
+		result.Projects = projects
+		if result.Collection != "" {
+			if folder := openclaw.CollectionFolder(gatewayStateDir(), result.Collection); folder != "" {
 				result.CollectionProject, _, err = wtc.GatewayHarness(folder)
 				if err != nil || (result.CollectionProject != "" && result.CollectionProject != openclaw.NoHarness && !slices.Contains(allowed, result.CollectionProject)) {
 					return errors.New("gateway collection metadata unavailable")
+				}
+			}
+			// A sandbox emits no binding write. An existing harness worktree
+			// establishes the collection's project when no record exists yet.
+			if result.CollectionProject == "" {
+				for _, project := range projects {
+					if project.HasWorktree {
+						if result.CollectionProject != "" {
+							return errors.New("gateway collection metadata is ambiguous")
+						}
+						result.CollectionProject = project.Name
+					}
 				}
 			}
 		}
@@ -60,7 +75,7 @@ func harnessProjectContext(worktree string) (openclaw.GatewayConfig, map[string]
 		if p.Default {
 			cfg.DefaultHarness = p.Name
 		}
-		reg := harnessRegistry{projectID: p.ProjectID, projectIDs: map[string]string{}}
+		reg := harnessRegistry{projectID: p.ProjectID, projectIDs: map[string]string{}, hasWorktree: metadata.Collection == worktree && p.HasWorktree}
 		if p.Error != "" {
 			reg.err = errors.New(p.Error)
 		}

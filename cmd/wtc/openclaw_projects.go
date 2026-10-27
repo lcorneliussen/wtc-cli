@@ -24,12 +24,12 @@ func gatewayProjects() ([]gatewayProject, error) {
 		p, err := gw.Projects()
 		return p.Projects, err
 	}
-	return localGatewayProjects(nil)
+	return localGatewayProjects(nil, "")
 }
 
 // A nil allowlist is the gateway's local listing. A non-nil list is the
 // sandbox projection: filter before reading registries and omit raw errors.
-func localGatewayProjects(allowed []string) ([]gatewayProject, error) {
+func localGatewayProjects(allowed []string, worktree string) ([]gatewayProject, error) {
 	cfg, err := gatewayConfig()
 	if err != nil {
 		return nil, err
@@ -40,7 +40,7 @@ func localGatewayProjects(allowed []string) ([]gatewayProject, error) {
 			continue
 		}
 		p := gatewayProject{Name: h.Name, Harness: h.Remote, Ref: h.Ref, Default: h.Name == cfg.DefaultHarness, Repos: []gatewayProjectRepo{}}
-		reg := readHarnessRegistry(h, "")
+		reg := readHarnessRegistry(h, worktree)
 		if reg.err != nil {
 			p.Error = reg.err.Error()
 		}
@@ -64,6 +64,7 @@ func sandboxProjectMetadata(p gatewayProject, h openclaw.Harness, reg harnessReg
 		p.ProjectID = filepath.Base(dir)
 	}
 	p.Repos = []gatewayProjectRepo{}
+	p.HasWorktree = reg.worktree != ""
 	if reg.err != nil {
 		p.Error = "project registry unavailable on the gateway"
 		return p
