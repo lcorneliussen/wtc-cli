@@ -617,7 +617,7 @@ function collectionTables(v) {
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
   const finished = (r) => r.pullRequest?.state === "merged";
-  const toPush = (r) => finished(r) ? 0 : r.unpublished || (!r.pullRequest ? r.ahead ?? 0 : 0);
+  const toPush = (r) => finished(r) ? 0 : r.unpublished ?? (!r.pullRequest ? r.ahead ?? 0 : 0);
   const pushable = (r) => !r.error && !finished(r) && ((r.forge !== BITBUCKET && r.dirty) || toPush(r) > 0);
   // A completed branch returns to the tip even if its commits are already
   // present there. Its PR leaves the repository row after that move.

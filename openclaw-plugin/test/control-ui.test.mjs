@@ -473,7 +473,7 @@ test("publication results distinguish new and existing Bitbucket PRs and offer t
 test("Bitbucket dirty files offer local commits instead of an empty push", async () => {
   bitbucket = { user: "ada@example.com", name: "Ada" };
   for (const kind of ["composer", "panel"]) {
-    const { host, view } = await mount(kind, collection([repo("docs", { forge: "bitbucket", dirty: 2 })]));
+    const { host, view } = await mount(kind, collection([repo("docs", { forge: "bitbucket", dirty: 2, ahead: 3, unpublished: 0, published: true })]));
     try {
       assert.ok([...host.all()].some((n) => n.tagName === "BUTTON" && n.textContent === "Commit changes"));
       assert.equal([...host.all()].some((n) => n.tagName === "BUTTON" && /to push/.test(n.title)), false);
