@@ -7,6 +7,12 @@ applies: always
 Does the change do what `pr.md` says it does, and does it keep doing what the
 code did before where it was not meant to change?
 
+Separate a request to change intended behavior from a defect in how that
+behavior is explained. An intentional restriction can still have a misleading
+message or diagnostic. Check the explanation against what the code establishes
+and the intended disclosure contract; identify a clarification separately from
+a behavior or policy change. Author intent alone does not refute the defect.
+
 Check, reading the surrounding code and not just the hunks:
 
 - logic errors: wrong condition, inverted check, off-by-one, wrong variable,
