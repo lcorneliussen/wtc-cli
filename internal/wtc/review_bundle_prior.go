@@ -57,7 +57,22 @@ func copyReviewPrior(dir, root string, current ReviewManifest) error {
 		return earlier[i].round < earlier[j].round
 	})
 	if len(earlier) == 0 {
-		return nil
+		return prepareReviewConvergence(dir, current, "")
+	}
+	completed := ""
+	for _, entry := range earlier {
+		if data, err := os.ReadFile(filepath.Join(entry.path, "summary.md")); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+			verdict, err := os.ReadFile(filepath.Join(entry.path, "verdict"))
+			if err == nil {
+				switch strings.TrimSpace(string(verdict)) {
+				case "pass", "pass-with-notes", "changes-requested", "error":
+					completed = entry.path
+				}
+			}
+		}
+	}
+	if err := prepareReviewConvergence(dir, current, completed); err != nil {
+		return err
 	}
 	prior := filepath.Join(dir, "prior")
 	if err := os.MkdirAll(prior, 0755); err != nil {

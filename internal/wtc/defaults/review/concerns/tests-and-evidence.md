@@ -19,6 +19,16 @@ Check:
   `log.txt` that changed the tested code
 - repro commands would run as written (paths, flags, targets exist)
 
+Before claiming coverage is absent, inspect all relevant tests and subcases,
+including end-to-end assertions outside the nearest unit-test table. Name a
+concrete uncovered scenario and verify the cited source line exists. A branch
+without its own dedicated test is not by itself a missing behavior test.
+
+For races and stale writes, require evidence that forces the violating order
+with a barrier, injected ordering hook or controlled scheduler. A sleep alone
+does not prove a regression: explain why the old code would fail the assertion
+and the corrected invariant would pass. Cover the affected writers together.
+
 Do not demand tests where the repo has no test layer for that kind of code;
 then judge the evidence instead.
 
