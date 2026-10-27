@@ -107,3 +107,7 @@ func TestStatusForgeCacheIsPrivateFreshAndDoesNotReadSymlinks(t *testing.T) {
 		t.Fatal("symlink cache was read")
 	}
 }
+
+func statusWriteForgeCache(forge, slug, number string, data []byte) {
+	statusWriteForgeEntry("pr", forge, slug, number, data)
+}

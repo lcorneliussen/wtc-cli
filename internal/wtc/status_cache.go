@@ -83,10 +83,6 @@ func statusReadForgeEntryWithAge(kind, forge, slug, key string, age time.Duratio
 	return data, err == nil && len(data) != 0
 }
 
-func statusWriteForgeCache(forge, slug, number string, data []byte) {
-	statusWriteForgeEntry("pr", forge, slug, number, data)
-}
-
 // statusWriteForgeEntrySince publishes data fetched by a request that started
 // at started, unless the record already holds a response from a later request.
 // Callers hold the record lock when it can be taken; without it two writers can
