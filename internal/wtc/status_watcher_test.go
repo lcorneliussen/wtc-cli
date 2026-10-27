@@ -306,7 +306,7 @@ func TestStatusWatcherRejectsRetiredAndSymlinkedRegistries(t *testing.T) {
 func TestStatusWatcherRegistrationCannotReviveRetirement(t *testing.T) {
 	c := watcherCollection(t)
 	registered := make(chan error, 1)
-	err := c.withRuntimeLock(func() error {
+	err := c.withStatusWatcherLock(func() error {
 		go func() {
 			cleanup, err := c.RegisterStatusWatcher(func() {})
 			registered <- err
@@ -354,5 +354,29 @@ func TestStatusWatcherConcurrentRegistrationAndCleanup(t *testing.T) {
 		}
 		<-done
 		next()
+	}
+}
+
+func TestStatusWatcherLifecycleDoesNotWaitForRuntimeProvisioning(t *testing.T) {
+	c := watcherCollection(t)
+	err := c.withRuntimeLock(func() error {
+		finished := make(chan error, 1)
+		go func() {
+			cleanup, err := c.RegisterStatusWatcher(func() {})
+			if err == nil {
+				cleanup()
+			}
+			finished <- err
+		}()
+		select {
+		case err := <-finished:
+			return err
+		case <-time.After(time.Second):
+			t.Fatal("watcher startup or cleanup waited for the runtime lock")
+			return nil
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

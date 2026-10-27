@@ -1329,7 +1329,7 @@ func runStatusTUI(c *wtc.Context, all, procs, reposOnly, noFetch, noClick bool, 
 	defer cleanup()
 	_, err = tea.NewProgram(model, tea.WithContext(ctx)).Run()
 	if ctx.Err() != nil {
-		return nil // Retirement requested this watcher to stop.
+		return nil // The watcher lease was cancelled.
 	}
 	return err
 }

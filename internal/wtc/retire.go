@@ -93,6 +93,11 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 	if err != nil {
 		return result, err
 	}
+	unlockWatchers, err := runtimeTarget.lockStatusWatchers()
+	if err != nil {
+		return result, err
+	}
+	defer unlockWatchers()
 	err = runtimeTarget.withRuntimeLock(func() error {
 		if err := runtimeTarget.retireRuntime(); err != nil {
 			return fmt.Errorf("runtime cleanup: %w", err)
@@ -326,7 +331,7 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 	files := []string{
 		"HANDOFF.md", ".env.collection", ".env.collection.local", "mise.toml", ".DS_Store",
 		"WTC-SCOPE.md", "SCOPE.md", ".env.toolchain",
-		".wtc-runtime.lock",
+		".wtc-runtime.lock", ".wtc-status-watchers.lock",
 		".wtc-prs", ".wtc-prs.lock", ".last-wtc-status.yml", ".wtc-status.json", ".wtc-status.md",
 		".wtc-catch-up.json", ".wtc-catch-up.json.md", ReviewModeFile,
 	}

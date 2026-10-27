@@ -16,13 +16,14 @@ const statusWatcherDir = ".wtc-status-watchers"
 // RegisterStatusWatcher binds a live view to its resolved collection, even when
 // launched from elsewhere or through a relative executable. Retirement marks
 // its lease to request cancellation and waits for cleanup to release the lock.
-// No persisted PID is trusted, so stale leases cannot signal a reused process.
+// A removed or replaced lease also cancels the view. No persisted PID is
+// trusted, so stale leases cannot signal a reused process.
 func (c *Context) RegisterStatusWatcher(stop func()) (func(), error) {
 	if RetiredFolder(c.Collection) {
 		return nil, retiredFolderError(c.Collection)
 	}
 	var cleanup func()
-	err := c.withRuntimeLock(func() error {
+	err := c.withStatusWatcherLock(func() error {
 		// Retirement holds this same lock through folder removal. Reopen after
 		// acquiring it so an already-discovered context cannot revive a retire.
 		if _, err := OpenCollection(c.Collection); err != nil {
@@ -68,9 +69,9 @@ func (c *Context) registerStatusWatcher(stop func()) (func(), error) {
 				_ = os.Remove(f.Name())
 			}
 			_ = f.Close()
-			// Release the lease before taking the lifecycle lock: retirement
+			// Release the lease before taking the watcher lock: retirement
 			// may own that lock while it waits for this watcher to stop.
-			_ = c.withRuntimeLock(func() error {
+			_ = c.withStatusWatcherLock(func() error {
 				_ = os.Remove(dir) // Only remove an empty registry.
 				return nil
 			})
@@ -158,6 +159,51 @@ func stopStatusWatcherLease(f *os.File, path string) error {
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("status watcher did not stop before retirement")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// This lock covers only watcher registration, cleanup and retirement. Service
+// provisioning must not hold it: a live view needs to open during startup.
+func (c *Context) withStatusWatcherLock(fn func() error) error {
+	unlock, err := c.lockStatusWatchers()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn()
+}
+
+func (c *Context) lockStatusWatchers() (func(), error) {
+	path := filepath.Join(c.Collection, ".wtc-status-watchers.lock")
+	fd, err := unix.Open(path, unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0600)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), path)
+	locked := false
+	defer func() {
+		if !locked {
+			_ = f.Close()
+		}
+	}()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("status watcher lock must be a regular file")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
+		if err == nil {
+			locked = true
+			return func() { _ = f.Close() }, nil // Close releases the flock.
+		}
+		if err != unix.EWOULDBLOCK && err != unix.EAGAIN {
+			return nil, err
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("status watcher lifecycle is busy")
 		}
 		time.Sleep(25 * time.Millisecond)
 	}

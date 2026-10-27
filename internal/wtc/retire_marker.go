@@ -95,6 +95,17 @@ func retireLeftovers(dir string) ([]string, error) {
 // generated files a lingering process may have written since, and the folder
 // once nothing else is left. If anything remains, the marker is refreshed.
 func (c *Context) finishRetiredFolder(target string) (RetireResult, error) {
+	var result RetireResult
+	targetContext := &Context{Collection: target}
+	err := targetContext.withStatusWatcherLock(func() error {
+		var err error
+		result, err = c.finishRetiredFolderLocked(target)
+		return err
+	})
+	return result, err
+}
+
+func (c *Context) finishRetiredFolderLocked(target string) (RetireResult, error) {
 	result := RetireResult{Collection: target, Removed: []string{}}
 	entries, err := os.ReadDir(target)
 	if err != nil {
