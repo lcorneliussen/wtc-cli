@@ -1,3 +1,0 @@
-## OpenClaw
-
-- **Sandbox sessions discover operator-allowed gateway projects.** Project names and repository branches can be resolved through the sandbox Git service. Plans needing new gateway base records, worker inheritance or another collection are directed to the gateway collection session. Discovery is denied by default, with an explicit per-agent allowlist, and grants no additional Git, clone or publication access. See [project discovery in a sandbox](https://github.com/lcorneliussen/wtc-cli/blob/main/docs/sandbox-projects.md) for operator setup ([#171](https://github.com/lcorneliussen/wtc-cli/issues/171)).

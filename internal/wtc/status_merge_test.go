@@ -105,8 +105,8 @@ func TestStatusBitbucketPredictsExactPRCommits(t *testing.T) {
 			for _, row := range snapshot.Repos {
 				if row.Dir == "harness" {
 					facts = row.PR
-					if row.Next != nil {
-						t.Errorf("dirty checkout received an action: %+v", row.Next)
+					if row.Next == nil || row.Next.Step != "commit" || row.Next.By != "agent" {
+						t.Errorf("dirty checkout must offer an author commit handoff: %+v", row.Next)
 					}
 				}
 			}

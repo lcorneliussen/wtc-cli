@@ -54,8 +54,9 @@ type CheckoutStatus struct {
 	Proposal *Proposal `json:"proposal,omitempty"`
 	// Next is the repository's next step, read from all of the above; nil
 	// when nothing waits on anyone.
-	Next  *next.Step `json:"next,omitempty"`
-	Error string     `json:"error,omitempty"`
+	Next    *next.Step    `json:"next,omitempty"`
+	Choices *next.Choices `json:"choices,omitempty"`
+	Error   string        `json:"error,omitempty"`
 }
 
 // PullRequest is the pull request of a checkout's branch.
@@ -239,7 +240,9 @@ func checkoutStatus(path string, pullRequests bool) CheckoutStatus {
 	if pullRequests && origin.Forge == ForgeGitHub && s.Branch != "" {
 		s.PullRequest = gitHubPullRequest(top, origin, s.Branch)
 	}
-	s.Next = next.For(s.facts(top))
+	choices := next.ChoicesFor(s.facts(top))
+	s.Choices = &choices
+	s.Next = choices.Primary()
 	return s
 }
 
@@ -279,7 +282,7 @@ func (s CheckoutStatus) facts(top string) next.Facts {
 		}
 	}
 	if pr := s.PullRequest; pr != nil {
-		f.PR = &next.PR{Number: pr.Number, State: pr.State, Draft: pr.Draft, Checks: pr.Checks, Mergeable: pr.Mergeable, Review: pr.Review, MergedIn: pr.MergedIn}
+		f.PR = &next.PR{Number: pr.Number, Head: pr.Head, State: pr.State, Draft: pr.Draft, Checks: pr.Checks, Mergeable: pr.Mergeable, Review: pr.Review, MergedIn: pr.MergedIn}
 	}
 	return f
 }
