@@ -573,6 +573,27 @@ for (const kind of ["composer", "panel"]) test(`${kind}: a delayed PR text revie
   } finally { view.dispose(); controlledSend = undefined; bitbucket = undefined; bitbucketConfirmResult = undefined; }
 });
 
+for (const kind of ["composer", "panel"]) test(`${kind}: a delayed next-action check cannot publish into another conversation`, async () => {
+  personal = { state: "connected", account: { id: 1, login: "octo" }, generation: "g1" };
+  const step = { step: "push", by: "wtc", approve: "person", gateway: "github_publish", key: "docs:push:head1", reason: "One commit is ready to push" };
+  const r = repo("docs", { unpublished: 1, next: step });
+  const { host, view } = await mount(kind, collection([r]));
+  try {
+    let finish;
+    nextResult = new Promise((resolve) => { finish = resolve; });
+    calls.length = 0;
+    titled(host, step.reason).onclick({ preventDefault() {}, stopPropagation() {} });
+    await settle();
+    const nextKey = `agent:main:other:${++sessions}`;
+    collections.set(nextKey, { ...collection([repo("other")]), collection: { sessionKey: nextKey } });
+    view.update({ props: { sessionKey: nextKey, agentId: "main" }, host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} });
+    finish({ ok: true, result: { performed: false, repo: r } });
+    await settle();
+    assert.equal(calls.some((c) => c.method === "sessions.github.publish" || c.method === "sessions.send"), false);
+    assert.doesNotMatch(host.textContent, /Preparing to push docs|confirm to push/);
+  } finally { view.dispose(); personal = null; nextResult = undefined; }
+});
+
 for (const phase of ["prepare", "confirm"]) for (const switchConversation of [false, true]) test(`composer: ${phase} batch ${switchConversation ? "stops after switching conversations" : "completes in its original conversation"}`, async () => {
   personal = { state: "connected", account: { id: 1, login: "octo" }, generation: "g1" };
   const previous = githubPublishResult;

@@ -585,25 +585,28 @@ function collectionTables(v) {
     : s.by === "wtc" && !s.approve && JSON.stringify(s.command) === JSON.stringify(["wtc", "catch-up"]) ? "run" : null;
   async function actNext(r) {
     if (acting.has(r.sessionKey)) return;
+    const conversationKey = v.key();
+    const say = (...args) => { if (v.key() === conversationKey) v.say(...args); };
     acting.add(r.sessionKey);
     v.rerender();
     try {
-      const out = await call(v.host, "next", v.key(), v.agent(), { ownerSessionKey: r.sessionKey, key: r.next.key });
+      const out = await call(v.host, "next", conversationKey, v.agent(), { ownerSessionKey: r.sessionKey, key: r.next.key });
+      if (v.key() !== conversationKey) return;
       const fresh = out.repo;
       if (out.performed) {
-        await catchUpRepo(v.host, v.agent(), fresh, v.say, (input) => askSkill(v.host, v.key(), "wtc-catch-up", input), async () => out);
+        await catchUpRepo(v.host, v.agent(), fresh, say, (input) => v.key() === conversationKey ? askSkill(v.host, conversationKey, "wtc-catch-up", input) : undefined, async () => out);
       } else if (fresh?.next) {
         const step = fresh.next;
         switch (nextRoute(step)) {
-          case "publish": await publish(fresh); break;
+          case "publish": await publish(fresh, conversationKey); break;
           case "agent":
-            await askSkill(v.host, v.key(), step.skill ?? "wtc-catch-up", `${nameOf(fresh)}: ${step.reason}. Work on this repository only; recheck its state before acting.`);
-            v.say(`${nameOf(fresh)}: asked the conversation to ${nextLabel(step).toLowerCase()}.`);
+            await askSkill(v.host, conversationKey, step.skill ?? "wtc-catch-up", `${nameOf(fresh)}: ${step.reason}. Work on this repository only; recheck its state before acting.`);
+            say(`${nameOf(fresh)}: asked the conversation to ${nextLabel(step).toLowerCase()}.`);
             break;
-          default: v.say("The next step changed; refresh the collection before acting.", true);
+          default: say("The next step changed; refresh the collection before acting.", true);
         }
       }
-    } catch (err) { v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
+    } catch (err) { say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
     finally { acting.delete(r.sessionKey); await v.refresh(); }
   }
   function nextActions(repos) {
