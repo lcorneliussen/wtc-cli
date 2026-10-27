@@ -20,12 +20,26 @@ Check, reading the surrounding code and not just the hunks:
 - concurrency and ordering where the code runs more than once or in parallel
 - the change is complete: renamed or removed things have no leftover references
 
+For a structural defect (race, stale overwrite, missing guard, retry or cache
+inconsistency), name the invariant before proposing a fix. Trace the affected
+state's writers, readers and publication paths, including fallback, forced
+refresh, empty-result and error paths. Consolidate every confirmed violation
+of that invariant into one finding, listing the paths checked and any coverage
+limits. Suggest a shared boundary or invariant-level fix instead of a patch
+to the first offending line. Independent root causes remain separate findings.
+
+Support each finding with a concrete trigger and observable consequence. Check
+likelihood, persistence, recovery and impact before assigning severity. A rare
+case that self-corrects at the next audit is normally minor or an explicit
+accepted risk; explain any higher-impact exception. Do not inflate severity
+for an unverified suspicion or weaken a demonstrated data-loss/security risk.
+
 Severities:
 
 - **blocker** — wrong results, data loss/corruption, crash or failed run on a
   path that will execute in normal use
-- **major** — wrong on a realistic edge case, or an error path that hides
-  failures
+- **major** — a realistic setup produces a persistent wrong state, or an error
+  path hides a consequential failure; give the setup and its impact
 - **minor** — wrong only on an unlikely input, or a latent bug not reachable
   today
 - **nit** — do not use for this concern except for a misleading name or

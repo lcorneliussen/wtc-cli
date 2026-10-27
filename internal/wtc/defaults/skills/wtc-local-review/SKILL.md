@@ -45,6 +45,11 @@ the new head.
    answer every open finding. Use `wtc review resolve <bundle-dir> --reply
    "..."` for inline threads after answering them. A later round retains the
    original inline thread; resolve it using the bundle that first posted it.
+   When a finding names an invariant, trace all affected writers/readers and fix
+   the shared class rather than only its first instance. Use deterministic
+   ordering evidence for races. Answer scope/design checkpoints before another
+   round of point fixes; keep new behavior in an explicitly scoped follow-up
+   when appropriate. These checkpoints do not authorize expanding the task.
 5. Push fixes and build a new bundle on the new head. Continue until the
    verdict is `pass`, or `pass-with-notes` with remaining notes answered.
 6. Only when the user has asked to mark the draft ready, use
