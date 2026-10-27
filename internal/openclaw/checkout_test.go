@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -356,6 +357,61 @@ func TestStatus(t *testing.T) {
 	}
 	if got.Repos[1].Error == "" {
 		t.Errorf("a directory that is no checkout: %+v", got.Repos[1])
+	}
+}
+
+func TestStatusAfterPersonalPush(t *testing.T) {
+	for _, marked := range []bool{false, true} {
+		t.Run(fmt.Sprint("prior-marker=", marked), func(t *testing.T) {
+			c, git := managedWorktree(t, "https://bitbucket.org/example-ws/docs.git")
+			message := "First change"
+			if marked {
+				message += "\n\nOpenClaw-Publication: first"
+			}
+			git("commit", "--allow-empty", "-qm", message)
+			git("commit", "--allow-empty", "-qm", "Second change")
+			ref := "refs/remotes/origin/" + c.Branch()
+			git("update-ref", ref, "HEAD")
+			s := CheckoutsStatus([]string{c.Dir}, false).Repos[0]
+			if !s.Published || s.Unpublished != 0 || s.Ahead != 2 || s.Next != nil && s.Next.Step == "push" {
+				t.Fatalf("pushed commits still offered for publication: %+v", s)
+			}
+			git("commit", "--allow-empty", "-qm", "New local change")
+			s = CheckoutsStatus([]string{c.Dir}, false).Repos[0]
+			if s.Unpublished != 1 || s.Next == nil || s.Next.Step != "push" {
+				t.Fatalf("only the new local commit needs publication: %+v", s)
+			}
+		})
+	}
+}
+
+func TestPublishedMarkerWithOtherRemoteEvidence(t *testing.T) {
+	for _, ahead := range []bool{false, true} {
+		t.Run(fmt.Sprint("remote-ahead=", ahead), func(t *testing.T) {
+			c, git := managedWorktree(t, "https://bitbucket.org/example-ws/docs.git")
+			git("commit", "--allow-empty", "-qm", "Published\n\nOpenClaw-Publication: first")
+			marked := git("rev-parse", "HEAD")
+			git("commit", "--allow-empty", "-qm", "Local work")
+			remote := git("rev-parse", "origin/main")
+			if ahead {
+				remote = git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Remote work")
+			}
+			git("update-ref", "refs/remotes/origin/"+c.Branch(), remote)
+			if got := c.publishedHead(); got != marked {
+				t.Fatalf("remote evidence replaced the local marker: %s", got)
+			}
+			if s := CheckoutsStatus([]string{c.Dir}, false).Repos[0]; s.Unpublished != 1 {
+				t.Fatalf("local unpublished work: %+v", s)
+			}
+			if _, err := c.PlanPublish(PublishOptions{}); err != nil {
+				t.Fatalf("unchanged local history was rejected: %v", err)
+			}
+			git("reset", "--soft", marked)
+			git("commit", "--amend", "--allow-empty", "-qm", "Rewritten")
+			if _, err := c.PlanPublish(PublishOptions{}); err == nil || !strings.Contains(err.Error(), "rewritten") {
+				t.Fatalf("rewritten published marker was not protected: %v", err)
+			}
+		})
 	}
 }
 
