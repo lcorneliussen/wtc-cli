@@ -194,13 +194,19 @@ func (c *Context) retirePreflight(opt RetireOptions) (RetireResult, []retireWork
 	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return result, nil, fmt.Errorf("collection path must be a directory: %s", target)
 	}
-	if _, err := OpenCollection(target); err != nil {
+	targetContext, err := OpenCollection(target)
+	if err != nil {
 		return result, nil, err
 	}
 	result.Collection = target
 	worktrees, problems, err := inspectRetireWorktrees(target)
 	if err != nil {
 		return result, nil, err
+	}
+	if targetContext.AdHoc {
+		if err := preflightAdHocRetirement(target, worktrees); err != nil {
+			return result, nil, err
+		}
 	}
 	if len(problems) > 0 && !opt.Force {
 		return result, nil, fmt.Errorf("retirement blocked: %s (use --force only after confirming the work is disposable)", strings.Join(problems, "; "))
@@ -340,17 +346,11 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 	if adHoc {
 		// An ad-hoc registry is remembered per user. Hand-written local
 		// hooks and config stay behind as leftovers for inspection.
-		config, err := collectionDirectoryInput(target, "config")
+		registries, err := adHocRetireRegistryFiles(target)
 		if err != nil {
 			return err
 		}
-		if safeGeneratedParent(target, config) == nil {
-			rel, err := filepath.Rel(target, config)
-			if err != nil {
-				return err
-			}
-			files = append(files, filepath.Join(rel, adHocRegistryFile))
-		}
+		files = append(files, registries...)
 	}
 	for _, name := range files {
 		if err := os.Remove(filepath.Join(target, name)); err != nil && !os.IsNotExist(err) {
@@ -406,6 +406,59 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 		_ = os.Remove(root) // Other namespaces and local files stay for inspection.
 	}
 	return nil
+}
+
+// A hidden registry must not become active when the selected one is removed.
+// Preflight every slot before teardown, and again before deleting any metadata.
+// Registry leaf links can be removed locally; linked parents cannot be followed.
+func adHocRetireRegistryFiles(target string) ([]string, error) {
+	var files []string
+	for _, root := range []string{".wtc", ".taba"} {
+		rel := filepath.Join(root, "config", adHocRegistryFile)
+		path := filepath.Join(target, rel)
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		if err := safeGeneratedParent(target, filepath.Dir(path)); err != nil {
+			return nil, fmt.Errorf("cannot retire local registry: %w", err)
+		}
+		if !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
+			return nil, fmt.Errorf("registry slot must be a regular file or link: %s", path)
+		}
+		files = append(files, rel)
+	}
+	return files, nil
+}
+
+func preflightAdHocRetirement(target string, worktrees []retireWorktree) error {
+	if _, err := adHocRetireRegistryFiles(target); err != nil {
+		return err
+	}
+	// A retained harness marker is another discovery source. Owned worktrees
+	// disappear during teardown; refuse before teardown when it would remain.
+	harness := filepath.Join(target, "harness")
+	if info, err := os.Stat(harness); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	} else if !info.IsDir() {
+		return nil
+	}
+	registry := filepath.Join(harness, ".harness-repos.yml")
+	if _, err := os.Lstat(registry); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	for _, wt := range worktrees {
+		if wt.path == harness {
+			return nil
+		}
+	}
+	return fmt.Errorf("retirement blocked: an unowned harness registry would keep the collection active: %s", registry)
 }
 
 func removeManagedCollectionEntry(target string) error {

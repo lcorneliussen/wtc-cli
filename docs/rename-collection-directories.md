@@ -35,9 +35,12 @@ before changing either and removes both, so an old alternate build cannot
 silently become active after removal.
 
 Retirement recognizes generated instruction/skill trees, dev builds and managed
-entry links under either spelling. It removes the selected ad-hoc registry,
-retains hand-written configuration and other namespaces for inspection, and
-does not follow linked namespace parents during cleanup.
+entry links under either spelling. It removes both local ad-hoc registry slots
+so a hidden registry cannot reactivate after cleanup. Before removing worktrees,
+it refuses linked registry parents or an unowned harness registry that would
+keep the collection discoverable. Registry leaf links are removed locally;
+their targets, hand-written configuration and other namespaces are retained.
+Ad-hoc folders retain their existing reuse policy without a retirement marker.
 
 Runtime/service roots, live locks, watcher registrations and review state are
 not renamed or migrated by this increment. Those still need coordinated

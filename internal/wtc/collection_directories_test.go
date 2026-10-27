@@ -277,13 +277,189 @@ func TestTabaRetirementDoesNotFollowLinkedNamespace(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(target, ".taba")); err != nil {
 		t.Fatal(err)
 	}
-	if err := removeRetiredGeneratedFiles(target, true); err != nil {
-		t.Fatal(err)
+	fixtureFile(t, filepath.Join(target, ".env.collection"), "keep until preflight passes", 0600)
+	if err := removeRetiredGeneratedFiles(target, true); err == nil {
+		t.Fatal("cleanup accepted a registry through a linked parent")
+	}
+	if data, err := os.ReadFile(filepath.Join(target, ".env.collection")); err != nil || string(data) != "keep until preflight passes" {
+		t.Fatalf("cleanup changed files before rejecting a linked registry: %s %v", data, err)
 	}
 	for _, name := range []string{"config/repos.yml", "collection-AGENTS.md", "skills/local/SKILL.md"} {
 		if _, err := os.Stat(filepath.Join(outside, name)); err != nil {
 			t.Fatalf("retirement followed linked parent: %s %v", name, err)
 		}
+	}
+}
+
+func TestTabaRetirementInvalidatesBothRegistrySlots(t *testing.T) {
+	for _, linkedRegistry := range []bool{false, true} {
+		for _, keepConfig := range []bool{false, true} {
+			name := map[bool]string{false: "regular", true: "leaf-symlink"}[linkedRegistry] + map[bool]string{false: "/empty", true: "/local-config"}[keepConfig]
+			t.Run(name, func(t *testing.T) {
+				root := adHocFixture(t)
+				c := initAdHoc(t, filepath.Join(root, "task"))
+				addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + adHocSource(t, root, "widget")})
+				registry, err := os.ReadFile(c.registryPath())
+				if err != nil {
+					t.Fatal(err)
+				}
+				alias := filepath.Join(c.Collection, ".taba", "config")
+				outside := filepath.Join(root, "saved-registry.yml")
+				if linkedRegistry {
+					fixtureFile(t, outside, string(registry), 0644)
+					if err := os.MkdirAll(alias, 0755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Symlink(outside, filepath.Join(alias, "repos.yml")); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					fixtureFile(t, filepath.Join(alias, "repos.yml"), string(registry), 0644)
+				}
+				if keepConfig {
+					fixtureFile(t, filepath.Join(alias, "taba.toml"), "# retain local configuration\n", 0644)
+				}
+				result, err := c.RetireCollection(RetireOptions{Name: "task", Self: true, InPlace: true})
+				if err != nil || len(result.Removed) != 1 {
+					t.Fatalf("retirement failed: %+v %v", result, err)
+				}
+				if active, err := OpenCollection(c.Collection); err == nil {
+					t.Errorf("retirement reactivated an alternate registry: %+v", active)
+				}
+				if active, err := Discover(c.Collection); err == nil {
+					t.Errorf("discovery reopened the retired collection: %+v", active)
+				}
+				for _, namespace := range []string{".wtc", ".taba"} {
+					if _, err := os.Lstat(filepath.Join(c.Collection, namespace, "config", "repos.yml")); !os.IsNotExist(err) {
+						t.Errorf("retirement retained a local registry slot: %s %v", namespace, err)
+					}
+				}
+				if RetiredFolder(c.Collection) {
+					t.Fatal("ad-hoc folder reuse policy changed")
+				}
+				if keepConfig {
+					if data, err := os.ReadFile(filepath.Join(alias, "taba.toml")); err != nil || string(data) != "# retain local configuration\n" {
+						t.Fatalf("hand-written config was removed: %s %v", data, err)
+					}
+				} else if !result.FolderRemoved {
+					t.Fatalf("disposable aliases kept an empty folder alive: %+v", result)
+				}
+				if linkedRegistry {
+					if data, err := os.ReadFile(outside); err != nil || string(data) != string(registry) {
+						t.Fatalf("registry leaf cleanup followed its link: %s %v", data, err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestTabaRetirementPreflightsLinkedRegistryParents(t *testing.T) {
+	for _, namespace := range []string{".wtc", ".taba"} {
+		for _, linkedParent := range []string{"root", "config"} {
+			t.Run(namespace+"/"+linkedParent, func(t *testing.T) {
+				root := adHocFixture(t)
+				c := initAdHoc(t, filepath.Join(root, "task"))
+				addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + adHocSource(t, root, "widget")})
+				opt := RetireOptions{Name: "task", Self: true, InPlace: true, Force: true}
+				if _, err := c.RetirePreflight(opt); err != nil {
+					t.Fatal(err)
+				}
+				registry, err := os.ReadFile(c.registryPath())
+				if err != nil {
+					t.Fatal(err)
+				}
+				outside := filepath.Join(root, "outside")
+				link := filepath.Join(c.Collection, namespace)
+				if linkedParent == "config" {
+					link = filepath.Join(link, "config")
+				}
+				if namespace == ".wtc" {
+					if err := os.Rename(link, outside); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					file := filepath.Join(outside, "repos.yml")
+					if linkedParent == "root" {
+						file = filepath.Join(outside, "config", "repos.yml")
+					}
+					fixtureFile(t, file, string(registry), 0644)
+				}
+				if err := os.MkdirAll(filepath.Dir(link), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, link); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.RetirePreflight(opt); err == nil {
+					t.Fatal("preflight accepted a registry through a linked parent")
+				}
+				if _, err := c.RetireCollection(opt); err == nil {
+					t.Fatal("retirement accepted a registry through a linked parent")
+				}
+				if _, err := os.Stat(filepath.Join(c.Collection, "widget", ".git")); err != nil {
+					t.Fatalf("retirement removed worktrees before registry preflight: %v", err)
+				}
+				if active, err := OpenCollection(c.Collection); err != nil || len(active.Registry.Repos) != 1 {
+					t.Fatalf("refusal changed the active collection: %+v %v", active, err)
+				}
+			})
+		}
+	}
+}
+
+func TestTabaRetirementPreflightsHarnessFallback(t *testing.T) {
+	for _, kind := range []string{"directory", "linked-directory", "broken-marker", "owned-worktree"} {
+		t.Run(kind, func(t *testing.T) {
+			root := adHocFixture(t)
+			c := initAdHoc(t, filepath.Join(root, "task"))
+			addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + adHocSource(t, root, "widget")})
+			harness := filepath.Join(c.Collection, "harness")
+			if kind == "owned-worktree" {
+				source := adHocSource(t, root, "harness")
+				fixtureFile(t, filepath.Join(source, ".harness-repos.yml"), "schema_version: 1\nrepos: []\n", 0644)
+				fixtureGit(t, "-C", source, "add", ".harness-repos.yml")
+				fixtureGit(t, "-C", source, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "harness fixture")
+				fixtureGit(t, "-C", source, "worktree", "add", "--detach", harness, "main")
+			} else if kind == "linked-directory" {
+				outside := filepath.Join(root, "outside")
+				fixtureFile(t, filepath.Join(outside, ".harness-repos.yml"), "schema_version: 1\nrepos: []\n", 0644)
+				if err := os.Symlink(outside, harness); err != nil {
+					t.Fatal(err)
+				}
+			} else if kind == "broken-marker" {
+				if err := os.MkdirAll(harness, 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("missing.yml", filepath.Join(harness, ".harness-repos.yml")); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				fixtureFile(t, filepath.Join(harness, ".harness-repos.yml"), "schema_version: 1\nrepos: []\n", 0644)
+			}
+			opt := RetireOptions{Name: "task", Self: true, InPlace: true, Force: true}
+			if kind == "owned-worktree" {
+				result, err := c.RetireCollection(opt)
+				if err != nil || len(result.Removed) != 2 {
+					t.Fatalf("owned harness was not retired: %+v %v", result, err)
+				}
+				if _, err := Discover(c.Collection); err == nil {
+					t.Fatal("owned harness revived the retired collection")
+				}
+				return
+			}
+			if _, err := c.RetirePreflight(opt); err == nil {
+				t.Fatal("preflight accepted an unowned discovery marker")
+			}
+			if _, err := c.RetireCollection(opt); err == nil {
+				t.Fatal("retirement accepted an unowned discovery marker")
+			}
+			for _, file := range []string{filepath.Join(harness, ".harness-repos.yml"), filepath.Join(c.Collection, "widget", ".git"), c.registryPath()} {
+				if _, err := os.Lstat(file); err != nil {
+					t.Fatalf("refusal changed collection files: %v", err)
+				}
+			}
+		})
 	}
 }
 
