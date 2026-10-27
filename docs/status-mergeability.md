@@ -2,7 +2,7 @@
 
 Status shows a confirmed pull-request conflict as `✗ conflict` in the repository and enlisted PR rows. A clean checkout can still have a PR conflict: the working-tree conflict flag refers to an already-started merge, while the PR merge field describes the proposed merge.
 
-For Bitbucket, wtc supplements unknown mergeability with a local `git merge-tree` prediction when the exact source and destination commit objects reported by the forge are already available. It does not fetch objects, check out branches or start a merge to render that observation. The prediction uses the reported commit pair even when the local branch contains additional changes.
+For Bitbucket, wtc supplements unknown mergeability with a local `git merge-tree` prediction when the exact source and destination commit objects reported by the forge are already available. Shortened hashes must resolve to a unique local commit object; similarly named refs, non-commit objects and ambiguous prefixes do not qualify. JSON records the resolved full commit IDs. It does not fetch objects, check out branches or start a merge to render that observation. The prediction uses the reported commit pair even when the local branch contains additional changes.
 
 A conflicting pair produces `CONFLICTING`; a clean pair with new base commits produces `BEHIND`; an already-contained base produces `CLEAN`. Missing commit IDs, unavailable objects, unsupported Git versions and histories Git cannot merge remain `UNKNOWN`. A behind count alone never proves a conflict. Predictions describe the forge snapshot's commits, which can be cached; they are not a merge authorization or a statement about unseen remote changes.
 

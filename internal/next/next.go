@@ -256,5 +256,7 @@ func PredictMergeAt(dir, head, base string) (conflicts []string, ok bool) {
 			conflicts = append(conflicts, path)
 		}
 	}
+	// A conflict exit without paths supplies no usable observation. Normal Git
+	// conflicts list paths; malformed or unsupported output stays unknown.
 	return conflicts, len(conflicts) > 0
 }

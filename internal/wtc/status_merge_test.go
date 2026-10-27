@@ -14,13 +14,15 @@ import (
 
 func TestStatusBitbucketPredictsExactPRCommits(t *testing.T) {
 	for _, tc := range []struct {
-		name, want                    string
-		conflict, missing, discovered bool
+		name, want                           string
+		conflict, missing, discovered, short bool
 	}{
 		{name: "conflicting", want: "CONFLICTING", conflict: true},
 		{name: "clean behind", want: "BEHIND"},
 		{name: "missing source object", want: "UNKNOWN", missing: true},
 		{name: "discovered conflict", want: "CONFLICTING", conflict: true, discovered: true},
+		{name: "abbreviated conflict", want: "CONFLICTING", conflict: true, short: true},
+		{name: "abbreviated clean", want: "BEHIND", short: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TMPDIR", t.TempDir())
@@ -48,8 +50,8 @@ func TestStatusBitbucketPredictsExactPRCommits(t *testing.T) {
 			base := commit(name, "destination\n")
 			fixtureGit(t, "-C", dir, "update-ref", "refs/remotes/origin/main", base)
 			fixtureGit(t, "-C", dir, "switch", "topic")
-			// Local HEAD no longer conflicts. The PR prediction must still use
-			// its reported source commit, not this unpushed local resolution.
+			// Reset the checkout to the destination commit. The PR prediction
+			// must still use its reported source commit, not local HEAD.
 			fixtureGit(t, "-C", dir, "reset", "--hard", base)
 			fixtureFile(t, filepath.Join(dir, "untracked.txt"), "keep me\n", 0644)
 			fixtureGit(t, "-C", dir, "remote", "set-url", "origin", "https://bitbucket.org/example/harness.git")
@@ -62,12 +64,16 @@ func TestStatusBitbucketPredictsExactPRCommits(t *testing.T) {
 			if tc.missing {
 				head = strings.Repeat("1", 40)
 			}
+			reportedHead, reportedBase := head, base
+			if tc.short {
+				reportedHead, reportedBase = head[:12], base[:12]
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				fields := r.URL.Query().Get("fields")
 				if !strings.Contains(fields, "source.commit.hash") || !strings.Contains(fields, "destination.commit.hash") {
 					t.Errorf("list omitted exact commit identities: %s", fields)
 				}
-				fmt.Fprintf(w, `{"values":[{"id":7,"state":"OPEN","title":"Synthetic change","source":{"branch":{"name":"topic"},"commit":{"hash":%q}},"destination":{"branch":{"name":"main"},"commit":{"hash":%q}}}]}`, head, base)
+				fmt.Fprintf(w, `{"values":[{"id":7,"state":"OPEN","title":"Synthetic change","source":{"branch":{"name":"topic"},"commit":{"hash":%q}},"destination":{"branch":{"name":"main"},"commit":{"hash":%q}}}]}`, reportedHead, reportedBase)
 			}))
 			defer server.Close()
 			old := statusBBAPI
@@ -154,14 +160,19 @@ func TestStatusBitbucketPredictionUnknownAndSettledCases(t *testing.T) {
 	fixtureGit(t, "-C", dir, "add", ".")
 	fixtureGit(t, "-C", dir, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-qm", "base")
 	sha := fixtureGit(t, "-C", dir, "rev-parse", "HEAD")
+	blob := fixtureGit(t, "-C", dir, "rev-parse", "HEAD:a")
+	fixtureGit(t, "-C", dir, "branch", "abcdef123456", "HEAD")
 	rows := []StatusRepo{{Forge: "bitbucket.org", Slug: "example/widget", Worktree: dir}}
 	for _, tc := range []struct{ name, head, base, state, forge, slug, want string }{
 		{"current", sha, sha, "OPEN", "bitbucket.org", "example/widget", "CLEAN"},
 		{"draft", sha, sha, "DRAFT", "bitbucket.org", "example/widget", "CLEAN"},
+		{"short commits", sha[:11], sha[:12], "OPEN", "bitbucket.org", "example/widget", "CLEAN"},
 		{"missing head", "", sha, "OPEN", "bitbucket.org", "example/widget", "UNKNOWN"},
 		{"missing base", sha, "", "OPEN", "bitbucket.org", "example/widget", "UNKNOWN"},
 		{"unavailable base", sha, strings.Repeat("1", 40), "OPEN", "bitbucket.org", "example/widget", "UNKNOWN"},
 		{"ref name", sha, "HEAD", "OPEN", "bitbucket.org", "example/widget", "UNKNOWN"},
+		{"hex ref name", sha, "abcdef123456", "OPEN", "bitbucket.org", "example/widget", "UNKNOWN"},
+		{"blob prefix", sha, blob[:12], "OPEN", "bitbucket.org", "example/widget", "UNKNOWN"},
 		{"closed", sha, sha, "DECLINED", "bitbucket.org", "example/widget", "UNKNOWN"},
 		{"different repository", sha, sha, "OPEN", "bitbucket.org", "example/other", "UNKNOWN"},
 		{"other forge", sha, sha, "OPEN", "github.com", "example/widget", "UNKNOWN"},
