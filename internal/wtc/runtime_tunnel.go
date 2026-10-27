@@ -30,6 +30,8 @@ const (
 	ExposureDefault  = "default"  // how the provider behaves unless told otherwise
 )
 
+const runtimeTailscaleApp = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+
 type runtimeTunnelProvider struct {
 	name     string
 	program  string
@@ -178,11 +180,10 @@ func runtimeTailscaleCheck() func(string) string {
 			asked = true
 			binary, err := exec.LookPath("tailscale")
 			if err != nil {
-				const app = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
-				if _, statErr := os.Stat(app); statErr != nil {
+				if _, statErr := os.Stat(runtimeTailscaleApp); statErr != nil {
 					return ""
 				}
-				binary = app
+				binary = runtimeTailscaleApp
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()

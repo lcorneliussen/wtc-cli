@@ -255,8 +255,9 @@ func runtimeTaskPath(path string) bool {
 	return true
 }
 
-// RuntimeStatus only queries an existing runner. It never renders configuration,
-// sources shell env, starts a runner, or executes repository hooks.
+// RuntimeStatus reads existing runner state and checks ready addresses and
+// tunnel-provider logins. It never renders configuration, sources shell env,
+// starts a runner, or executes repository hooks.
 func (c *Context) RuntimeStatus() []RuntimeItem {
 	items := c.runtimeStatusOnly()
 	// What people are shown is also looked at now: whether each ready
