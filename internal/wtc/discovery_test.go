@@ -255,3 +255,56 @@ esac
 		}
 	}
 }
+
+func TestDiscoverySelectionAndLeftoverGuards(t *testing.T) {
+	c, target := discoveryFixture(t)
+	r, err := c.DiscoverRetirement(".", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Collection != c.Collection {
+		t.Fatal("default did not select current collection")
+	}
+	if _, err := c.DiscoverRetirement("finished", make([]string, 9)); err == nil {
+		t.Fatal("accepted unbounded transcript list")
+	}
+	link := filepath.Join(target, "linked-work")
+	if err := os.Symlink(t.TempDir(), link); err != nil {
+		t.Fatal(err)
+	}
+	r, err = c.DiscoverRetirement("finished", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(r.Blockers, " "), "Uninspected symlink entry: linked-work") {
+		t.Fatal("linked work lost its blocker")
+	}
+	leftover := filepath.Join(c.Workspace, "leftovers")
+	fixtureFile(t, filepath.Join(leftover, RetiredMarkerFile), `{"schema_version":1}`, 0600)
+	fixtureFile(t, filepath.Join(leftover, "rescue.txt"), "preserve", 0600)
+	before := discoveryTree(t, leftover)
+	r, err = c.DiscoverRetirement("leftovers", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Disposition != "preserve-leftovers" {
+		t.Fatalf("lost retired evidence: %+v", r)
+	}
+	if !reflect.DeepEqual(before, discoveryTree(t, leftover)) {
+		t.Fatal("leftover discovery changed evidence")
+	}
+}
+func TestDiscoveryAdHocCannotSelectSibling(t *testing.T) {
+	root := adHocFixture(t)
+	dir := filepath.Join(root, "scratch")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	c := initAdHoc(t, dir)
+	if _, err := c.DiscoverRetirement("other", nil); err == nil {
+		t.Fatal("ad-hoc discovery crossed collection boundary")
+	}
+	if r, err := c.DiscoverRetirement(".", nil); err != nil || r.Collection != c.Collection {
+		t.Fatalf("ad-hoc current selection: %+v %v", r, err)
+	}
+}
