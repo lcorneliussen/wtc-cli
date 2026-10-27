@@ -118,14 +118,14 @@ func (c statusRuntimeColumn) header() string {
 	return strings.ToUpper(c.provider)
 }
 
-// statusRuntimeTunnelShown is true for a tunnel that is in use or starts by
-// default; a configured tunnel nobody started stays out of the table.
+// statusRuntimeTunnelShown includes tunnels in use, declaration defaults,
+// explicit on choices and lifecycle problems.
 func statusRuntimeTunnelShown(item wtc.RuntimeItem) bool {
 	switch item.State {
 	case "starting", "running", "ready", "failed", "exited":
 		return true
 	}
-	return item.URL != "" || item.Autostart
+	return item.URL != "" || item.Autostart || item.TunnelIntent == "on" || item.Lifecycle != ""
 }
 
 func statusTUIRuntimeLayout(snapshot wtc.StatusSnapshot, width int) statusRuntimeLayout {
@@ -239,6 +239,12 @@ func (l statusRuntimeLayout) urlAt(g statusRuntimeGroup, x int) string {
 // statusRuntimeState shortens the hook fact the way the repo summary does.
 func statusRuntimeState(item wtc.RuntimeItem) string {
 	switch {
+	case item.State == "unknown":
+		return "unknown"
+	case item.TunnelIntent == "stale":
+		return "choice stale"
+	case item.Lifecycle != "":
+		return "tunnel missing"
 	case item.Kind == "resources" && item.State == "provision-hook-completed":
 		return "provisioned"
 	case item.State == "absent" || item.State == "idle":
@@ -252,12 +258,11 @@ func statusRuntimeState(item wtc.RuntimeItem) string {
 	return item.State
 }
 
-// statusRuntimeTrouble is a live task (ready or running) that doesn't answer
-// now, or a live tunnel whose provider client cannot serve: ready is only a
-// startup probe.
+// statusRuntimeTrouble includes tunnel lifecycle problems and live tasks that
+// cannot answer or whose provider cannot serve: ready is only a startup probe.
 func statusRuntimeTrouble(item wtc.RuntimeItem) bool {
 	running := item.State == "ready" || item.State == "running"
-	return running && (item.Answering == "no" || item.Login != "")
+	return item.Lifecycle != "" || running && (item.Answering == "no" || item.Login != "")
 }
 
 // statusTUIRuntimeLines draws one line per service in the style of the PR
@@ -492,7 +497,7 @@ func statusRuntimeHover(item wtc.RuntimeItem) string {
 	if item.Answering == "no" {
 		answer = "not answering now: " + item.AnswerDetail
 	}
-	for _, extra := range []string{item.Label, item.URL, item.Reason, item.Error, answer, item.Login} {
+	for _, extra := range []string{item.Label, item.URL, item.Reason, item.Error, answer, item.Login, item.Lifecycle} {
 		if extra != "" {
 			parts = append(parts, extra)
 		}

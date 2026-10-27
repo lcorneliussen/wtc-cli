@@ -222,9 +222,28 @@ wtc svc dekit -- why widget/web/server   # anything else, with the pinned dekit
 `wtc up`, `wtc down`, `wtc restart` and `wtc logs` are shortcuts for the same
 commands. A name without its repository works when only one repository has it.
 
+`wtc svc tunnel` records an explicit on/off choice for that collection and
+service endpoint. `--stop` records off, including when stopping fails; retry the
+stop to confirm shutdown. Ordinary `down` keeps the choice. Service `up` and
+`restart` restore enabled tunnels after checking the provider login, including
+previously approved public tunnels. Untargeted `restart` restores them only for
+services that were running. Untargeted `up` restores them for autostart or
+already running services. Without an explicit choice, declaration defaults
+keep their existing behavior.
+
+Approval belongs to the current tunnel definition. Changing its command,
+provider, destination or exposure, or removing and later reusing its task path,
+requires a fresh `wtc svc tunnel` choice (and `--public` when applicable).
+Changed or explicitly disabled tunnels do not autostart. Choices live in this
+collection's runtime manifest and never change another collection's settings.
+An intended tunnel that is not running reports a lifecycle problem separately
+from provider login, current reachability and exposure; JSON includes
+`tunnel_intent` and `lifecycle` alongside the observed runner `state`.
+
 `up` and `restart` wait up to 30 seconds for startup readiness; `--wait 60s`
-changes this, and `--wait 0` returns immediately. Untargeted `up` checks
-autostart tasks; explicitly name a group to wait for all its tasks. `restart`
+changes this, and `--wait 0` returns immediately. Untargeted `up` waits for
+autostart tasks and intended tunnels it restores; explicitly name a group to
+wait for all its selected tasks. `restart`
 requires a running runner. A readiness failure remains visible in status and
 logs, and the failed command's output includes the last lines of each failed
 or unready task's log, so a build error is in the failure itself. **Ready
