@@ -286,3 +286,95 @@ func TestTabaRetirementDoesNotFollowLinkedNamespace(t *testing.T) {
 		}
 	}
 }
+
+func TestTabaInstructionLinksRefreshAcrossConfigNamespaces(t *testing.T) {
+	for _, from := range []string{".wtc", ".taba"} {
+		for _, keepOverride := range []bool{true, false} {
+			name := from + map[bool]string{true: "/retarget", false: "/restore-default"}[keepOverride]
+			t.Run(name, func(t *testing.T) {
+				root := adHocFixture(t)
+				c := initAdHoc(t, filepath.Join(root, "task"))
+				move := func(namespace string) {
+					t.Helper()
+					to := filepath.Join(c.Collection, namespace, "config")
+					if c.Harness == to {
+						return
+					}
+					if err := os.MkdirAll(filepath.Dir(to), 0755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Rename(c.Harness, to); err != nil {
+						t.Fatal(err)
+					}
+					var err error
+					c, err = OpenCollection(c.Collection)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				move(from)
+				fixtureFile(t, filepath.Join(c.Harness, "instructions", "secrets.md"), "local instruction override\n", 0644)
+				if _, err := c.RenderSkills(SkillRenderOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				generated := filepath.Join(c.Collection, ".wtc", "instructions", "secrets.md")
+				oldLink, err := os.Readlink(generated)
+				if err != nil {
+					t.Fatal(err)
+				}
+				to := ".taba"
+				if from == to {
+					to = ".wtc"
+				}
+				move(to)
+				if !keepOverride {
+					if err := os.Remove(filepath.Join(c.Harness, "instructions", "secrets.md")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if _, err := c.RenderSkills(SkillRenderOptions{DryRun: true}); err != nil {
+					t.Fatal(err)
+				}
+				if link, err := os.Readlink(generated); err != nil || link != oldLink {
+					t.Fatalf("preview changed the old generated link: %q %v", link, err)
+				}
+				// Repository addition renders instructions before running init.
+				source := adHocSource(t, root, "widget")
+				fixtureFile(t, filepath.Join(source, ".harness", "init.sh"), "#!/bin/sh\nprintf initialized > init-ran\n", 0755)
+				fixtureGit(t, "-C", source, "add", ".harness/init.sh")
+				fixtureGit(t, "-C", source, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "init fixture")
+				addAdHoc(t, c, AdHocRepoOptions{Spec: "file://" + source})
+				if data, err := os.ReadFile(filepath.Join(c.Collection, "widget", "init-ran")); err != nil || string(data) != "initialized" {
+					t.Fatalf("instruction refresh prevented repository initialization: %s %v", data, err)
+				}
+				if keepOverride {
+					if link, err := os.Readlink(generated); err != nil || link != "../../"+to+"/config/instructions/secrets.md" {
+						t.Fatalf("owned instruction link was not retargeted: %q %v", link, err)
+					}
+					if data, err := os.ReadFile(generated); err != nil || string(data) != "local instruction override\n" {
+						t.Fatalf("instruction override did not survive the move: %s %v", data, err)
+					}
+				} else {
+					want, err := ReadDefault("instructions/secrets.md")
+					if err != nil {
+						t.Fatal(err)
+					}
+					data, err := os.ReadFile(generated)
+					info, statErr := os.Lstat(generated)
+					if err != nil || statErr != nil || !info.Mode().IsRegular() || string(data) != string(want) {
+						t.Fatalf("default instruction was not restored: %v %v", err, statErr)
+					}
+				}
+				if err := os.Remove(generated); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("../../personal/instructions/secrets.md", generated); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.RenderSkills(SkillRenderOptions{DryRun: true}); err == nil {
+					t.Fatal("an unrelated instruction symlink was accepted")
+				}
+			})
+		}
+	}
+}

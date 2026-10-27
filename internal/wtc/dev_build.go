@@ -42,8 +42,9 @@ func devBuildDir(collection string) string {
 }
 
 // FindCollectionRoot walks up from start to the collection root, recognized
-// by the same markers as Discover (a harness registry or an ad-hoc one),
-// without loading the collection.
+// by the same boundaries as Discover: a harness registry or the selected
+// ad-hoc config directory, even when incomplete. It does not load the collection;
+// invalid namespace paths stop the walk.
 func FindCollectionRoot(start string) string {
 	dir, err := filepath.Abs(start)
 	if err != nil {
