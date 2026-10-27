@@ -562,12 +562,13 @@ function collectionTables(v) {
     } catch (err) { v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
     finally { acting.delete(r.sessionKey); await v.refresh(); }
   }
-  async function reviewPRText(r, url) {
+  async function reviewPRText(r, url, conversationKey) {
+    if (v.key() !== conversationKey) return;
     if (acting.has(r.sessionKey)) return;
     acting.add(r.sessionKey);
     try {
-      await askSkill(v.host, v.key(), "wtc", `${nameOf(r)}: review the title and description of ${url} against the full current PR diff, including the latest pushed commits. Recheck the PR's current state and head first. Preserve useful human edits. If the text no longer describes the complete change, propose a revised title and description for the person to review; otherwise explain that it still fits. This is a review of the PR text, not a request for a code review. Do not change commits, push, merge, or edit the remote PR text in this step.`);
-      v.say(`${nameOf(r)}: asked the conversation to review the PR title and description and propose any needed revisions.`);
+      await askSkill(v.host, conversationKey, "wtc", `${nameOf(r)}: review the title and description of ${url} against the full current PR diff, including the latest pushed commits. Recheck the PR's current state and head first. Preserve useful human edits. If the text no longer describes the complete change, propose a revised title and description for the person to review; otherwise explain that it still fits. This is a review of the PR text, not a request for a code review. Do not change commits, push, merge, or edit the remote PR text in this step.`);
+      if (v.key() === conversationKey) v.say(`${nameOf(r)}: asked the conversation to review the PR title and description and propose any needed revisions.`);
     } finally { acting.delete(r.sessionKey); }
   }
   const nextLabel = (s) => ({ "return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", resolve: "Resolve conflicts", merge: "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", push: "Push", "merge-pr": "Open pull request" })[s.step] ?? s.step;
@@ -678,6 +679,9 @@ function collectionTables(v) {
   }
   async function publish(r) {
     if (!PUSHES.has(r.forge) || mine[r.forge] === false) return;
+    const conversationKey = v.key();
+    const say = (...args) => { if (v.key() === conversationKey) v.say(...args); };
+    const review = (repo, url) => reviewPRText(repo, url, conversationKey);
     busy.add(r.sessionKey);
     v.say(`Preparing to push ${nameOf(r)}…`);
     v.pause(true);
@@ -687,10 +691,10 @@ function collectionTables(v) {
       confirming.delete(r.sessionKey);
       const bitbucket = r.forge === BITBUCKET;
       const next = pending
-        ? await (bitbucket ? confirmBitbucket : confirmRepo)(v.host, v.agent(), r, pending, v.say, reviewPRText)
+        ? await (bitbucket ? confirmBitbucket : confirmRepo)(v.host, v.agent(), r, pending, say, review)
         : bitbucket
-          ? await publishBitbucket(v.host, v.agent(), r, v.say, r.base ? baseOf(r) : undefined)
-          : await publishRepo(v.host, v.agent(), r, v.say, reviewPRText);
+          ? await publishBitbucket(v.host, v.agent(), r, say, r.base ? baseOf(r) : undefined)
+          : await publishRepo(v.host, v.agent(), r, say, review);
       if (next?.connect) { mine[r.forge] = null; showConnect = r.forge; v.reveal?.(); }
       else {
         // It is connected: look again rather than keep "not connected".
@@ -698,7 +702,7 @@ function collectionTables(v) {
         if (next) confirming.set(r.sessionKey, next);
       }
     } catch (err) {
-      v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true);
+      say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true);
     } finally {
       busy.delete(r.sessionKey);
       v.pause(false);
@@ -1305,6 +1309,8 @@ function mountComposer(container, context) {
     key = sessionKey;
     entry = null;
     note = "";
+    noteAction = null;
+    noteFailed = false;
     card.remove();
     if (sessionKey) watch = watchCollection(next.host, sessionKey, agentOf(next), render);
   }
@@ -1673,6 +1679,7 @@ function mountCollection(container, context) {
     watch?.dispose();
     watch = null;
     entry = null;
+    say("");
     const { sessionKey, agentId } = ctx.props ?? {};
     if (!sessionKey) {
       header.textContent = "No session selected.";

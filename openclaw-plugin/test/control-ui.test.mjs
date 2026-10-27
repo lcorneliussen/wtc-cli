@@ -516,6 +516,36 @@ test("a GitHub URL alone does not claim a new PR was created", async () => {
   } finally { view.dispose(); personal = null; githubPublishResult = previous; }
 });
 
+test("PR text review never follows a publication into another conversation", async () => {
+  for (const kind of ["composer", "panel"]) for (const delayed of [false, true]) {
+    bitbucket = { user: "ada@example.com", name: "Ada" };
+    let complete;
+    const result = { status: "published", created: false, url: "https://bitbucket.org/example/docs/pull-requests/8" };
+    bitbucketConfirmResult = delayed ? new Promise((resolve) => { complete = resolve; }) : result;
+    const { host, view } = await mount(kind, collection([repo("docs", { forge: "bitbucket", unpublished: 1 })]));
+    try {
+      await [...host.all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+      await settle();
+      const pending = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "confirm ↑ 1").onclick();
+      await settle();
+      const oldAction = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Review PR text");
+      if (!delayed) assert.ok(oldAction);
+      const nextKey = `agent:main:other:${++sessions}`;
+      collections.set(nextKey, { ...collection([repo("other")]), collection: { sessionKey: nextKey } });
+      view.update({ props: { sessionKey: nextKey, agentId: "main" }, host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} });
+      if (delayed) complete(result);
+      await pending;
+      await settle();
+      assert.equal([...host.all()].some((n) => n.tagName === "BUTTON" && n.textContent === "Review PR text"), false);
+      assert.doesNotMatch(host.textContent, /pushed commits to existing PR #8/);
+      calls.length = 0;
+      oldAction?.onclick({ preventDefault() {}, stopPropagation() {} });
+      await settle();
+      assert.equal(calls.some((c) => c.method === "sessions.send"), false);
+    } finally { view.dispose(); bitbucket = undefined; bitbucketConfirmResult = undefined; }
+  }
+});
+
 test("composer: a push is the person's, with their own account, after they confirm", async () => {
   const { host, view } = await mount("composer", busy);
   const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
