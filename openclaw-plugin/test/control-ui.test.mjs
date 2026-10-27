@@ -481,6 +481,28 @@ test("publication results distinguish new and existing Bitbucket PRs and offer t
   }
 });
 
+test("publication keeps the successful PR result and shows a local-status warning", async () => {
+  for (const kind of ["composer", "panel"]) {
+    bitbucket = { user: "ada@example.com", name: "Ada" };
+    bitbucketConfirmResult = { status: "published", created: false, url: "https://bitbucket.org/example/docs/pull-requests/8", warning: "Local status could not be updated; fetch and prune origin, then refresh." };
+    const { host, view } = await mount(kind, collection([repo("docs", { forge: "bitbucket", unpublished: 2 })]));
+    try {
+      await [...host.all()].find((n) => n.tagName === "BUTTON" && /^2 commits to push/.test(n.title)).onclick();
+      await settle();
+      await [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "confirm ↑ 2").onclick();
+      await settle();
+      assert.match(host.textContent, /pushed commits to existing PR #8/);
+      assert.match(host.textContent, /Warning: Local status could not be updated/);
+      assert.match(host.textContent, /fetch and prune origin/);
+      assert.ok([...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Review PR text"));
+    } finally {
+      view.dispose();
+      bitbucket = undefined;
+      bitbucketConfirmResult = undefined;
+    }
+  }
+});
+
 test("Bitbucket dirty files offer local commits instead of an empty push", async () => {
   bitbucket = { user: "ada@example.com", name: "Ada" };
   for (const kind of ["composer", "panel"]) {

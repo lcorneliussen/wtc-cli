@@ -385,6 +385,36 @@ func TestStatusAfterPersonalPush(t *testing.T) {
 	}
 }
 
+func TestPublishedMarkerWithOtherRemoteEvidence(t *testing.T) {
+	for _, ahead := range []bool{false, true} {
+		t.Run(fmt.Sprint("remote-ahead=", ahead), func(t *testing.T) {
+			c, git := managedWorktree(t, "https://bitbucket.org/example-ws/docs.git")
+			git("commit", "--allow-empty", "-qm", "Published\n\nOpenClaw-Publication: first")
+			marked := git("rev-parse", "HEAD")
+			git("commit", "--allow-empty", "-qm", "Local work")
+			remote := git("rev-parse", "origin/main")
+			if ahead {
+				remote = git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Remote work")
+			}
+			git("update-ref", "refs/remotes/origin/"+c.Branch(), remote)
+			if got := c.publishedHead(); got != marked {
+				t.Fatalf("remote evidence replaced the local marker: %s", got)
+			}
+			if s := CheckoutsStatus([]string{c.Dir}, false).Repos[0]; s.Unpublished != 1 {
+				t.Fatalf("local unpublished work: %+v", s)
+			}
+			if _, err := c.PlanPublish(PublishOptions{}); err != nil {
+				t.Fatalf("unchanged local history was rejected: %v", err)
+			}
+			git("reset", "--soft", marked)
+			git("commit", "--amend", "--allow-empty", "-qm", "Rewritten")
+			if _, err := c.PlanPublish(PublishOptions{}); err == nil || !strings.Contains(err.Error(), "rewritten") {
+				t.Fatalf("rewritten published marker was not protected: %v", err)
+			}
+		})
+	}
+}
+
 // Once the pull request merged and a catch-up fast-forwarded the branch to
 // the base, the merge commit is not something to publish.
 func TestStatusAfterThePullRequestMerged(t *testing.T) {
