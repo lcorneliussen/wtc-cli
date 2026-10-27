@@ -50,6 +50,14 @@ func TestReviewConvergenceUsesLastCompatibleCompletedRound(t *testing.T) {
 	prior("r1", 1, 10, true, true, current.Slug)
 	prior("r2", 2, 20, true, true, current.Slug)
 	prior("unrun-r3", 3, 900, true, false, current.Slug)
+	prior("summary-only-r3", 3, 900, true, false, current.Slug)
+	convergenceFixtureFile(t, filepath.Join(root, "summary-only-r3", "summary.md"), "Unfinished review\n")
+	prior("empty-summary-r3", 3, 900, true, false, current.Slug)
+	convergenceFixtureFile(t, filepath.Join(root, "empty-summary-r3", "summary.md"), "")
+	convergenceFixtureFile(t, filepath.Join(root, "empty-summary-r3", "verdict"), "pass\n")
+	prior("unknown-verdict-r3", 3, 900, true, false, current.Slug)
+	convergenceFixtureFile(t, filepath.Join(root, "unknown-verdict-r3", "summary.md"), "Unfinished review\n")
+	convergenceFixtureFile(t, filepath.Join(root, "unknown-verdict-r3", "verdict"), "pending\n")
 	prior("private-r4", 4, 900, false, true, current.Slug)
 	prior("foreign-r4", 4, 900, true, true, "example/other")
 	dir := filepath.Join(root, "current")
@@ -72,6 +80,36 @@ func TestReviewConvergenceUsesLastCompatibleCompletedRound(t *testing.T) {
 	}
 	if report := reviewConvergenceReport(context); !strings.Contains(report, "20 to 31") || !strings.Contains(report, "round 2") {
 		t.Fatalf("scope warning missing: %s", report)
+	}
+}
+
+func TestReviewConvergenceNoHistoryAndCompletedErrorRound(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "current")
+	m := ReviewManifest{Repo: "widget", PR: "7", Forge: "github", Slug: "example/widget", Public: true, Round: 2}
+	convergenceFixtureFile(t, filepath.Join(dir, "diff.patch"), "one\ntwo\n")
+	if err := copyReviewPrior(dir, root, m); err != nil {
+		t.Fatal(err)
+	}
+	context := readConvergenceFixture(t, dir)
+	if context.PatchLines == nil || *context.PatchLines != 2 || context.PreviousRound != 0 || context.PreviousPatchLines != nil || context.GrowthPercent != nil || reviewConvergenceReport(context) != "" {
+		t.Fatalf("first bundle invented a previous comparison: %+v", context)
+	}
+	old := filepath.Join(root, "old")
+	convergenceFixtureFile(t, filepath.Join(old, "diff.patch"), "one\n")
+	previous := m
+	previous.Round = 1
+	if err := writeReviewManifest(old, previous); err != nil {
+		t.Fatal(err)
+	}
+	convergenceFixtureFile(t, filepath.Join(old, "summary.md"), "A concern failed; coverage is incomplete.\n")
+	convergenceFixtureFile(t, filepath.Join(old, "verdict"), "error\n")
+	if err := copyReviewPrior(dir, root, m); err != nil {
+		t.Fatal(err)
+	}
+	context = readConvergenceFixture(t, dir)
+	if context.PreviousRound != 1 || context.PreviousPatchLines == nil || *context.PreviousPatchLines != 1 || !context.ScopeGrew {
+		t.Fatalf("completed error round was lost: %+v", context)
 	}
 }
 
