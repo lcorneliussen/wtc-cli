@@ -25,8 +25,11 @@ func TestSandboxChecks(t *testing.T) {
 	nothing := func(name string, args ...string) (string, error) { return "", errors.New("no") }
 
 	checks := sandboxChecks(gw, func(string) string { return "" }, nothing)
-	if len(checks) != 2 || !checks[0].OK || !strings.Contains(checks[0].Detail, "2 repos: api, web") || !checks[1].OK {
+	if len(checks) != 3 || !checks[0].OK || !strings.Contains(checks[0].Detail, "2 repos: api, web") || !checks[1].OK {
 		t.Fatalf("a clean sandbox: %+v", checks)
+	}
+	if checks[2].Name != "projects" || checks[2].OK || checks[2].Required || !strings.Contains(checks[2].Detail, "discovery unavailable") {
+		t.Fatalf("old gateway without project discovery: %+v", checks[2])
 	}
 
 	env := map[string]string{"GH_TOKEN": "x"}
