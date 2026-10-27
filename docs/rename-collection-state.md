@@ -34,7 +34,9 @@ Catch-up has no cached-report reader: its default output remains
 Retirement recognizes both report names, `.taba-status.md`, and the alternate
 PR/status files as disposable collection state.
 
-The `.taba/` directory, live runner identity, runtime and watcher locks,
-review-mode markers, review bundles and posted-review receipts remain separate
-phase-0 work. Skill names, executable packaging and automatic migration belong
-to later rename phases.
+[Collection directory inputs](rename-collection-directories.md) cover ad-hoc
+configuration, dev-build lookup and generated skill/instruction links under
+`.taba/`. Live runner identity, runtime and watcher locks, review-mode markers,
+review bundles and posted-review receipts remain separate phase-0 work. Skill
+names, executable packaging and automatic migration belong to later rename
+phases.

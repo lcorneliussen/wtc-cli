@@ -121,6 +121,8 @@ func TestInstallAndUninstallDevBuild(t *testing.T) {
 		t.Skip("checkout has no release tag (shallow clone)")
 	}
 	collection := t.TempDir()
+	fixtureFile(t, filepath.Join(collection, ".taba", "dev", "wtc"), "#!/bin/sh\n", 0755)
+	fixtureFile(t, filepath.Join(collection, ".taba", "dev", "version"), "0.1.40-dev.1+dev.gabc1234\n", 0644)
 	build, err := InstallDevBuild(collection, source)
 	if err != nil {
 		t.Fatal(err)
@@ -128,6 +130,9 @@ func TestInstallAndUninstallDevBuild(t *testing.T) {
 	read := ReadDevBuild(collection)
 	if read == nil || read.Version != build.Version || read.Source != source || !strings.Contains(build.Version, "dev") {
 		t.Fatalf("installed build not readable: %+v / %+v", build, read)
+	}
+	if build.Binary != filepath.Join(collection, ".wtc", "dev", "wtc") {
+		t.Fatalf("install changed the default namespace: %+v", build)
 	}
 	if _, err := os.Stat(filepath.Join(collection, ".wtc", "dev", ".wtc.tmp")); !os.IsNotExist(err) {
 		t.Fatal("temporary binary left behind")

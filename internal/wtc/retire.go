@@ -340,7 +340,17 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 	if adHoc {
 		// An ad-hoc registry is remembered per user. Hand-written local
 		// hooks and config stay behind as leftovers for inspection.
-		files = append(files, filepath.Join(AdHocConfigDir, adHocRegistryFile))
+		config, err := collectionDirectoryInput(target, "config")
+		if err != nil {
+			return err
+		}
+		if safeGeneratedParent(target, config) == nil {
+			rel, err := filepath.Rel(target, config)
+			if err != nil {
+				return err
+			}
+			files = append(files, filepath.Join(rel, adHocRegistryFile))
+		}
 	}
 	for _, name := range files {
 		if err := os.Remove(filepath.Join(target, name)); err != nil && !os.IsNotExist(err) {
@@ -366,24 +376,34 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 				return err
 			}
 		}
-		if err := os.RemoveAll(filepath.Join(wtcDir, "instructions")); err != nil {
-			return err
-		}
-		if err := os.RemoveAll(filepath.Join(wtcDir, "skills")); err != nil {
-			return err
-		}
 		// The pre-push hook of a review-only collection.
 		if err := os.RemoveAll(filepath.Join(wtcDir, "review-hooks")); err != nil {
 			return err
 		}
-		// A dev build is regenerated with wtc dev install.
-		if err := os.RemoveAll(devBuildDir(target)); err != nil {
-			return err
-		}
-		_ = os.Remove(filepath.Join(target, AdHocConfigDir)) // Only when nothing hand-written remains.
-		_ = os.Remove(wtcDir)                                // Other .wtc files are left for inspection.
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
+	}
+	for _, name := range []string{".wtc", ".taba"} {
+		root := filepath.Join(target, name)
+		info, err := os.Lstat(root)
+		if os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			continue // Linked roots and unknown files stay for inspection.
+		}
+		for _, generated := range []string{"instructions", "skills", "dev"} {
+			if err := os.RemoveAll(filepath.Join(root, generated)); err != nil {
+				return err
+			}
+		}
+		config := filepath.Join(root, "config")
+		if info, err := os.Lstat(config); err == nil && info.IsDir() {
+			_ = os.Remove(config) // Only when no hand-written configuration remains.
+		}
+		_ = os.Remove(root) // Other namespaces and local files stay for inspection.
 	}
 	return nil
 }
@@ -391,7 +411,8 @@ func removeRetiredGeneratedFiles(target string, adHoc bool) error {
 func removeManagedCollectionEntry(target string) error {
 	entry := filepath.Join(target, "AGENTS.md")
 	if link, err := os.Readlink(entry); err == nil &&
-		(link == "harness/collection-AGENTS.md" || link == ".wtc/collection-AGENTS.md") {
+		(link == "harness/collection-AGENTS.md" || link == ".wtc/collection-AGENTS.md" ||
+			link == ".taba/collection-AGENTS.md" || link == ".wtc/config/collection-AGENTS.md" || link == ".taba/config/collection-AGENTS.md") {
 		if err := os.Remove(entry); err != nil {
 			return err
 		}
@@ -414,8 +435,31 @@ func removeManagedCollectionEntry(target string) error {
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	fallback := filepath.Join(target, ".wtc", "collection-AGENTS.md")
-	if data, err := os.ReadFile(fallback); err == nil {
+	for _, name := range []string{".wtc", ".taba"} {
+		root := filepath.Join(target, name)
+		info, err := os.Lstat(root)
+		if os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			continue
+		}
+		fallback := filepath.Join(root, "collection-AGENTS.md")
+		info, err = os.Lstat(fallback)
+		if os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		data, err := os.ReadFile(fallback)
+		if err != nil {
+			return err
+		}
 		defaultBody, err := ReadDefault("collection-AGENTS.md")
 		if err != nil {
 			return err
@@ -425,10 +469,8 @@ func removeManagedCollectionEntry(target string) error {
 				return err
 			}
 		}
-	} else if err != nil && !os.IsNotExist(err) {
-		return err
+		_ = os.Remove(root)
 	}
-	_ = os.Remove(filepath.Join(target, ".wtc"))
 	return nil
 }
 
@@ -456,15 +498,17 @@ func removeManagedAgentFiles(target string) error {
 		}
 		_ = os.Remove(dir)
 	}
-	for path, want := range map[string]string{
-		".grok/hooks/wtc-agent-env.json": "../../" + harness + "/hooks/agent-env.json",
-		".claude/settings.json":          "../" + harness + "/hooks/agent-env.json",
-		".cursor/hooks.json":             "../" + harness + "/hooks/agent-env.json",
-	} {
-		full := filepath.Join(target, path)
-		if link, err := os.Readlink(full); err == nil && link == want {
-			if err := os.Remove(full); err != nil {
-				return err
+	for _, source := range []string{harness, AdHocConfigDir, ".taba/config"} {
+		for path, want := range map[string]string{
+			".grok/hooks/wtc-agent-env.json": "../../" + source + "/hooks/agent-env.json",
+			".claude/settings.json":          "../" + source + "/hooks/agent-env.json",
+			".cursor/hooks.json":             "../" + source + "/hooks/agent-env.json",
+		} {
+			full := filepath.Join(target, path)
+			if link, err := os.Readlink(full); err == nil && link == want {
+				if err := os.Remove(full); err != nil {
+					return err
+				}
 			}
 		}
 	}

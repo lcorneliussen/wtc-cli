@@ -27,7 +27,11 @@ backend = "dekit"
 // use, adds repositories it has not seen and repoints moved links. It never
 // removes a repository, and it never touches anything that is not a link.
 func LinkGatewayCollection(dir string, repos []LinkedRepo) (*Context, error) {
-	if _, err := os.Stat(filepath.Join(dir, AdHocConfigDir, adHocRegistryFile)); os.IsNotExist(err) {
+	present, err := collectionMarker(dir)
+	if err != nil {
+		return nil, err
+	}
+	if !present {
 		if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 			return nil, err
 		}
@@ -35,7 +39,14 @@ func LinkGatewayCollection(dir string, repos []LinkedRepo) (*Context, error) {
 			return nil, err
 		}
 	}
-	config, err := configInput(filepath.Join(dir, AdHocConfigDir))
+	c, err := OpenCollection(dir)
+	if err != nil {
+		return nil, err
+	}
+	if !c.AdHoc {
+		return nil, fmt.Errorf("gateway collection must use collection-local configuration")
+	}
+	config, err := configInput(c.Harness)
 	if err != nil {
 		return nil, err
 	}
@@ -44,17 +55,13 @@ func LinkGatewayCollection(dir string, repos []LinkedRepo) (*Context, error) {
 			return nil, err
 		}
 	}
-	c, err := OpenCollection(dir)
-	if err != nil {
-		return nil, err
-	}
 	known := map[string]bool{}
 	for _, r := range c.Registry.Repos {
 		known[r.Name] = true
 	}
 	for _, r := range repos {
 		if !known[r.Name] {
-			if err := appendRegistryEntry(filepath.Join(dir, AdHocConfigDir, adHocRegistryFile), Repo{Name: r.Name, Remote: r.Remote, DefaultRef: r.DefaultRef}); err != nil {
+			if err := appendRegistryEntry(c.registryPath(), Repo{Name: r.Name, Remote: r.Remote, DefaultRef: r.DefaultRef}); err != nil {
 				return nil, err
 			}
 			known[r.Name] = true
@@ -84,7 +91,9 @@ func LinkGatewayCollection(dir string, repos []LinkedRepo) (*Context, error) {
 func GatewayHarness(dir string) (name, remote string, err error) {
 	c, err := OpenCollection(dir)
 	if err != nil {
-		if _, statErr := os.Stat(filepath.Join(dir, AdHocConfigDir, adHocRegistryFile)); os.IsNotExist(statErr) {
+		if present, markerErr := collectionMarker(dir); markerErr != nil {
+			return "", "", markerErr
+		} else if !present {
 			return "", "", nil
 		}
 		return "", "", err
@@ -97,7 +106,8 @@ func GatewayHarness(dir string) (name, remote string, err error) {
 // without one. A collection has one harness or none: a different one already
 // recorded is an error.
 func RecordGatewayHarness(dir, name, remote string) error {
-	if _, err := LinkGatewayCollection(dir, nil); err != nil {
+	c, err := LinkGatewayCollection(dir, nil)
+	if err != nil {
 		return err
 	}
 	current, _, err := GatewayHarness(dir)
@@ -110,7 +120,7 @@ func RecordGatewayHarness(dir, name, remote string) error {
 	if current != "" {
 		return fmt.Errorf("collection %s already uses harness %s", filepath.Base(dir), current)
 	}
-	config, err := configInput(filepath.Join(dir, AdHocConfigDir))
+	config, err := configInput(c.Harness)
 	if err != nil {
 		return err
 	}
