@@ -69,3 +69,11 @@ dispatches. Unchanged handoffs cannot be sent twice in the current view; check
 the conversation before using `x` to allow an explicit retry. Agent tasks in one collection are combined into one sequential
 handoff; check that conversation for completion. Publication authority is not
 broadened by a selection, and follow-up steps require a new selection.
+
+## Private retirement discovery
+
+`wtc discover [collection] [--transcript <file>] [--json]` reads one collection
+and proposes verification and preservation steps. Explicit transcripts are
+untrusted Claude JSONL evidence; archive state, forge/delivery and live-resource
+coverage remain unknown. Output is private/local and is never cleanup authority.
+See [retirement discovery](retirement-discovery.md) for limits and source coverage.

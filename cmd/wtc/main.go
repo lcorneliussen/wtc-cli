@@ -292,6 +292,7 @@ func run() error {
 	addNewCommand(root, &asJSON)
 	addAddRepoCommand(root, &asJSON)
 	addRetireCommand(root, &asJSON)
+	addDiscoveryCommand(root, &asJSON)
 	addCatchUpCommand(root, &asJSON)
 	addStatusCommand(root, &asJSON)
 	addOpenCommand(root, &asJSON)
