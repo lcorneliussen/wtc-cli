@@ -376,3 +376,15 @@ local independent-review alternative uses the existing skill; the gateway review
 alternative is disabled with an adapter requirement. Shared claims, review slots,
 persisted continuation and coordinated PR sets remain in subsequent slices.
 The fixture exporter now includes actual choices and the compatibility projection.
+
+
+### Interaction refinement
+
+The visible checked rows are the selection preview for non-destructive local
+work. Catch-up runs on one click, including mixed selections of local steps.
+An explicit catch-up click supplies the agent-level timing decision for a
+mechanical catch-up; conflict resolution still requires judgment, and background
+callers retain the agent gate. Publication selections retain a separate preview
+and the host's exact account/commit confirmation. Action rows separate repository,
+reason and controls; a single choice does not need a dropdown, and running/queued
+results replace the earlier repeated action/authority prose.

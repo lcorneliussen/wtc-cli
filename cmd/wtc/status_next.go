@@ -127,14 +127,14 @@ func statusNextCurrent(wanted wtc.StatusRepo, snapshot wtc.StatusSnapshot) (wtc.
 	return wtc.StatusRepo{}, fmt.Errorf("the selected action changed or is blocked; refresh and choose again")
 }
 
-func statusNextCommand(r wtc.StatusRepo) ([]string, bool) {
+func statusNextCommand(r wtc.StatusRepo, userSelected ...bool) ([]string, bool) {
 	s := r.Next
 	repo := r.Repo
 	if repo == "" {
 		repo = r.Dir
 	}
 	want := []string{"wtc", "catch-up", r.Collection, "--repos", repo}
-	if s == nil || s.By != next.ByWTC || s.Approve != "" || !reflect.DeepEqual(s.Command, want) {
+	if s == nil || s.By != next.ByWTC || (s.Approve != "" && !(len(userSelected) > 0 && userSelected[0] && s.Step == "catch-up" && s.Approve == next.ApproveAgent)) || !reflect.DeepEqual(s.Command, want) {
 		return nil, false
 	}
 	// Leave any newly dirty or busy checkout with its owner.
@@ -189,7 +189,7 @@ func statusNextRunInContext(ctx context.Context, c *wtc.Context, selected wtc.St
 		if err := ctx.Err(); err != nil {
 			return failed(err)
 		}
-		if argv, ok := statusNextCommand(r); ok {
+		if argv, ok := statusNextCommand(r, true); ok {
 			state, err := run.busy(owner)
 			if err != nil {
 				return failed(err)
@@ -402,4 +402,15 @@ func statusNextPendingKey(r wtc.StatusRepo) string {
 		key = parts[len(parts)-1]
 	}
 	return statusNextIdentity(r) + ":" + key
+}
+
+// Local edits and catch-up need no second click. Publication retains a preview
+// and its host authority checks; following steps never inherit that authority.
+func statusNextConfirmTargets(targets []wtc.StatusRepo) bool {
+	for _, r := range targets {
+		if r.Next.Approve == next.ApprovePerson || r.Next.Step == "push" {
+			return true
+		}
+	}
+	return false
 }

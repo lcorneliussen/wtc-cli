@@ -62,7 +62,8 @@ the view does not run them on every refresh.
 
 In `wtc status --tui`, press `n` for next actions, Space to select a repository,
 Right to choose an alternative, or `s` to select visible suggestions. Enter
-previews a selection and Enter again confirms it. Each selected action is
+runs selected catch-up and local steps directly. Publication selections show a
+preview before dispatch. Each selected action is
 revalidated; stale or blocked targets are reported separately. `c` cancels queued
 dispatches. Unchanged handoffs cannot be sent twice in the current view; check
 the conversation before using `x` to allow an explicit retry. Agent tasks in one collection are combined into one sequential
