@@ -305,6 +305,10 @@ shared class, with deterministic ordering evidence for races. Answer scope or
 repeated-major design checkpoints before another round of point fixes. Keep
 additional behavior in an explicitly scoped follow-up when appropriate;
 review feedback does not authorize expanding the task.
+Defending intended scope does not settle an inaccurate message, diagnostic or
+comment: address the explanation separately from a request to change behavior.
+Optional style advice alone has no gate significance. Correct stale test-status
+claims with current supplied evidence and its tested head.
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/<n>/comments/<comment-id>/replies -f body='…'

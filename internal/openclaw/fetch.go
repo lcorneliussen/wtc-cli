@@ -143,6 +143,10 @@ func baseBranch(dir string) string {
 	if b := checkedOutBase(dir); b != "" {
 		return b
 	}
+	return defaultBaseBranch(dir)
+}
+
+func defaultBaseBranch(dir string) string {
 	if head, err := git(dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil && head != "" {
 		return strings.TrimPrefix(head, "origin/")
 	}

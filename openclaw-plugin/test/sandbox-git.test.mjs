@@ -117,3 +117,145 @@ test("a sandbox container is served its session, cannot push, and delivers its b
     server.close();
   }
 });
+
+// Discovery must not turn possession of a gateway URL into session authority.
+test("project discovery refuses an unknown or ambiguous worktree owner", async (t) => {
+  const owner = { sessionKey: "s1", entry: { worktree: { id: "w1" }, projectId: "api", workspaceDir: "/fixture/api" } };
+  for (const [name, entries] of [["unknown", []], ["ambiguous", [owner, { ...owner, sessionKey: "s2" }]]]) {
+    await t.test(name, async () => {
+      const commands = [];
+      const server = startSandboxGit({
+        host: "127.0.0.1", port: 0,
+        run: async (argv) => {
+          commands.push(argv);
+          if (argv[0] === "openclaw") return { code: 0, stdout: JSON.stringify({ containers: [{ containerName: "sbx-1", backendId: "docker", running: true, sessionKey: "agent:dev:session:x", workspaceDir: "/fixture/worktree-projections/w1/workspace" }] }), stderr: "" };
+          if (argv[0] === "docker") return { code: 0, stdout: "/sbx-1 127.0.0.1\n", stderr: "" };
+          throw new Error("unauthorized session reached gateway metadata");
+        },
+        openclaw: ["openclaw"],
+        listSessionEntries: () => entries,
+        collectionOf: () => { throw new Error("no unique session owner"); },
+        worktreeOf: (entry) => entry?.workspaceDir,
+      });
+      try {
+        await new Promise((resolve) => server.once("listening", resolve));
+        const response = await fetch(`http://127.0.0.1:${server.address().port}/wtc/projects`);
+        assert.equal(response.status, 403);
+        assert.deepEqual(await response.json(), { error: "no single session owns this sandbox's worktree" });
+        assert.deepEqual(commands.map((argv) => argv[0]), ["openclaw", "docker"]);
+      } finally {
+        server.close();
+      }
+    });
+  }
+});
+
+function projectService(t, options = {}) {
+  const commands = [];
+  let agent = "dev";
+  const server = startSandboxGit({
+    host: "127.0.0.1", port: 0,
+    openclaw: ["openclaw"],
+    run: async (argv, opts) => {
+      commands.push({ argv, opts });
+      if (argv[0] === "openclaw") return { code: 0, stdout: JSON.stringify({ containers: [{ containerName: "sbx", backendId: "docker", running: true, sessionKey: `agent:${agent}:session:x`, workspaceDir: "/fixture/worktree-projections/w1/workspace" }] }), stderr: "" };
+      if (argv[0] === "docker") return { code: 0, stdout: "/sbx 127.0.0.1\n", stderr: "" };
+      if (argv[2] === "sandbox-projects") return options.metadata ?? { code: 0, stdout: JSON.stringify({ projects: [{ name: "platform", harness: "https://github.com/example/harness.git", ref: "main", repos: [{ name: "web", remote: "https://github.com/example/web.git" }] }] }), stderr: "" };
+      throw new Error("unexpected command");
+    },
+    listSessionEntries: () => [{ sessionKey: "s1", entry: { worktree: { id: "w1" }, projectId: "api", workspaceDir: "/fixture/api" } }],
+    collectionOf: () => ({ children: [] }),
+    worktreeOf: (entry) => entry?.workspaceDir,
+    ...options,
+  });
+  t.after(() => server.close());
+  return {
+    server, commands,
+    setAgent: (value) => { agent = value; },
+    url: async () => {
+      await new Promise((resolve) => server.once("listening", resolve));
+      return `http://127.0.0.1:${server.address().port}`;
+    },
+  };
+}
+
+test("project discovery is closed by default and invalid policies fail closed", async (t) => {
+  for (const projectsByAgent of [undefined, {}, { dev: [] }, { dev: ["*"] }, { dev: ["../platform"] }, { dev: "platform" }, { dev: ["none"] }, { other: ["platform"] }, Object.create({ dev: ["platform"] })]) {
+    await t.test(JSON.stringify(projectsByAgent), async (t) => {
+      const fixture = projectService(t, { projectsByAgent });
+      const response = await fetch(`${await fixture.url()}/wtc/projects?agentId=other&project=platform`, { headers: { "x-agent-id": "other" } });
+      assert.equal(response.status, 403);
+      assert.deepEqual(await response.json(), { error: "project discovery is not enabled for this agent" });
+      assert.equal(fixture.commands.filter(({ argv }) => argv[0] === "wtc").length, 0);
+    });
+  }
+});
+
+test("discovery uses only authenticated agent policy, stays read-only, and refreshes identity", async (t) => {
+  const fixture = projectService(t, { projectsByAgent: { dev: ["platform"], admin: ["hidden"] } });
+  const base = await fixture.url();
+  const response = await fetch(`${base}/wtc/projects?agentId=admin&project=hidden&path=/fixture/secret`, { headers: { "x-agent-id": "admin" } });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual((await response.json()).projects.map((p) => p.name), ["platform"]);
+  const load = fixture.commands.find(({ argv }) => argv[0] === "wtc");
+  assert.deepEqual(load.argv, ["wtc", "openclaw", "sandbox-projects", "--project", "platform"]);
+  assert.equal(load.opts.cwd, "/fixture/api");
+  assert.deepEqual(load.opts.env, { WTC_GATEWAY_GIT: "" });
+  assert.equal((await fetch(`${base}/web/info/refs?service=git-upload-pack`)).status, 404, "metadata granted Git access outside the collection");
+  assert.equal((await fetch(`${base}/wtc/projects`, { method: "POST" })).status, 404);
+  fixture.setAgent("unlisted");
+  assert.equal((await fetch(`${base}/wtc/projects`)).status, 403, "discovery reused the previous container identity");
+  assert.equal(fixture.commands.filter(({ argv }) => argv[0] === "wtc").length, 1);
+});
+
+test("project command failures and malformed or unallowed results disclose no diagnostics", async (t) => {
+  for (const metadata of [
+    { code: 1, stdout: "", stderr: "credential=secret /fixture/private-config" },
+    { code: 0, stdout: "not JSON /fixture/private-config", stderr: "" },
+    { code: 0, stdout: '{"projects":[{"name":"hidden"}]}', stderr: "" },
+    { code: 0, stdout: '{"projects":null}', stderr: "" },
+  ]) {
+    await t.test(metadata.stdout, async (t) => {
+      const fixture = projectService(t, { projectsByAgent: { dev: ["platform"] }, metadata });
+      const response = await fetch(`${await fixture.url()}/wtc/projects`);
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { error: "gateway project metadata unavailable" });
+    });
+  }
+});
+
+test("discovery refuses a container without an authenticated agent identity", async (t) => {
+  const fixture = projectService(t, { projectsByAgent: { "": ["platform"] } });
+  fixture.setAgent("");
+  const response = await fetch(`${await fixture.url()}/wtc/projects?agentId=dev`);
+  assert.equal(response.status, 403);
+  assert.equal(fixture.commands.filter(({ argv }) => argv[0] === "wtc").length, 0);
+});
+
+test("discovery hides identity-provider diagnostics", async (t) => {
+  const fixture = projectService(t, { projectsByAgent: { dev: ["platform"] }, listSessionEntries: () => { throw new Error("credential=secret /fixture/private-config"); } });
+  const response = await fetch(`${await fixture.url()}/wtc/projects`);
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "gateway project metadata unavailable" });
+});
+
+test("failed or ambiguous container lookup cannot authorize discovery", async (t) => {
+  for (const mode of ["list failure", "inspect failure", "duplicate address"]) {
+    await t.test(mode, async (t) => {
+      const containers = ["one", "two"].map((containerName) => ({ containerName, backendId: "docker", running: true, sessionKey: "agent:dev:x", workspaceDir: "/fixture/worktree-projections/w1/workspace" }));
+      const fixture = projectService(t, { projectsByAgent: { dev: ["platform"] }, run: async (argv) => {
+        if (argv[0] === "openclaw") return { code: mode === "list failure" ? 1 : 0, stdout: JSON.stringify({ containers }), stderr: "" };
+        if (argv[0] === "docker") return { code: mode === "inspect failure" ? 1 : 0, stdout: "/one 127.0.0.1\n/two 127.0.0.1\n", stderr: "" };
+        throw new Error("identity failure reached metadata command");
+      } });
+      const response = await fetch(`${await fixture.url()}/wtc/projects`);
+      assert.equal(response.status, 403);
+      if (mode === "duplicate address") {
+        assert.deepEqual(await response.json(), { error: "this address belongs to more than one sandbox container" });
+      } else {
+        assert.deepEqual(await response.json(), { error: "this address is no sandbox container of the gateway's" });
+      }
+    });
+  }
+});

@@ -50,6 +50,10 @@ the new head.
    ordering evidence for races. Answer scope/design checkpoints before another
    round of point fixes; keep new behavior in an explicitly scoped follow-up
    when appropriate. These checkpoints do not authorize expanding the task.
+   An intentional behavior can still need a truthful explanation or diagnostic;
+   answer that clarification separately from a request to change the behavior.
+   Optional style notes alone do not hold the gate. Supply current head-specific
+   evidence when correcting a stale pending-test claim.
 5. Push fixes and build a new bundle on the new head. Continue until the
    verdict is `pass`, or `pass-with-notes` with remaining notes answered.
 6. Only when the user has asked to mark the draft ready, use
