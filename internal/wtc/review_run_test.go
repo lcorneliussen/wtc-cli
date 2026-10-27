@@ -21,8 +21,12 @@ func TestReviewRunnerUsesSeparateProcessResultsAndClosesIncompleteCoverage(t *te
 	if err := os.WriteFile(filepath.Join(harness, ".harness-repos.yml"), []byte("repos:\n  - name: app\n    remote: https://github.com/example/app.git\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	manifest := ReviewManifest{Repo: "app", Forge: "github", Slug: "example/app", HeadSHA: "1234567890abcdef1234567890abcdef12345678", Round: 1, RepoDir: filepath.Join(collection, "app")}
+	manifest := ReviewManifest{Repo: "app", Forge: "github", Slug: "example/app", HeadSHA: "1234567890abcdef1234567890abcdef12345678", Round: 3, RepoDir: filepath.Join(collection, "app")}
 	if err := writeReviewManifest(bundle, manifest); err != nil {
+		t.Fatal(err)
+	}
+	before, after := 20, 40
+	if err := writeReviewConvergence(bundle, reviewConvergence{Round: 3, PatchLines: &after, PreviousRound: 2, PreviousPatchLines: &before, GrowthThreshold: 50, ScopeGrew: true, PreviousMajorConcerns: []string{"code"}}); err != nil {
 		t.Fatal(err)
 	}
 	for path, body := range map[string]string{
@@ -77,6 +81,9 @@ if [ "${FAIL_CONCERN:-}" = "$id" ]; then exit 3; fi
 	if err != nil || !strings.Contains(string(summary), "| code | test: |") || !strings.Contains(string(summary), "| lead | test:sample-model |") || !strings.Contains(string(summary), "100 / 10 (20)") || !strings.Contains(string(summary), "1.2k / 50 (200)") || !strings.Contains(string(summary), "1.3k / 60 (220)") || !strings.Contains(string(summary), "$0.03") {
 		t.Fatalf("run statistics table missing: %s %v", summary, err)
 	}
+	if !strings.Contains(string(summary), "Scope checkpoint:") || strings.Contains(string(summary), "Design checkpoint:") {
+		t.Fatalf("checkpoint observations disagree with findings: %s", summary)
+	}
 	skipped, err := os.ReadFile(filepath.Join(bundle, "findings", "compat.json"))
 	if err != nil || !strings.Contains(string(skipped), `"skipped"`) {
 		t.Fatalf("downstream concern was not skipped: %s %v", skipped, err)
@@ -104,6 +111,9 @@ if [ "${FAIL_CONCERN:-}" = "$id" ]; then exit 3; fi
 	summary, err = os.ReadFile(filepath.Join(bundle, "summary.md"))
 	if err != nil || !strings.Contains(string(summary), "**Local review: changes-requested**") || strings.Contains(string(summary), "**Local review: pass**") {
 		t.Fatalf("runner verdict and summary heading disagree: %s %v", summary, err)
+	}
+	if !strings.Contains(string(summary), "Design checkpoint: major findings remain in code") {
+		t.Fatalf("runner omitted the repeated-major design question: %s", summary)
 	}
 	stale := filepath.Join(bundle, "stats", "unselected.json")
 	if err := os.WriteFile(stale, []byte(`{"agent":"old","input_tokens":99999,"status":"ok"}`), 0644); err != nil {

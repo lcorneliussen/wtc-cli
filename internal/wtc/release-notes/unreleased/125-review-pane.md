@@ -1,0 +1,4 @@
+## Collections
+
+- Add `wtc open --add review` for pinned review bundle or current PR diffs, using Hunk when available and Git/less otherwise.
+- Preserve review viewers across layout switches and keep focused or running review panes during trimming; default and full pane sets remain unchanged.
