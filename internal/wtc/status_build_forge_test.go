@@ -32,6 +32,7 @@ func TestStatusParseGHBuildUsesRollupAndWorkflowRun(t *testing.T) {
 }
 
 func TestStatusBBBuildReadsNewestBranchPipeline(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	var gotPath, gotUser string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path + "?" + r.URL.RawQuery
@@ -288,6 +289,7 @@ func TestMergedPRRecordsMergeCommit(t *testing.T) {
 }
 
 func TestStatusGHBuildPassesNumericNamesAsStrings(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	bin := t.TempDir()
 	argsFile := filepath.Join(bin, "args")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\nprintf '{\"data\":{\"repository\":{\"ref\":null}}}'\n"

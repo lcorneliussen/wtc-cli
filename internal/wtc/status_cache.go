@@ -66,6 +66,10 @@ func statusReadForgeEntry(kind, forge, slug, key string) ([]byte, bool) {
 	return statusReadForgeEntryWithAge(kind, forge, slug, key, statusForgeCacheAge())
 }
 
+func statusReadForgeEntryAny(kind, forge, slug, key string) ([]byte, bool) {
+	return statusReadForgeEntryWithAge(kind, forge, slug, key, 365*24*time.Hour)
+}
+
 func statusReadForgeEntryWithAge(kind, forge, slug, key string, age time.Duration) ([]byte, bool) {
 	path := statusForgeEntryPath(kind, forge, slug, key)
 	if !statusSecureCacheDir(filepath.Dir(path)) {

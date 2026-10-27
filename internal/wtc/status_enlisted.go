@@ -42,7 +42,9 @@ func statusBBCompleteMergeTime(detail statusPRDetail, slug string) statusPRDetai
 	if len(parts) != 2 {
 		return detail
 	}
-	raw, err := statusJSON("bb", "pr", "activity", detail.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
+	raw, err := statusSingleFlight("activity", "bitbucket.org", slug, detail.Number, func() ([]byte, error) {
+		return statusJSON("bb", "pr", "activity", detail.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
+	})
 	if err == nil {
 		detail.MergedOn = statusBBMergeEventTime(raw)
 	}
@@ -125,15 +127,20 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 			return detail
 		}
 	}
-	var raw []byte
-	var err error
-	switch forge {
-	case "github.com":
-		raw, err = statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,mergeable,reviewRequests,latestReviews,mergedAt,baseRefName,mergeCommit")
-	case "bitbucket.org":
-		parts := strings.SplitN(slug, "/", 2)
-		raw, err = statusJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
-	}
+	raw, err := statusSingleFlight("pr", forge, slug, record.Number, func() ([]byte, error) {
+		switch forge {
+		case "github.com":
+			return statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,mergeable,reviewRequests,latestReviews,mergedAt,baseRefName,mergeCommit")
+		case "bitbucket.org":
+			parts := strings.SplitN(slug, "/", 2)
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid Bitbucket repository slug")
+			}
+			return statusJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
+		default:
+			return nil, fmt.Errorf("unsupported forge")
+		}
+	})
 	if err == nil {
 		if detail, parseErr := statusParseForgeDetail(forge, raw, record); parseErr == nil {
 			statusWriteForgeCache(forge, slug, record.Number, raw)

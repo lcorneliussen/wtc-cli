@@ -62,44 +62,46 @@ func statusDiscoverBranch(forge, slug, branch string) (string, error) {
 	if forge == "" || slug == "" || branch == "" {
 		return "", nil
 	}
-	if cached, ok := statusReadForgeEntry("branch", forge, slug, branch); ok {
-		if number, err := statusParseBranchList(forge, cached, branch); err == nil {
-			return number, nil
-		}
-	}
 	var raw []byte
 	var err error
 	switch forge {
 	case "github.com":
-		raw, err = statusJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "open", "--limit", "50", "--json", "number,headRefName")
+		raw, err = statusSingleFlight("branch", forge, slug, branch, func() ([]byte, error) {
+			return statusJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "open", "--limit", "50", "--json", "number,headRefName")
+		})
 	case "bitbucket.org":
 		parts := strings.SplitN(slug, "/", 2)
-		raw, err = statusJSON("bb", "pr", "list", "-w", parts[0], "-r", parts[1], "--state", "OPEN", "--limit", "50", "--json")
+		if len(parts) != 2 {
+			return "", fmt.Errorf("invalid Bitbucket repository slug")
+		}
+		raw, err = statusSingleFlight("bblist", forge, slug, "OPEN", func() ([]byte, error) {
+			return statusJSON("bb", "pr", "list", "-w", parts[0], "-r", parts[1], "--state", "OPEN", "--limit", "50", "--json")
+		})
+		if err != nil {
+			return "", err
+		}
+		number, parseErr := statusParseBranchList(forge, raw, branch)
+		if parseErr != nil || number != "" {
+			return number, parseErr
+		}
+		count, countErr := statusBitbucketListCount(raw)
+		if countErr != nil {
+			return "", countErr
+		}
+		if count < 50 {
+			return "", nil
+		}
+		// The installed bb CLI paginates up to --limit. Ask for every page
+		// only when the first page has no branch match. One saved list serves
+		// every branch of the repository.
+		raw, err = statusSingleFlight("bblist", forge, slug, "OPEN-ALL", func() ([]byte, error) {
+			return statusJSON("bb", "pr", "list", "-w", parts[0], "-r", parts[1], "--state", "OPEN", "--limit", "2147483647", "--json")
+		})
 	default:
 		return "", fmt.Errorf("unsupported forge")
 	}
 	if err != nil {
 		return "", err
 	}
-	number, err := statusParseBranchList(forge, raw, branch)
-	if err == nil && forge == "bitbucket.org" && number == "" {
-		count, countErr := statusBitbucketListCount(raw)
-		if countErr != nil {
-			return "", countErr
-		}
-		if count == 50 {
-			// The installed bb CLI paginates up to --limit. Ask for every
-			// page only when the first page has no branch match.
-			parts := strings.SplitN(slug, "/", 2)
-			raw, err = statusJSON("bb", "pr", "list", "-w", parts[0], "-r", parts[1], "--state", "OPEN", "--limit", "2147483647", "--json")
-			if err != nil {
-				return "", err
-			}
-			number, err = statusParseBranchList(forge, raw, branch)
-		}
-	}
-	if err == nil {
-		statusWriteForgeEntry("branch", forge, slug, branch, raw)
-	}
-	return number, err
+	return statusParseBranchList(forge, raw, branch)
 }
