@@ -147,6 +147,9 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	if forge == "bitbucket.org" && (detail.State == "OPEN" || detail.State == "DRAFT") {
 		evidence := statusBBHeadChecks(slug, detail.HeadCommit, false)
 		detail.Checks, detail.ChecksUnsettled = evidence.Result, !evidence.Complete || evidence.Result == "PENDING"
+		if detail.State == "DRAFT" && detail.Checks == "NONE" {
+			detail.Checks = "draft"
+		}
 	}
 	return detail
 }

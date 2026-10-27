@@ -23,15 +23,7 @@ func unknownHeadChecks(head string) headCheckEvidence {
 }
 
 func validCheckHead(head string) bool {
-	if len(head) != 40 {
-		return false
-	}
-	for _, c := range head {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-	}
-	return true
+	return len(head) == 40 && validCheckHeadPrefix(head)
 }
 
 func checkAggregate(states []string, complete bool) string {
@@ -69,7 +61,7 @@ func bbCheckState(state string) string {
 	}
 }
 
-// Every page spends the workspace's shared forge allowance. Partial collections
+// Every page spends the shared bitbucket.org forge allowance. Partial collections
 // retain observed failures but cannot claim success or absence of checks.
 func fetchBBCheckPages(endpoint, user, pass string, consume func(json.RawMessage) error) bool {
 	seen := map[string]bool{}
@@ -102,12 +94,20 @@ func fetchBBCheckPages(endpoint, user, pass string, consume func(json.RawMessage
 func statusBBHeadChecks(slug, head string, fresh bool) headCheckEvidence {
 	evidence := unknownHeadChecks(head)
 	parts := strings.Split(slug, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || !validCheckHead(head) {
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || !validCheckHeadPrefix(head) {
 		return evidence
 	}
 	user, pass := bitbucketCredentials()
 	if user == "" || pass == "" {
 		return evidence
+	}
+	if len(head) < 40 {
+		resolved, err := resolveBBCheckHead(slug, head, user, pass)
+		if err != nil {
+			return evidence
+		}
+		head = resolved
+		evidence = unknownHeadChecks(head)
 	}
 	fetch := func() ([]byte, error) {
 		result := unknownHeadChecks(head)
@@ -150,9 +150,10 @@ func statusBBHeadChecks(slug, head string, fresh bool) headCheckEvidence {
 				return nil
 			}
 			selector := run.Target.Selector.Type
-			if !statusBranchPipelineSelector(selector) {
+			if !statusHeadPipelineSelector(selector) {
 				return nil
 			}
+			// The query sorts by creation time descending, so the first rerun wins.
 			key := selector + ":" + run.Target.Selector.Pattern
 			if seen[key] {
 				return nil
@@ -170,12 +171,13 @@ func statusBBHeadChecks(slug, head string, fresh bool) headCheckEvidence {
 		return json.Marshal(result)
 	}
 	// The collector budgets each HTTP request itself; avoid charging an extra
-	// token for its aggregate. Keep a head-keyed cache under the existing lock.
+	// token for its aggregate.
 	if fresh {
 		raw, _ := fetch()
 		_ = json.Unmarshal(raw, &evidence)
 		return evidence
 	}
+	// Status uses a head-keyed cache under the existing lock.
 	unlock, err := statusLockCache(statusForgeEntryPath("checks", "bitbucket.org", slug, head))
 	if err == nil {
 		defer unlock()
@@ -204,4 +206,36 @@ func (e headCheckEvidence) report() string {
 		conclusion += " Evidence is incomplete; unavailable queries are not green."
 	}
 	return fmt.Sprintf("### Forge checks\n\n%s Head `%s`; observed %s. Required-check policy is unknown. This evidence is separate from the code-review verdict.\n", conclusion, e.Head, e.ObservedAt)
+}
+
+func validCheckHeadPrefix(head string) bool {
+	if len(head) < 12 || len(head) > 40 {
+		return false
+	}
+	for _, c := range head {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// Resolve abbreviations through the immutable commit endpoint before caching
+// or filtering pipelines. Never attach prefix-scoped evidence to another head.
+func resolveBBCheckHead(slug, prefix, user, pass string) (string, error) {
+	parts := strings.Split(slug, "/")
+	raw, err := statusSingleFlight("checkhead", "bitbucket.org", slug, prefix, func() ([]byte, error) {
+		endpoint := statusBBAPI + "/repositories/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]) + "/commit/" + prefix
+		return statusBBGET(endpoint, user, pass)
+	})
+	if err != nil {
+		return "", err
+	}
+	var commit struct {
+		Hash string `json:"hash"`
+	}
+	if json.Unmarshal(raw, &commit) != nil || !validCheckHead(commit.Hash) || !strings.HasPrefix(commit.Hash, prefix) {
+		return "", fmt.Errorf("cannot resolve exact check head")
+	}
+	return commit.Hash, nil
 }

@@ -186,3 +186,49 @@ func TestStatusPRPipelineSourceTargetSurvivesBranchAudit(t *testing.T) {
 		t.Fatalf("targeted audit lost PR source: %+v hits=%d err=%v", build, hits, err)
 	}
 }
+
+func TestStatusPRChecksResolveAbbreviatedHeadBeforeQueries(t *testing.T) {
+	for _, resolved := range []string{checkHeadB, checkHeadA, "not-a-commit"} {
+		t.Run(resolved, func(t *testing.T) {
+			hits := 0
+			setupHeadCheckServer(t, func(w http.ResponseWriter, r *http.Request) {
+				hits++
+				if strings.HasSuffix(r.URL.Path, "/commit/"+checkHeadB[:12]) {
+					fmt.Fprintf(w, `{"hash":%q}`, resolved)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/statuses") {
+					if !strings.Contains(r.URL.Path, checkHeadB) {
+						t.Error("statuses used an abbreviated head")
+					}
+					fmt.Fprint(w, `{"values":[{"state":"FAILED"}]}`)
+					return
+				}
+				if r.URL.Query().Get("target.commit.hash") != checkHeadB {
+					t.Error("pipeline filter used an abbreviated head")
+				}
+				fmt.Fprint(w, `{"values":[]}`)
+			})
+			got := statusBBHeadChecks("example/widget", checkHeadB[:12], false)
+			if resolved == checkHeadB {
+				if got.Result != "FAILURE" || got.Head != checkHeadB || !got.Complete || hits != 3 {
+					t.Fatalf("resolved head lost: %+v hits=%d", got, hits)
+				}
+			} else if got.Result != "UNKNOWN" || got.Complete || hits != 1 {
+				t.Fatalf("unresolved head attached: %+v hits=%d", got, hits)
+			}
+		})
+	}
+}
+
+func TestStatusPRChecksPreserveDraftLabelWithoutChecks(t *testing.T) {
+	setupHeadCheckServer(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"values":[]}`) })
+	record := PRRecord{Number: "7"}
+	raw := []byte(`{"id":7,"state":"OPEN","draft":true,"source":{"commit":{"hash":"` + checkHeadB + `"}}}`)
+	list, _ := statusEncodeOpenPRs([]statusOpenPR{{Number: "7", Fingerprint: "draft", Raw: raw}}, false, time.Now())
+	statusWriteForgeEntry("openprs", "bitbucket.org", "example/widget", "open", list)
+	got := statusEnrichRecord(record, "example/widget", "bitbucket.org")
+	if got.Checks != "draft" || got.ChecksUnsettled {
+		t.Fatalf("draft label changed: %+v", got)
+	}
+}

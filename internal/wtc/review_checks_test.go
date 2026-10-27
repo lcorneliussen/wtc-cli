@@ -69,3 +69,35 @@ func TestReviewChecksGitHubHeadMismatchIsUnknown(t *testing.T) {
 		t.Fatal(string(data))
 	}
 }
+
+func TestReviewChecksAcceptMatchingAbbreviatedBitbucketHead(t *testing.T) {
+	hits := 0
+	setupHeadCheckServer(t, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if strings.Contains(r.URL.Path, "/statuses") {
+			fmt.Fprint(w, `{"values":[{"state":"FAILED"}]}`)
+		} else {
+			fmt.Fprint(w, `{"values":[]}`)
+		}
+	})
+	bin := t.TempDir()
+	for _, prefix := range []string{checkHeadB[:12], checkHeadA[:12], checkHeadB[:7]} {
+		script := "#!/bin/sh\nprintf '%s' '{\"source\":{\"commit\":{\"hash\":\"" + prefix + "\"}}}'\n"
+		if err := os.WriteFile(filepath.Join(bin, "bb"), []byte(script), 0755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		m := ReviewManifest{Forge: "bitbucket", Slug: "example/widget", PR: "7", HeadSHA: checkHeadB, RepoDir: t.TempDir()}
+		got := collectReviewChecks(m)
+		if prefix == checkHeadB[:12] {
+			if got.Result != "FAILURE" || !got.Complete || got.Head != checkHeadB {
+				t.Fatalf("matching prefix rejected: %+v", got)
+			}
+		} else if got.Result != "UNKNOWN" || got.Complete {
+			t.Fatalf("unsafe prefix matched: %+v", got)
+		}
+	}
+	if hits != 2 {
+		t.Fatalf("queried mismatched heads: %d", hits)
+	}
+}

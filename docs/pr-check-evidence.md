@@ -11,3 +11,7 @@ A code-review verdict and forge checks answer different questions. A confirmed f
 Bitbucket collection uses read-only endpoints and the existing shared request allowance. Status caches check evidence by repository and full commit hash independently of PR metadata fingerprints; review/publication requests fresh evidence. Pagination follows same-origin links under a bounded page count.
 
 API contracts: [commit statuses](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-commit-statuses/), [pipelines](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-pipelines/), [pagination](https://developer.atlassian.com/cloud/bitbucket/rest/intro/#pagination). All regression fixtures are synthetic; no live pipeline mutation is required.
+
+Abbreviated Bitbucket heads are resolved through the read-only commit endpoint before status queries or cache lookup; a failed resolution stays unknown. Review uses its full local head only when the forge head is a matching prefix of at least 12 characters. GitHub review evidence comes from `headRefOid,statusCheckRollup` on `gh pr view` and spends the shared github.com allowance.
+
+Branch-targeted pipeline lookups use the documented `target.branch` filter so pull-request source targets are included along with branch reference targets. Both `ref_name` and PR `source` target shapes are recognized. The Go runner adds an instruction to read check evidence to each rendered review prompt; versioned Markdown templates, concerns and skills are unchanged.

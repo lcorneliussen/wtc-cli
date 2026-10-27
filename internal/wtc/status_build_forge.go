@@ -251,7 +251,7 @@ func statusPipelinePageBranches(raw []byte) []string {
 		if name == "" || seen[name] {
 			continue
 		}
-		if !statusBranchPipelineSelector(run.Target.Selector.Type) {
+		if !statusHeadPipelineSelector(run.Target.Selector.Type) {
 			continue
 		}
 		seen[name] = true
@@ -300,7 +300,7 @@ func statusParseBBBuild(raw []byte, slug, branch string) (*StatusBuild, error) {
 		if name == "" && statusPRPipelineSelector(run.Target.Selector.Type) {
 			name = run.Target.Source
 		}
-		if name != branch || !statusBranchPipelineSelector(run.Target.Selector.Type) {
+		if name != branch || !statusHeadPipelineSelector(run.Target.Selector.Type) {
 			continue
 		}
 		build := &StatusBuild{Branch: branch, Build: statusString(strconv.Itoa(run.BuildNumber)),
@@ -331,7 +331,7 @@ func statusForgeBuild(forge, slug, branch string) (*StatusBuild, error) {
 	return nil, nil
 }
 
-func statusBranchPipelineSelector(selector string) bool {
+func statusHeadPipelineSelector(selector string) bool {
 	switch selector {
 	case "", "branches", "default", "pullrequests", "pull-requests":
 		return true

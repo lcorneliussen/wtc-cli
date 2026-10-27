@@ -14,8 +14,11 @@ func collectReviewChecks(m ReviewManifest) headCheckEvidence {
 		return evidence
 	}
 	if m.Forge == "bitbucket" {
-		head, err := reviewPRHead(m)
-		if err != nil || head != m.HeadSHA {
+		raw, _, err := statusWithForgeBudget("bitbucket.org", nil, func() ([]byte, error) {
+			head, err := reviewPRHead(m)
+			return []byte(head), err
+		})
+		if err != nil || !SameReviewSHA(m.HeadSHA, string(raw)) {
 			return evidence
 		}
 		return statusBBHeadChecks(m.Slug, m.HeadSHA, true)

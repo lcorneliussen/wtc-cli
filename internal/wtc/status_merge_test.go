@@ -69,6 +69,14 @@ func TestStatusBitbucketPredictsExactPRCommits(t *testing.T) {
 				reportedHead, reportedBase = head[:12], base[:12]
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/statuses") || strings.HasSuffix(r.URL.Path, "/pipelines/") {
+					fmt.Fprint(w, `{"values":[]}`)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/commit/") {
+					fmt.Fprintf(w, `{"hash":%q}`, head)
+					return
+				}
 				fields := r.URL.Query().Get("fields")
 				if !strings.Contains(fields, "source.commit.hash") || !strings.Contains(fields, "destination.commit.hash") {
 					t.Errorf("list omitted exact commit identities: %s", fields)
