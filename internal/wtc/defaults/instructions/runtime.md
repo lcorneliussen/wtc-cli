@@ -241,8 +241,9 @@ from provider login, current reachability and exposure; JSON includes
 `tunnel_intent` and `lifecycle` alongside the observed runner `state`.
 
 `up` and `restart` wait up to 30 seconds for startup readiness; `--wait 60s`
-changes this, and `--wait 0` returns immediately. Untargeted `up` checks
-autostart tasks; explicitly name a group to wait for all its tasks. `restart`
+changes this, and `--wait 0` returns immediately. Untargeted `up` waits for
+autostart tasks and intended tunnels it restores; explicitly name a group to
+wait for all its selected tasks. `restart`
 requires a running runner. A readiness failure remains visible in status and
 logs, and the failed command's output includes the last lines of each failed
 or unready task's log, so a build error is in the failure itself. **Ready

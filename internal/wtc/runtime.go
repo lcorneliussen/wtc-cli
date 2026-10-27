@@ -51,9 +51,11 @@ type RuntimeItem struct {
 	// Login says why the tunnel provider's client cannot serve (logged out,
 	// stopped, awaiting approval, an expired key), and how to fix it.
 	Login string `json:"login,omitempty"`
-	// TunnelIntent is the explicit collection choice: on, off, or stale.
+	// TunnelIntent is the explicit collection choice: on, off, stale, or empty
+	// when no choice exists.
 	TunnelIntent string `json:"tunnel_intent,omitempty"`
-	// Lifecycle describes an intended tunnel that cannot currently run.
+	// Lifecycle describes a missing intended tunnel or a changed declaration
+	// that requires a fresh choice.
 	Lifecycle string `json:"lifecycle,omitempty"`
 }
 
@@ -64,7 +66,9 @@ type runtimeTask struct {
 	Deps  []string `json:"deps,omitempty"`
 	// Spec is a digest of the task's generated definition; a running task
 	// whose spec changes is restarted when the config is applied live.
-	Spec       string `json:"spec,omitempty"`
+	Spec string `json:"spec,omitempty"`
+	// Definition binds approval to native configuration and endpoint metadata
+	// before explicit intent overrides autostart.
 	Definition string `json:"definition,omitempty"`
 	// URLLog finds an endpoint URL that is only known after startup.
 	URLLog string `json:"url_log,omitempty"`

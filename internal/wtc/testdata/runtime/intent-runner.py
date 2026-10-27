@@ -30,6 +30,13 @@ def start(path):
 if args == ["runner", "status"]:
     print(json.dumps({"status": "running" if state["running"] else "absent"}))
 elif args == ["ls"]:
+    for path, count in list(state.get("pending", {}).items()):
+        state["pending"][path] = count - 1
+        if count <= 1:
+            state["tasks"][path] = "idle"
+            del state["pending"][path]
+        elif (root / "stop-query-fails").exists():
+            state["tasks"][path] = "unknown"
     print(json.dumps({"tasks": [{"path": p, "state": s} for p, s in state["tasks"].items()]}))
 elif args == ["down"] or args == ["runner", "stop"]:
     state["running"] = False
@@ -45,6 +52,9 @@ elif args[0] == "veto":
         stopped |= dependents
     for path in stopped:
         state["tasks"][path] = "idle"
+        if (root / "slow-stop").exists():
+            state["tasks"][path] = "stopping"
+            state.setdefault("pending", {})[path] = 3
 elif args[0] in ["start", "restart"]:
     start(args[1])
 elif args == ["up"]:
@@ -59,6 +69,9 @@ elif args == ["up"]:
     state["running"] = True
 elif args[0] == "rm":
     state["tasks"].pop(args[1], None)
-elif args != ["reload", "--yes"]:
+elif args == ["reload", "--yes"]:
+    if state.get("pending"):
+        sys.exit("configuration reloaded before stop confirmation")
+else:
     sys.exit("unexpected fixture command: " + command)
 state_path.write_text(json.dumps(state))

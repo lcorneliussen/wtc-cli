@@ -288,6 +288,21 @@ func (c *Context) runtimeAction(action, target string, wait time.Duration, choic
 				return err
 			}
 		}
+		if choice != nil && !choice.On && !slices.ContainsFunc(m.Tasks, func(t runtimeTask) bool { return t.Path == target }) {
+			// A declaration added since the last render has no running task
+			// to stop. Persist off before rendering so it cannot autostart.
+			if m.TunnelIntents == nil {
+				m.TunnelIntents = map[string]runtimeTunnelIntent{}
+			}
+			m.TunnelIntents[target] = *choice
+			if err := runtimeSaveManifest(m); err != nil {
+				return err
+			}
+			m, err = c.renderRuntime()
+			if err != nil {
+				return err
+			}
+		}
 		selector, tasks, err := runtimeSelect(m, target)
 		if err != nil {
 			return err
@@ -311,17 +326,28 @@ func (c *Context) runtimeAction(action, target string, wait time.Duration, choic
 			if err := runtimeSaveManifest(m); err != nil {
 				return err
 			}
-			m, err = c.renderRuntime()
-			if err != nil {
-				return err
-			}
-			selector, tasks, err = runtimeSelect(m, target)
-			if err != nil {
-				return err
+			if choice.On {
+				m, err = c.renderRuntime()
+				if err != nil {
+					return err
+				}
+				selector, tasks, err = runtimeSelect(m, target)
+				if err != nil {
+					return err
+				}
 			}
 		}
 		if choice == nil && (action == "up" || action == "restart") && len(tasks) == 1 && (tasks[0].TunnelIntent == "off" || tasks[0].TunnelIntent == "stale") {
 			return fmt.Errorf(branding.Text("%s: choose the tunnel again with {{command}} svc tunnel"), tasks[0].Path)
+		}
+		if action == "up" || action == "restart" {
+			for _, task := range tasks {
+				if selector != "" && task.TunnelIntent == "on" {
+					if missing := runtimeLoginCheck(task.Provider); missing != "" {
+						return fmt.Errorf("%s: %s", task.Path, missing)
+					}
+				}
+			}
 		}
 		grouped := strings.HasSuffix(selector, "/**")
 		// Restore choices for the services selected by this action. Untargeted
@@ -386,13 +412,6 @@ func (c *Context) runtimeAction(action, target string, wait time.Duration, choic
 				}
 				break
 			}
-			for _, task := range tasks {
-				if selector != "" && task.TunnelIntent == "on" {
-					if missing := runtimeLoginCheck(task.Provider); missing != "" {
-						return fmt.Errorf("%s: %s", task.Path, missing)
-					}
-				}
-			}
 			args := []string{"up"}
 			if selector != "" {
 				args = []string{"start", selector}
@@ -406,6 +425,10 @@ func (c *Context) runtimeAction(action, target string, wait time.Duration, choic
 				return err
 			}
 			if state == "absent" {
+				if choice != nil {
+					_, err := c.renderRuntime()
+					return err
+				}
 				return nil
 			}
 			args := []string{"down"}
@@ -504,28 +527,15 @@ func (c *Context) runtimeAction(action, target string, wait time.Duration, choic
 					}
 				}
 			}
-			deadline := time.Now().Add(30 * time.Second)
-			for {
-				complete := true
-				for _, item := range c.runtimeStatus(m) {
-					if !stopped[item.Path] {
-						continue
-					}
-					switch item.State {
-					case "idle", "exited", "done", "absent":
-					case "unknown", "missing":
-						return fmt.Errorf("%s: shutdown not confirmed: %s", item.Path, item.State)
-					default:
-						complete = false
-					}
-				}
-				if complete {
-					break
-				}
-				if time.Now().After(deadline) {
-					return fmt.Errorf("target runtime shutdown not confirmed")
-				}
-				time.Sleep(100 * time.Millisecond)
+			if err := c.runtimeWaitStopped(m, stopped); err != nil {
+				return err
+			}
+		}
+		if choice != nil && !choice.On {
+			// Confirm this endpoint stopped before applying configuration. A
+			// different provider's failed stop must not prevent this one.
+			if _, err := c.renderRuntime(); err != nil {
+				return err
 			}
 		}
 		if wait > 0 && (action == "up" || action == "restart") {
@@ -688,4 +698,33 @@ func (c *Context) retireRuntime() error {
 		tasks = append(tasks, runtimeTask{RuntimeItem: RuntimeItem{Dir: resource.Dir, Repo: resource.Repo}})
 	}
 	return c.runtimeHooks(m, tasks, "teardown")
+}
+
+// runtimeWaitStopped confirms veto completion before config changes can
+// replace a tunnel command or restart one of its dependencies.
+func (c *Context) runtimeWaitStopped(m *runtimeManifest, stopped map[string]bool) error {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		complete := true
+		for _, item := range c.runtimeStatus(m) {
+			if !stopped[item.Path] {
+				continue
+			}
+			switch item.State {
+			case "idle", "exited", "done", "absent":
+			case "unknown", "missing":
+				return fmt.Errorf("%s: shutdown not confirmed: %s", item.Path, item.State)
+			default:
+				complete = false
+			}
+		}
+		if complete {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("target runtime shutdown not confirmed")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return nil
 }

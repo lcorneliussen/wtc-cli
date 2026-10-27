@@ -442,7 +442,13 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 		// Metadata-only policy/provider changes can leave the native digest
 		// unchanged. Stop unapproved live endpoints before either save path.
 		if slices.ContainsFunc(m.Tasks, func(t runtimeTask) bool { return t.TunnelIntent == "off" || t.TunnelIntent == "stale" }) {
+			stopped := map[string]bool{}
 			for _, item := range c.runtimeStatus(old) {
+				if item.State == "unknown" && slices.ContainsFunc(m.Tasks, func(t runtimeTask) bool {
+					return t.Path == item.Path && (t.TunnelIntent == "off" || t.TunnelIntent == "stale")
+				}) {
+					return nil, fmt.Errorf("%s: shutdown not confirmed: unknown", item.Path)
+				}
 				if item.State != "ready" && item.State != "running" && item.State != "starting" {
 					continue
 				}
@@ -451,7 +457,13 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 						if _, err := runtimeCommand(old, false, "veto", task.Path); err != nil {
 							return nil, err
 						}
+						stopped[task.Path] = true
 					}
+				}
+			}
+			if len(stopped) > 0 {
+				if err := c.runtimeWaitStopped(old, stopped); err != nil {
+					return nil, err
 				}
 			}
 		}

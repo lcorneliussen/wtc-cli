@@ -296,3 +296,128 @@ func TestTunnelIntentExplicitOffCannotBeBypassedByExactTarget(t *testing.T) {
 		}
 	}
 }
+
+func TestTunnelIntentStopAllContinuesAfterProviderFailure(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	fragment := runtimeSharedFragment(filepath.Join(c.Collection, "widget"))
+	data, _ := os.ReadFile(fragment)
+	fixtureFile(t, fragment, string(data)+` web/zzz:
+  cmd: [second-synthetic-provider]
+  deps: [web/server]
+  tags: [endpoint]
+  x-wtc: {tunnel: ngrok, public: false}
+`, 0644)
+	for _, provider := range []string{"devtunnel", "ngrok"} {
+		if _, err := c.Tunnel(TunnelOptions{Service: "web", Provider: provider}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixtureFile(t, filepath.Join(c.runtimeRoot(), "fail-action"), "veto widget/web/tunnel", 0600)
+	if _, err := c.Tunnel(TunnelOptions{Service: "web", Stop: true}); err == nil {
+		t.Fatal("provider stop failure hidden")
+	}
+	m, err := c.runtimeManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, intent := range m.TunnelIntents {
+		if intent.On {
+			t.Fatalf("stop all left %s intended on", path)
+		}
+	}
+	for _, item := range c.RuntimeStatus() {
+		if item.Path == "widget/web/zzz" && item.State != "idle" {
+			t.Fatalf("one failure prevented other provider stop: %+v", item)
+		}
+	}
+}
+
+func TestTunnelIntentStopNewDeclarationBeforeAutostart(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	intentAction(t, c, "up", "web")
+	fragment := runtimeSharedFragment(filepath.Join(c.Collection, "widget"))
+	data, _ := os.ReadFile(fragment)
+	fixtureFile(t, fragment, string(data)+` web/new:
+  cmd: [new-synthetic-provider]
+  deps: [web/server]
+  autostart: true
+  tags: [endpoint]
+  x-wtc: {tunnel: ngrok, public: false}
+`, 0644)
+	if _, err := c.Tunnel(TunnelOptions{Service: "web", Provider: "ngrok", Stop: true}); err != nil {
+		t.Fatal(err)
+	}
+	intentAction(t, c, "up", "")
+	for _, item := range c.RuntimeStatus() {
+		if item.Path == "widget/web/new" && (item.TunnelIntent != "off" || item.State != "idle") {
+			t.Fatalf("new declaration bypassed off: %+v", item)
+		}
+	}
+}
+
+func TestTunnelIntentConfirmsStaleTunnelStoppedBeforeReload(t *testing.T) {
+	for _, fails := range []bool{false, true} {
+		t.Run(map[bool]string{false: "delayed stop", true: "unconfirmed stop"}[fails], func(t *testing.T) {
+			c := runtimeIntentFixture(t)
+			chooseTunnel(t, c, false)
+			fixtureFile(t, filepath.Join(c.runtimeRoot(), "slow-stop"), "", 0600)
+			if fails {
+				fixtureFile(t, filepath.Join(c.runtimeRoot(), "stop-query-fails"), "", 0600)
+			}
+			fragment := runtimeSharedFragment(filepath.Join(c.Collection, "widget"))
+			data, _ := os.ReadFile(fragment)
+			fixtureFile(t, fragment, strings.Replace(string(data), "synthetic-provider", "changed-synthetic-provider", 1), 0644)
+			config := filepath.Join(c.runtimeRoot(), "dekit.yaml")
+			before, _ := os.ReadFile(config)
+			_, err := c.RuntimeAction("up", "web", 0)
+			if fails {
+				if err == nil || !strings.Contains(err.Error(), "shutdown not confirmed") {
+					t.Fatalf("unconfirmed stop ignored: %v", err)
+				}
+				after, _ := os.ReadFile(config)
+				if string(after) != string(before) {
+					t.Fatal("config changed before stop confirmation")
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if item := intentTunnel(t, c); item.State != "idle" || item.TunnelIntent != "stale" {
+					t.Fatalf("unapproved definition started: %+v", item)
+				}
+			}
+		})
+	}
+}
+
+func TestTunnelIntentExactRestartChecksProviderLogin(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	chooseTunnel(t, c, false)
+	runtimeLoginCheck = func(string) string { return "synthetic login expired" }
+	os.Remove(filepath.Join(c.runtimeRoot(), "calls"))
+	if _, err := c.RuntimeAction("restart", "widget/web/tunnel", 0); err == nil || !strings.Contains(err.Error(), "login expired") {
+		t.Fatalf("restart skipped provider: %v", err)
+	}
+	calls, _ := os.ReadFile(filepath.Join(c.runtimeRoot(), "calls"))
+	if strings.Contains(string(calls), "restart widget/web/tunnel") {
+		t.Fatalf("restart ran before login check: %s", calls)
+	}
+}
+
+func TestTunnelIntentUnknownStaleRunnerCannotReload(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	chooseTunnel(t, c, false)
+	fixtureFile(t, filepath.Join(c.runtimeRoot(), "fail-action"), "ls", 0600)
+	fragment := runtimeSharedFragment(filepath.Join(c.Collection, "widget"))
+	data, _ := os.ReadFile(fragment)
+	fixtureFile(t, fragment, strings.Replace(string(data), "synthetic-provider", "changed-synthetic-provider", 1), 0644)
+	config := filepath.Join(c.runtimeRoot(), "dekit.yaml")
+	before, _ := os.ReadFile(config)
+	if _, err := c.RuntimeAction("up", "web", 0); err == nil || !strings.Contains(err.Error(), "shutdown not confirmed") {
+		t.Fatalf("unknown stale state ignored: %v", err)
+	}
+	after, _ := os.ReadFile(config)
+	if string(after) != string(before) {
+		t.Fatal("config changed without a known stop")
+	}
+}

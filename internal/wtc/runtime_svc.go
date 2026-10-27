@@ -418,12 +418,12 @@ func (c *Context) Tunnel(opt TunnelOptions) (RuntimeResult, error) {
 			return RuntimeResult{}, fmt.Errorf("%s has no %s tunnel", group, opt.Provider)
 		}
 		var result RuntimeResult
+		var stopErr error
 		for _, t := range tunnels {
-			if result, err = c.runtimeAction("down", t.Path, 0, &runtimeTunnelIntent{On: false, Definition: t.Definition}); err != nil {
-				return result, err
-			}
+			result, err = c.runtimeAction("down", t.Path, 0, &runtimeTunnelIntent{On: false, Definition: t.Definition})
+			stopErr = errors.Join(stopErr, err)
 		}
-		return result, nil
+		return result, stopErr
 	}
 	if opt.Provider == "" && len(tunnels) != 1 {
 		return RuntimeResult{}, fmt.Errorf("name the provider: tailscale, cloudflare, ngrok or devtunnel")
