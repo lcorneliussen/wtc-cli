@@ -659,3 +659,32 @@ built by CI/CD upgrades with a new image instead (above).
 
 `openclaw plugins update` does not upgrade the wtc plugin: it skips plugins
 installed from a path, which is how `wtc openclaw install` installs.
+
+### Select next actions
+
+Development builds expose CLI-derived recommendations and alternatives in the
+Collection card and panel. Choose an action per repository, check its selection,
+or use **Select suggested** to select the visible recommendations. Existing
+alternative choices are preserved. **Run selected** previews the exact targets;
+**Confirm actions** rechecks those same actions before dispatch. A changed head,
+base, worktree state or PR observation makes an old selection stale. It is not
+silently replaced with a new recommendation or expanded to newly appearing repos.
+
+Each batch dispatches one step per selected repository. Results stay per target;
+a failure does not undo other targets. Selected author tasks are sent together
+as one sequential prompt to the conversation. “Sent to conversation” means the
+handoff was accepted; check the conversation for completion. **Cancel queued**
+stops remaining dispatches and does not undo work already started. Publication
+retains each repository's personal confirmation; selecting a batch does not
+approve new commits or merge a PR. Open pull request remains a link for the
+person to inspect the current merge requirements.
+
+**Check PR progress** hands off checking the current reviews and requirements.
+Forge approval does not prove a current independent review. Independent review
+execution in the gateway remains unavailable until its shared review adapter is
+installed; the disabled alternative explains this. Local status can hand off the
+existing `wtc-local-review` skill, which checks existing review activity first.
+Unchanged handoffs stay disabled in that view while completion is pending.
+After checking the conversation, **Allow retry** enables explicit reselection.
+There is no automatic continuation, durable job queue or cross-runner claim in
+this phase. Reloading a view does not restart its unfinished batch.

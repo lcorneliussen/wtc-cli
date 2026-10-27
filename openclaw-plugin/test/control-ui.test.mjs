@@ -140,7 +140,7 @@ const hostRequest = async (method, params) => {
   if (method === "sessions.send" && controlledSend) return controlledSend;
   if (method === "plugins.sessionAction" && params.actionId === "svc") return svcResult;
   if (method === "plugins.sessionAction" && params.actionId === "catch-up") return catchUpResult;
-  if (method === "plugins.sessionAction" && params.actionId === "next") return nextResult;
+  if (method === "plugins.sessionAction" && params.actionId === "next") return typeof nextResult === "function" ? nextResult(params) : nextResult;
   if (method === "sessions.delete") return { ok: true, key: params.key, deleted: true, archived: [], ...(preserved[params.key] ? { worktreePreserved: preserved[params.key] } : {}) };
   if (method === "sessions.github.publish") return typeof githubPublishResult === "function" ? githubPublishResult(params) : githubPublishResult;
   if (method === "sessions.github.confirm") return typeof githubConfirmResult === "function" ? githubConfirmResult(params) : githubConfirmResult ?? { status: "published", url: "https://github.com/octo/api/pull/7" };
@@ -1228,4 +1228,87 @@ test("composer: a sub-session with uncommitted files is reviewed by the conversa
   await buttons().find((n) => /^2 commits of the collection's site not on openclaw\/13-docs-nav/.test(n.title)).onclick();
   assert.deepEqual(calls.map((c) => [c.actionId, c.sessionKey, c.payload]), [["catch-up", "agent:main:owner:site-nav", { from: "openclaw/test" }]]);
   clean.view.dispose();
+});
+
+
+const withChoices = (name, kind = "fix-checks") => {
+  const step = { repo: name, step: kind, by: "agent", skill: "wtc-follow", key: `${name}:${kind}:head1`, reason: `${name} needs ${kind}` };
+  const alternative = { ...step, step: "follow-pr", key: `${name}:follow-pr:head1`, reason: `Check ${name}'s current PR` };
+  return repo(name, { next: step, choices: { recommended: step.key, actions: [{ ...step, available: true }, { ...alternative, available: true }, { ...step, step: "review", key: `${name}:review`, available: false, blocked: "No review adapter" }] } });
+};
+const clickText = async (host, text) => {
+  const b = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === text);
+  assert.ok(b, text); b.onclick({ preventDefault() {}, stopPropagation() {} });
+  for (let i = 0; i < 6; i++) await settle();
+};
+
+test("selected mixed actions preview exact alternatives and combine author handoffs", async () => {
+  for (const kind of ["composer", "panel"]) {
+    const api = withChoices("api"), web = withChoices("web", "address-review");
+    const { host, view } = await mount(kind, collection([api, web]));
+    try {
+      const select = [...host.all()].find((n) => n.tagName === "SELECT" && n.ariaLabel === "Action for web");
+      select.value = web.choices.actions[1].key; select.onchange();
+      await clickText(host, "Select suggested");
+      calls.length = 0;
+      await clickText(host, "Run selected (2)");
+      assert.equal(calls.length, 0, "preview must not dispatch");
+      assert.match(host.textContent, /web: Check PR progress/);
+      nextResult = ({ payload }) => {
+        const r = payload.ownerSessionKey === api.sessionKey ? api : web;
+        return { ok: true, result: { performed: false, repo: { ...r, next: r.choices.actions.find((a) => a.key === payload.key) } } };
+      };
+      await clickText(host, "Confirm 2 actions");
+      const sends = calls.filter((c) => c.method === "sessions.send");
+      assert.equal(sends.length, 1, "one author conversation gets one prompt");
+      assert.match(sends[0].message, /api needs fix-checks/);
+      assert.match(sends[0].message, /Check web's current PR/);
+      assert.doesNotMatch(sends[0].message, /web needs address-review/);
+      assert.match(host.textContent, /completion pending/);
+      await clickText(host, "Select suggested");
+      assert.ok(buttons(host).includes("Run selected (0)"), "unchanged handoffs cannot be immediately resent");
+      await clickText(host, "Allow retry"); await clickText(host, "Select suggested");
+      assert.ok(buttons(host).includes("Run selected (2)"), "explicit retry recovers an unchanged failed handoff");
+    } finally { view.dispose(); nextResult = undefined; }
+  }
+});
+
+test("batch stale targets fail independently and an unselected new repository stays excluded", async () => {
+  for (const kind of ["composer", "panel"]) {
+    const api = withChoices("api"), web = withChoices("web");
+    const { host, view } = await mount(kind, collection([api, web]));
+    try {
+      await clickText(host, "Select suggested");
+      await clickText(host, "Run selected (2)");
+      calls.length = 0;
+      nextResult = ({ payload }) => payload.ownerSessionKey === api.sessionKey ? { ok: false, error: "Head changed" } : { ok: true, result: { performed: false, repo: web } };
+      await clickText(host, "Confirm 2 actions");
+      assert.match(host.textContent, /Failed or stale: Head changed/);
+      const sends = calls.filter((c) => c.method === "sessions.send");
+      assert.equal(sends.length, 1);
+      assert.match(sends[0].message, /web needs/); assert.doesNotMatch(sends[0].message, /api needs/);
+    } finally { view.dispose(); nextResult = undefined; }
+  }
+});
+
+test("cancelling a batch or switching conversations prevents queued handoffs", async () => {
+  for (const kind of ["composer", "panel"]) for (const switchView of [false, true]) {
+    const r = withChoices("api"); const { host, view } = await mount(kind, collection([r]));
+    let release;
+    try {
+      await clickText(host, "Select suggested"); await clickText(host, "Run selected (1)");
+      nextResult = () => new Promise((resolve) => { release = resolve; }); calls.length = 0;
+      await clickText(host, "Confirm 1 actions");
+      assert.ok(release);
+      if (switchView) {
+        const key = `agent:main:other:${++sessions}`; collections.set(key, collection([repo("other")]));
+        view.update({ props: { sessionKey: key, agentId: "main" }, host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} }); await settle();
+      } else await clickText(host, "Cancel queued");
+      release({ ok: true, result: { performed: false, repo: r } });
+      for (let i=0;i<6;i++) await settle();
+      assert.equal(calls.filter((c) => c.method === "sessions.send").length, 0);
+      if (switchView) assert.doesNotMatch(host.textContent, /api needs|completion pending/);
+      else assert.match(host.textContent, /Cancelled before handoff/);
+    } finally { view.dispose(); nextResult = undefined; }
+  }
 });

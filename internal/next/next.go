@@ -51,6 +51,7 @@ type Step struct {
 // PR is what a step needs of a repository's pull request.
 type PR struct {
 	Number    int
+	Head      string // exact remote PR head, when observed
 	State     string // open, merged, closed
 	Draft     bool
 	Checks    string // success, failure, pending, none

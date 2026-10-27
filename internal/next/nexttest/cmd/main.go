@@ -23,7 +23,8 @@ func main() {
 		if !strings.Contains(c.ID, *filter) {
 			continue
 		}
-		step := next.For(c.Facts)
+		choices := next.ChoicesFor(c.Facts)
+		step := choices.Primary()
 		name := "none"
 		if step != nil {
 			name = step.Step
@@ -32,8 +33,9 @@ func main() {
 		if !*summary {
 			if err := enc.Encode(struct {
 				nexttest.Case
-				Current *next.Step `json:"current"`
-			}{c, step}); err != nil {
+				Current *next.Step   `json:"current"`
+				Choices next.Choices `json:"choices"`
+			}{c, step, choices}); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}

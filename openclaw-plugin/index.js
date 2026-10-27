@@ -817,13 +817,15 @@ export default {
         try {
           const collection = await loadCollection(action.agentId, action.sessionKey);
           const repo = collection.repos.find((r) => r.sessionKey === ownerSessionKey);
-          if (!repo || repo.error || !repo.next || repo.next.key !== key) return { ok: false, error: "the next step changed; refresh the collection" };
-          const step = repo.next;
+          const choice = repo?.choices?.actions?.find((a) => a.available && a.key === key);
+          const step = choice ?? (!repo?.choices && repo?.next?.key === key ? repo.next : null);
+          if (!repo || repo.error || !step) return { ok: false, error: "the next step changed; refresh the collection" };
+          const selectedRepo = { ...repo, next: step };
           if (step.by === "wtc" && !step.approve && JSON.stringify(step.command) === JSON.stringify(["wtc", "catch-up"])) {
             const out = await catchUp({ ...action, sessionKey: ownerSessionKey, payload: {} });
-            return out.ok ? { ok: true, result: { ...out.result, performed: true, repo } } : out;
+            return out.ok ? { ok: true, result: { ...out.result, performed: true, repo: selectedRepo } } : out;
           }
-          return { ok: true, result: { performed: false, repo } };
+          return { ok: true, result: { performed: false, repo: selectedRepo } };
         } finally { acting.delete(lock); }
       },
     });

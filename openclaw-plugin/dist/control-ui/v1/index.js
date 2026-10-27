@@ -556,8 +556,9 @@ function collectionTables(v) {
   const busy = new Set();
   const catching = new Set();
   const acting = new Set();
-  const actionable = (r) => !r.error && (r.next || r.dirty > 0);
+  const actionable = (r) => !r.error && (r.next || r.choices?.actions?.length || r.dirty > 0);
   async function askCommit(r) {
+    if (batchRunning) return;
     if (acting.has(r.sessionKey)) return;
     acting.add(r.sessionKey);
     v.say(`Asking the conversation to create local commits for ${nameOf(r)}…`);
@@ -579,14 +580,16 @@ function collectionTables(v) {
       if (v.key() === conversationKey) v.say(String(err?.message ?? err), true);
     } finally { acting.delete(r.sessionKey); }
   }
-  const nextLabel = (s) => ({ "return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", resolve: "Resolve conflicts", merge: "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", push: "Push", "merge-pr": "Open pull request" })[s.step] ?? s.step;
+  const nextLabel = (s) => ({ "return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", resolve: "Resolve conflicts", merge: "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", push: "Push", "merge-pr": "Open pull request", commit: "Commit changes", "follow-pr": "Check PR progress", review: "Run independent review" })[s.step] ?? s.step;
   const nextRoute = (s) => s.by === "person" && s.step === "merge-pr" ? "pr"
     : s.by === "wtc" && s.approve === "person" && s.gateway === "github_publish" ? "publish"
     : s.by === "agent" && (!s.approve || s.approve === "agent") && s.skill ? "agent"
     : s.by === "wtc" && s.approve === "agent" && s.command?.[0] === "wtc" && s.command?.[1] === "catch-up" ? "agent"
     : s.by === "wtc" && !s.approve && JSON.stringify(s.command) === JSON.stringify(["wtc", "catch-up"]) ? "run" : null;
   async function actNext(r) {
+    if (batchRunning || dispatched.has(handoffKey(r, r.next))) return;
     if (acting.has(r.sessionKey)) return;
+    const sent = dispatched;
     const conversationKey = v.key();
     const say = (...args) => { if (v.key() === conversationKey) v.say(...args); };
     acting.add(r.sessionKey);
@@ -602,7 +605,8 @@ function collectionTables(v) {
         switch (nextRoute(step)) {
           case "publish": await publish(fresh, conversationKey); break;
           case "agent":
-            await askSkill(v.host, conversationKey, step.skill ?? "wtc-catch-up", `${nameOf(fresh)}: ${step.reason}. Work on this repository only; recheck its state before acting.`);
+            await askSkill(v.host, conversationKey, step.skill ?? "wtc-catch-up", `${nameOf(fresh)}: ${step.reason}. Work on this repository only; recheck its state before acting. Carry out only this selected step; report follow-up actions for separate selection.`);
+            sent.add(handoffKey(fresh, step));
             say(`${nameOf(fresh)}: asked the conversation to ${nextLabel(step).toLowerCase()}.`);
             break;
           default: say("The next step changed; refresh the collection before acting.", true);
@@ -611,20 +615,107 @@ function collectionTables(v) {
     } catch (err) { say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
     finally { acting.delete(r.sessionKey); await v.refresh(); }
   }
+  let selection = new Map(), batchResults = new Map(), batchPreview = null, dispatched = new Set();
+  let batchKey = null, batchRunning = false, batchCancelled = false;
+  const handoffKey = (r, step) => `${r.sessionKey}:${r.choices ? step.key.split(":").at(-1) : step.key}`;
+  const choicesOf = (r) => r.choices?.actions ?? (r.next ? [{ ...r.next, available: true }] : []);
+  async function runSelected(targets) {
+    if (batchRunning) return;
+    const conversation = v.key();
+    const sent = dispatched;
+    const results = new Map(); batchResults = results;
+    batchRunning = true; batchCancelled = false; batchPreview = null;
+    const update = () => { if (v.key() === conversation) v.rerender(); };
+    const agents = [];
+    try {
+      for (const { repo: r, step } of targets) {
+        if (batchCancelled || v.key() !== conversation) { results.set(r.sessionKey, "Cancelled before dispatch"); continue; }
+        if (sent.has(handoffKey(r, step))) { results.set(r.sessionKey, "Already sent to the conversation; completion pending"); continue; }
+        results.set(r.sessionKey, "Rechecking…"); update();
+        try {
+          const out = await call(v.host, "next", conversation, v.agent(), { ownerSessionKey: r.sessionKey, key: step.key });
+          if (v.key() !== conversation) break;
+          const fresh = out.repo;
+          if (out.performed) results.set(r.sessionKey, out.code ? "Failed: " + (out.message ?? out.code) : "Completed");
+          else {
+            const selected = fresh?.next;
+            if (!selected || selected.key !== step.key) throw Error("The selection changed; choose again");
+            switch (nextRoute(selected)) {
+              case "agent": agents.push({ repo: fresh, step: selected }); results.set(r.sessionKey, "Waiting for conversation handoff"); break;
+              case "publish":
+                // A batch never consumes an earlier per-repository confirmation.
+                // Each gateway confirmation still shows its exact commits/account.
+                if (!confirming.has(r.sessionKey)) await publish(fresh, conversation);
+                results.set(r.sessionKey, "Use the repository's publication result or confirmation above"); break;
+              case "pr": results.set(r.sessionKey, "Open the PR link; inspect its current requirements"); break;
+              default: throw Error("This action is unavailable on this host");
+            }
+          }
+        } catch (err) { results.set(r.sessionKey, "Failed or stale: " + String(err?.message ?? err)); }
+        update();
+      }
+      // One author conversation receives one prompt, even when several selected
+      // targets need judgment. Acceptance records dispatch, never completion.
+      const ready = [];
+      for (const target of agents) {
+        const { repo: r, step } = target;
+        if (batchCancelled || v.key() !== conversation) { results.set(r.sessionKey, "Cancelled before handoff"); continue; }
+        try {
+          const fresh = await call(v.host, "next", conversation, v.agent(), { ownerSessionKey: r.sessionKey, key: step.key });
+          if (!fresh.repo?.next || fresh.repo.next.key !== step.key) throw Error("The selection changed");
+          ready.push(target);
+        } catch (err) { results.set(r.sessionKey, "Failed or stale: " + String(err?.message ?? err)); }
+      }
+      if (ready.length && !batchCancelled && v.key() === conversation) {
+        try {
+          await askSkill(v.host, conversation, "wtc", "Carry out only these selected single steps, sequentially. Recheck each repository's state, branch policy and ownership before acting. Preserve intended work. Do not broaden the selection, publish, merge, or automatically continue to another step. Publication is a separate personal confirmation.\n" + ready.map(({ repo, step }) => `${nameOf(repo)}: use the ${step.skill ?? "wtc-catch-up"} skill. ${step.reason}`).join("\n"));
+          for (const { repo, step } of ready) { sent.add(handoffKey(repo, step)); results.set(repo.sessionKey, "Sent to conversation; completion pending"); }
+        } catch (err) { for (const { repo } of ready) results.set(repo.sessionKey, "Handoff failed: " + String(err?.message ?? err)); }
+      } else for (const { repo } of ready) results.set(repo.sessionKey, "Cancelled before handoff");
+    } finally {
+      batchRunning = false;
+      v.rerender();
+      if (v.key() === conversation) { selection.clear(); await v.refresh(); update(); }
+    }
+  }
   function nextActions(repos) {
     const rows = repos.filter(actionable);
-    if (!rows.length) return null;
-    return css(el("div", { className: "wtc-next-actions" }, muted("Next actions"), ...rows.map((r) => {
-      const commit = !r.next && r.dirty > 0;
-      const step = r.next ?? { step: "commit", by: "agent", reason: `${plural(r.dirty, "uncommitted file")}. Save intended changes as local commits; pushing and opening a PR are separate.` };
+    if (batchKey !== v.key()) { batchKey = v.key(); selection = new Map(); batchResults = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true; }
+    const currentKeys = new Set(rows.flatMap((r) => choicesOf(r).map((a) => handoffKey(r, a))));
+    for (const key of dispatched) if (!currentKeys.has(key)) dispatched.delete(key);
+    if (!rows.length && !batchResults.size) return null;
+    const controls = rows.some((r) => r.choices) ? css(el("div", {},
+      smallButton("Select suggested", "Select current recommendations without replacing chosen alternatives", () => {
+        for (const r of rows) if (!selection.has(r.sessionKey) && r.next && !dispatched.has(handoffKey(r, r.next)) && choicesOf(r).some((a) => a.available && a.key === r.next.key)) selection.set(r.sessionKey, { repo: r, step: r.next });
+        batchPreview = null; v.rerender();
+      }),
+      smallButton(batchPreview ? `Confirm ${batchPreview.length} actions` : `Run selected (${selection.size})`, "Preview the exact selection, then recheck and run one step per repository", () => {
+        if (batchRunning || !selection.size) return;
+        if (batchPreview) void runSelected(batchPreview);
+        else { batchPreview = [...selection.values()]; v.rerender(); }
+      }),
+      dispatched.size ? smallButton("Allow retry", "Check the conversation first; allow explicit reselection of unchanged handoffs", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }) : null,
+      batchRunning ? smallButton("Cancel queued", "Stop remaining dispatches; active work is not undone", () => { batchCancelled = true; v.rerender(); }) : null,
+      batchPreview ? muted("One step per selected repository: " + batchPreview.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)}${step.by === "person" ? " (open the PR link manually)" : step.approve ? ` (${step.approve} approval)` : ""}`).join("; ")) : null), "display:flex;flex-wrap:wrap;gap:6px;align-items:center") : null;
+    return css(el("div", { className: "wtc-next-actions" }, muted("Next actions"), controls, ...rows.map((r) => {
+      const available = choicesOf(r);
+      const picked = selection.get(r.sessionKey);
+      const step = picked?.step ?? r.next ?? { step: "commit", by: "agent", reason: `${plural(r.dirty, "uncommitted file")}. Save intended changes as local commits; pushing and opening a PR are separate.` };
+      const stale = picked && !available.some((a) => a.available && a.key === step.key);
+      const commit = !r.next && !r.choices && r.dirty > 0;
       const route = commit ? "commit" : nextRoute(step);
       const action = route === "pr" && r.pullRequest?.url
         ? link(nextLabel(step), r.pullRequest.url)
-        : smallButton(acting.has(r.sessionKey) ? "Working…" : commit ? "Commit changes" : route === "agent" ? `Ask agent: ${nextLabel(step).toLowerCase()}` : nextLabel(step), step.reason, () => commit ? askCommit(r) : actNext(r));
-      if (action.tagName === "BUTTON") action.disabled = !route || route === "pr" || acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey);
-      return css(el("div", {}, css(el("strong", { textContent: nameOf(r) }), "font-size:12px"), action,
-        muted(`${step.reason}${step.approve ? ` · ${step.approve} approval` : ` · ${step.by}`}`)), "display:flex;flex-wrap:wrap;align-items:center;gap:6px");
-    })), "display:grid;gap:6px;padding:8px 0");
+        : smallButton(acting.has(r.sessionKey) ? "Working…" : commit ? "Commit changes" : route === "agent" ? `Ask agent: ${nextLabel(step).toLowerCase()}` : nextLabel(step), step.reason, () => commit ? askCommit(r) : actNext({ ...r, next: step }));
+      if (action.tagName === "BUTTON") action.disabled = !!stale || dispatched.has(handoffKey(r, step)) || batchRunning || !route || route === "pr" || acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey);
+      const check = r.choices ? el("input", { type: "checkbox", checked: !!picked, disabled: batchRunning, ariaLabel: `Select ${nameOf(r)}` }) : null;
+      if (check) check.onchange = () => { if (selection.has(r.sessionKey)) selection.delete(r.sessionKey); else if (r.next && !dispatched.has(handoffKey(r, r.next))) selection.set(r.sessionKey, { repo: r, step: r.next }); batchPreview = null; v.rerender(); };
+      const alternatives = r.choices ? el("select", { ariaLabel: `Action for ${nameOf(r)}`, disabled: batchRunning }, ...available.map((a) => el("option", { value: a.key, selected: a.key === step.key, disabled: !a.available, textContent: `${nextLabel(a)}${a.available ? "" : ` — ${a.blocked}`}` }))) : null;
+      if (alternatives) { alternatives.style.cssText = "max-width:100%;min-width:0;background:var(--bg,inherit);color:inherit"; alternatives.onchange = () => { const chosen = available.find((a) => a.available && a.key === alternatives.value); if (chosen) selection.set(r.sessionKey, { repo: r, step: chosen }); batchPreview = null; v.rerender(); }; }
+      return css(el("div", {}, check, css(el("strong", { textContent: nameOf(r) }), "font-size:12px"), alternatives, action,
+        muted(dispatched.has(handoffKey(r, step)) ? "Sent to conversation; wait for completion before retrying" : stale ? "Selection is stale; unselect and choose again" : `${step.reason}${step.approve ? ` · ${step.approve} approval` : ` · ${step.by}`}`),
+        batchResults.has(r.sessionKey) ? muted(batchResults.get(r.sessionKey)) : null), "display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0");
+    }), ...[...batchResults].filter(([key]) => !rows.some((r) => r.sessionKey === key)).map(([key, result]) => muted(`${key}: ${result}`))), "display:grid;gap:6px;padding:8px 0");
   }
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
@@ -722,6 +813,7 @@ function collectionTables(v) {
     }
   }
   async function catchUp(list) {
+    if (batchRunning) return;
     list.forEach((r) => catching.add(r.sessionKey));
     v.rerender();
     try { for (const r of list) await catchUpRepo(v.host, v.agent(), r, v.say, (input) => askSkill(v.host, v.key(), "wtc-catch-up", input)); } finally {
@@ -730,6 +822,7 @@ function collectionTables(v) {
     }
   }
   async function pushAll(list) {
+    if (batchRunning) return;
     const conversationKey = v.key();
     for (const r of list) {
       if (v.key() !== conversationKey) break;
@@ -827,7 +920,7 @@ function collectionTables(v) {
   const toned = (text, tone, title) => css(el("span", { textContent: text, title: title ?? "" }), `color:${tone}`);
   // A fact that is also an action: a count in a pill.
   const count = (text, title, tone, run) => {
-    const b = css(el("button", { type: "button", textContent: String(text), title, ariaLabel: title }),
+    const b = css(el("button", { type: "button", textContent: String(text), title, ariaLabel: title, disabled: batchRunning }),
       `border:1px solid var(--border-strong, rgba(128,128,128,.4));background:transparent;color:${tone};cursor:pointer;font:inherit;font-size:12px;line-height:16px;padding:0 6px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums`);
     b.onclick = async (e) => {
       e?.preventDefault();

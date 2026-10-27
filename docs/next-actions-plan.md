@@ -1,7 +1,8 @@
 # Plan: per-repository choices, mixed batches and conditional follow-through
 
-Status: proposed design, with an executable fixture foundation. This document
-does not enable automation or change runtime behavior. Tracking: public CLI
+Status: the fixture foundation, shared choices and explicit single-step selection
+are implemented. Shared gateway review jobs and conditional continuation remain
+planned; this document describes their intended contract. Tracking: public CLI
 issue #179; independent review execution and shared review ownership are in
 #218. Review integration remains owned by that separate task.
 
@@ -348,3 +349,30 @@ that dispatches only some of its advertised action types, or a continuation
 control backed only by predicted `then` strings. Make unsupported choices and
 host limitations explicit. No release or live-gateway update is part of the
 planning/fixture change.
+
+
+## Implemented first runtime slice
+
+`choices` supplements `next` in local and gateway repository status. The
+recommendation projects into `next`; alternatives retain availability and blocked
+reasons. Selection keys include local/base identity, unpublished work and available
+PR observations, including the remote head. Green PRs with incomplete review
+facts offer Check PR progress rather than disappearing. An unpublished local fix
+is offered for publication ahead of old remote check failures; unknown mergeability
+never produces a merge-ready recommendation. Dirty merged work first needs a new
+branch. Dirty file contents are rechecked by the author handoff, not granted a
+blanket staging approval by their file count.
+
+The card/panel and TUI preview explicit heterogeneous selections, then revalidate
+individual targets. Existing gateway publication confirmations remain separate.
+Selected commands are serialized; author tasks use one prompt per conversation.
+A handoff is pending completion. Failures, stale selections and cancellation are
+reported without rolling back independent results. No follow-up action is inferred
+from `then`, and no new repository silently joins a batch.
+
+Independent review status, required policy and global ownership are not inferred
+from missing observations. Check PR progress is an existing skill handoff. The
+local independent-review alternative uses the existing skill; the gateway review
+alternative is disabled with an adapter requirement. Shared claims, review slots,
+persisted continuation and coordinated PR sets remain in subsequent slices.
+The fixture exporter now includes actual choices and the compatibility projection.

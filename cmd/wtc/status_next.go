@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -14,8 +16,16 @@ import (
 )
 
 type statusNextDoneMsg struct {
-	text string
-	err  error
+	text    string
+	err     error
+	pending []string
+	handoff *statusNextHandoff
+}
+
+type statusNextHandoff struct {
+	owner  *wtc.Context
+	repo   wtc.StatusRepo
+	prompt string
 }
 
 // Keep process boundaries replaceable in tests; state comparison and routing
@@ -33,19 +43,23 @@ func statusNextRepos(snapshot wtc.StatusSnapshot) []wtc.StatusRepo {
 	for _, r := range snapshot.Repos {
 		if r.Next != nil {
 			repos = append(repos, r)
+		} else if r.Choices != nil && len(r.Choices.Actions) > 0 {
+			s := r.Choices.Actions[0].Step
+			r.Next = &s
+			repos = append(repos, r)
 		}
 	}
 	return repos
 }
 
 func statusNextLabel(s *next.Step) string {
-	if label := map[string]string{"return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", "resolve": "Resolve conflicts", "merge": "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", "push": "Push", "merge-pr": "Open pull request"}[s.Step]; label != "" {
+	if label := map[string]string{"return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", "resolve": "Resolve conflicts", "merge": "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", "push": "Push", "merge-pr": "Open pull request", "commit": "Commit changes", "follow-pr": "Check PR progress", "review": "Run independent review"}[s.Step]; label != "" {
 		return label
 	}
 	return s.Step
 }
 
-func statusNextLines(snapshot wtc.StatusSnapshot, width int, styled bool, selected int) []string {
+func statusNextLines(snapshot wtc.StatusSnapshot, width int, styled bool, selected int, marked ...map[string]wtc.StatusRepo) []string {
 	repos := statusNextRepos(snapshot)
 	if len(repos) == 0 {
 		return nil
@@ -55,6 +69,13 @@ func statusNextLines(snapshot wtc.StatusSnapshot, width int, styled bool, select
 		lines[1] = statusTUIStyle(lines[1], statusToneHeading)
 	}
 	for i, r := range repos {
+		checked := false
+		if len(marked) > 0 {
+			if choice, ok := marked[0][statusNextIdentity(r)]; ok {
+				r.Next = choice.Next
+				checked = true
+			}
+		}
 		name := r.Dir
 		if snapshot.ShowCollectionColumn {
 			name = r.Collection + "/" + name
@@ -64,11 +85,25 @@ func statusNextLines(snapshot wtc.StatusSnapshot, width int, styled bool, select
 			who += "; " + r.Next.Approve + " approval"
 		}
 		prefix := "  "
+		mark := ""
+		if len(marked) > 0 {
+			mark = "[ ] "
+			if checked {
+				mark = "[x] "
+			}
+		}
 		if selected == i {
 			prefix = "› "
 		}
-		lines = append(lines, statusTUIFit(statusTUISafe(fmt.Sprintf("%s%s · %s · %s", prefix, name, statusNextLabel(r.Next), who)), width),
+		lines = append(lines, statusTUIFit(statusTUISafe(fmt.Sprintf("%s%s · %s · %s", prefix+mark, name, statusNextLabel(r.Next), who)), width),
 			statusTUIFit("    "+statusTUISafe(r.Next.Reason), width))
+		if selected == i && r.Choices != nil {
+			for _, a := range r.Choices.Actions {
+				if !a.Available {
+					lines = append(lines, statusTUIFit("    "+statusTUISafe(statusNextLabel(&a.Step)+": "+a.Blocked), width))
+				}
+			}
+		}
 	}
 	return lines
 }
@@ -77,11 +112,19 @@ func statusNextLines(snapshot wtc.StatusSnapshot, width int, styled bool, select
 // the same step in the same checkout before execution or an agent handoff.
 func statusNextCurrent(wanted wtc.StatusRepo, snapshot wtc.StatusSnapshot) (wtc.StatusRepo, error) {
 	for _, r := range snapshot.Repos {
-		if r.Collection == wanted.Collection && r.Dir == wanted.Dir && r.Worktree == wanted.Worktree && r.Next != nil && reflect.DeepEqual(r.Next, wanted.Next) {
+		if r.Collection != wanted.Collection || r.Dir != wanted.Dir || r.Worktree != wanted.Worktree || wanted.Next == nil {
+			continue
+		}
+		if r.Choices != nil {
+			if s := r.Choices.Select(wanted.Next.Key); s != nil && reflect.DeepEqual(s, wanted.Next) {
+				r.Next = s
+				return r, nil
+			}
+		} else if reflect.DeepEqual(r.Next, wanted.Next) {
 			return r, nil
 		}
 	}
-	return wtc.StatusRepo{}, fmt.Errorf("the next step changed; refresh and choose again")
+	return wtc.StatusRepo{}, fmt.Errorf("the selected action changed or is blocked; refresh and choose again")
 }
 
 func statusNextCommand(r wtc.StatusRepo) ([]string, bool) {
@@ -99,7 +142,11 @@ func statusNextCommand(r wtc.StatusRepo) ([]string, bool) {
 }
 
 func statusNextRun(c *wtc.Context, selected wtc.StatusRepo) tea.Cmd {
-	return statusNextRunWith(c, selected, statusNextRunner{
+	return statusNextRunWith(c, selected, statusNextDefaultRunner())
+}
+
+func statusNextDefaultRunner() statusNextRunner {
+	return statusNextRunner{
 		readStatus: (*wtc.Context).StatusForgePreview,
 		busy:       (*wtc.Context).AgentBusy,
 		command: func(owner *wtc.Context, argv []string) (string, error) {
@@ -114,10 +161,10 @@ func statusNextRun(c *wtc.Context, selected wtc.StatusRepo) tea.Cmd {
 		},
 		openURL: func(target string) error { return statusOpenURL(target)().(statusOpenedMsg).err },
 		herdr:   openHerdr,
-	})
+	}
 }
 
-func statusNextRunWith(c *wtc.Context, selected wtc.StatusRepo, run statusNextRunner) tea.Cmd {
+func statusNextRunWith(c *wtc.Context, selected wtc.StatusRepo, run statusNextRunner, deferHandoff ...bool) tea.Cmd {
 	return func() tea.Msg {
 		failed := func(err error) tea.Msg { return statusNextDoneMsg{err: err} }
 		if c == nil || selected.Collection == "" || selected.Collection == "." || selected.Collection == ".." || filepath.Base(selected.Collection) != selected.Collection {
@@ -160,30 +207,170 @@ func statusNextRunWith(c *wtc.Context, selected wtc.StatusRepo, run statusNextRu
 		if skill == "" || r.Next.Approve == next.ApprovePerson || (r.Next.By != next.ByAgent && r.Next.Approve != next.ApproveAgent) {
 			return failed(fmt.Errorf("this step needs its owner's action"))
 		}
-		prompt := fmt.Sprintf("/skill %s %s: %s. Work on this repository only; recheck its state before acting.", skill, r.Dir, r.Next.Reason)
-		instruction := statusNextDoneMsg{text: "Ask the collection's agent: " + prompt}
-		// A plain terminal provides the exact instruction. In herdr, submit
-		// only to this collection's idle agent, never a running or blocked one.
-		session := openSession(owner, "")
-		workspaces, err := run.herdr(session, "workspace", "list")
-		if err != nil {
-			return instruction
+		prompt := fmt.Sprintf("/skill %s %s: %s. Work on this repository only; recheck its state before acting. Carry out only this selected step; report follow-up actions for separate selection.", skill, r.Dir, r.Next.Reason)
+		if len(deferHandoff) > 0 && deferHandoff[0] {
+			return statusNextDoneMsg{handoff: &statusNextHandoff{owner: owner, repo: r, prompt: prompt}}
 		}
-		for _, workspace := range workspaces.Result.Workspaces {
-			if workspace.Label != r.Collection {
-				continue
-			}
-			panes, err := run.herdr(session, "pane", "list", "--workspace", workspace.ID)
-			if err != nil {
-				return failed(err)
-			}
-			pane := openPaneByLabel(panes.Result.Panes, "agent")
-			if pane.ID == "" || pane.Agent == "" || (pane.AgentStatus != "idle" && pane.AgentStatus != "done") {
-				return instruction
-			}
-			_, err = run.herdr(session, "agent", "prompt", pane.ID, prompt)
-			return statusNextDoneMsg{text: "Asked the collection's agent to " + strings.ToLower(statusNextLabel(r.Next)), err: err}
-		}
+		return statusNextPrompt(owner, r, prompt, run)
+	}
+}
+
+func statusNextPrompt(owner *wtc.Context, r wtc.StatusRepo, prompt string, run statusNextRunner) tea.Msg {
+	failed := func(err error) tea.Msg { return statusNextDoneMsg{err: err} }
+	instruction := statusNextDoneMsg{text: "Ask the collection's agent: " + prompt}
+	// A plain terminal provides the exact instruction. In herdr, submit
+	// only to this collection's idle agent, never a running or blocked one.
+	session := openSession(owner, "")
+	workspaces, err := run.herdr(session, "workspace", "list")
+	if err != nil {
 		return instruction
 	}
+	for _, workspace := range workspaces.Result.Workspaces {
+		if workspace.Label != r.Collection {
+			continue
+		}
+		panes, err := run.herdr(session, "pane", "list", "--workspace", workspace.ID)
+		if err != nil {
+			return failed(err)
+		}
+		pane := openPaneByLabel(panes.Result.Panes, "agent")
+		if pane.ID == "" || pane.Agent == "" || (pane.AgentStatus != "idle" && pane.AgentStatus != "done") {
+			return instruction
+		}
+		_, err = run.herdr(session, "agent", "prompt", pane.ID, prompt)
+		result := statusNextDoneMsg{text: "Asked the collection's agent to " + strings.ToLower(statusNextLabel(r.Next)), err: err}
+		if err == nil {
+			result.pending = []string{statusNextPendingKey(r)}
+		}
+		return result
+	}
+	return instruction
+}
+
+// Selected batches serialize collection-wide commands and send one prompt per
+// author conversation. Each target is freshly checked; failures do not roll
+// back independent work, and an accepted handoff is never called completed.
+func statusNextBatch(ctx context.Context, c *wtc.Context, targets []wtc.StatusRepo, run statusNextRunner) tea.Cmd {
+	return func() tea.Msg {
+		var lines []string
+		var pending []string
+		groups := map[string][]statusNextHandoff{}
+		var order []string
+		for _, r := range targets {
+			if ctx.Err() != nil {
+				lines = append(lines, r.Dir+": cancelled before dispatch")
+				continue
+			}
+			result := statusNextRunWith(c, r, run, true)().(statusNextDoneMsg)
+			if result.handoff != nil {
+				key := result.handoff.owner.Collection
+				if _, ok := groups[key]; !ok {
+					order = append(order, key)
+				}
+				groups[key] = append(groups[key], *result.handoff)
+				continue
+			}
+			if result.err != nil {
+				lines = append(lines, r.Dir+": failed or stale: "+result.err.Error())
+			} else {
+				lines = append(lines, r.Dir+": "+result.text)
+			}
+		}
+		for _, key := range order {
+			var current []statusNextHandoff
+			for _, h := range groups[key] {
+				if ctx.Err() != nil {
+					lines = append(lines, h.repo.Dir+": cancelled before handoff")
+					continue
+				}
+				fresh, err := run.readStatus(h.owner)
+				if err == nil {
+					_, err = statusNextCurrent(h.repo, fresh)
+				}
+				if err != nil {
+					lines = append(lines, h.repo.Dir+": failed or stale: "+err.Error())
+					continue
+				}
+				current = append(current, h)
+			}
+			if len(current) == 0 {
+				continue
+			}
+			prompt := "/skill wtc Carry out only these selected single steps, sequentially. Recheck current state, ownership and branch policy. Honor publication authority and confirmation requirements; commit steps save local commits only. Do not automatically continue to another step.\n"
+			for _, h := range current {
+				prompt += h.prompt + "\n"
+			}
+			if ctx.Err() != nil {
+				for _, h := range current {
+					lines = append(lines, h.repo.Dir+": cancelled before handoff")
+				}
+				continue
+			}
+			result := statusNextPrompt(current[0].owner, current[0].repo, prompt, run).(statusNextDoneMsg)
+			if result.err != nil {
+				lines = append(lines, key+": handoff failed: "+result.err.Error())
+			} else {
+				lines = append(lines, result.text)
+				if len(result.pending) > 0 {
+					for _, h := range current {
+						pending = append(pending, statusNextPendingKey(h.repo))
+					}
+				}
+				for _, h := range current {
+					lines = append(lines, h.repo.Dir+": handoff pending; verify completion in the author conversation")
+				}
+			}
+		}
+		return statusNextDoneMsg{text: strings.Join(lines, "\n"), pending: pending}
+	}
+}
+
+func statusNextIdentity(r wtc.StatusRepo) string { return r.Collection + "/" + r.Dir }
+
+func statusNextCycle(r wtc.StatusRepo) wtc.StatusRepo {
+	if r.Choices == nil || len(r.Choices.Actions) == 0 {
+		return r
+	}
+	for i, a := range r.Choices.Actions {
+		if r.Next != nil && a.Key == r.Next.Key {
+			r.Next = &r.Choices.Actions[(i+1)%len(r.Choices.Actions)].Step
+			return r
+		}
+	}
+	r.Next = &r.Choices.Actions[0].Step
+	return r
+}
+
+// Keep captured targets even when a refresh removes their row. They must fail
+// revalidation visibly instead of silently disappearing from the user's batch.
+func statusNextTargets(snapshot wtc.StatusSnapshot, selected map[string]wtc.StatusRepo) []wtc.StatusRepo {
+	var out []wtc.StatusRepo
+	seen := map[string]bool{}
+	for _, r := range statusNextRepos(snapshot) {
+		key := statusNextIdentity(r)
+		if target, ok := selected[key]; ok {
+			out = append(out, target)
+			seen[key] = true
+		}
+	}
+	var missing []string
+	for key := range selected {
+		if !seen[key] {
+			missing = append(missing, key)
+		}
+	}
+	sort.Strings(missing)
+	for _, key := range missing {
+		out = append(out, selected[key])
+	}
+	return out
+}
+
+func statusNextPendingKey(r wtc.StatusRepo) string {
+	key := r.Next.Key
+	if r.Choices != nil {
+		parts := strings.Split(key, ":")
+		key = parts[len(parts)-1]
+	}
+	return statusNextIdentity(r) + ":" + key
 }

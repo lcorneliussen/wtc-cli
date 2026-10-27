@@ -68,6 +68,10 @@ type statusTUIModel struct {
 	selectedNext   int
 	nextRunning    bool
 	nextNotice     string
+	nextSelected   map[string]wtc.StatusRepo
+	nextPreview    []wtc.StatusRepo
+	nextPending    map[string]bool
+	nextCancel     context.CancelFunc
 	progressLog    []string
 	progressStep   string
 	progressKey    string
@@ -302,6 +306,18 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errorText = msg.err.Error()
 		}
 	case statusNextDoneMsg:
+		if m.nextPending == nil {
+			m.nextPending = map[string]bool{}
+		}
+		for _, key := range msg.pending {
+			m.nextPending[key] = true
+		}
+		if m.nextCancel != nil {
+			m.nextCancel()
+			m.nextCancel = nil
+		}
+		m.nextPreview = nil
+		m.nextSelected = nil
 		m.nextRunning = false
 		m.nextNotice = msg.text
 		if msg.err != nil {
@@ -327,8 +343,83 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scroll = max(0, m.scroll-max(1, m.height/2))
 			case "pgdown":
 				m.scroll += max(1, m.height/2)
+			case "space", " ":
+				if !m.nextRunning && m.selectedNext < len(repos) {
+					if m.nextSelected == nil {
+						m.nextSelected = map[string]wtc.StatusRepo{}
+					}
+					r := repos[m.selectedNext]
+					id := statusNextIdentity(r)
+					if _, ok := m.nextSelected[id]; ok {
+						delete(m.nextSelected, id)
+					} else if !m.nextPending[statusNextPendingKey(r)] {
+						m.nextSelected[id] = r
+					}
+					m.nextPreview = nil
+				}
+			case "right", "l":
+				if !m.nextRunning && m.selectedNext < len(repos) {
+					if m.nextSelected == nil {
+						m.nextSelected = map[string]wtc.StatusRepo{}
+					}
+					r := repos[m.selectedNext]
+					id := statusNextIdentity(r)
+					if old, ok := m.nextSelected[id]; ok {
+						r.Next = old.Next
+					}
+					m.nextSelected[id] = statusNextCycle(r)
+					m.nextPreview = nil
+				}
+			case "s":
+				if !m.nextRunning {
+					if m.nextSelected == nil {
+						m.nextSelected = map[string]wtc.StatusRepo{}
+					}
+					for _, r := range repos {
+						if _, ok := m.nextSelected[statusNextIdentity(r)]; !ok && !m.nextPending[statusNextPendingKey(r)] && (r.Choices == nil || r.Choices.Select(r.Next.Key) != nil) {
+							m.nextSelected[statusNextIdentity(r)] = r
+						}
+					}
+					m.nextPreview = nil
+				}
+			case "x":
+				if !m.nextRunning {
+					m.nextPending = nil
+					m.nextNotice = "Retry enabled. Check the author conversation before selecting unchanged work again."
+				}
+			case "c":
+				if m.nextCancel != nil {
+					m.nextCancel()
+					m.nextNotice = "Cancelling queued actions; active work is not undone…"
+				}
 			case "enter":
+				if !m.refreshing && !m.nextRunning && len(m.nextSelected) > 0 {
+					for _, r := range m.nextSelected {
+						if m.nextPending[statusNextPendingKey(r)] {
+							m.nextNotice = "An unchanged handoff is pending. Check the author conversation; x allows an explicit retry."
+							return m, nil
+						}
+					}
+					if m.nextPreview == nil {
+						var lines []string
+						m.nextPreview = statusNextTargets(m.snapshot, m.nextSelected)
+						for _, target := range m.nextPreview {
+							lines = append(lines, target.Dir+": "+statusNextLabel(target.Next))
+						}
+						m.nextNotice = "Selected single steps:\n" + strings.Join(lines, "\n") + "\nEnter confirms; Space changes selection. Publication retains its authority requirements."
+						return m, nil
+					}
+					ctx, cancel := context.WithCancel(context.Background())
+					m.nextCancel = cancel
+					m.nextRunning = true
+					m.nextNotice = "Rechecking selected actions; c cancels queued work…"
+					return m, statusNextBatch(ctx, m.context, append([]wtc.StatusRepo(nil), m.nextPreview...), statusNextDefaultRunner())
+				}
 				if !m.refreshing && !m.nextRunning && m.selectedNext < len(repos) {
+					if m.nextPending[statusNextPendingKey(repos[m.selectedNext])] {
+						m.nextNotice = "An unchanged handoff is pending. Check the author conversation; x allows an explicit retry."
+						return m, nil
+					}
 					m.nextRunning, m.nextNotice = true, "Rechecking the selected step…"
 					return m, statusNextRun(m.context, repos[m.selectedNext])
 				}
@@ -337,6 +428,9 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "q", "ctrl+c":
+			if m.nextCancel != nil {
+				m.nextCancel()
+			}
 			return m, tea.Quit
 		case "esc":
 			m.showHelp = false
@@ -1217,9 +1311,9 @@ func (m statusTUIModel) contentLines() []string {
 		return lines
 	}
 	if m.showNext {
-		lines = append(lines, "↑/↓ choose · Enter run or ask agent · Esc back")
+		lines = append(lines, "↑/↓ choose · Enter run or ask agent · Space select · → alternative · s suggested · c cancel · x allow retry · Esc back")
 		selected := min(m.selectedNext, max(0, len(statusNextRepos(m.snapshot))-1))
-		lines = append(lines, statusNextLines(m.snapshot, width, true, selected)...)
+		lines = append(lines, statusNextLines(m.snapshot, width, true, selected, m.nextSelected)...)
 		if len(statusNextRepos(m.snapshot)) == 0 {
 			lines = append(lines, "", "No next actions.")
 		}
