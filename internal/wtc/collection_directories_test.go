@@ -125,6 +125,13 @@ func TestTabaConfigNamespacePreservesLegacyPrecedenceAndBoundaries(t *testing.T)
 				if _, err := OpenCollection(dir); err == nil {
 					t.Fatal("explicit open bypassed broken legacy state")
 				}
+				child := filepath.Join(dir, "child")
+				if _, err := InitAdHoc(child); err == nil {
+					t.Fatal("initialization bypassed a broken collection boundary")
+				}
+				if _, err := os.Lstat(child); !os.IsNotExist(err) {
+					t.Fatal("refused initialization created files inside a broken collection")
+				}
 			}
 			if found := FindCollectionRoot(dir); found != "" && found != dir {
 				t.Fatalf("early dev discovery crossed a broken boundary: %q", found)

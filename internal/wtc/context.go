@@ -92,6 +92,7 @@ type Context struct {
 }
 
 var validRepoName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
+var errNotInCollection = errors.New("not inside a worktree collection (harness/.harness-repos.yml not found)")
 
 func Discover(start string) (*Context, error) {
 	abs, err := filepath.Abs(start)
@@ -114,7 +115,7 @@ func Discover(start string) (*Context, error) {
 		}
 		dir = parent
 	}
-	return nil, errors.New(branding.Text("not inside a worktree collection (harness/.harness-repos.yml not found); run `{{command}} init` to make this folder an ad-hoc collection"))
+	return nil, fmt.Errorf(branding.Text("%w; run `{{command}} init` to make this folder an ad-hoc collection"), errNotInCollection)
 }
 
 func OpenCollection(dir string) (*Context, error) {
