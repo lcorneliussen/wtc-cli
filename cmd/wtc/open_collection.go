@@ -78,7 +78,7 @@ func openCollection(source *wtc.Context, name string, opt openOptions, desired s
 		if opt.List {
 			item.Layout = current
 			item.Actions = append(item.Actions, openLayoutDescription(current, panes))
-			for _, label := range []string{"agent", "browse", "shell", "status"} {
+			for _, label := range []string{"agent", "browse", "shell", "review", "status"} {
 				state, inspectErr := openPaneState(opt.Session, openPaneByLabel(panes, label))
 				item.Actions = append(item.Actions, label+": "+state)
 				if inspectErr != nil {
@@ -245,7 +245,10 @@ func openPaneState(session string, pane openPaneInfo) (string, error) {
 
 func openPlanPanes(item *openItem, panes []openPaneInfo, opt openOptions) error {
 	var failures []error
-	for _, label := range []string{"agent", "browse", "status"} {
+	for _, label := range []string{"agent", "browse", "review", "status"} {
+		if label == "review" && !openWants(opt, label) {
+			continue
+		}
 		if label == "agent" && opt.NoAgent || label == "browse" && opt.NoBrowse || label == "status" && opt.NoStatus {
 			continue
 		}
@@ -264,13 +267,13 @@ func openPlanPanes(item *openItem, panes []openPaneInfo, opt openOptions) error 
 
 func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, opt openOptions) error {
 	var failures []error
-	for _, label := range []string{"agent", "browse", "shell", "status"} {
+	for _, label := range []string{"agent", "browse", "shell", "review", "status"} {
 		if label == "agent" && opt.NoAgent || label == "browse" && opt.NoBrowse || label == "status" && opt.NoStatus {
 			item.Actions = append(item.Actions, label+" skipped")
 			continue
 		}
 		pane := openPaneByLabel(panes, label)
-		if pane.ID == "" && (label == "browse" || label == "shell") && !openWants(opt, label) {
+		if pane.ID == "" && (label == "browse" || label == "shell" || label == "review") && !openWants(opt, label) {
 			continue // Tool panes come on demand.
 		}
 		state, inspectErr := openPaneState(opt.Session, pane)
@@ -300,7 +303,7 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 			} else {
 				item.Actions = append(item.Actions, "agent started")
 			}
-		case "browse", "status":
+		case "browse", "review", "status":
 			if pane.ID == "" {
 				item.Actions = append(item.Actions, label+" no pane")
 				failures = append(failures, fmt.Errorf("%s pane is missing", label))
@@ -308,6 +311,10 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 			}
 			if state != "empty" && !strings.HasPrefix(state, "empty (") {
 				item.Actions = append(item.Actions, label+" live ("+state+")")
+				continue
+			}
+			if label == "review" && !openWants(opt, label) {
+				item.Actions = append(item.Actions, "review empty (use --add review to restart)")
 				continue
 			}
 			if label == "browse" {
@@ -319,6 +326,16 @@ func openStartPanes(item *openItem, target *wtc.Context, panes []openPaneInfo, o
 			command := "wtc status --tui"
 			if label == "browse" {
 				command = "wtc browse --here"
+			}
+			if label == "review" {
+				var detail string
+				var err error
+				command, detail, err = openReviewCommand(target)
+				if err != nil {
+					failures = append(failures, fmt.Errorf("review: %w", err))
+					continue
+				}
+				item.Actions = append(item.Actions, detail)
 			}
 			if !openWaitIdle(opt.Session, pane.ID, 0) {
 				item.Actions = append(item.Actions, label+" busy — left alone")

@@ -51,7 +51,7 @@ func openTrimCommand(c *wtc.Context, names []string, opt openOptions, running bo
 	return nil
 }
 
-// openTrimCollection closes the browse and shell panes of one collection's
+// openTrimCollection closes the idle tool panes of one collection's
 // workspace that nobody is using. Agent and status panes are never touched.
 func openTrimCollection(source *wtc.Context, name string, opt openOptions) openItem {
 	item := openItem{Collection: name, Actions: []string{}}
@@ -77,7 +77,7 @@ func openTrimCollection(source *wtc.Context, name string, opt openOptions) openI
 	}
 	socket := browseSocket(source.Workspace, name)
 	for _, pane := range panes {
-		if pane.Label != "browse" && pane.Label != "shell" {
+		if pane.Label != "browse" && pane.Label != "shell" && pane.Label != "review" {
 			continue
 		}
 		reason, err := openTrimKeep(opt.Session, pane, socket)
@@ -107,7 +107,7 @@ func openTrimCollection(source *wtc.Context, name string, opt openOptions) openI
 }
 
 // openTrimKeep returns why a tool pane stays open, or "" when it is idle: a
-// shell at its prompt, or a browse pane whose Neovim has no unsaved buffers.
+// shell or review pane at its prompt, or a browse Neovim with no unsaved buffers.
 // A focused pane, a running command, or a Neovim that does not answer stays.
 func openTrimKeep(session string, pane openPaneInfo, socket string) (string, error) {
 	if pane.Focused {

@@ -51,19 +51,17 @@ func addOpenCommand(root *cobra.Command, asJSON *bool) {
 	cmd.Flags().Bool("narrow", false, "Use two stacked tabs")
 	cmd.Flags().Bool("wide", false, "Use two stacked columns")
 	cmd.Flags().BoolVar(&opt.Full, "full", false, "Also open the browse and shell panes (default: WTC_PANES)")
-	cmd.Flags().StringSliceVar(&opt.Add, "add", nil, "Add a tool pane to the workspace: browse or shell (repeatable)")
-	cmd.Flags().BoolVar(&opt.Trim, "trim", false, "Close idle browse and shell panes; never agent or status")
+	cmd.Flags().StringSliceVar(&opt.Add, "add", nil, "Add a tool pane to the workspace: browse, shell or review (repeatable)")
+	cmd.Flags().BoolVar(&opt.Trim, "trim", false, "Close idle browse, shell and review panes; never agent or status")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if opt.All && len(args) != 0 {
 			return errors.New("--all cannot be combined with collection names")
 		}
 		for _, kind := range opt.Add {
 			switch kind {
-			case "browse", "shell":
-			case "review":
-				return errors.New("--add review is not supported yet; use browse or shell")
+			case "browse", "shell", "review":
 			default:
-				return fmt.Errorf("--add %q: expected browse or shell", kind)
+				return fmt.Errorf("--add %q: expected browse, shell or review", kind)
 			}
 		}
 		if opt.Trim {
@@ -168,8 +166,8 @@ func addOpenCommand(root *cobra.Command, asJSON *bool) {
 // workspace holds only agent and status until a pane is asked for.
 func openWantedTools(full bool, add []string) []string {
 	var tools []string
-	for _, kind := range []string{"browse", "shell"} {
-		wanted := full
+	for _, kind := range []string{"browse", "shell", "review"} {
+		wanted := full && kind != "review"
 		for _, requested := range add {
 			wanted = wanted || requested == kind
 		}
