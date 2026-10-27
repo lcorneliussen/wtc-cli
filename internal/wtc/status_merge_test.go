@@ -14,8 +14,8 @@ import (
 
 func TestStatusBitbucketPredictsExactPRCommits(t *testing.T) {
 	for _, tc := range []struct {
-		name, want                           string
-		conflict, missing, discovered, short bool
+		name, want                                           string
+		conflict, missing, discovered, short, failedPipeline bool
 	}{
 		{name: "conflicting", want: "CONFLICTING", conflict: true},
 		{name: "clean behind", want: "BEHIND"},
@@ -23,6 +23,7 @@ func TestStatusBitbucketPredictsExactPRCommits(t *testing.T) {
 		{name: "discovered conflict", want: "CONFLICTING", conflict: true, discovered: true},
 		{name: "abbreviated conflict", want: "CONFLICTING", conflict: true, short: true},
 		{name: "abbreviated clean", want: "BEHIND", short: true},
+		{name: "PR failure beside stale local head", want: "BEHIND", failedPipeline: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TMPDIR", t.TempDir())
@@ -69,6 +70,15 @@ func TestStatusBitbucketPredictsExactPRCommits(t *testing.T) {
 				reportedHead, reportedBase = head[:12], base[:12]
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.failedPipeline && strings.HasSuffix(r.URL.Path, "/pipelines/") {
+					if r.URL.Query().Get("target.commit.hash") != head {
+						t.Error("pipeline request did not use the PR head")
+					}
+					fmt.Fprintf(w, `{"values":[
+ {"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"commit":{"hash":%q},"selector":{"type":"branches"}}},
+ {"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"commit":{"hash":%q},"selector":{"type":"pullrequests","pattern":"**"}}}]}`, base, head)
+					return
+				}
 				if strings.HasSuffix(r.URL.Path, "/statuses") || strings.HasSuffix(r.URL.Path, "/pipelines/") {
 					fmt.Fprint(w, `{"values":[]}`)
 					return
@@ -112,6 +122,9 @@ func TestStatusBitbucketPredictsExactPRCommits(t *testing.T) {
 			}
 			if facts == nil || facts.Merge != tc.want {
 				t.Fatalf("PR facts: %+v, want %s", facts, tc.want)
+			}
+			if tc.failedPipeline && (facts.Checks != "FAILURE" || facts.Head != head) {
+				t.Fatalf("pipeline failure or PR head lost beside the stale dirty checkout: %+v", facts)
 			}
 			if !tc.discovered && (len(snapshot.PRs) != 1 || snapshot.PRs[0].Merge == nil || *snapshot.PRs[0].Merge != tc.want) {
 				t.Fatalf("enlisted PR observation: %+v", snapshot.PRs)
