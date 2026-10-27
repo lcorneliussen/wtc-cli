@@ -321,7 +321,12 @@ func TestServiceUpAndRestartLeaveAStoppedPublicTunnelClosed(t *testing.T) {
 	if _, err := c.Tunnel(TunnelOptions{Service: "echo", Provider: "cloudflare", Public: true}); err != nil {
 		t.Fatal(err)
 	}
-	// The fake runner lists no task as running: the tunnel is closed.
+	// Explicit stop records off; an idle observation alone preserves on.
+	fixtureFile(t, filepath.Join(c.runtimeRoot(), "fake-tasks.json"), `{"tasks":[{"path":"widget/echo/cloudflare","state":"idle"}]}`, 0600)
+	if _, err := c.Tunnel(TunnelOptions{Service: "echo", Provider: "cloudflare", Stop: true}); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, filepath.Join(c.runtimeRoot(), "fake-tasks.json"), `{"tasks":[]}`, 0600)
 	for _, action := range []string{"up", "restart"} {
 		os.Remove(filepath.Join(c.runtimeRoot(), "calls"))
 		if _, err := c.RuntimeAction(action, "echo", 0); err != nil {

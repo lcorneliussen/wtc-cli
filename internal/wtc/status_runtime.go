@@ -55,6 +55,9 @@ func (c *Context) statusRuntime(snapshot *StatusSnapshot, all bool) {
 		for _, item := range snapshot.Runtime {
 			if item.Repo == row.Repo && item.Collection == row.Collection {
 				state := item.State
+				if item.Lifecycle != "" {
+					state = "tunnel missing"
+				}
 				if item.Kind == "resources" && state == "provision-hook-completed" {
 					state = "provisioned"
 				}
@@ -140,6 +143,9 @@ func RuntimeText(items []RuntimeItem) string {
 		}
 		if item.Answering == "no" {
 			fmt.Fprintf(&b, " · not answering now: %s", runtimeTextSafe(item.AnswerDetail))
+		}
+		if item.Lifecycle != "" {
+			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.Lifecycle))
 		}
 		if item.Login != "" {
 			fmt.Fprintf(&b, " · %s", runtimeTextSafe(item.Login))

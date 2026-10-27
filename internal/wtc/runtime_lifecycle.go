@@ -236,16 +236,16 @@ func (c *Context) runtimeHooks(m *runtimeManifest, tasks []runtimeTask, hook str
 	return nil
 }
 
-// runtimeGroupTasks picks what starting or restarting a service group runs:
-// its own processes, not its tunnels. A tunnel that is not running opens only
-// through wtc svc tunnel, which checks how far it reaches; a running tunnel
-// restarts with the service it depends on. Starting also brings up a tunnel
-// that autostarts and stays private.
+// runtimeGroupTasks includes explicit tunnel choices and private declaration
+// defaults. A stopped tunnel without a choice keeps its existing behavior.
 func runtimeGroupTasks(selector string, tasks []runtimeTask, starting bool) ([]runtimeTask, error) {
 	var picked []runtimeTask
 	for _, task := range tasks {
 		if task.Kind != "endpoint" {
 			picked = append(picked, task)
+			continue
+		}
+		if task.TunnelIntent != "" {
 			continue
 		}
 		switch task.Exposure {
@@ -263,6 +263,10 @@ func runtimeGroupTasks(selector string, tasks []runtimeTask, starting bool) ([]r
 }
 
 func (c *Context) RuntimeAction(action, target string, wait time.Duration) (RuntimeResult, error) {
+	return c.runtimeAction(action, target, wait, nil)
+}
+
+func (c *Context) runtimeAction(action, target string, wait time.Duration, choice *runtimeTunnelChoice) (RuntimeResult, error) {
 	defer c.signalServicesChanged()
 	result := RuntimeResult{Root: c.runtimeRoot(), Action: action, Items: []RuntimeItem{}}
 	err := c.withRuntimeLock(func() error {
@@ -270,7 +274,7 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 		if err != nil {
 			return err
 		}
-		if action == "up" || action == "provision" {
+		if action == "up" || action == "provision" || action == "restart" || choice != nil {
 			m, err = c.renderRuntime()
 			if err != nil {
 				return err
@@ -288,8 +292,71 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 		if err != nil {
 			return err
 		}
+		if choice != nil {
+			if len(tasks) != 1 || tasks[0].Kind != "endpoint" || tasks[0].Definition != choice.Definition {
+				return fmt.Errorf("tunnel declaration changed; choose the tunnel again")
+			}
+			if m.TunnelIntents == nil {
+				m.TunnelIntents = map[string]runtimeTunnelIntent{}
+			}
+			m.TunnelIntents[tasks[0].Path] = choice.runtimeTunnelIntent
+			for i := range m.Tasks {
+				if m.Tasks[i].Path == tasks[0].Path {
+					m.Tasks[i].TunnelIntent = "off"
+					if choice.On {
+						m.Tasks[i].TunnelIntent = "on"
+					}
+				}
+			}
+			if err := runtimeSaveManifest(m); err != nil {
+				return err
+			}
+			m, err = c.renderRuntime()
+			if err != nil {
+				return err
+			}
+			selector, tasks, err = runtimeSelect(m, target)
+			if err != nil {
+				return err
+			}
+		}
 		grouped := strings.HasSuffix(selector, "/**")
+		// Restore choices for the services selected by this action. Untargeted
+		// restart retains its existing rule of restarting only live services.
 		live := map[string]bool{}
+		selectedGroups := map[string]bool{}
+		for _, task := range tasks {
+			if task.Kind != "endpoint" {
+				selectedGroups[task.Group] = true
+			}
+		}
+		var restored []runtimeTask
+		restore := func() error {
+			for _, task := range m.Tasks {
+				if task.Kind != "endpoint" || task.TunnelIntent != "on" || !selectedGroups[task.Group] {
+					continue
+				}
+				if action == "restart" && target == "" {
+					active := false
+					for _, service := range m.Tasks {
+						if service.Group == task.Group && service.Kind != "endpoint" && live[service.Path] {
+							active = true
+						}
+					}
+					if !active {
+						continue
+					}
+				}
+				if missing := runtimeLoginCheck(task.Provider); missing != "" {
+					return fmt.Errorf("%s: %s", task.Path, missing)
+				}
+				if _, err := runtimeCommand(m, true, "start", task.Path); err != nil {
+					return err
+				}
+				restored = append(restored, task)
+			}
+			return nil
+		}
 		switch action {
 		case "up", "provision":
 			if err := c.runtimeHooks(m, runtimeDependencies(m, tasks), "provision"); err != nil {
@@ -308,6 +375,13 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 					}
 				}
 				break
+			}
+			for _, task := range tasks {
+				if selector != "" && task.TunnelIntent == "on" {
+					if missing := runtimeLoginCheck(task.Provider); missing != "" {
+						return fmt.Errorf("%s: %s", task.Path, missing)
+					}
+				}
 			}
 			args := []string{"up"}
 			if selector != "" {
@@ -382,6 +456,12 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 		default:
 			return fmt.Errorf("unknown runtime action %q", action)
 		}
+		if action == "up" || action == "restart" {
+			if err := restore(); err != nil {
+				return err
+			}
+			tasks = append(tasks, restored...)
+		}
 		if action == "down" && target == "" {
 			deadline := time.Now().Add(30 * time.Second)
 			for {
@@ -441,7 +521,10 @@ func (c *Context) RuntimeAction(action, target string, wait time.Duration) (Runt
 		if wait > 0 && (action == "up" || action == "restart") {
 			wanted := map[string]bool{}
 			for _, task := range tasks {
-				if target != "" || task.Autostart || action == "restart" {
+				if target == "" && (task.TunnelIntent == "off" || task.TunnelIntent == "stale") {
+					continue
+				}
+				if target != "" || task.Autostart || task.TunnelIntent == "on" || action == "restart" {
 					wanted[task.Path] = true
 				}
 			}

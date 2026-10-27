@@ -385,3 +385,20 @@ func TestStatusRuntimeShowsTroubleNow(t *testing.T) {
 		t.Errorf("hover: %s", h)
 	}
 }
+
+func TestRuntimeMissingIntendedTunnelIsVisible(t *testing.T) {
+	item := wtc.RuntimeItem{Collection: "sample", Dir: "widget", Repo: "widget", Group: "widget/web", Path: "widget/web/tunnel", Kind: "endpoint", State: "idle", TunnelIntent: "on", Lifecycle: "tunnel intended on but not running", Login: "synthetic login expired", Exposure: wtc.ExposureProtected}
+	if !statusRuntimeTunnelShown(item) {
+		t.Fatal("missing intended tunnel hidden")
+	}
+	if state := statusRuntimeState(item); state != "tunnel missing" {
+		t.Fatalf("state: %s", state)
+	}
+	if _, tone := statusRuntimeMark(item); tone != statusToneFailure {
+		t.Fatalf("tone: %s", tone)
+	}
+	hover := statusRuntimeHover(item)
+	if !strings.Contains(hover, item.Lifecycle) || !strings.Contains(hover, item.Login) {
+		t.Fatalf("diagnostics missing: %s", hover)
+	}
+}

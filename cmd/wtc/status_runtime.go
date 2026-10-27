@@ -125,7 +125,7 @@ func statusRuntimeTunnelShown(item wtc.RuntimeItem) bool {
 	case "starting", "running", "ready", "failed", "exited":
 		return true
 	}
-	return item.URL != "" || item.Autostart
+	return item.URL != "" || item.Autostart || item.TunnelIntent == "on" || item.Lifecycle != ""
 }
 
 func statusTUIRuntimeLayout(snapshot wtc.StatusSnapshot, width int) statusRuntimeLayout {
@@ -239,6 +239,8 @@ func (l statusRuntimeLayout) urlAt(g statusRuntimeGroup, x int) string {
 // statusRuntimeState shortens the hook fact the way the repo summary does.
 func statusRuntimeState(item wtc.RuntimeItem) string {
 	switch {
+	case item.Lifecycle != "":
+		return "tunnel missing"
 	case item.Kind == "resources" && item.State == "provision-hook-completed":
 		return "provisioned"
 	case item.State == "absent" || item.State == "idle":
@@ -257,7 +259,7 @@ func statusRuntimeState(item wtc.RuntimeItem) string {
 // startup probe.
 func statusRuntimeTrouble(item wtc.RuntimeItem) bool {
 	running := item.State == "ready" || item.State == "running"
-	return running && (item.Answering == "no" || item.Login != "")
+	return item.Lifecycle != "" || running && (item.Answering == "no" || item.Login != "")
 }
 
 // statusTUIRuntimeLines draws one line per service in the style of the PR
@@ -492,7 +494,7 @@ func statusRuntimeHover(item wtc.RuntimeItem) string {
 	if item.Answering == "no" {
 		answer = "not answering now: " + item.AnswerDetail
 	}
-	for _, extra := range []string{item.Label, item.URL, item.Reason, item.Error, answer, item.Login} {
+	for _, extra := range []string{item.Label, item.URL, item.Reason, item.Error, answer, item.Login, item.Lifecycle} {
 		if extra != "" {
 			parts = append(parts, extra)
 		}

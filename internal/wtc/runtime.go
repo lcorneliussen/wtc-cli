@@ -51,6 +51,10 @@ type RuntimeItem struct {
 	// Login says why the tunnel provider's client cannot serve (logged out,
 	// stopped, awaiting approval, an expired key), and how to fix it.
 	Login string `json:"login,omitempty"`
+	// TunnelIntent is the explicit collection choice: on, off, or stale.
+	TunnelIntent string `json:"tunnel_intent,omitempty"`
+	// Lifecycle describes an intended tunnel that cannot currently run.
+	Lifecycle string `json:"lifecycle,omitempty"`
 }
 
 type runtimeTask struct {
@@ -60,7 +64,8 @@ type runtimeTask struct {
 	Deps  []string `json:"deps,omitempty"`
 	// Spec is a digest of the task's generated definition; a running task
 	// whose spec changes is restarted when the config is applied live.
-	Spec string `json:"spec,omitempty"`
+	Spec       string `json:"spec,omitempty"`
+	Definition string `json:"definition,omitempty"`
 	// URLLog finds an endpoint URL that is only known after startup.
 	URLLog string `json:"url_log,omitempty"`
 }
@@ -82,13 +87,14 @@ type runtimeDeclaredResource struct {
 }
 
 type runtimeManifest struct {
-	Schema    int                       `json:"schema"`
-	Root      string                    `json:"root"`
-	Binary    string                    `json:"binary"`
-	Digest    string                    `json:"digest"`
-	Tasks     []runtimeTask             `json:"tasks"`
-	Resources []runtimeResource         `json:"resources,omitempty"`
-	Declared  []runtimeDeclaredResource `json:"declared,omitempty"`
+	TunnelIntents map[string]runtimeTunnelIntent `json:"tunnel_intents,omitempty"`
+	Schema        int                            `json:"schema"`
+	Root          string                         `json:"root"`
+	Binary        string                         `json:"binary"`
+	Digest        string                         `json:"digest"`
+	Tasks         []runtimeTask                  `json:"tasks"`
+	Resources     []runtimeResource              `json:"resources,omitempty"`
+	Declared      []runtimeDeclaredResource      `json:"declared,omitempty"`
 }
 
 type RuntimeResult struct {
@@ -344,6 +350,7 @@ func (c *Context) runtimeResourceItems(m *runtimeManifest, checking bool) []Runt
 func (c *Context) runtimeStatus(m *runtimeManifest) []RuntimeItem {
 	items := make([]RuntimeItem, len(m.Tasks))
 	items = append(items, c.runtimeResourceItems(m, false)...)
+	defer func() { runtimeTunnelLifecycle(items) }()
 	state, err := runtimeRunnerState(m)
 	for i, task := range m.Tasks {
 		items[i] = task.RuntimeItem

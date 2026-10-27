@@ -10,12 +10,14 @@ import (
 	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"gopkg.in/yaml.v3"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -333,6 +335,13 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 			}
 		}
 	}
+	old, err := c.runtimeManifest()
+	if err != nil {
+		return nil, nil, err
+	}
+	if old != nil {
+		m.TunnelIntents = maps.Clone(old.TunnelIntents)
+	}
 	for i := range m.Tasks {
 		task := native[m.Tasks[i].Path].(map[string]any)
 		// A runner keeps the environment it started with; give a service and
@@ -351,7 +360,29 @@ func (c *Context) runtimePlan(binary string) (*runtimeManifest, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		m.Tasks[i].Spec = fmt.Sprintf("%x", sha256.Sum256(spec))
+		item := &m.Tasks[i]
+		definition, err := json.Marshal([]any{string(spec), item.Provider, item.Exposure, item.URL, item.URLLog, item.Source})
+		if err != nil {
+			return nil, nil, err
+		}
+		item.Definition = fmt.Sprintf("%x", sha256.Sum256(definition))
+		if intent, ok := m.TunnelIntents[item.Path]; ok && item.Kind == "endpoint" {
+			item.TunnelIntent = "off"
+			if intent.On {
+				item.TunnelIntent = "stale"
+				if intent.Definition == item.Definition {
+					item.TunnelIntent = "on"
+				}
+			}
+			// Explicit choices are started by WTC after provider checks, never
+			// implicitly by a runner launch or configuration reload.
+			task["autostart"] = false
+			spec, err = yaml.Marshal(task)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		item.Spec = fmt.Sprintf("%x", sha256.Sum256(spec))
 	}
 	sort.Slice(m.Tasks, func(i, j int) bool { return m.Tasks[i].Path < m.Tasks[j].Path })
 	sort.Slice(m.Declared, func(i, j int) bool {
@@ -382,6 +413,13 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Forget approval for a removed declaration, even if that path is reused.
+	for path, intent := range m.TunnelIntents {
+		if !slices.ContainsFunc(m.Tasks, func(t runtimeTask) bool { return t.Path == path && t.Kind == "endpoint" }) {
+			intent.Definition = ""
+			m.TunnelIntents[path] = intent
+		}
+	}
 	var reload func() error
 	if old != nil {
 		m.Resources = old.Resources
@@ -401,10 +439,26 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 		if err := runtimeRegular(filepath.Join(m.Root, "dekit.yaml")); err != nil {
 			return nil, err
 		}
+		// Metadata-only policy/provider changes can leave the native digest
+		// unchanged. Stop unapproved live endpoints before either save path.
+		if slices.ContainsFunc(m.Tasks, func(t runtimeTask) bool { return t.TunnelIntent == "off" || t.TunnelIntent == "stale" }) {
+			for _, item := range c.runtimeStatus(old) {
+				if item.State != "ready" && item.State != "running" && item.State != "starting" {
+					continue
+				}
+				for _, task := range m.Tasks {
+					if task.Path == item.Path && (task.TunnelIntent == "off" || task.TunnelIntent == "stale") {
+						if _, err := runtimeCommand(old, false, "veto", task.Path); err != nil {
+							return nil, err
+						}
+					}
+				}
+			}
+		}
 		if old.Digest == m.Digest {
 			// Endpoint metadata and declared resources are outside the
 			// generated config and its digest.
-			if reflect.DeepEqual(old.Tasks, m.Tasks) && reflect.DeepEqual(old.Declared, m.Declared) {
+			if reflect.DeepEqual(old.Tasks, m.Tasks) && reflect.DeepEqual(old.Declared, m.Declared) && reflect.DeepEqual(old.TunnelIntents, m.TunnelIntents) {
 				return old, nil
 			}
 			if err := runtimeSaveManifest(m); err != nil {

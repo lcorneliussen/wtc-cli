@@ -1,0 +1,229 @@
+package wtc
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+func runtimeIntentFixture(t *testing.T) *Context {
+	t.Helper()
+	c := runtimeFixture(t)
+	data, err := os.ReadFile("testdata/runtime/intent-runner.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, c.Config.Runtime.Binary, string(data), 0755)
+	fragment := runtimeSharedFragment(filepath.Join(c.Collection, "widget"))
+	fixtureFile(t, fragment, `tasks:
+ web/server:
+  cmd: [synthetic-server]
+  autostart: true
+ web/tunnel:
+  cmd: [synthetic-provider]
+  deps: [web/server]
+  tags: [endpoint]
+  x-wtc: {tunnel: devtunnel, public: false}
+`, 0644)
+	return c
+}
+
+func intentTunnel(t *testing.T, c *Context) RuntimeItem {
+	t.Helper()
+	for _, item := range c.RuntimeStatus() {
+		if item.Path == "widget/web/tunnel" {
+			return item
+		}
+	}
+	t.Fatal("tunnel missing from status")
+	return RuntimeItem{}
+}
+
+func intentAction(t *testing.T, c *Context, action, target string) {
+	t.Helper()
+	if _, err := c.RuntimeAction(action, target, 0); err != nil {
+		t.Fatalf("%s %s: %v", action, target, err)
+	}
+}
+
+func chooseTunnel(t *testing.T, c *Context, stop bool) {
+	t.Helper()
+	if _, err := c.Tunnel(TunnelOptions{Service: "web", Stop: stop}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTunnelIntentSurvivesServiceLifecycle(t *testing.T) {
+	for _, target := range []string{"web", "widget/web", "widget", "", "widget/web/server"} {
+		t.Run(strings.ReplaceAll(target, "/", "-"), func(t *testing.T) {
+			c := runtimeIntentFixture(t)
+			chooseTunnel(t, c, false)
+			intentAction(t, c, "down", target)
+			item := intentTunnel(t, c)
+			if item.TunnelIntent != "on" || item.Lifecycle == "" {
+				t.Fatalf("down lost intent: %+v", item)
+			}
+			intentAction(t, c, "up", target)
+			if item := intentTunnel(t, c); item.State != "ready" || item.Lifecycle != "" {
+				t.Fatalf("up did not restore: %+v", item)
+			}
+			// A missing intended tunnel is restored by restart too.
+			intentAction(t, c, "down", "widget/web/tunnel")
+			intentAction(t, c, "restart", target)
+			if item := intentTunnel(t, c); item.State != "ready" {
+				t.Fatalf("restart did not restore: %+v", item)
+			}
+			chooseTunnel(t, c, true)
+			for _, action := range []string{"up", "restart"} {
+				intentAction(t, c, action, target)
+				if item := intentTunnel(t, c); item.State != "idle" || item.TunnelIntent != "off" || item.Lifecycle != "" {
+					t.Fatalf("explicit off lost after %s: %+v", action, item)
+				}
+			}
+		})
+	}
+}
+
+func TestTunnelIntentIsCollectionLocalAndPreservesDefaults(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	other := runtimeIntentFixture(t)
+	chooseTunnel(t, c, false)
+	intentAction(t, other, "up", "web")
+	if item := intentTunnel(t, other); item.TunnelIntent != "" || item.State != "idle" {
+		t.Fatalf("choice leaked collections: %+v", item)
+	}
+	fragment := runtimeSharedFragment(filepath.Join(other.Collection, "widget"))
+	data, _ := os.ReadFile(fragment)
+	fixtureFile(t, fragment, strings.Replace(string(data), "  tags: [endpoint]", "  tags: [endpoint]\n  autostart: true", 1), 0644)
+	intentAction(t, other, "up", "web")
+	if item := intentTunnel(t, other); item.State != "ready" || item.TunnelIntent != "" {
+		t.Fatalf("declaration default lost: %+v", item)
+	}
+	chooseTunnel(t, other, true)
+	intentAction(t, other, "down", "")
+	intentAction(t, other, "up", "")
+	if item := intentTunnel(t, other); item.State != "idle" {
+		t.Fatalf("off did not override autostart: %+v", item)
+	}
+}
+
+func TestTunnelIntentRejectsChangedOrReusedDeclaration(t *testing.T) {
+	for _, change := range []string{"provider", "exposure", "command", "removed"} {
+		t.Run(change, func(t *testing.T) {
+			c := runtimeIntentFixture(t)
+			chooseTunnel(t, c, false)
+			fragment := runtimeSharedFragment(filepath.Join(c.Collection, "widget"))
+			data, _ := os.ReadFile(fragment)
+			changed := string(data)
+			switch change {
+			case "provider":
+				changed = strings.Replace(changed, "devtunnel", "ngrok", 1)
+			case "exposure":
+				changed = strings.Replace(changed, "public: false", "public: true", 1)
+			case "command":
+				changed = strings.Replace(changed, "synthetic-provider", "other-synthetic-provider", 1)
+			case "removed":
+				fixtureFile(t, fragment, strings.Split(changed, " web/tunnel:")[0], 0644)
+				intentAction(t, c, "up", "web")
+			}
+			fixtureFile(t, fragment, changed, 0644)
+			intentAction(t, c, "restart", "web")
+			item := intentTunnel(t, c)
+			if item.State == "ready" || item.TunnelIntent != "stale" || item.Lifecycle == "" {
+				t.Fatalf("stale approval reused: %+v", item)
+			}
+			if change != "removed" { // Explicit re-approval accepts the current declaration.
+				if _, err := c.Tunnel(TunnelOptions{Service: "web", Public: true}); err != nil {
+					t.Fatal(err)
+				}
+				if item := intentTunnel(t, c); item.State != "ready" || item.TunnelIntent != "on" {
+					t.Fatalf("new choice not saved: %+v", item)
+				}
+			}
+		})
+	}
+}
+
+func TestTunnelIntentFailuresRetainChoiceAndDiagnostics(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	chooseTunnel(t, c, false)
+	intentAction(t, c, "down", "web")
+	runtimeLoginCheck = func(string) string { return "synthetic login expired" }
+	if _, err := c.RuntimeAction("up", "web", 0); err == nil || !strings.Contains(err.Error(), "login expired") {
+		t.Fatalf("missing provider failure: %v", err)
+	}
+	item := intentTunnel(t, c)
+	if item.TunnelIntent != "on" || item.Lifecycle == "" || item.Login == "" || item.Exposure != ExposureProtected {
+		t.Fatalf("diagnostics conflated: %+v", item)
+	}
+	if text := RuntimeText([]RuntimeItem{item}); !strings.Contains(text, item.Lifecycle) || !strings.Contains(text, item.Login) {
+		t.Fatalf("diagnostics missing: %s", text)
+	}
+	runtimeLoginCheck = func(string) string { return "" }
+	fixtureFile(t, filepath.Join(c.runtimeRoot(), "fail-action"), "start widget/web/tunnel", 0600)
+	if _, err := c.RuntimeAction("up", "web", 0); err == nil {
+		t.Fatal("start failure hidden")
+	}
+	if item := intentTunnel(t, c); item.TunnelIntent != "on" || item.Lifecycle == "" {
+		t.Fatalf("failure forgot choice: %+v", item)
+	}
+	os.Remove(filepath.Join(c.runtimeRoot(), "fail-action"))
+	intentAction(t, c, "up", "web")
+	fixtureFile(t, filepath.Join(c.runtimeRoot(), "fail-action"), "veto widget/web/tunnel", 0600)
+	if _, err := c.Tunnel(TunnelOptions{Service: "web", Stop: true}); err == nil {
+		t.Fatal("stop failure hidden")
+	}
+	m, err := c.runtimeManifest()
+	if err != nil || m.TunnelIntents["widget/web/tunnel"].On {
+		t.Fatalf("failed stop forgot off: %v %+v", err, m)
+	}
+	// The native config must suppress declaration defaults after any choice.
+	var native struct {
+		Tasks map[string]map[string]any `yaml:"tasks"`
+	}
+	data, _ := os.ReadFile(filepath.Join(c.runtimeRoot(), "dekit.yaml"))
+	if err := yaml.Unmarshal(data, &native); err != nil {
+		t.Fatal(err)
+	}
+	if native.Tasks["widget/web/tunnel"]["autostart"] != false {
+		t.Fatal("runner can bypass choice")
+	}
+	data, _ = json.Marshal(item)
+	if !strings.Contains(string(data), `"tunnel_intent":"on"`) || !strings.Contains(string(data), `"lifecycle":`) {
+		t.Fatalf("JSON omitted intent: %s", data)
+	}
+}
+
+func TestTunnelIntentOffDoesNotWaitForAutostartTunnel(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	fragment := runtimeSharedFragment(filepath.Join(c.Collection, "widget"))
+	data, _ := os.ReadFile(fragment)
+	fixtureFile(t, fragment, strings.Replace(string(data), "  tags: [endpoint]", "  tags: [endpoint]\n  autostart: true", 1), 0644)
+	chooseTunnel(t, c, true)
+	if _, err := c.RuntimeAction("up", "", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if item := intentTunnel(t, c); item.State != "idle" {
+		t.Fatalf("disabled tunnel started: %+v", item)
+	}
+}
+
+func TestTunnelIntentRemovingLastServiceInvalidatesApproval(t *testing.T) {
+	c := runtimeIntentFixture(t)
+	fragment := runtimeSharedFragment(filepath.Join(c.Collection, "widget"))
+	data, _ := os.ReadFile(fragment)
+	chooseTunnel(t, c, false)
+	if _, err := c.RemoveService("web", true); err != nil {
+		t.Fatal(err)
+	}
+	fixtureFile(t, fragment, string(data), 0644)
+	intentAction(t, c, "up", "web")
+	if item := intentTunnel(t, c); item.State == "ready" || item.TunnelIntent != "stale" {
+		t.Fatalf("removed approval reused: %+v", item)
+	}
+}
