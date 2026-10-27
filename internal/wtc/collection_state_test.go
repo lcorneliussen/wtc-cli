@@ -30,6 +30,9 @@ func TestTabaPRRegistryReadsCarryForwardIntoLegacyWrites(t *testing.T) {
 	if err != nil || len(records) != 2 || records[0].Number != "7" || records[0].MergedOn == "" || filepath.Base(c.PRFile()) != ".wtc-prs" {
 		t.Fatalf("legacy write lost alternate rows: %+v %v", records, err)
 	}
+	if data, err := os.ReadFile(c.PRFile()); err != nil || !strings.HasPrefix(string(data), "# Preserve comments and final merge facts.\n") {
+		t.Fatalf("legacy output lost the source comment: %s %v", data, err)
+	}
 	if data, err := os.ReadFile(alias); err != nil || string(data) != initial {
 		t.Fatalf("alternate source was changed: %s %v", data, err)
 	}
