@@ -108,7 +108,9 @@ func (c *Context) finishRetiredFolder(target string) (RetireResult, error) {
 			return result, fmt.Errorf("%s carries %s but holds %s again; inspect it before retiring", target, RetiredMarkerFile, entry.Name())
 		}
 	}
-	stopRetiredStatusWatchers(target)
+	if err := stopRetiredStatusWatchers(target); err != nil {
+		return result, err
+	}
 	if err := removeRetiredGeneratedFiles(target, false); err != nil {
 		return result, err
 	}

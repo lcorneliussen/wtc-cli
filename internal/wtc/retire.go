@@ -97,6 +97,9 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 		if err := runtimeTarget.retireRuntime(); err != nil {
 			return fmt.Errorf("runtime cleanup: %w", err)
 		}
+		if err := stopRetiredStatusWatchers(target); err != nil {
+			return err
+		}
 		postRan := false
 		for _, wt := range worktrees {
 			// A self-retire loses its harness hook source when that final worktree
@@ -133,7 +136,6 @@ func (c *Context) RetireCollection(opt RetireOptions) (RetireResult, error) {
 				result.Warnings = append(result.Warnings, warning)
 			}
 		}
-		stopRetiredStatusWatchers(target)
 		if err := removeRetiredGeneratedFiles(target, runtimeTarget.AdHoc); err != nil {
 			return err
 		}
@@ -318,31 +320,6 @@ func (c *Context) closeRetiredWorkspaceID(name, expectedID string) (bool, string
 		return false, "target Herdr workspace identity changed; no workspace closed"
 	}
 	return false, ""
-}
-
-func stopRetiredStatusWatchers(target string) {
-	output, err := exec.Command("ps", "ax", "-o", "pid=,args=").Output()
-	if err != nil {
-		return
-	}
-	tui := filepath.Join(target, "harness", "tools", "wtc-status-tui.sh")
-	oneshoot := filepath.Join(target, "harness", "tools", "wtc-status.sh")
-	for _, line := range strings.Split(string(output), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		args := strings.Join(fields[1:], " ")
-		if !strings.Contains(args, tui) && !(strings.Contains(args, oneshoot) && strings.Contains(args, "--tui")) {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[0])
-		if err == nil && pid != os.Getpid() {
-			if process, err := os.FindProcess(pid); err == nil {
-				_ = process.Kill()
-			}
-		}
-	}
 }
 
 func removeRetiredGeneratedFiles(target string, adHoc bool) error {
