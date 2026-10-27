@@ -151,15 +151,7 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 	}
 	if listed, truncated, err := statusOpenPRs(forge, slug); err == nil {
 		if item, ok := listed[record.Number]; ok {
-			detail, used, matched := statusDetailFromOpenItem(record, slug, forge, item)
-			if !used {
-				return statusViewPR(record, slug, forge, false)
-			}
-			source := "list"
-			if matched {
-				source = "stamp"
-			}
-			return statusConfirmFullPR(record, slug, forge, detail, source)
+			return statusEnrichListed(record, slug, forge, item)
 		}
 		if truncated {
 			if cached, ok := statusReadForgeEntryAny("pr", forge, slug, record.Number); ok {
@@ -183,6 +175,26 @@ func statusEnrichRecord(record PRRecord, slug, forge string) statusPRDetail {
 		return detail
 	}
 	return statusViewPR(record, slug, forge, false)
+}
+
+func statusEnrichListed(record PRRecord, slug, forge string, item statusOpenPR) statusPRDetail {
+	unlock, lockErr := statusLockCache(statusForgeEntryPath("pr", forge, slug, record.Number))
+	detail, used, matched := statusDetailFromOpenItem(record, slug, forge, item)
+	if !used {
+		if lockErr == nil {
+			unlock()
+		}
+		return statusViewPR(record, slug, forge, false)
+	}
+	source := "list"
+	if matched {
+		source = "stamp"
+	}
+	detail = statusConfirmFullPRLocked(record, slug, forge, detail, source)
+	if lockErr == nil {
+		unlock()
+	}
+	return detail
 }
 
 func statusViewPR(record PRRecord, slug, forge string, bypassCache bool) statusPRDetail {

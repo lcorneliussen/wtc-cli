@@ -125,6 +125,31 @@ func TestStatusBitbucketDiscoverySharesOneList(t *testing.T) {
 	}
 }
 
+func TestStatusBitbucketListChargesEveryPage(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	t.Setenv("WTC_FORGE_MIN_INTERVAL", "60")
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if r.URL.Query().Get("page") == "2" {
+			w.Write([]byte(`{"values":[{"id":2,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"other"}}}]}`))
+			return
+		}
+		fmt.Fprintf(w, `{"values":[{"id":1,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"topic"}}}],"next":"http://%s%s?page=2"}`, r.Host, r.URL.Path)
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	listed, truncated, err := statusOpenPRs("bitbucket.org", "example/widget")
+	if err != nil || !truncated || hits.Load() != 1 || listed["1"].Number != "1" || listed["2"].Number != "" {
+		t.Fatalf("second page was not charged: listed=%v truncated=%v hits=%d err=%v", listed, truncated, hits.Load(), err)
+	}
+}
+
 func TestStatusBitbucketDiscoveryLooksUpABranchTheCappedListOmits(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("HOME", t.TempDir())

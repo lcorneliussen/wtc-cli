@@ -272,6 +272,67 @@ func TestStatusPullRequestAuditFetchesOnceAcrossCallers(t *testing.T) {
 	}
 }
 
+func TestStatusListedPullRequestAuditIsNotOverwritten(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_FULL_REFRESH", "60")
+	dir := t.TempDir()
+	views := filepath.Join(dir, "views")
+	started := filepath.Join(dir, "started")
+	release := filepath.Join(dir, "release")
+	t.Setenv("WTC_TEST_VIEWS", views)
+	t.Setenv("WTC_TEST_STARTED", started)
+	t.Setenv("WTC_TEST_RELEASE", release)
+	bin := t.TempDir()
+	script := `#!/bin/sh
+case "$2" in
+  list) printf '%s\n' '[{"number":7,"state":"OPEN","title":"List","updatedAt":"2026-10-01T00:00:00Z","headRefName":"topic"}]' ;;
+  view) printf 'x\n' >> "$WTC_TEST_VIEWS"; touch "$WTC_TEST_STARTED"; while [ ! -f "$WTC_TEST_RELEASE" ]; do sleep 0.01; done; printf '%s\n' '{"number":7,"state":"OPEN","title":"Audited"}' ;;
+  *) exit 2 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	record := PRRecord{Number: "7", Title: "Saved"}
+	errc := make(chan error, 2)
+	for range 2 {
+		go func() {
+			detail := statusEnrichRecord(record, "example/widget", "github.com")
+			if detail.Title != "Audited" {
+				errc <- fmt.Errorf("detail=%+v", detail)
+				return
+			}
+			errc <- nil
+		}()
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(started); err != nil {
+		t.Fatal("audit did not start")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if statusTestFileLines(t, views) != 1 {
+		t.Fatalf("views = %d", statusTestFileLines(t, views))
+	}
+	if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if statusTestFileLines(t, views) != 1 {
+		t.Fatalf("views = %d", statusTestFileLines(t, views))
+	}
+}
+
 func statusReadAuditLog(t *testing.T) string {
 	t.Helper()
 	data, err := os.ReadFile(statusIncrementalMissLog())

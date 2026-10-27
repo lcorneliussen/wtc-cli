@@ -152,6 +152,10 @@ func statusConfirmFullPR(record PRRecord, slug, forge string, incremental status
 	if lockErr == nil {
 		defer unlock()
 	}
+	return statusConfirmFullPRLocked(record, slug, forge, incremental, source)
+}
+
+func statusConfirmFullPRLocked(record PRRecord, slug, forge string, incremental statusPRDetail, source string) statusPRDetail {
 	if !statusFullRefreshDue(forge, slug, record.Number) {
 		if cached, ok := statusReadCachedDetail(record, slug, forge); ok {
 			return cached

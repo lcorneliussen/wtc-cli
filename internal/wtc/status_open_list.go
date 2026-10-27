@@ -223,9 +223,20 @@ func statusFetchBBOpenList(slug string) ([]byte, error) {
 	seen := map[string]bool{}
 	truncated := false
 	for page := 0; page < 10 && endpoint != ""; page++ {
+		if page > 0 && (statusForgeCooling("bitbucket.org") || !statusTakeForgeToken("bitbucket.org")) {
+			truncated = true
+			break
+		}
 		raw, err := statusBBGET(endpoint, user, pass)
 		if err != nil {
-			return nil, err
+			if page == 0 {
+				return nil, err
+			}
+			if statusRateLimited(err) {
+				statusForgeCool("bitbucket.org", statusRetryAfter(err))
+			}
+			truncated = true
+			break
 		}
 		var body struct {
 			Values []statusBBListItem `json:"values"`
