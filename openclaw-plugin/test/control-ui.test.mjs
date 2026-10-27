@@ -454,7 +454,8 @@ test("publication results distinguish new and existing Bitbucket PRs and offer t
       await settle();
       const request = calls.find((c) => c.method === "sessions.send");
       assert.ok(request);
-      assert.notEqual(request.sessionKey, "agent:main:owner:docs");
+      assert.ok(request.key, "the handoff names the task conversation");
+      assert.notEqual(request.key, "agent:main:owner:docs");
       assert.match(request.message, /\/skill wtc docs: review the title and description of https:\/\/bitbucket.org\/example\/docs\/pull-requests\/8/);
       assert.match(request.message, /full current PR diff/);
       assert.match(request.message, /Preserve useful human edits/);
