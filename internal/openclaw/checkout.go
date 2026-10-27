@@ -157,21 +157,23 @@ const publicationMarker = "OpenClaw-Publication:"
 // branch, or empty. The gateway pushes without updating a remote-tracking
 // ref, so the evidence is local: the branch's reflog remembers the commits
 // the gateway marked, also after an amend or a rebase moved the branch off
-// them. A remote-tracking ref counts too when something did fetch one.
+// them. A remote-tracking ref recorded by a fetch or a personal push takes
+// precedence when it contains the marked commit, proving a later publication.
 func (c *Checkout) publishedHead() string {
 	branch := c.Branch()
+	remote, _ := git(c.Dir, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch)
 	if log, err := git(c.Dir, "log", "-g", "-n", "500", "--format=%H%x00%B%x01", "refs/heads/"+branch); err == nil {
 		for _, entry := range strings.Split(log, "\x01") {
 			hash, body, _ := strings.Cut(strings.TrimSpace(entry), "\x00")
 			if hash != "" && strings.Contains(body, publicationMarker) {
+				if remote != "" && gitOK(c.Dir, "merge-base", "--is-ancestor", hash, remote) {
+					return remote
+				}
 				return hash
 			}
 		}
 	}
-	if hash, err := git(c.Dir, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch); err == nil {
-		return hash
-	}
-	return ""
+	return remote
 }
 
 type change struct{ status, path string }

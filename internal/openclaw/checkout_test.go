@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -356,6 +357,31 @@ func TestStatus(t *testing.T) {
 	}
 	if got.Repos[1].Error == "" {
 		t.Errorf("a directory that is no checkout: %+v", got.Repos[1])
+	}
+}
+
+func TestStatusAfterPersonalPush(t *testing.T) {
+	for _, marked := range []bool{false, true} {
+		t.Run(fmt.Sprint("prior-marker=", marked), func(t *testing.T) {
+			c, git := managedWorktree(t, "https://bitbucket.org/example-ws/docs.git")
+			message := "First change"
+			if marked {
+				message += "\n\nOpenClaw-Publication: first"
+			}
+			git("commit", "--allow-empty", "-qm", message)
+			git("commit", "--allow-empty", "-qm", "Second change")
+			ref := "refs/remotes/origin/" + c.Branch()
+			git("update-ref", ref, "HEAD")
+			s := CheckoutsStatus([]string{c.Dir}, false).Repos[0]
+			if !s.Published || s.Unpublished != 0 || s.Ahead != 2 || s.Next != nil && s.Next.Step == "push" {
+				t.Fatalf("pushed commits still offered for publication: %+v", s)
+			}
+			git("commit", "--allow-empty", "-qm", "New local change")
+			s = CheckoutsStatus([]string{c.Dir}, false).Repos[0]
+			if s.Unpublished != 1 || s.Next == nil || s.Next.Step != "push" {
+				t.Fatalf("only the new local commit needs publication: %+v", s)
+			}
+		})
 	}
 }
 
