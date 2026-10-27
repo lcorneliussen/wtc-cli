@@ -1275,11 +1275,11 @@ function mountComposer(container, context) {
       brand("14px", entry.data.version),
       css(el("span", {}, ...(card.open ? [] : [...tables.totals(repos, groups), tables.nextSummary(repos)])), "flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding-left:6px"),
       // What an action is doing or why it failed shows here.
-      css(el("span", {}, note ? noteNode(note, noteFailed, "max-width:22em;overflow:hidden;text-overflow:ellipsis") : null,
+      css(el("span", {}, note ? noteNode(note, noteFailed, "min-width:0;max-width:22em;overflow:hidden;text-overflow:ellipsis") : null,
         iconButton("↻", `Updated ${ago(entry.at)}. Refresh`, () => void watch?.refresh()),
         iconButton("⤢", "Open the wtc Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
         css(el("span", { textContent: card.open ? "⌃" : "⌄" }), "color:var(--muted, #888);padding:0 6px")),
-      "flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
+      "flex:0 1 auto;min-width:0;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
     );
     tables.checkAccount(repos);
     detail.replaceChildren(...[tables.repoTable(repos, narrow, entry.data.subSessions),
