@@ -372,3 +372,21 @@ func TestSandboxUnsupportedHarnessIsContained(t *testing.T) {
 		t.Fatalf("unsupported harness: %+v", project)
 	}
 }
+
+func TestSandboxSchemeLessHarnessFailureIsContained(t *testing.T) {
+	_, _ = harnessGateway(t)
+	withGatewayConfig(t, `{"harnesses":[{"name":"platform","remote":"https://github.com/example-org/platform-harness"},{"name":"bare","remote":"github.com:example-org/ops-harness"}]}`)
+	projects, err := localGatewayProjects([]string{"platform", "bare"}, "")
+	if err != nil || len(projects) != 2 || projects[0].Error != "" || len(projects[0].Repos) != 2 || projects[1].Error == "" {
+		t.Fatalf("per-project containment: %+v %v", projects, err)
+	}
+	body, err := json.Marshal(openclaw.SandboxProjects{Projects: projects})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandboxMetadataServer(t, http.StatusOK, string(body))
+	metadata, err := openclaw.GatewayFromEnv(os.Getenv).Projects()
+	if err != nil || len(metadata.Projects) != 2 || metadata.Projects[0].Error != "" {
+		t.Fatalf("one unavailable harness broke the full listing: %+v %v", metadata, err)
+	}
+}

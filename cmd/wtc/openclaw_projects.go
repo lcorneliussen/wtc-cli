@@ -61,7 +61,7 @@ func localGatewayProjects(allowed []string, worktree string) ([]gatewayProject, 
 func sandboxProjectMetadata(p gatewayProject, h openclaw.Harness, reg harnessRegistry, worktree string) gatewayProject {
 	var err error
 	p.Harness, err = projectMetadataRemote(h.Remote)
-	if err != nil {
+	if err != nil || p.Harness == "" {
 		p.Error = "project harness metadata unavailable on the gateway"
 		p.Repos = []gatewayProjectRepo{}
 		return p
