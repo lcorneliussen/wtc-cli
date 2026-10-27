@@ -1,6 +1,7 @@
 package wtc
 
 import (
+	"encoding/json"
 	"fmt"
 	"golang.org/x/sys/unix"
 	"io"
@@ -62,6 +63,88 @@ func runtimeToolsSkip(t *testing.T, reason string) {
 		t.Fatal(reason)
 	}
 	t.Skip(reason)
+}
+
+func TestDekitRuntimeConfigReload(t *testing.T) {
+	binary := os.Getenv("WTC_TEST_DEKIT")
+	if binary == "" {
+		runtimeToolsSkip(t, "set WTC_TEST_DEKIT to run the native configuration reload contract")
+	}
+	binary, err := filepath.Abs(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := runtimeFixture(t)
+	c.Config.Runtime.Binary = binary
+	t.Cleanup(func() {
+		if err := c.RetireRuntime(); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+	})
+	fragment := filepath.Join(c.Collection, "widget/.harness/dekit.tasks.yaml")
+	definition := func(version string, extra bool) string {
+		body := fmt.Sprintf(`tasks:
+ web/server:
+  cmd: [sh, -c, 'echo %s; echo SERVER_READY; exec sleep 60']
+  autostart: true
+  ready: {log: SERVER_READY, timeout: 3s}
+`, version)
+		if extra {
+			body += ` web/extra:
+  cmd: [sh, -c, 'echo EXTRA_READY; exec sleep 60']
+  autostart: true
+  ready: {log: EXTRA_READY, timeout: 3s}
+`
+		}
+		return body
+	}
+	up := func(body string, wantExtra bool) {
+		t.Helper()
+		fixtureFile(t, fragment, body, 0644)
+		if _, err := c.RuntimeAction("up", "widget/web", 5*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		m, err := c.runtimeManifest()
+		if err != nil || m == nil {
+			t.Fatalf("runtime manifest: %v", err)
+		}
+		data, err := runtimeCommand(m, false, "ls")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var native struct {
+			Tasks []RuntimeItem `json:"tasks"`
+		}
+		if err := json.Unmarshal(data, &native); err != nil {
+			t.Fatal(err)
+		}
+		seen := map[string]string{}
+		for _, item := range native.Tasks {
+			seen[item.Path] = item.State
+		}
+		if seen["widget/web/server"] != "ready" || (seen["widget/web/extra"] == "ready") != wantExtra {
+			t.Fatalf("unexpected tasks after importing configuration: %+v", seen)
+		}
+		if !wantExtra && seen["widget/web/extra"] != "" {
+			t.Fatalf("removed task remains in runner: %+v", seen)
+		}
+	}
+	up(definition("VERSION_ONE", false), false)
+	up(definition("VERSION_ONE", true), true)
+	up(definition("VERSION_TWO", true), true)
+	logPath, err := c.RuntimeLogPath("widget/web/server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil || !strings.Contains(string(log), "VERSION_TWO") {
+		t.Fatalf("running task did not take its new definition: %q, %v", log, err)
+	}
+	up(definition("VERSION_TWO", false), false)
+	if _, err := c.RuntimeAction("down", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	up(definition("VERSION_TWO", true), true)
 }
 
 // Run explicitly against the pinned upstream release, without replacing a host

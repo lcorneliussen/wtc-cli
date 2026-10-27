@@ -439,7 +439,7 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 				}
 			}
 			reload = func() error {
-				if _, err := runtimeCommand(m, false, "runner", "restart"); err != nil {
+				if err := runtimeReloadConfig(m); err != nil {
 					return err
 				}
 				for _, task := range old.Tasks {
@@ -496,6 +496,15 @@ func (c *Context) renderRuntime() (*runtimeManifest, error) {
 		}
 	}
 	return m, nil
+}
+
+func runtimeReloadConfig(m *runtimeManifest) error {
+	_, err := runtimeCommand(m, false, "reload", "--yes")
+	if err != nil && strings.Contains(err.Error(), "unknown command or unsupported file: `reload`") {
+		// Dekit 0.10.0 imports configuration by restarting its runner.
+		_, err = runtimeCommand(m, false, "runner", "restart")
+	}
+	return err
 }
 
 func runtimeSaveManifest(m *runtimeManifest) error {
