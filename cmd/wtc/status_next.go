@@ -404,8 +404,8 @@ func statusNextPendingKey(r wtc.StatusRepo) string {
 	return statusNextIdentity(r) + ":" + key
 }
 
-// Local edits and catch-up need no second click. Publication retains a preview
-// and its host authority checks; following steps never inherit that authority.
+// Person-approved operations and pushes keep a preview. Catch-up, local work
+// and handoffs run directly; Then hints never grant follow-up authority.
 func statusNextConfirmTargets(targets []wtc.StatusRepo) bool {
 	for _, r := range targets {
 		if r.Next.Approve == next.ApprovePerson || r.Next.Step == "push" {

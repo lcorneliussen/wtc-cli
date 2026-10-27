@@ -1245,7 +1245,7 @@ const clickText = async (host, text) => {
   for (let i = 0; i < 6; i++) await settle();
 };
 
-test("selected mixed actions preview exact alternatives and combine author handoffs", async () => {
+test("selected mixed actions retain alternatives and combine author handoffs", async () => {
   for (const kind of ["composer", "panel"]) {
     const api = withChoices("api"), web = withChoices("web", "address-review");
     const { host, view } = await mount(kind, collection([api, web]));
@@ -1402,6 +1402,21 @@ test("catch-up selections dispatch on one click without redundant single-choice 
    assert.equal(buttons(host).some(b=>/^Confirm /.test(b)),false);
    assert.match(host.textContent,/Completed/);
    assert.equal(calls.filter(c=>c.method==="sessions.send").length,0,"a person's catch-up click can run the mechanical action directly");
+  }finally{view.dispose();nextResult=undefined;}
+ }
+});
+
+
+test("manual catch-up with alternatives promises Run rather than an agent handoff", async () => {
+ for(const kind of ["composer","panel"]){
+  const step={step:"catch-up",by:"wtc",approve:"agent",command:["wtc","catch-up"],key:"catchup:h1",reason:"Merge the current base cleanly"};
+  const r=repo("api",{next:step,choices:{recommended:step.key,actions:[{...step,available:true},{step:"follow-pr",by:"agent",skill:"wtc-follow",key:"follow:h1",available:true}]}});
+  const {host,view}=await mount(kind,collection([r]));
+  try{
+   assert.ok(buttons(host).includes("Run"));assert.equal(buttons(host).includes("Ask agent"),false);
+   nextResult={ok:true,result:{performed:true,repo:r,code:0}};calls.length=0;await clickText(host,"Run");
+   assert.equal(calls.find(c=>c.actionId==="next").payload.approveCatchUp,true);
+   assert.equal(calls.some(c=>c.method==="sessions.send"),false);
   }finally{view.dispose();nextResult=undefined;}
  }
 });

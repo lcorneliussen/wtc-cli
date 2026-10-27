@@ -750,7 +750,7 @@ function collectionTables(v) {
       const hasAlternatives = r.choices && available.length > 1;
       const action = route === "pr" && r.pullRequest?.url
         ? link(nextLabel(step), r.pullRequest.url)
-        : control(hasAlternatives ? (route === "agent" ? "Ask agent" : "Run") : commit ? "Commit changes" : nextLabel(step), step.reason, () => commit ? askCommit(r) : actNext({ ...r, next: step }));
+        : control(hasAlternatives ? (route === "agent" && !nextPayload(r, step).approveCatchUp ? "Ask agent" : "Run") : commit ? "Commit changes" : nextLabel(step), step.reason, () => commit ? askCommit(r) : actNext({ ...r, next: step }));
       if (action.tagName === "BUTTON") action.disabled = !!stale || dispatched.has(handoffKey(r, step)) || batchRunning || !route || route === "pr" || acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey);
       if (action.disabled) { action.style.opacity = ".45"; action.style.cursor = "default"; }
       const check = r.choices ? el("input", { type: "checkbox", checked: !!picked, disabled: batchRunning || reserved(r), ariaLabel: `Select ${nameOf(r)}` }) : null;

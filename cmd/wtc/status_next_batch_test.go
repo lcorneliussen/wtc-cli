@@ -227,6 +227,16 @@ func TestStatusNextCatchUpNeedsOneClick(t *testing.T) {
 	if _, ok := statusNextCommand(r, true); !ok {
 		t.Fatal("explicit catch-up needs no second approval")
 	}
+	for _, invalid := range []struct{ step, approval string }{{"catch-up", next.ApprovePerson}, {"merge", next.ApproveAgent}} {
+		rejected := r
+		step := *r.Next
+		step.Step = invalid.step
+		step.Approve = invalid.approval
+		rejected.Next = &step
+		if _, ok := statusNextCommand(rejected, true); ok {
+			t.Fatalf("interactive selection bypassed %s/%s", invalid.step, invalid.approval)
+		}
+	}
 	if _, ok := statusNextCommand(r); ok {
 		t.Fatal("implicit callers must retain the agent gate")
 	}

@@ -377,7 +377,6 @@ alternative is disabled with an adapter requirement. Shared claims, review slots
 persisted continuation and coordinated PR sets remain in subsequent slices.
 The fixture exporter now includes actual choices and the compatibility projection.
 
-
 ### Interaction refinement
 
 The visible checked rows are the selection preview for non-destructive local
