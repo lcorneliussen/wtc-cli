@@ -201,12 +201,13 @@ func statusFetchShared(kind, forge, slug, key string, fetch func() ([]byte, erro
 			return data, false, nil
 		}
 	}
+	started := time.Now()
 	raw, live, err := statusWithForgeBudget(forge, stale, fetch)
 	if err != nil {
 		return nil, false, err
 	}
 	if live {
-		statusWriteForgeEntry(kind, forge, slug, key, raw)
+		statusWriteForgeEntrySince(kind, forge, slug, key, raw, started)
 	}
 	return raw, live, nil
 }

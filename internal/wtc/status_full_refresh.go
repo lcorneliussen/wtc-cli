@@ -162,6 +162,7 @@ func statusConfirmFullPRLocked(record PRRecord, slug, forge string, incremental 
 		}
 		return incremental
 	}
+	started := time.Now()
 	raw, err := statusFetchPRRaw(record, slug, forge)
 	if err != nil || len(raw) == 0 {
 		return incremental
@@ -173,7 +174,7 @@ func statusConfirmFullPRLocked(record PRRecord, slug, forge string, incremental 
 	if forge == "bitbucket.org" {
 		full = statusBBCompleteMergeTime(full, slug)
 	}
-	statusWriteForgeCache(forge, slug, record.Number, raw)
+	statusWriteForgeEntrySince("pr", forge, slug, record.Number, raw, started)
 	statusMarkFullRefresh(forge, slug, record.Number)
 	statusLogIncrementalMiss(forge, slug, "#"+record.Number, source, statusPRDetailDiff(incremental, full))
 	return full
@@ -202,6 +203,7 @@ func statusConfirmFullBuild(slug, branch string, incremental *StatusBuild, sourc
 	if statusForgeCooling("bitbucket.org") || !statusTakeForgeToken("bitbucket.org") {
 		return fallback
 	}
+	started := time.Now()
 	raw, err := statusBBPipelines(parts[0], parts[1], branch, user, pass)
 	if err != nil {
 		if statusRateLimited(err) {
@@ -213,7 +215,7 @@ func statusConfirmFullBuild(slug, branch string, incremental *StatusBuild, sourc
 	if parseErr != nil {
 		return fallback
 	}
-	statusWriteForgeEntry("build", "bitbucket.org", slug, branch, raw)
+	statusWriteForgeEntrySince("build", "bitbucket.org", slug, branch, raw, started)
 	statusWriteForgeEntry("full", "bitbucket.org", slug, "build:"+branch, []byte(statusBuildFingerprint(incremental)))
 	statusLogIncrementalMiss("bitbucket.org", slug, branch, source, statusBuildDiff(incremental, full))
 	return full

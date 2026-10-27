@@ -225,10 +225,11 @@ func statusViewPR(record PRRecord, slug, forge string, bypassCache bool) statusP
 			}
 		}
 		stale, _ := statusReadForgeEntryAny("pr", forge, slug, record.Number)
+		started := time.Now()
 		var live bool
 		raw, live, err = statusWithForgeBudget(forge, stale, fetch)
 		if live && len(raw) > 0 {
-			statusWriteForgeCache(forge, slug, record.Number, raw)
+			statusWriteForgeEntrySince("pr", forge, slug, record.Number, raw, started)
 			statusWriteForgeEntry("omit", forge, slug, record.Number, []byte("ok"))
 		}
 	} else {

@@ -475,3 +475,45 @@ func statusReadAuditLog(t *testing.T) string {
 	}
 	return string(data)
 }
+
+func TestStatusOlderListDoesNotReplaceANewerPullRequest(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	slug, forge := "example/widget", "github.com"
+	record := PRRecord{Number: "7"}
+	audited := []byte(`{"number":7,"state":"OPEN","title":"Listed","statusCheckRollup":[{"conclusion":"FAILURE","status":"COMPLETED"}]}`)
+	listed := []byte(`{"number":7,"state":"OPEN","title":"Listed","statusCheckRollup":[{"conclusion":"SUCCESS","status":"COMPLETED"}]}`)
+	auditStarted := time.Now()
+	statusWriteForgeEntrySince("pr", forge, slug, record.Number, audited, auditStarted)
+
+	older := statusOpenPR{Number: "7", Fingerprint: "old", Raw: listed, Started: auditStarted.Add(-time.Minute)}
+	detail, used, _ := statusDetailFromOpenItem(record, slug, forge, older)
+	if !used || detail.Checks != "FAILURE" {
+		t.Fatalf("older list replaced the audit: used=%v detail=%+v", used, detail)
+	}
+	if saved, _ := statusReadForgeEntryAny("pr", forge, slug, record.Number); string(saved) != string(audited) {
+		t.Fatalf("saved body = %s", saved)
+	}
+
+	newer := statusOpenPR{Number: "7", Fingerprint: "new", Raw: listed, Started: auditStarted.Add(time.Second)}
+	if detail, _, _ := statusDetailFromOpenItem(record, slug, forge, newer); detail.Checks != "SUCCESS" {
+		t.Fatalf("newer list was not published: %+v", detail)
+	}
+}
+
+func TestStatusOlderPipelinePageDoesNotReplaceANewerBuild(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	slug := "team/widget"
+	audited := []byte(`{"values":[{"build_number":13,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"bbbbbbb"}}}]}`)
+	page := []byte(`{"values":[{"build_number":12,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"aaaaaaa"}}}]}`)
+	auditStarted := time.Now()
+	statusWriteForgeEntrySince("build", "bitbucket.org", slug, "main", audited, auditStarted)
+
+	statusSaveLivePipelinePage(slug, page, auditStarted.Add(-time.Second))
+	if saved, _ := statusReadForgeEntryAny("build", "bitbucket.org", slug, "main"); string(saved) != string(audited) {
+		t.Fatalf("older page replaced the audited build: %s", saved)
+	}
+	statusSaveLivePipelinePage(slug, page, auditStarted.Add(time.Second))
+	if saved, _ := statusReadForgeEntryAny("build", "bitbucket.org", slug, "main"); string(saved) != string(page) {
+		t.Fatalf("newer page was not saved: %s", saved)
+	}
+}

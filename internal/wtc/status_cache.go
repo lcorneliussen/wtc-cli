@@ -87,6 +87,24 @@ func statusWriteForgeCache(forge, slug, number string, data []byte) {
 	statusWriteForgeEntry("pr", forge, slug, number, data)
 }
 
+// statusWriteForgeEntrySince publishes data fetched by a request that started
+// at started, unless the record already holds a response from a later request.
+// Callers hold the record lock.
+func statusWriteForgeEntrySince(kind, forge, slug, key string, data []byte, started time.Time) bool {
+	if len(data) == 0 {
+		return false
+	}
+	since := kind + ":" + key
+	if saved, ok := statusReadForgeEntryAny("since", forge, slug, since); ok {
+		if nanos, err := strconv.ParseInt(string(saved), 10, 64); err == nil && nanos > started.UnixNano() {
+			return false
+		}
+	}
+	statusWriteForgeEntry(kind, forge, slug, key, data)
+	statusWriteForgeEntry("since", forge, slug, since, []byte(strconv.FormatInt(started.UnixNano(), 10)))
+	return true
+}
+
 func statusWriteForgeEntry(kind, forge, slug, key string, data []byte) {
 	if len(data) == 0 {
 		return

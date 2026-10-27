@@ -128,14 +128,16 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 	if user == "" || pass == "" {
 		return nil, fmt.Errorf("no Bitbucket API credentials (log in with bb, or set BB_USERNAME and BB_API_TOKEN)")
 	}
+	var started time.Time
 	raw, live, err := statusFetchShared("pipelines", "bitbucket.org", slug, "recent", func() ([]byte, error) {
+		started = time.Now()
 		return statusBBPipelines(parts[0], parts[1], "", user, pass)
 	})
 	if err != nil {
 		return nil, err
 	}
 	if live {
-		statusSaveLivePipelinePage(slug, raw)
+		statusSaveLivePipelinePage(slug, raw, started)
 	}
 	build, err := statusParseBBBuild(raw, slug, branch)
 	if err != nil {
@@ -204,12 +206,12 @@ func statusBBPipelines(workspace, repo, branch, user, pass string) ([]byte, erro
 	return raw, nil
 }
 
-func statusSaveLivePipelinePage(slug string, raw []byte) {
+func statusSaveLivePipelinePage(slug string, raw []byte, started time.Time) {
 	for _, branch := range statusPipelinePageBranches(raw) {
 		unlock, lockErr := statusLockCache(statusForgeEntryPath("build", "bitbucket.org", slug, branch))
 		build, err := statusParseBBBuild(raw, slug, branch)
 		if err == nil && build != nil && !statusPageAuditApplies(slug, branch, build) {
-			statusWriteForgeEntry("build", "bitbucket.org", slug, branch, raw)
+			statusWriteForgeEntrySince("build", "bitbucket.org", slug, branch, raw, started)
 		}
 		if lockErr == nil {
 			unlock()

@@ -21,6 +21,7 @@ type statusOpenPR struct {
 	Branch      string          `json:"branch"`
 	Fingerprint string          `json:"fingerprint"`
 	Raw         json.RawMessage `json:"raw"`
+	Started     time.Time       `json:"-"`
 }
 
 func statusOpenPRs(forge, slug string) (map[string]statusOpenPR, bool, error) {
@@ -37,35 +38,38 @@ func statusOpenPRs(forge, slug string) (map[string]statusOpenPR, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	list, truncated, err := statusParseOpenPRs(raw)
+	list, truncated, started, err := statusParseOpenPRs(raw)
 	if err != nil {
 		return nil, false, err
 	}
 	byNumber := make(map[string]statusOpenPR, len(list))
 	for _, pr := range list {
 		if pr.Number != "" {
+			pr.Started = started
 			byNumber[pr.Number] = pr
 		}
 	}
 	return byNumber, truncated, nil
 }
 
-func statusParseOpenPRs(raw []byte) ([]statusOpenPR, bool, error) {
+func statusParseOpenPRs(raw []byte) ([]statusOpenPR, bool, time.Time, error) {
 	var body struct {
 		PRs       []statusOpenPR `json:"prs"`
 		Truncated bool           `json:"truncated"`
+		Started   int64          `json:"started"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
-		return nil, false, err
+		return nil, false, time.Time{}, err
 	}
-	return body.PRs, body.Truncated, nil
+	return body.PRs, body.Truncated, time.Unix(0, body.Started), nil
 }
 
-func statusEncodeOpenPRs(prs []statusOpenPR, truncated bool) ([]byte, error) {
+func statusEncodeOpenPRs(prs []statusOpenPR, truncated bool, started time.Time) ([]byte, error) {
 	return json.Marshal(struct {
 		PRs       []statusOpenPR `json:"prs"`
 		Truncated bool           `json:"truncated"`
-	}{PRs: prs, Truncated: truncated})
+		Started   int64          `json:"started"`
+	}{PRs: prs, Truncated: truncated, Started: started.UnixNano()})
 }
 
 var statusBeforeOpenPublish func()
@@ -85,7 +89,12 @@ func statusDetailFromOpenItem(record PRRecord, slug, forge string, item statusOp
 	if statusBeforeOpenPublish != nil {
 		statusBeforeOpenPublish()
 	}
-	statusWriteForgeCache(forge, slug, record.Number, item.Raw)
+	if !statusWriteForgeEntrySince("pr", forge, slug, record.Number, item.Raw, item.Started) {
+		if cached, ok := statusReadCachedDetail(record, slug, forge); ok {
+			statusWriteForgeEntry("stamp", forge, slug, record.Number, []byte(item.Fingerprint))
+			return cached, true, true
+		}
+	}
 	statusWriteForgeEntry("stamp", forge, slug, record.Number, []byte(item.Fingerprint))
 	return detail, true, false
 }
@@ -138,6 +147,7 @@ func (p statusGHListItem) fingerprint() string {
 }
 
 func statusFetchGHOpenList(slug string) ([]byte, error) {
+	started := time.Now()
 	raw, err := statusJSON("gh", "pr", "list", "--repo", slug, "--state", "open", "--limit", strconv.Itoa(statusOpenListLimit), "--json", statusGHOpenFields)
 	if err != nil {
 		return nil, err
@@ -159,7 +169,7 @@ func statusFetchGHOpenList(slug string) ([]byte, error) {
 			Raw:         rawItem,
 		})
 	}
-	return statusEncodeOpenPRs(prs, len(items) >= statusOpenListLimit)
+	return statusEncodeOpenPRs(prs, len(items) >= statusOpenListLimit, started)
 }
 
 type statusBBListItem struct {
@@ -210,6 +220,7 @@ func (p statusBBListItem) fingerprint() string {
 }
 
 func statusFetchBBOpenList(slug string) ([]byte, error) {
+	started := time.Now()
 	user, pass := bitbucketCredentials()
 	if user == "" || pass == "" {
 		return nil, fmt.Errorf("no Bitbucket API credentials")
@@ -278,7 +289,7 @@ func statusFetchBBOpenList(slug string) ([]byte, error) {
 			Raw:         rawItem,
 		})
 	}
-	return statusEncodeOpenPRs(prs, truncated)
+	return statusEncodeOpenPRs(prs, truncated, started)
 }
 
 func statusFetchBBBranch(slug, branch string) ([]byte, error) {
