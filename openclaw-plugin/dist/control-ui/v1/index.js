@@ -138,17 +138,27 @@ async function publishBitbucket(host, agentId, r, say, dest, mayDispatch = () =>
   if (!mayDispatch()) return { cancelled: true };
   const name = r.repo ?? r.project;
   say(`Asking to push ${name}…`);
-  // Its publish takes a title, not yet a description. Its rows carry no
-  // pull request, so the title goes with every push; the Bitbucket plugin
-  // uses it only when it creates the pull request.
-  const title = proposalOf(r)?.title;
-  const out = await bitbucketAction(host, agentId, r, "publish", { draft: true, ...(dest ? { dest } : {}), ...(title ? { title } : {}) });
+  // Its rows carry no pull request, so proposed text accompanies every push;
+  // the publisher uses it only when creating a pull request.
+  const proposal = proposalOf(r);
+  let out;
+  try {
+    out = await bitbucketAction(host, agentId, r, "publish", { draft: true, ...(dest ? { dest } : {}), ...(proposal?.title ? { title: proposal.title } : {}), ...(proposal?.body ? { description: proposal.body } : {}) });
+  } catch (err) {
+    if (proposal?.body && /payload.*schema|additional propert/i.test(String(err?.message ?? err))) {
+      throw new Error("Publishing the proposed description requires Bitbucket plugin 0.3.4 or later. Upgrade it and try again; nothing was published.");
+    }
+    throw err;
+  }
   if (out?.status === "not_connected") {
     say(`${name}: ${CONNECT.bitbucket}.`);
     return { connect: true };
   }
   const c = out?.confirmation;
   if (out?.status !== "needs_confirmation" || !c) { say(`${name}: ${out?.status ?? "no answer"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${out.message}` : ""}`, true); return null; }
+  if (proposal?.body && c.description !== proposal.body) {
+    throw new Error("The publisher did not confirm the proposed description. Upgrade to Bitbucket plugin 0.3.4 or later and try again; nothing was published.");
+  }
   const left = c.uncommitted ? `; ${plural(c.uncommitted, "uncommitted file")} stay behind` : "";
   say(`${name}: confirm to push ${c.branch} (${String(c.head).slice(0, 7)}) to ${c.dest} as ${bitbucketAccount(c)}${left}.`);
   return { forge: BITBUCKET, requestId: out.requestId, confirmation: c };
@@ -365,10 +375,9 @@ const proposalOf = (r) => (r.pullRequest ? null : r.proposal?.title || r.proposa
 const proposalTitle = (r) => {
   if (r.pullRequest) return "";
   const p = proposalOf(r);
-  // Bitbucket's publish takes a title, not yet a description.
-  const body = r.forge !== BITBUCKET && p?.body;
+  const body = p?.body;
   if (!p?.title && !body) return " The agent proposed no title or description: ask it to run wtc publish with them, or the pull request opens as \"Publish <branch>\".";
-  return p.title ? ` Title: "${p.title}"${body ? ", with the agent's description" : ""}.` : " With the agent's description.";
+  return p.title ? ` Title: "${p.title}"${body ? ", with the agent's description" : r.forge === BITBUCKET ? ", without a proposed description" : ""}.` : " With the agent's description.";
 };
 
 // Services. wtc svc starts, stops and restarts them (one, or all without a
@@ -1049,7 +1058,9 @@ function collectionTables(v) {
     const pending = confirming.get(r.sessionKey);
     if (pending) {
       const as = pending.forge === BITBUCKET ? bitbucketAccount(pending.confirmation) : `@${pending.confirmation.account?.login ?? "you"}`;
-      return count(`confirm ${label}`, `${r.forge !== BITBUCKET && r.dirty ? "Commit pending changes and publish" : `Push ${what} of`} ${nameOf(r)} as ${as}`, TONE.success, () => publish(r));
+      const text = pending.forge === BITBUCKET && pending.confirmation.description
+        ? `\nNew PR description:\n${pending.confirmation.description}\nUsed only when creating a PR; existing PR text is kept.` : "";
+      return count(`confirm ${label}`, `${r.forge !== BITBUCKET && r.dirty ? "Commit pending changes and publish" : `Push ${what} of`} ${nameOf(r)} as ${as}${text}`, TONE.success, () => publish(r));
     }
     // Bitbucket publishes commits only; files not committed stay behind.
     const left = r.forge === BITBUCKET && r.dirty ? ` Uncommitted files stay behind: ask the conversation to commit them first.` : "";

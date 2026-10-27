@@ -89,7 +89,11 @@ the card's ↑ hands them to `sessions.github.publish` and shows the title
 before the push. The gateway's limits apply: one line of at most 256
 characters, a description of at most 8192. The gateway uses them only when it
 opens the pull request. Without a proposal, it opens as "Publish
-openclaw/<name>". Bitbucket's publish takes the title only.
+openclaw/<name>". Bitbucket plugin 0.3.4 or later takes the proposed title and
+description when creating a PR and includes the description in its confirmation.
+If an older publisher cannot confirm the description, the card requests an
+upgrade instead of silently omitting it. Pushes to an existing PR preserve its
+title and description.
 
 ## Pull request news in the conversation
 
@@ -558,7 +562,7 @@ instead. An agent asked to set wtc up starts with `wtc docs setup.md`.
 4. **Bitbucket**, if repositories live there:
 
    ```sh
-   openclaw plugins install git:github.com/lcorneliussen/openclaw-bitbucket@v0.3.0 --accept-capabilities
+   openclaw plugins install git:github.com/lcorneliussen/openclaw-bitbucket@v0.3.4 --accept-capabilities
    openclaw config set plugins.entries.bitbucket.config.execLogin false
    ```
 
