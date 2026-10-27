@@ -104,7 +104,7 @@ func TestStatusBitbucketBuildIsCachedAndARateLimitKeepsIt(t *testing.T) {
 		t.Fatalf("cached build = %+v, %v, hits %d", second, err, hits)
 	}
 	past := time.Now().Add(-2 * time.Second)
-	if err := os.Chtimes(statusForgeEntryPath("build", "bitbucket.org", "team/widget", "main"), past, past); err != nil {
+	if err := os.Chtimes(statusForgeEntryPath("pipelines", "bitbucket.org", "team/widget", "recent"), past, past); err != nil {
 		t.Fatal(err)
 	}
 	kept, err := statusBBBuild("team/widget", "main")

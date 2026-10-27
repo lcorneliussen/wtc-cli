@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStatusParseGHBuildUsesRollupAndWorkflowRun(t *testing.T) {
@@ -53,12 +54,71 @@ func TestStatusBBBuildReadsNewestBranchPipeline(t *testing.T) {
 	if err != nil || build == nil {
 		t.Fatalf("build = %+v, %v", build, err)
 	}
-	if gotUser != "builder" || !strings.Contains(gotPath, "/repositories/team/widget/pipelines/") || !strings.Contains(gotPath, "target.ref_name=main") {
+	if gotUser != "builder" || !strings.Contains(gotPath, "/repositories/team/widget/pipelines/") || strings.Contains(gotPath, "target.ref_name=") {
 		t.Fatalf("unexpected request %q as %q", gotPath, gotUser)
 	}
 	if *build.Build != "11" || *build.Checks != "SUCCESS" || *build.SHA != "bbbbbbb" ||
 		*build.URL != "https://bitbucket.org/team/widget/pipelines/results/11" {
 		t.Fatalf("custom pipelines must not stand in for the branch build: %+v", build)
+	}
+}
+
+func TestStatusBBBuildSharesOnePipelinePage(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Query().Get("target.ref_name") != "" {
+			t.Errorf("branch filter on a page that already lists both branches: %s", r.URL.RawQuery)
+		}
+		w.Write([]byte(`{"values":[
+			{"build_number":11,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"bbbbbbb"}}},
+			{"build_number":4,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"other","selector":{"type":"branches"},"commit":{"hash":"ccccccc"}}}]}`))
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	mainBuild, err := statusBBBuild("team/widget", "main")
+	other, otherErr := statusBBBuild("team/widget", "other")
+	if err != nil || otherErr != nil || mainBuild == nil || other == nil || *mainBuild.Build != "11" || *other.Build != "4" || hits != 1 {
+		t.Fatalf("main=%+v other=%+v hits=%d err=%v %v", mainBuild, other, hits, err, otherErr)
+	}
+}
+
+func TestStatusBBBuildKeepsASavedBranchTheRecentPageOmits(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	hits, targeted := 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Query().Get("target.ref_name") == "main" {
+			targeted++
+			w.Write([]byte(`{"values":[{"build_number":11,"state":{"name":"COMPLETED","result":{"name":"SUCCESSFUL"}},"target":{"ref_name":"main","selector":{"type":"branches"},"commit":{"hash":"bbbbbbb"}}}]}`))
+			return
+		}
+		w.Write([]byte(`{"values":[{"build_number":4,"state":{"name":"COMPLETED","result":{"name":"FAILED"}},"target":{"ref_name":"other","selector":{"type":"branches"},"commit":{"hash":"ccccccc"}}}]}`))
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	first, err := statusBBBuild("team/widget", "main")
+	if err != nil || first == nil || *first.Build != "11" || hits != 2 || targeted != 1 {
+		t.Fatalf("first lookup = %+v hits=%d targeted=%d err=%v", first, hits, targeted, err)
+	}
+	past := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(statusForgeEntryPath("pipelines", "bitbucket.org", "team/widget", "recent"), past, past); err != nil {
+		t.Fatal(err)
+	}
+	second, err := statusBBBuild("team/widget", "main")
+	if err != nil || second == nil || *second.Build != "11" || hits != 3 || targeted != 1 {
+		t.Fatalf("saved branch was fetched again: %+v hits=%d targeted=%d err=%v", second, hits, targeted, err)
 	}
 }
 

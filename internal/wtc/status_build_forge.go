@@ -128,7 +128,22 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 	if user == "" || pass == "" {
 		return nil, fmt.Errorf("no Bitbucket API credentials (log in with bb, or set BB_USERNAME and BB_API_TOKEN)")
 	}
-	raw, err := statusSingleFlight("build", "bitbucket.org", slug, branch, func() ([]byte, error) {
+	// One recent page covers every branch. A newer run for this branch is on
+	// that page; an older saved lookup stays current when the branch is absent.
+	raw, err := statusSingleFlight("pipelines", "bitbucket.org", slug, "recent", func() ([]byte, error) {
+		return statusBBPipelines(parts[0], parts[1], "", user, pass)
+	})
+	if err != nil {
+		return nil, err
+	}
+	build, err := statusParseBBBuild(raw, slug, branch)
+	if err != nil || build != nil {
+		return build, err
+	}
+	if saved, ok := statusReadForgeEntryAny("build", "bitbucket.org", slug, branch); ok {
+		return statusParseBBBuild(saved, slug, branch)
+	}
+	raw, err = statusSingleFlight("build", "bitbucket.org", slug, branch, func() ([]byte, error) {
 		return statusBBPipelines(parts[0], parts[1], branch, user, pass)
 	})
 	if err != nil {
@@ -138,7 +153,10 @@ func statusBBBuild(slug, branch string) (*StatusBuild, error) {
 }
 
 func statusBBPipelines(workspace, repo, branch, user, pass string) ([]byte, error) {
-	query := url.Values{"sort": {"-created_on"}, "pagelen": {"30"}, "target.ref_name": {branch}}
+	query := url.Values{"sort": {"-created_on"}, "pagelen": {"30"}}
+	if branch != "" {
+		query.Set("target.ref_name", branch)
+	}
 	endpoint := statusBBAPI + "/repositories/" + url.PathEscape(workspace) + "/" + url.PathEscape(repo) + "/pipelines/?" + query.Encode()
 	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {

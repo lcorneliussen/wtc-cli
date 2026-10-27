@@ -2,6 +2,8 @@ package wtc
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,28 +63,41 @@ esac
 	if cached := statusEnrichRecord(PRRecord{Number: number}, "example/widget", "github.com"); cached.State != "OPEN" {
 		t.Fatalf("valid detail cache missed: %+v", cached)
 	}
-	if _, err := statusDiscoverBranch("github.com", "example/widget", "different"); err == nil {
+	if number, err := statusDiscoverBranch("github.com", "example/widget", "different"); err != nil || number != "" {
+		t.Fatalf("branch absent from a successful list: %q %v", number, err)
+	}
+	if _, err := statusDiscoverBranch("github.com", "example/other", "topic"); err == nil {
 		t.Fatal("failed discovery was treated as a negative result")
 	}
 }
 
 func TestStatusBitbucketDiscoveryReadsPastFirstPage(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	bin := t.TempDir()
-	items := make([]string, 50)
-	for i := range items {
-		items[i] = fmt.Sprintf(`{"id":%d,"source":{"branch":{"name":"other-%d"}}}`, i+1, i)
-	}
-	first := `{"pullRequests":[` + strings.Join(items, ",") + `]}`
-	last := `{"pullRequests":[{"id":99,"source":{"branch":{"name":"topic"}}}]}`
-	script := "#!/bin/sh\ncase \"$*\" in\n  *2147483647*) printf '%s\\n' '" + last + "' ;;\n  *) printf '%s\\n' '" + first + "' ;;\nesac\n"
-	if err := os.WriteFile(filepath.Join(bin, "bb"), []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BB_USERNAME", "builder")
+	t.Setenv("BB_API_TOKEN", "token")
+	var sawFields bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Query().Get("fields"), "updated_on") && strings.Contains(r.URL.Query().Get("fields"), "comment_count") {
+			sawFields = true
+		}
+		if r.URL.Query().Get("page") == "2" {
+			w.Write([]byte(`{"values":[{"id":99,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"topic"}}}]}`))
+			return
+		}
+		items := make([]string, 50)
+		for i := range items {
+			items[i] = fmt.Sprintf(`{"id":%d,"state":"OPEN","updated_on":"2026-10-01T00:00:00Z","source":{"branch":{"name":"other-%d"}}}`, i+1, i)
+		}
+		fmt.Fprintf(w, `{"values":[%s],"next":"http://%s%s?page=2"}`, strings.Join(items, ","), r.Host, r.URL.Path)
+	}))
+	defer server.Close()
+	old := statusBBAPI
+	statusBBAPI = server.URL
+	defer func() { statusBBAPI = old }()
 	number, err := statusDiscoverBranch("bitbucket.org", "example/widget", "topic")
-	if err != nil || number != "99" {
-		t.Fatalf("branch beyond first page was missed: %q %v", number, err)
+	if err != nil || number != "99" || !sawFields {
+		t.Fatalf("branch beyond first page was missed: %q %v fields %v", number, err, sawFields)
 	}
 }
 

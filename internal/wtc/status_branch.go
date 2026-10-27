@@ -3,7 +3,6 @@ package wtc
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 func statusParseBranchList(forge string, raw []byte, branch string) (string, error) {
@@ -46,62 +45,30 @@ func statusParseBranchList(forge string, raw []byte, branch string) (string, err
 	return "", nil
 }
 
-func statusBitbucketListCount(raw []byte) (int, error) {
-	var result struct {
-		PullRequests []json.RawMessage `json:"pullRequests"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return 0, err
-	}
-	return len(result.PullRequests), nil
-}
-
-// Discovery only asks for open PRs on the exact source branch. A failed call
-// never becomes a cached "none" answer.
+// Discovery reads the shared open list. A failed call never becomes a cached
+// "none" answer. GitHub's list is capped, so a full page falls back to one
+// query for that branch.
 func statusDiscoverBranch(forge, slug, branch string) (string, error) {
 	if forge == "" || slug == "" || branch == "" {
 		return "", nil
 	}
-	var raw []byte
-	var err error
-	switch forge {
-	case "github.com":
-		raw, err = statusSingleFlight("branch", forge, slug, branch, func() ([]byte, error) {
-			return statusJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "open", "--limit", "50", "--json", "number,headRefName")
-		})
-	case "bitbucket.org":
-		parts := strings.SplitN(slug, "/", 2)
-		if len(parts) != 2 {
-			return "", fmt.Errorf("invalid Bitbucket repository slug")
+	listed, err := statusOpenPRs(forge, slug)
+	if err != nil {
+		return "", err
+	}
+	for _, pr := range listed {
+		if pr.Number != "" && pr.Branch == branch {
+			return pr.Number, nil
 		}
-		raw, err = statusSingleFlight("bblist", forge, slug, "OPEN", func() ([]byte, error) {
-			return statusJSON("bb", "pr", "list", "-w", parts[0], "-r", parts[1], "--state", "OPEN", "--limit", "50", "--json")
+	}
+	if forge == "github.com" && len(listed) >= statusOpenListLimit {
+		raw, err := statusSingleFlight("branch", forge, slug, branch, func() ([]byte, error) {
+			return statusJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "open", "--limit", "20", "--json", "number,headRefName")
 		})
 		if err != nil {
 			return "", err
 		}
-		number, parseErr := statusParseBranchList(forge, raw, branch)
-		if parseErr != nil || number != "" {
-			return number, parseErr
-		}
-		count, countErr := statusBitbucketListCount(raw)
-		if countErr != nil {
-			return "", countErr
-		}
-		if count < 50 {
-			return "", nil
-		}
-		// The installed bb CLI paginates up to --limit. Ask for every page
-		// only when the first page has no branch match. One saved list serves
-		// every branch of the repository.
-		raw, err = statusSingleFlight("bblist", forge, slug, "OPEN-ALL", func() ([]byte, error) {
-			return statusJSON("bb", "pr", "list", "-w", parts[0], "-r", parts[1], "--state", "OPEN", "--limit", "2147483647", "--json")
-		})
-	default:
-		return "", fmt.Errorf("unsupported forge")
+		return statusParseBranchList(forge, raw, branch)
 	}
-	if err != nil {
-		return "", err
-	}
-	return statusParseBranchList(forge, raw, branch)
+	return "", nil
 }
