@@ -122,7 +122,7 @@ func openReviewBundleRange(c *wtc.Context) (openReviewRange, bool, error) {
 			continue
 		}
 		dir, slug, forge, err := openReviewRepo(c, m.Repo)
-		if err != nil || m.Slug != slug || m.Forge != forge {
+		if err != nil || !strings.EqualFold(m.Slug, slug) || m.Forge != forge {
 			continue
 		}
 		branch, err := openReviewGit(dir, "symbolic-ref", "--quiet", "--short", "HEAD")
@@ -260,11 +260,11 @@ func openReviewPRRange(c *wtc.Context) (openReviewRange, error) {
 		for _, pr := range prs {
 			if forge == "bitbucket" {
 				pr.Number, pr.Branch, pr.Head, pr.Base, pr.HeadRepo.Name = pr.ID, pr.Source.Branch.Name, pr.Source.Commit.Hash, pr.Destination.Commit.Hash, pr.Source.Repository.Name
-				if pr.Destination.Repository.Name != slug {
+				if !strings.EqualFold(pr.Destination.Repository.Name, slug) {
 					continue
 				}
 			}
-			if pr.State != "OPEN" || pr.Branch != branch || pr.HeadRepo.Name != slug {
+			if pr.State != "OPEN" || pr.Branch != branch || !strings.EqualFold(pr.HeadRepo.Name, slug) {
 				continue
 			}
 			if pr.Number <= 0 || len(numbers) == 1 && fmt.Sprint(pr.Number) != numbers[0] {

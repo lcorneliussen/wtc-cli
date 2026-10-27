@@ -85,6 +85,11 @@ func TestOpenReviewSelectsLatestApplicablePinnedBundle(t *testing.T) {
 	if err != nil || !found || r.dir != dir || r.base != base || r.head != head || r.source != "bundle latest" {
 		t.Fatalf("wrong bundle: %+v %v %v", r, found, err)
 	}
+	c.Registry.Repos[0].Remote = "https://github.com/Example/Example.git"
+	if _, found, err := openReviewBundleRange(c); err != nil || !found {
+		t.Fatalf("canonical bundle rejected for mixed-case remote: %v %v", found, err)
+	}
+	c.Registry.Repos[0].Remote = "https://github.com/example/example.git"
 	// An applicable newest bundle with missing objects fails instead of hiding
 	// the problem behind an older bundle or an unrelated local range.
 	openReviewTestBundle(t, c, "missing", base, strings.Repeat("a", 40))
@@ -152,6 +157,36 @@ func TestOpenReviewPRFallbackUsesExactRemoteIdentity(t *testing.T) {
 			r, err := openReviewPRRange(c)
 			if err != nil || r.head != head || r.base != base || r.source != "PR #7" {
 				t.Fatalf("wrong PR fallback: %+v %v", r, err)
+			}
+			// Repository casing does not change forge identity.
+			originalRemote := c.Registry.Repos[0].Remote
+			c.Registry.Repos[0].Remote = strings.ReplaceAll(originalRemote, "example/example", "Example/Example")
+			if r, err := openReviewPRRange(c); err != nil || r.head != head {
+				t.Fatalf("canonical PR rejected for mixed-case remote: %+v %v", r, err)
+			}
+			c.Registry.Repos[0].Remote = originalRemote
+			if forge == "bitbucket" {
+				for name, payload := range map[string]any{
+					"array":        []any{pr},
+					"values":       map[string]any{"values": []any{pr}},
+					"pullRequests": map[string]any{"pullRequests": []any{pr}},
+				} {
+					data, _ := json.Marshal(payload)
+					if err := os.WriteFile(dataPath, data, 0644); err != nil {
+						t.Fatal(err)
+					}
+					if r, err := openReviewPRRange(c); err != nil || r.head != head {
+						t.Fatalf("%s response failed: %+v %v", name, r, err)
+					}
+				}
+				capped := make([]any, 100)
+				for i := range capped {
+					capped[i] = pr
+				}
+				write(capped)
+				if _, err := openReviewPRRange(c); err == nil || !strings.Contains(err.Error(), "reached its limit") {
+					t.Fatalf("incomplete PR list accepted: %v", err)
+				}
 			}
 			// Multiple same-name branches must not select an arbitrary PR.
 			write([]any{pr, pr})

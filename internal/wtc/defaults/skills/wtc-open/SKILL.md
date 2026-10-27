@@ -65,10 +65,10 @@ When a step needs a human to look at files, `wtc open --add browse`; for a
 spare prompt, `--add shell`. For the pinned review range, `--add review`
 uses the latest applicable bundle or exact current PR commits. It sits in the
 wide right column or narrow tools tab and coexists with browse and shell.
-It requires Hunk or less; no tool is installed automatically. `--trim` closes a shell at its prompt and a
-browse Neovim without unsaved buffers, and a review viewer that exited to its
-shell prompt — never agent or status, never a
-focused pane or a running command. Trim when the user asks, or when
+It requires Hunk or less; no tool is installed automatically.
+`--trim` closes a shell at its prompt, a browse Neovim without unsaved buffers,
+and a review viewer that exited to its shell prompt.
+It preserves agent and status panes, focused panes, and running commands. Trim when the user asks, or when
 `wtc open` warns that the machine is close to its pty cap.
 
 ## 4. What to report
