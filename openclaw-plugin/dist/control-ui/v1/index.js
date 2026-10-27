@@ -57,10 +57,12 @@ const personalAccount = (options) => {
   return mine?.state === "connected" && mine.account && mine.generation ? mine : null;
 };
 // Asks the gateway to publish; returns the confirmation it waits for, if any.
-async function publishRepo(host, agentId, r, say, review) {
+async function publishRepo(host, agentId, r, say, review, mayDispatch = () => true) {
+  if (!mayDispatch()) return { cancelled: true };
   const name = r.repo ?? r.project;
   const target = { sessionKey: r.sessionKey, agentId };
   const mine = personalAccount(await host.request("sessions.github.options", target));
+  if (!mayDispatch()) return { cancelled: true };
   if (!mine) {
     say(`${name}: ${CONNECT.github}.`);
     return { connect: true };
@@ -71,21 +73,24 @@ async function publishRepo(host, agentId, r, say, review) {
     ...target, idempotencyKey: uuid(), selection: { source: "personal", account: mine.account, generation: mine.generation },
     ...(p?.title ? { title: p.title } : {}), ...(p?.body ? { body: p.body } : {}),
   });
-  return settle(host, target, r, out, say, review);
+  return settle(host, target, r, out, say, review, mayDispatch);
 }
-async function confirmRepo(host, agentId, r, pending, say, review) {
+async function confirmRepo(host, agentId, r, pending, say, review, mayDispatch = () => true) {
+  if (!mayDispatch()) return { cancelled: true };
   const name = r.repo ?? r.project;
   const target = { sessionKey: r.sessionKey, agentId };
   say(`Pushing ${name}…`);
   const out = await host.request("sessions.github.confirm", { ...target, requestId: pending.requestId, ...pending.confirmation });
-  return settle(host, target, r, out, say, review);
+  return settle(host, target, r, out, say, review, mayDispatch);
 }
 // What a publish or confirm came back with: done, failed, or a confirmation
 // to ask the person for (its account, generation and digest, from status).
-async function settle(host, target, r, out, say, review) {
+async function settle(host, target, r, out, say, review, mayDispatch = () => true) {
   const name = r.repo ?? r.project;
   if (out?.status === "needs_confirmation") {
+    if (!mayDispatch()) return { cancelled: true };
     const status = await host.request("sessions.github.status", { ...target, requestId: out.requestId }).catch(() => null);
+    if (!mayDispatch()) return { cancelled: true };
     const c = status?.confirmation ?? out.confirmation ?? null;
     if (!c) { say(`${name}: the gateway waits for a confirmation; confirm it under Publish in the owner session.`); return null; }
     say(`${name}: confirm to push as @${c.account?.login ?? "you"}.`);
@@ -129,7 +134,8 @@ async function bitbucketAction(host, agentId, r, actionId, payload) {
   return res?.result ?? res;
 }
 const bitbucketAccount = (c) => c?.name ? `${c.name} (${c.account})` : c?.account ?? "you";
-async function publishBitbucket(host, agentId, r, say, dest) {
+async function publishBitbucket(host, agentId, r, say, dest, mayDispatch = () => true) {
+  if (!mayDispatch()) return { cancelled: true };
   const name = r.repo ?? r.project;
   say(`Asking to push ${name}…`);
   // Its publish takes a title, not yet a description. Its rows carry no
@@ -147,7 +153,8 @@ async function publishBitbucket(host, agentId, r, say, dest) {
   say(`${name}: confirm to push ${c.branch} (${String(c.head).slice(0, 7)}) to ${c.dest} as ${bitbucketAccount(c)}${left}.`);
   return { forge: BITBUCKET, requestId: out.requestId, confirmation: c };
 }
-async function confirmBitbucket(host, agentId, r, pending, say, review) {
+async function confirmBitbucket(host, agentId, r, pending, say, review, mayDispatch = () => true) {
+  if (!mayDispatch()) return { cancelled: true };
   const name = r.repo ?? r.project;
   say(`Pushing ${name}…`);
   const out = await bitbucketAction(host, agentId, r, "publish-confirm", { requestId: pending.requestId, requestDigest: pending.confirmation.requestDigest });
@@ -655,6 +662,7 @@ function collectionTables(v) {
           const fresh = out.repo;
           if (out.performed) results.set(r.sessionKey, out.code ? "Failed: " + (out.message ?? out.code) : "Completed");
           else {
+            if (batchCancelled) { results.set(r.sessionKey, "Cancelled before dispatch"); continue; }
             const selected = fresh?.next;
             if (!selected || selected.key !== step.key) throw Error("The selection changed; choose again");
             switch (nextRoute(selected)) {
@@ -662,7 +670,10 @@ function collectionTables(v) {
               case "publish":
                 // A batch never consumes an earlier per-repository confirmation.
                 // Each gateway confirmation still shows its exact commits/account.
-                if (!confirming.has(r.sessionKey)) await publish(fresh, conversation);
+                if (!confirming.has(r.sessionKey)) {
+                  const outcome = await publish(fresh, conversation, () => !batchCancelled);
+                  if (outcome?.cancelled) { results.set(r.sessionKey, "Cancelled before publication dispatch"); break; }
+                }
                 results.set(r.sessionKey, "Use the repository's publication result or confirmation above"); break;
               case "pr": results.set(r.sessionKey, "Open the PR link; inspect its current requirements"); break;
               default: throw Error("This action is unavailable on this host");
@@ -797,8 +808,9 @@ function collectionTables(v) {
       bitbucket ? null : css(el("div", { textContent: "A GitHub identity under Agents → Tools is the agent's own; it is not used for pushing." }), "color:var(--muted, #888)")),
     "font-size:12px;line-height:1.45;display:grid;gap:4px;padding:8px 10px;border:1px solid var(--border-strong, rgba(128,128,128,.4));border-radius:12px");
   }
-  async function publish(r, conversationKey = v.key()) {
-    if (!active(conversationKey)) return;
+  async function publish(r, conversationKey = v.key(), continueAllowed = () => true) {
+    const mayDispatch = () => active(conversationKey) && continueAllowed();
+    if (!mayDispatch()) return { cancelled: true };
     if (!PUSHES.has(r.forge) || mine[r.forge] === false) return;
     const say = (...args) => { if (active(conversationKey)) v.say(...args); };
     const review = (repo, url) => reviewPRText(repo, url, conversationKey);
@@ -811,10 +823,11 @@ function collectionTables(v) {
       confirming.delete(r.sessionKey);
       const bitbucket = r.forge === BITBUCKET;
       const next = pending
-        ? await (bitbucket ? confirmBitbucket : confirmRepo)(v.host, v.agent(), r, pending, say, review)
+        ? await (bitbucket ? confirmBitbucket : confirmRepo)(v.host, v.agent(), r, pending, say, review, mayDispatch)
         : bitbucket
-          ? await publishBitbucket(v.host, v.agent(), r, say, r.base ? baseOf(r) : undefined)
-          : await publishRepo(v.host, v.agent(), r, say, review);
+          ? await publishBitbucket(v.host, v.agent(), r, say, r.base ? baseOf(r) : undefined, mayDispatch)
+          : await publishRepo(v.host, v.agent(), r, say, review, mayDispatch);
+      if (next?.cancelled) { say(`${nameOf(r)}: Cancelled before publication dispatch.`); return next; }
       if (!active(conversationKey)) return;
       if (next?.connect) { mine[r.forge] = null; showConnect = r.forge; v.reveal?.(); }
       else {
@@ -822,6 +835,7 @@ function collectionTables(v) {
         if (mine[r.forge] === null) { mine[r.forge] = undefined; askedAt[r.forge] = 0; if (showConnect === r.forge) showConnect = null; }
         if (next) confirming.set(r.sessionKey, next);
       }
+      return next;
     } catch (err) {
       say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true);
     } finally {

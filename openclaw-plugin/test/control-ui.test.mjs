@@ -105,6 +105,7 @@ let controlledSend;
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
 let personal = null;
+let controlledOptions;
 // Methods a test makes fail.
 const failing = new Set();
 // The Bitbucket plugin: absent unless a test installs it with a login (or null).
@@ -123,6 +124,7 @@ const hostRequest = async (method, params) => {
     }
     if (params.actionId === "publish-confirm") return { ok: true, result: bitbucketConfirmResult ?? { status: "published", created: true, url: "https://bitbucket.org/ws/hooks/pull-requests/3" } };
   }
+  if (method === "sessions.github.options" && controlledOptions) return controlledOptions;
   if (method === "sessions.github.options") return { personal, shared: { source: "system-detected", login: "octo-bot" } };
   if (method === "sessions.github.status") return { confirmation: { generation: personal?.generation, account: personal?.account, requestDigest: "d1" } };
   if (method === "plugins.sessionAction" && params.actionId === "collection") {
@@ -1350,5 +1352,43 @@ test("a captured batch cannot duplicate an in-flight individual author handoff",
    assert.equal(calls.filter(c=>c.method==="sessions.send").length,1,"batch reused an in-flight reservation");
    finish({});for(let i=0;i<6;i++)await settle();
   }finally{finish?.({});view.dispose();nextResult=undefined;controlledSend=undefined;}
+ }
+});
+
+
+test("publication preparation checks cancellation after revalidation and account lookup", async () => {
+ for(const kind of ["composer","panel"])for(const boundary of ["revalidation","options"]){
+  const step={step:"push",by:"wtc",approve:"person",gateway:"github_publish",key:"push:h1",reason:"Push exact commits"};
+  const r=repo("api",{ahead:1,unpublished:1,next:step,choices:{recommended:step.key,actions:[{...step,available:true}]}});
+  personal={state:"connected",account:{login:"demo"},generation:"g1"};
+  const {host,view}=await mount(kind,collection([r]));let release;
+  try{
+   await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
+   nextResult=boundary==="revalidation"?()=>new Promise(resolve=>{release=resolve}):{ok:true,result:{performed:false,repo:r}};
+   if(boundary==="options")controlledOptions=new Promise(resolve=>{release=resolve});
+   calls.length=0;await clickText(host,"Confirm 1 actions");assert.ok(release);
+   await clickText(host,"Cancel queued");
+   release(boundary==="revalidation"?{ok:true,result:{performed:false,repo:r}}:{personal});
+   for(let i=0;i<6;i++)await settle();
+   assert.equal(calls.filter(c=>c.method==="sessions.github.publish"||c.method==="sessions.github.confirm").length,0,`${kind}/${boundary}`);
+   assert.match(host.textContent,/Cancelled/);
+  }finally{view.dispose();nextResult=undefined;controlledOptions=undefined;personal=null;}
+ }
+});
+
+test("publication preparation stops after abort or disposal during account lookup", async () => {
+ for(const kind of ["composer","panel"])for(const lifecycle of ["abort","dispose"]){
+  const step={step:"push",by:"wtc",approve:"person",gateway:"github_publish",key:"push:h1",reason:"Push exact commits"};
+  const r=repo("api",{ahead:1,unpublished:1,next:step,choices:{recommended:step.key,actions:[{...step,available:true}]}});
+  personal={state:"connected",account:{login:"demo"},generation:"g1"};
+  const {host,view,abort}=await mount(kind,collection([r]));let release;
+  try{
+   await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
+   nextResult={ok:true,result:{performed:false,repo:r}};controlledOptions=new Promise(resolve=>{release=resolve});calls.length=0;
+   await clickText(host,"Confirm 1 actions");assert.ok(release);
+   if(lifecycle==="abort")abort();else view.dispose();
+   release({personal});for(let i=0;i<6;i++)await settle();
+   assert.equal(calls.filter(c=>c.method==="sessions.github.publish"||c.method==="sessions.github.confirm").length,0,`${kind}/${lifecycle}`);
+  }finally{view.dispose();nextResult=undefined;controlledOptions=undefined;personal=null;}
  }
 });
