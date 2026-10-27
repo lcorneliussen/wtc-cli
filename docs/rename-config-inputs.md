@@ -14,7 +14,7 @@ This is a phase-0 increment of [#201](https://github.com/lcorneliussen/wtc-cli/i
 | Collection task context | `WTC-SCOPE.md` | `SCOPE.md` |
 | Skill overlay base digest | `.wtc-base.sha256` | `.taba-base.sha256` |
 
-Configuration and pin files stay in the harness directory. Ad-hoc configuration accepts `taba.toml` inside the existing `.wtc/config` directory. The `.taba/config` directory is not selected by this increment.
+Configuration and pin files stay in the harness directory. Ad-hoc configuration accepts `taba.toml` inside the selected configuration directory. [Collection directory inputs](rename-collection-directories.md) add `.taba/config` when `.wtc/config` is absent.
 
 When XDG variables are unset, user directories use `~/.config` and `~/.local/share` as before. Explicit config/data-root settings keep their existing precedence over these defaults; both `TABA_` and `WTC_` prefixes are accepted as described in [environment compatibility](rename-compatibility.md).
 

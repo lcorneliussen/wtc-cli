@@ -131,6 +131,8 @@ func InitAdHoc(dir string) (InitResult, error) {
 	}
 	if existing, err := Discover(abs); err == nil {
 		return result, fmt.Errorf("already inside a collection: %s", existing.Collection)
+	} else if !errors.Is(err, errNotInCollection) {
+		return result, err
 	}
 	if info, err := os.Lstat(abs); err == nil {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {

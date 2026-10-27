@@ -26,7 +26,7 @@ func (c *Context) renderInstructions(dryRun bool, r *SkillRenderResult) error {
 			return err
 		}
 		if info, err := os.Stat(override); err == nil && info.Mode().IsRegular() {
-			if target, err := os.Readlink(dest); err == nil && target != link {
+			if target, err := os.Readlink(dest); err == nil && !managedInstructionTarget(target, c.harnessRel(), path) {
 				return fmt.Errorf("unmanaged instruction symlink: %s", dest)
 			}
 			// A previously generated default becomes a link when a project takes ownership.
@@ -50,7 +50,7 @@ func (c *Context) renderInstructions(dryRun bool, r *SkillRenderResult) error {
 			return err
 		}
 		if target, err := os.Readlink(dest); err == nil {
-			if target != link {
+			if !managedInstructionTarget(target, c.harnessRel(), path) {
 				return fmt.Errorf("unmanaged instruction symlink: %s", dest)
 			}
 			r.Actions = append(r.Actions, "restore default instruction: "+path)
@@ -91,4 +91,16 @@ func (c *Context) renderInstructions(dryRun bool, r *SkillRenderResult) error {
 		}
 	}
 	return nil
+}
+
+// Only the exact per-instruction targets emitted for known config sources
+// are owned. A namespace move can retarget them or restore a default without
+// treating an unrelated user symlink as generated.
+func managedInstructionTarget(target, selected, instruction string) bool {
+	for _, source := range []string{selected, AdHocConfigDir, ".taba/config"} {
+		if target == "../../"+source+"/"+instruction {
+			return true
+		}
+	}
+	return false
 }

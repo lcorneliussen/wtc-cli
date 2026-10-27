@@ -282,7 +282,13 @@ func (c *Context) RenderSkills(opt SkillRenderOptions) (SkillRenderResult, error
 }
 
 func managedSkillTarget(target, harnessName string) bool {
-	for _, prefix := range []string{"../../" + harnessName + "/skills/", "../../" + harnessName + "/overlays/skills/", "../../.wtc/skills/"} {
+	target = filepath.ToSlash(filepath.Clean(target))
+	for _, prefix := range []string{
+		"../../" + harnessName + "/skills/", "../../" + harnessName + "/overlays/skills/",
+		"../../.wtc/skills/", "../../.taba/skills/",
+		"../../.wtc/config/skills/", "../../.wtc/config/overlays/skills/",
+		"../../.taba/config/skills/", "../../.taba/config/overlays/skills/",
+	} {
 		if strings.HasPrefix(target, prefix) {
 			return true
 		}

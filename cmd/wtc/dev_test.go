@@ -95,6 +95,21 @@ func TestPinnedBinaryHandsOverToDevBuild(t *testing.T) {
 	if raw, err := adHocRun.CombinedOutput(); err != nil || !strings.Contains(string(raw), devVersion+" (dev build, in place of 0.1.39)") {
 		t.Fatalf("ad-hoc collection did not hand over: %q %v", raw, err)
 	}
+	// Both namespaces can move while .wtc remains for generated files.
+	if err := os.MkdirAll(filepath.Join(adHoc, ".taba"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, namespace := range []string{"config", "dev"} {
+		if err := os.Rename(filepath.Join(adHoc, ".wtc", namespace), filepath.Join(adHoc, ".taba", namespace)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adHocRun = exec.Command(taba, "--version")
+	adHocRun.Dir = adHoc
+	adHocRun.Env = append(os.Environ(), "WTC_DEV_DELEGATED_FROM=", "WTC_DEV_BUILD=")
+	if raw, err := adHocRun.CombinedOutput(); err != nil || !strings.HasPrefix(string(raw), "taba version "+devVersion+" (dev build, in place of 0.1.39)") {
+		t.Fatalf("alternate namespaces lost dev handover or invocation: %q %v", raw, err)
+	}
 	// The dev build run directly, through a symlinked collection path, is
 	// itself and must not hand over to itself.
 	link := filepath.Join(t.TempDir(), "collection")
