@@ -82,7 +82,7 @@ func TestPrivateReviewBundleIncludesSnapshotsOverlaysAndRelatedPatch(t *testing.
 		t.Fatal(err)
 	}
 	c.Config.Harness.Name = "agent-harness"
-	bundle, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "library", Base: "main", NoCatchUp: true})
+	bundle, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "library", Base: "main", Private: true, NoCatchUp: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestPrivateReviewBundleIncludesSnapshotsOverlaysAndRelatedPatch(t *testing.
 	if err := os.Remove(filepath.Join(collection, ".wtc-prs")); err != nil {
 		t.Fatal(err)
 	}
-	unlisted, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "library", Base: "main", NoCatchUp: true})
+	unlisted, err := c.BuildReviewBundle(ReviewBundleOptions{Repo: "library", Base: "main", Private: true, NoCatchUp: true})
 	if err != nil {
 		t.Fatal(err)
 	}
