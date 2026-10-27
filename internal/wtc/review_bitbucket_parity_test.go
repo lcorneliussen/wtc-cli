@@ -39,10 +39,8 @@ func TestBitbucketReviewPostResolveWithoutAPICredentials(t *testing.T) {
 	bin := t.TempDir()
 	log := filepath.Join(bin, "calls.log")
 	launcher := `#!/bin/sh
-if [ "$1" = --workspace ]; then
-  [ "$2" = example ] && [ "$3" = --repo ] && [ "$4" = app ] || exit 90
-  shift 4
-fi
+[ "$1" = --workspace ] && [ "$2" = example ] && [ "$3" = --repo ] && [ "$4" = app ] || exit 90
+shift 4
 printf '%s\n' "$*" >> "$FAKE_BB_LOG"
 case "$*" in
   'pr view 7 --json') printf '{"source":{"commit":{"hash":"1234567890abcdef1234567890abcdef12345678"}}}\n' ;;
