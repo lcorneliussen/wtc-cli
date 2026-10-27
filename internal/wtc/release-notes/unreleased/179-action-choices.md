@@ -1,0 +1,3 @@
+## Status and OpenClaw
+
+- **Choose next actions across repositories.** Status exposes recommendations, alternatives and blocked reasons while retaining `next`. The Collection card/panel and status TUI can preview a mixed selection, recheck each target and dispatch one step per repository. Shared operations are serialized and selected author tasks use one prompt per conversation; acceptance is reported as pending completion. Cancellation stops queued dispatch, publication keeps its existing authority requirements, and unavailable gateway review jobs are explicit. Automatic continuation remains a separate phase.

@@ -346,6 +346,11 @@ func TestStatus(t *testing.T) {
 	}
 	want := CheckoutStatus{Path: c.Dir, Repo: "docs", Owner: "example-ws", Forge: ForgeBitbucket, Branch: "openclaw/72-add-thing", Base: "origin/main",
 		Ahead: 2, Dirty: 2, Untracked: 1, Published: true, Unpublished: 1}
+	if got.Repos[0].Next == nil || got.Repos[0].Next.Step != "commit" || got.Repos[0].Next.By != next.ByAgent || got.Repos[0].Choices == nil {
+		t.Fatalf("dirty work needs an explicit commit handoff: %+v", got.Repos[0])
+	}
+	want.Next = got.Repos[0].Next
+	want.Choices = got.Repos[0].Choices
 	if !reflect.DeepEqual(got.Repos[0], want) {
 		t.Errorf("got  %+v\nwant %+v", got.Repos[0], want)
 	}
@@ -669,11 +674,11 @@ func TestStatusNamesTheNextStep(t *testing.T) {
 		t.Fatal("predicting the merge touched the worktree")
 	}
 
-	// Uncommitted work: everything waits for it.
+	// Uncommitted work offers an explicit commit handoff; catch-up waits.
 	write(t, c, "draft.md", "wip\n")
 	git("add", "draft.md")
-	if s = checkoutStatus(c.Dir, false); s.Next != nil {
-		t.Fatalf("work in progress: %+v", s.Next)
+	if s = checkoutStatus(c.Dir, false); s.Next == nil || s.Next.Step != "commit" || s.Next.By != next.ByAgent {
+		t.Fatalf("work in progress must stay with the author: %+v", s.Next)
 	}
 	git("rm", "-q", "--cached", "draft.md")
 	if err := os.Remove(filepath.Join(c.Dir, "draft.md")); err != nil {

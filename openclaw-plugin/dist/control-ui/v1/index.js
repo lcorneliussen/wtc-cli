@@ -57,10 +57,12 @@ const personalAccount = (options) => {
   return mine?.state === "connected" && mine.account && mine.generation ? mine : null;
 };
 // Asks the gateway to publish; returns the confirmation it waits for, if any.
-async function publishRepo(host, agentId, r, say, review) {
+async function publishRepo(host, agentId, r, say, review, mayDispatch = () => true) {
+  if (!mayDispatch()) return { cancelled: true };
   const name = r.repo ?? r.project;
   const target = { sessionKey: r.sessionKey, agentId };
   const mine = personalAccount(await host.request("sessions.github.options", target));
+  if (!mayDispatch()) return { cancelled: true };
   if (!mine) {
     say(`${name}: ${CONNECT.github}.`);
     return { connect: true };
@@ -71,21 +73,24 @@ async function publishRepo(host, agentId, r, say, review) {
     ...target, idempotencyKey: uuid(), selection: { source: "personal", account: mine.account, generation: mine.generation },
     ...(p?.title ? { title: p.title } : {}), ...(p?.body ? { body: p.body } : {}),
   });
-  return settle(host, target, r, out, say, review);
+  return settle(host, target, r, out, say, review, mayDispatch);
 }
-async function confirmRepo(host, agentId, r, pending, say, review) {
+async function confirmRepo(host, agentId, r, pending, say, review, mayDispatch = () => true) {
+  if (!mayDispatch()) return { cancelled: true };
   const name = r.repo ?? r.project;
   const target = { sessionKey: r.sessionKey, agentId };
   say(`Pushing ${name}…`);
   const out = await host.request("sessions.github.confirm", { ...target, requestId: pending.requestId, ...pending.confirmation });
-  return settle(host, target, r, out, say, review);
+  return settle(host, target, r, out, say, review, mayDispatch);
 }
 // What a publish or confirm came back with: done, failed, or a confirmation
 // to ask the person for (its account, generation and digest, from status).
-async function settle(host, target, r, out, say, review) {
+async function settle(host, target, r, out, say, review, mayDispatch = () => true) {
   const name = r.repo ?? r.project;
   if (out?.status === "needs_confirmation") {
+    if (!mayDispatch()) return { cancelled: true };
     const status = await host.request("sessions.github.status", { ...target, requestId: out.requestId }).catch(() => null);
+    if (!mayDispatch()) return { cancelled: true };
     const c = status?.confirmation ?? out.confirmation ?? null;
     if (!c) { say(`${name}: the gateway waits for a confirmation; confirm it under Publish in the owner session.`); return null; }
     say(`${name}: confirm to push as @${c.account?.login ?? "you"}.`);
@@ -129,7 +134,8 @@ async function bitbucketAction(host, agentId, r, actionId, payload) {
   return res?.result ?? res;
 }
 const bitbucketAccount = (c) => c?.name ? `${c.name} (${c.account})` : c?.account ?? "you";
-async function publishBitbucket(host, agentId, r, say, dest) {
+async function publishBitbucket(host, agentId, r, say, dest, mayDispatch = () => true) {
+  if (!mayDispatch()) return { cancelled: true };
   const name = r.repo ?? r.project;
   say(`Asking to push ${name}…`);
   // Its publish takes a title, not yet a description. Its rows carry no
@@ -147,7 +153,8 @@ async function publishBitbucket(host, agentId, r, say, dest) {
   say(`${name}: confirm to push ${c.branch} (${String(c.head).slice(0, 7)}) to ${c.dest} as ${bitbucketAccount(c)}${left}.`);
   return { forge: BITBUCKET, requestId: out.requestId, confirmation: c };
 }
-async function confirmBitbucket(host, agentId, r, pending, say, review) {
+async function confirmBitbucket(host, agentId, r, pending, say, review, mayDispatch = () => true) {
+  if (!mayDispatch()) return { cancelled: true };
   const name = r.repo ?? r.project;
   say(`Pushing ${name}…`);
   const out = await bitbucketAction(host, agentId, r, "publish-confirm", { requestId: pending.requestId, requestDigest: pending.confirmation.requestDigest });
@@ -557,75 +564,188 @@ function collectionTables(v) {
   const busy = new Set();
   const catching = new Set();
   const acting = new Set();
-  const actionable = (r) => !r.error && (r.next || r.dirty > 0);
+  let authorSending = false;
+  const active = (conversation) => v.alive?.() !== false && v.key() === conversation;
+  const reserved = (r) => acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey);
+  async function sendToAuthor(conversation, skill, input) {
+    if (!active(conversation)) throw Error("The view closed or changed before handoff");
+    if (authorSending) throw Error("An author handoff is already pending; wait before dispatching another");
+    authorSending = true;
+    try { return await askSkill(v.host, conversation, skill, input); }
+    finally { authorSending = false; if (v.alive?.() !== false) v.rerender(); }
+  }
+
+  const actionable = (r) => !r.error && (r.next || r.choices?.actions?.length || r.dirty > 0);
   async function askCommit(r) {
+    if (batchRunning || v.alive?.() === false) return;
     if (acting.has(r.sessionKey)) return;
+    const conversationKey=v.key();
+    const say=(...args)=>{if(active(conversationKey))v.say(...args)};
     acting.add(r.sessionKey);
-    v.say(`Asking the conversation to create local commits for ${nameOf(r)}…`);
+    say(`Asking the conversation to create local commits for ${nameOf(r)}…`);
     v.rerender();
     try {
-      await askSkill(v.host, v.key(), "wtc", `${nameOf(r)}: review and commit the intended uncommitted changes. Recheck its current state and branch policy first, and report the resulting commit. Leave publication for the person's push action.`);
-      v.say(`${nameOf(r)}: asked the conversation to save intended changes as local commits. Pushing and opening a PR are separate.`);
-    } catch (err) { v.say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
-    finally { acting.delete(r.sessionKey); await v.refresh(); }
+      await sendToAuthor(conversationKey, "wtc", `${nameOf(r)}: review and commit the intended uncommitted changes. Recheck its current state and branch policy first, and report the resulting commit. Leave publication for the person's push action.`);
+      say(`${nameOf(r)}: asked the conversation to save intended changes as local commits. Pushing and opening a PR are separate.`);
+    } catch (err) { say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
+    finally { acting.delete(r.sessionKey); if(active(conversationKey))await v.refresh(); }
   }
   async function reviewPRText(r, url, conversationKey) {
-    if (v.key() !== conversationKey) return;
+    if (!active(conversationKey)) return;
     if (acting.has(r.sessionKey)) return;
     acting.add(r.sessionKey);
     try {
-      await askSkill(v.host, conversationKey, "wtc", `${nameOf(r)}: review the title and description of ${url} against the full current PR diff, including the latest pushed commits. Recheck the PR's current state and head first. Preserve useful human edits. If the text no longer describes the complete change, propose a revised title and description for the person to review; otherwise explain that it still fits. This is a review of the PR text, not a request for a code review. Do not change commits, push, merge, or edit the remote PR text in this step.`);
-      if (v.key() === conversationKey) v.say(`${nameOf(r)}: asked the conversation to review the PR title and description and propose any needed revisions.`);
+      await sendToAuthor(conversationKey, "wtc", `${nameOf(r)}: review the title and description of ${url} against the full current PR diff, including the latest pushed commits. Recheck the PR's current state and head first. Preserve useful human edits. If the text no longer describes the complete change, propose a revised title and description for the person to review; otherwise explain that it still fits. This is a review of the PR text, not a request for a code review. Do not change commits, push, merge, or edit the remote PR text in this step.`);
+      if (active(conversationKey)) v.say(`${nameOf(r)}: asked the conversation to review the PR title and description and propose any needed revisions.`);
     } catch (err) {
-      if (v.key() === conversationKey) v.say(String(err?.message ?? err), true);
+      if (active(conversationKey)) v.say(String(err?.message ?? err), true);
     } finally { acting.delete(r.sessionKey); }
   }
-  const nextLabel = (s) => ({ "return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", resolve: "Resolve conflicts", merge: "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", push: "Push", "merge-pr": "Open pull request" })[s.step] ?? s.step;
+  const nextLabel = (s) => ({ "return-to-tip": "Return to tip", "catch-up": "Catch up", "new-branch": "Create a branch", resolve: "Resolve conflicts", merge: "Merge the base", "fix-checks": "Fix checks", "address-review": "Address review", push: "Push", "merge-pr": "Open pull request", commit: "Commit changes", "follow-pr": "Check PR progress", review: "Run independent review" })[s.step] ?? s.step;
   const nextRoute = (s) => s.by === "person" && s.step === "merge-pr" ? "pr"
     : s.by === "wtc" && s.approve === "person" && s.gateway === "github_publish" ? "publish"
     : s.by === "agent" && (!s.approve || s.approve === "agent") && s.skill ? "agent"
     : s.by === "wtc" && s.approve === "agent" && s.command?.[0] === "wtc" && s.command?.[1] === "catch-up" ? "agent"
     : s.by === "wtc" && !s.approve && JSON.stringify(s.command) === JSON.stringify(["wtc", "catch-up"]) ? "run" : null;
   async function actNext(r) {
+    if (batchRunning || v.alive?.() === false || dispatched.has(handoffKey(r, r.next))) return;
     if (acting.has(r.sessionKey)) return;
+    const sent = dispatched;
     const conversationKey = v.key();
-    const say = (...args) => { if (v.key() === conversationKey) v.say(...args); };
+    const say = (...args) => { if (active(conversationKey)) v.say(...args); };
     acting.add(r.sessionKey);
     v.rerender();
     try {
       const out = await call(v.host, "next", conversationKey, v.agent(), { ownerSessionKey: r.sessionKey, key: r.next.key });
-      if (v.key() !== conversationKey) return;
+      if (!active(conversationKey)) return;
       const fresh = out.repo;
       if (out.performed) {
-        await catchUpRepo(v.host, v.agent(), fresh, say, (input) => v.key() === conversationKey ? askSkill(v.host, conversationKey, "wtc-catch-up", input) : undefined, async () => out);
+        await catchUpRepo(v.host, v.agent(), fresh, say, (input) => v.key() === conversationKey ? sendToAuthor(conversationKey, "wtc-catch-up", input) : undefined, async () => out);
       } else if (fresh?.next) {
         const step = fresh.next;
         switch (nextRoute(step)) {
           case "publish": await publish(fresh, conversationKey); break;
           case "agent":
-            await askSkill(v.host, conversationKey, step.skill ?? "wtc-catch-up", `${nameOf(fresh)}: ${step.reason}. Work on this repository only; recheck its state before acting.`);
+            await sendToAuthor(conversationKey, step.skill ?? "wtc-catch-up", `${nameOf(fresh)}: ${step.reason}. Work on this repository only; recheck its state before acting. Carry out only this selected step; report follow-up actions for separate selection.`);
+            sent.add(handoffKey(fresh, step));
             say(`${nameOf(fresh)}: asked the conversation to ${nextLabel(step).toLowerCase()}.`);
             break;
           default: say("The next step changed; refresh the collection before acting.", true);
         }
       }
     } catch (err) { say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
-    finally { acting.delete(r.sessionKey); await v.refresh(); }
+    finally { acting.delete(r.sessionKey); if(active(conversationKey))await v.refresh(); }
+  }
+  let selection = new Map(), batchResults = new Map(), batchLabels = new Map(), batchPreview = null, dispatched = new Set();
+  let batchKey = null, batchRunning = false, batchCancelled = false;
+  const handoffKey = (r, step) => `${r.sessionKey}:${r.choices ? step.key.split(":").at(-1) : step.key}`;
+  const choicesOf = (r) => r.choices?.actions ?? (r.next ? [{ ...r.next, available: true }] : []);
+  async function runSelected(targets) {
+    if (batchRunning || v.alive?.() === false) return;
+    const conversation = v.key();
+    const sent = dispatched;
+    const reservations = new Set();
+    const results = new Map(); batchResults = results;
+    batchLabels = new Map(targets.map(({ repo }) => [repo.sessionKey, nameOf(repo)]));
+    batchRunning = true; batchCancelled = false; batchPreview = null;
+    const update = () => { if (active(conversation)) v.rerender(); };
+    const agents = [];
+    try {
+      for (const { repo: r, step } of targets) {
+        if (batchCancelled || !active(conversation)) { results.set(r.sessionKey, "Cancelled before dispatch"); continue; }
+        if (reserved(r)) { results.set(r.sessionKey, "Waiting: an individual action is already in flight"); continue; }
+        acting.add(r.sessionKey); reservations.add(r.sessionKey);
+        if (sent.has(handoffKey(r, step))) { results.set(r.sessionKey, "Already sent to the conversation; completion pending"); continue; }
+        results.set(r.sessionKey, "Rechecking…"); update();
+        try {
+          const out = await call(v.host, "next", conversation, v.agent(), { ownerSessionKey: r.sessionKey, key: step.key });
+          if (!active(conversation)) break;
+          const fresh = out.repo;
+          if (out.performed) results.set(r.sessionKey, out.code ? "Failed: " + (out.message ?? out.code) : "Completed");
+          else {
+            if (batchCancelled) { results.set(r.sessionKey, "Cancelled before dispatch"); continue; }
+            const selected = fresh?.next;
+            if (!selected || selected.key !== step.key) throw Error("The selection changed; choose again");
+            switch (nextRoute(selected)) {
+              case "agent": agents.push({ repo: fresh, step: selected }); results.set(r.sessionKey, "Waiting for conversation handoff"); break;
+              case "publish":
+                // A batch never consumes an earlier per-repository confirmation.
+                // Each gateway confirmation still shows its exact commits/account.
+                if (!confirming.has(r.sessionKey)) {
+                  const outcome = await publish(fresh, conversation, () => !batchCancelled);
+                  if (outcome?.cancelled) { results.set(r.sessionKey, "Cancelled before publication dispatch"); break; }
+                }
+                results.set(r.sessionKey, "Use the repository's publication result or confirmation above"); break;
+              case "pr": results.set(r.sessionKey, "Open the PR link; inspect its current requirements"); break;
+              default: throw Error("This action is unavailable on this host");
+            }
+          }
+        } catch (err) { results.set(r.sessionKey, "Failed or stale: " + String(err?.message ?? err)); }
+        update();
+      }
+      // One author conversation receives one prompt, even when several selected
+      // targets need judgment. Acceptance records dispatch, never completion.
+      const ready = [];
+      for (const target of agents) {
+        const { repo: r, step } = target;
+        if (batchCancelled || !active(conversation)) { results.set(r.sessionKey, "Cancelled before handoff"); continue; }
+        try {
+          const fresh = await call(v.host, "next", conversation, v.agent(), { ownerSessionKey: r.sessionKey, key: step.key });
+          if (!fresh.repo?.next || fresh.repo.next.key !== step.key) throw Error("The selection changed");
+          ready.push(target);
+        } catch (err) { results.set(r.sessionKey, "Failed or stale: " + String(err?.message ?? err)); }
+      }
+      if (ready.length && !batchCancelled && active(conversation)) {
+        try {
+          await sendToAuthor(conversation, "wtc", "Carry out only these selected single steps, sequentially. Recheck each repository's state, branch policy and ownership before acting. Preserve intended work. Do not broaden the selection, publish, merge, or automatically continue to another step. Publication is a separate personal confirmation.\n" + ready.map(({ repo, step }) => `${nameOf(repo)}: use the ${step.skill ?? "wtc-catch-up"} skill. ${step.reason}`).join("\n"));
+          for (const { repo, step } of ready) { sent.add(handoffKey(repo, step)); results.set(repo.sessionKey, "Sent to conversation; completion pending"); }
+        } catch (err) { for (const { repo } of ready) results.set(repo.sessionKey, "Handoff failed: " + String(err?.message ?? err)); }
+      } else for (const { repo } of ready) results.set(repo.sessionKey, "Cancelled before handoff");
+    } finally {
+      for (const key of reservations) acting.delete(key);
+      batchRunning = false;
+      if (v.alive?.() !== false) v.rerender();
+      if (active(conversation)) { selection.clear(); await v.refresh(); update(); }
+    }
   }
   function nextActions(repos) {
     const rows = repos.filter(actionable);
-    if (!rows.length) return null;
-    return css(el("div", { className: "wtc-next-actions" }, muted("Next actions"), ...rows.map((r) => {
-      const commit = !r.next && r.dirty > 0;
-      const step = r.next ?? { step: "commit", by: "agent", reason: `${plural(r.dirty, "uncommitted file")}. Save intended changes as local commits; pushing and opening a PR are separate.` };
+    if (batchKey !== v.key()) { batchKey = v.key(); selection = new Map(); batchResults = new Map(); batchLabels = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true; }
+    const currentKeys = new Set(rows.flatMap((r) => choicesOf(r).map((a) => handoffKey(r, a))));
+    for (const key of dispatched) if (!currentKeys.has(key)) dispatched.delete(key);
+    if (!rows.length && !batchResults.size) return null;
+    const controls = rows.some((r) => r.choices) ? css(el("div", {},
+      smallButton("Select suggested", "Select current recommendations without replacing chosen alternatives", () => {
+        for (const r of rows) if (!selection.has(r.sessionKey) && r.next && !reserved(r) && !dispatched.has(handoffKey(r, r.next)) && choicesOf(r).some((a) => a.available && a.key === r.next.key)) selection.set(r.sessionKey, { repo: r, step: r.next });
+        batchPreview = null; v.rerender();
+      }),
+      smallButton(batchPreview ? `Confirm ${batchPreview.length} actions` : `Run selected (${selection.size})`, "Preview the exact selection, then recheck and run one step per repository", () => {
+        if (batchRunning || !selection.size) return;
+        if (batchPreview) void runSelected(batchPreview);
+        else { batchPreview = [...selection.values()]; v.rerender(); }
+      }),
+      dispatched.size ? smallButton("Allow retry", "Check the conversation first; allow explicit reselection of unchanged handoffs", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }) : null,
+      batchRunning ? smallButton("Cancel queued", "Stop remaining dispatches; active work is not undone", () => { batchCancelled = true; v.rerender(); }) : null,
+      batchPreview ? muted("One step per selected repository: " + batchPreview.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)}${step.by === "person" ? " (open the PR link manually)" : step.approve ? ` (${step.approve} approval)` : ""}`).join("; ")) : null), "display:flex;flex-wrap:wrap;gap:6px;align-items:center") : null;
+    return css(el("div", { className: "wtc-next-actions" }, muted("Next actions"), controls, ...rows.map((r) => {
+      const available = choicesOf(r);
+      const picked = selection.get(r.sessionKey);
+      const step = picked?.step ?? r.next ?? { step: "commit", by: "agent", reason: `${plural(r.dirty, "uncommitted file")}. Save intended changes as local commits; pushing and opening a PR are separate.` };
+      const stale = picked && !available.some((a) => a.available && a.key === step.key);
+      const commit = !r.next && !r.choices && r.dirty > 0;
       const route = commit ? "commit" : nextRoute(step);
       const action = route === "pr" && r.pullRequest?.url
         ? link(nextLabel(step), r.pullRequest.url)
-        : smallButton(acting.has(r.sessionKey) ? "Working…" : commit ? "Commit changes" : route === "agent" ? `Ask agent: ${nextLabel(step).toLowerCase()}` : nextLabel(step), step.reason, () => commit ? askCommit(r) : actNext(r));
-      if (action.tagName === "BUTTON") action.disabled = !route || route === "pr" || acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey);
-      return css(el("div", {}, css(el("strong", { textContent: nameOf(r) }), "font-size:12px"), action,
-        muted(`${step.reason}${step.approve ? ` · ${step.approve} approval` : ` · ${step.by}`}`)), "display:flex;flex-wrap:wrap;align-items:center;gap:6px");
-    })), "display:grid;gap:6px;padding:8px 0");
+        : smallButton(acting.has(r.sessionKey) ? "Working…" : commit ? "Commit changes" : route === "agent" ? `Ask agent: ${nextLabel(step).toLowerCase()}` : nextLabel(step), step.reason, () => commit ? askCommit(r) : actNext({ ...r, next: step }));
+      if (action.tagName === "BUTTON") action.disabled = !!stale || dispatched.has(handoffKey(r, step)) || batchRunning || !route || route === "pr" || acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey);
+      const check = r.choices ? el("input", { type: "checkbox", checked: !!picked, disabled: batchRunning || reserved(r), ariaLabel: `Select ${nameOf(r)}` }) : null;
+      if (check) check.onchange = () => { if (selection.has(r.sessionKey)) selection.delete(r.sessionKey); else if (r.next && !reserved(r) && !dispatched.has(handoffKey(r, r.next))) selection.set(r.sessionKey, { repo: r, step: r.next }); batchPreview = null; v.rerender(); };
+      const alternatives = r.choices ? el("select", { ariaLabel: `Action for ${nameOf(r)}`, disabled: batchRunning || reserved(r) }, ...available.map((a) => el("option", { value: a.key, selected: a.key === step.key, disabled: !a.available, textContent: `${nextLabel(a)}${a.available ? "" : ` — ${a.blocked}`}` }))) : null;
+      if (alternatives) { alternatives.style.cssText = "max-width:100%;min-width:0;background:var(--bg,inherit);color:inherit"; alternatives.onchange = () => { const chosen = available.find((a) => a.available && a.key === alternatives.value); if (chosen) selection.set(r.sessionKey, { repo: r, step: chosen }); batchPreview = null; v.rerender(); }; }
+      return css(el("div", {}, check, css(el("strong", { textContent: nameOf(r) }), "font-size:12px"), alternatives, action,
+        muted(dispatched.has(handoffKey(r, step)) ? "Sent to conversation; wait for completion before retrying" : stale ? "Selection is stale; unselect and choose again" : `${step.reason}${step.approve ? ` · ${step.approve} approval` : ` · ${step.by}`}`),
+        batchResults.has(r.sessionKey) ? muted(batchResults.get(r.sessionKey)) : null), "display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0");
+    }), ...[...batchResults].filter(([key]) => !rows.some((r) => r.sessionKey === key)).map(([key, result]) => muted(`${batchLabels.get(key) ?? "Repository"}: ${result}`))), "display:grid;gap:6px;padding:8px 0");
   }
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
@@ -689,10 +809,11 @@ function collectionTables(v) {
       bitbucket ? null : css(el("div", { textContent: "A GitHub identity under Agents → Tools is the agent's own; it is not used for pushing." }), "color:var(--muted, #888)")),
     "font-size:12px;line-height:1.45;display:grid;gap:4px;padding:8px 10px;border:1px solid var(--border-strong, rgba(128,128,128,.4));border-radius:12px");
   }
-  async function publish(r, conversationKey = v.key()) {
-    if (v.key() !== conversationKey) return;
+  async function publish(r, conversationKey = v.key(), continueAllowed = () => true) {
+    const mayDispatch = () => active(conversationKey) && continueAllowed();
+    if (!mayDispatch()) return { cancelled: true };
     if (!PUSHES.has(r.forge) || mine[r.forge] === false) return;
-    const say = (...args) => { if (v.key() === conversationKey) v.say(...args); };
+    const say = (...args) => { if (active(conversationKey)) v.say(...args); };
     const review = (repo, url) => reviewPRText(repo, url, conversationKey);
     busy.add(r.sessionKey);
     say(`Preparing to push ${nameOf(r)}…`);
@@ -703,37 +824,41 @@ function collectionTables(v) {
       confirming.delete(r.sessionKey);
       const bitbucket = r.forge === BITBUCKET;
       const next = pending
-        ? await (bitbucket ? confirmBitbucket : confirmRepo)(v.host, v.agent(), r, pending, say, review)
+        ? await (bitbucket ? confirmBitbucket : confirmRepo)(v.host, v.agent(), r, pending, say, review, mayDispatch)
         : bitbucket
-          ? await publishBitbucket(v.host, v.agent(), r, say, r.base ? baseOf(r) : undefined)
-          : await publishRepo(v.host, v.agent(), r, say, review);
-      if (v.key() !== conversationKey) return;
+          ? await publishBitbucket(v.host, v.agent(), r, say, r.base ? baseOf(r) : undefined, mayDispatch)
+          : await publishRepo(v.host, v.agent(), r, say, review, mayDispatch);
+      if (next?.cancelled) { say(`${nameOf(r)}: Cancelled before publication dispatch.`); return next; }
+      if (!active(conversationKey)) return;
       if (next?.connect) { mine[r.forge] = null; showConnect = r.forge; v.reveal?.(); }
       else {
         // It is connected: look again rather than keep "not connected".
         if (mine[r.forge] === null) { mine[r.forge] = undefined; askedAt[r.forge] = 0; if (showConnect === r.forge) showConnect = null; }
         if (next) confirming.set(r.sessionKey, next);
       }
+      return next;
     } catch (err) {
       say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true);
     } finally {
       busy.delete(r.sessionKey);
       resume?.();
-      if (v.key() === conversationKey) await v.refresh();
+      if (active(conversationKey)) await v.refresh();
     }
   }
   async function catchUp(list) {
+    if (batchRunning) return;
     list.forEach((r) => catching.add(r.sessionKey));
     v.rerender();
-    try { for (const r of list) await catchUpRepo(v.host, v.agent(), r, v.say, (input) => askSkill(v.host, v.key(), "wtc-catch-up", input)); } finally {
+    try { for (const r of list) await catchUpRepo(v.host, v.agent(), r, v.say, (input) => sendToAuthor(v.key(), "wtc-catch-up", input)); } finally {
       list.forEach((r) => catching.delete(r.sessionKey));
       await v.refresh();
     }
   }
   async function pushAll(list) {
+    if (batchRunning) return;
     const conversationKey = v.key();
     for (const r of list) {
-      if (v.key() !== conversationKey) break;
+      if (!active(conversationKey)) break;
       await publish(r, conversationKey);
     }
   }
@@ -752,7 +877,7 @@ function collectionTables(v) {
       const out = await call(v.host, "catch-up", r.taskSessionKey, v.agent(), { from: r.branch });
       const conflicts = conflictsOf(out.message);
       if (conflicts.length) {
-        await askSkill(v.host, v.key(), "wtc-catch-up", `${name}: merging sub-session ${w.name}'s ${r.branch} (wtc catch-up --from ${r.branch}) conflicts in ${conflicts.join(", ")}.`);
+        await sendToAuthor(v.key(), "wtc-catch-up", `${name}: merging sub-session ${w.name}'s ${r.branch} (wtc catch-up --from ${r.branch}) conflicts in ${conflicts.join(", ")}.`);
         v.say(`${name}: ${conflicts.join(", ")} changed in both; the conversation was asked to merge ${r.branch} and resolve them.`);
       } else {
         v.say(`${name}: ${out.json?.summary ?? (wtcMessage(out.message) || "exit " + out.code)}`, out.code !== 0);
@@ -774,7 +899,7 @@ function collectionTables(v) {
       const out = await call(v.host, "catch-up", r.sessionKey, v.agent(), r.taskBranch ? { from: r.taskBranch } : undefined);
       const conflicts = conflictsOf(out.message);
       if (conflicts.length) {
-        await askSkill(v.host, v.key(), "wtc-catch-up", `${name}: catching sub-session ${w.name} up with the collection (wtc catch-up in its checkout) conflicts in ${conflicts.join(", ")}.`);
+        await sendToAuthor(v.key(), "wtc-catch-up", `${name}: catching sub-session ${w.name} up with the collection (wtc catch-up in its checkout) conflicts in ${conflicts.join(", ")}.`);
         v.say(`${name}: ${conflicts.join(", ")} changed in both; the conversation was asked to catch sub-session ${w.name} up and resolve them.`);
       } else {
         v.say(`${name}: ${out.json?.summary ?? (wtcMessage(out.message) || "exit " + out.code)}`, out.code !== 0);
@@ -828,7 +953,7 @@ function collectionTables(v) {
   const toned = (text, tone, title) => css(el("span", { textContent: text, title: title ?? "" }), `color:${tone}`);
   // A fact that is also an action: a count in a pill.
   const count = (text, title, tone, run) => {
-    const b = css(el("button", { type: "button", textContent: String(text), title, ariaLabel: title }),
+    const b = css(el("button", { type: "button", textContent: String(text), title, ariaLabel: title, disabled: batchRunning }),
       `border:1px solid var(--border-strong, rgba(128,128,128,.4));background:transparent;color:${tone};cursor:pointer;font:inherit;font-size:12px;line-height:16px;padding:0 6px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums`);
     b.onclick = async (e) => {
       e?.preventDefault();
@@ -919,7 +1044,7 @@ function collectionTables(v) {
       : null;
     const conflict = open && pr.mergeable === "conflicting"
       ? count("✗", `#${pr.number} conflicts with ${baseOf(r)}. Resolve: ask the conversation to merge the base in and resolve the conflicts`, TONE.failure,
-        () => askSkill(v.host, v.key(), "wtc-catch-up", `${nameOf(r)}: pull request #${pr.number} conflicts with ${baseOf(r)}.`))
+        () => sendToAuthor(v.key(), "wtc-catch-up", `${nameOf(r)}: pull request #${pr.number} conflicts with ${baseOf(r)}.`))
       : null;
     const review = open ? { approved: toned("✓", TONE.success, "approved"), changes_requested: toned("✗", TONE.failure, "changes requested"), review_required: muted("○", "review required") }[pr.review] ?? null : null;
     return [
@@ -1126,6 +1251,7 @@ export const startMessage = (s, main = false) => main
 
 function mountComposer(container, context) {
   let ctx = context;
+  let disposed = false;
   let watch = null;
   let key = null;
   let entry = null;
@@ -1179,7 +1305,7 @@ function mountComposer(container, context) {
     },
   };
   const tables = collectionTables({
-    get host() { return ctx.host; }, key: () => key, agent: () => agentOf(ctx), svc, say,
+    get host() { return ctx.host; }, alive: () => !disposed && !ctx.signal?.aborted, key: () => key, agent: () => agentOf(ctx), svc, say,
     // What a push needs (the how-to of connecting GitHub) shows open.
     reveal: () => { if (!card.open) { card.open = true; remember(true); } },
     refresh: () => watch?.refresh(), pause: () => pauseCollection(watch), rerender: () => entry && render(entry),
@@ -1342,6 +1468,7 @@ function mountComposer(container, context) {
       if (entry) render(entry);
     },
     dispose() {
+      disposed = true;
       clearInterval(tick);
       clearTimeout(draftTimer);
       sized?.disconnect();
@@ -1357,6 +1484,7 @@ function mountComposer(container, context) {
 // pull request, the services, and adding a repository.
 function mountCollection(container, context) {
   let ctx = context;
+  let disposed = false;
   let entry = null;
   let watch = null;
 
@@ -1430,7 +1558,7 @@ function mountCollection(container, context) {
   };
 
   const tables = collectionTables({
-    get host() { return ctx.host; }, key: sessionKeyOf, agent: () => ctx.props.agentId, svc, say,
+    get host() { return ctx.host; }, alive: () => !disposed && !ctx.signal?.aborted, key: sessionKeyOf, agent: () => ctx.props.agentId, svc, say,
     refresh: () => watch?.refresh(), pause: () => pauseCollection(watch), rerender: () => render(),
   });
   // The panel is often narrow, beside the conversation or on a phone: rows
@@ -1714,6 +1842,7 @@ function mountCollection(container, context) {
       if (changed) follow();
     },
     dispose() {
+      disposed = true;
       clearInterval(tick);
       sized?.disconnect();
       watch?.dispose();

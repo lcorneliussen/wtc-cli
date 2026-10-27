@@ -201,7 +201,7 @@ func statusViewPR(record PRRecord, slug, forge string, bypassCache bool) statusP
 	fetch := func() ([]byte, error) {
 		switch forge {
 		case "github.com":
-			return statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,mergeable,reviewRequests,latestReviews,mergedAt,baseRefName,mergeCommit")
+			return statusJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "number,state,title,isDraft,statusCheckRollup,reviewDecision,mergeStateStatus,mergeable,reviewRequests,latestReviews,mergedAt,baseRefName,mergeCommit,headRefOid")
 		case "bitbucket.org":
 			parts := strings.SplitN(slug, "/", 2)
 			if len(parts) != 2 {
@@ -375,7 +375,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 				if prURL == "" && forge != "" {
 					prURL = prURLForStatus(forge, slug, record.Number)
 				}
-				snapshot.Repos[branchRow].PR = &StatusPRFacts{Number: detail.Number, Checks: detail.Checks,
+				snapshot.Repos[branchRow].PR = &StatusPRFacts{Number: detail.Number, Head: detail.HeadCommit, Checks: detail.Checks,
 					URL: prURL, Merge: detail.Merge, Review: detail.Review, Draft: detail.State == "DRAFT",
 					MergeConflicts: detail.MergeConflicts, MergeSource: detail.MergeSource, MergeHead: mergeHead, MergeBase: mergeBase}
 			}
@@ -416,7 +416,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		mergeHead, mergeBase := statusMergeProvenance(detail)
 		if detail.State == "OPEN" || detail.State == "DRAFT" {
 			statusPRBase(&snapshot, i, detail.Base)
-			snapshot.Repos[i].PR = &StatusPRFacts{Number: detail.Number, Checks: detail.Checks,
+			snapshot.Repos[i].PR = &StatusPRFacts{Number: detail.Number, Head: detail.HeadCommit, Checks: detail.Checks,
 				URL: prURLForStatus(forge, slug, number), Merge: detail.Merge, Review: detail.Review, Draft: detail.State == "DRAFT",
 				MergeConflicts: detail.MergeConflicts, MergeSource: detail.MergeSource, MergeHead: mergeHead, MergeBase: mergeBase}
 		}

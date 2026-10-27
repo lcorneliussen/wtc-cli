@@ -51,7 +51,8 @@ type StatusRepo struct {
 	ReviewOnly    bool           `json:"review_only,omitempty"`
 	// Next is the repository's next step, read from the facts above; nil
 	// when nothing waits on anyone.
-	Next *next.Step `json:"next,omitempty"`
+	Next    *next.Step    `json:"next,omitempty"`
+	Choices *next.Choices `json:"choices,omitempty"`
 	// baseRef is the ref Behind counts against: the development tip, or an
 	// open pull request's base.
 	baseRef string
@@ -59,6 +60,7 @@ type StatusRepo struct {
 
 type StatusPRFacts struct {
 	Number         string   `json:"number"`
+	Head           string   `json:"head,omitempty"`
 	URL            string   `json:"url,omitempty"`
 	Checks         string   `json:"checks"`
 	Merge          string   `json:"merge"`
@@ -262,6 +264,7 @@ func statusNext(snapshot *StatusSnapshot) {
 	for i := range snapshot.Repos {
 		r := &snapshot.Repos[i]
 		r.Next = nil
+		r.Choices = nil
 		if r.ReviewOnly {
 			continue
 		}
@@ -279,7 +282,9 @@ func statusNext(snapshot *StatusSnapshot) {
 				break
 			}
 		}
-		r.Next = next.For(f)
+		choices := next.ChoicesFor(f)
+		r.Choices = &choices
+		r.Next = choices.Primary()
 	}
 }
 
@@ -310,7 +315,7 @@ func statusFacts(r StatusRepo) next.Facts {
 	}
 	if pr := r.PR; pr != nil {
 		number, _ := strconv.Atoi(pr.Number)
-		f.PR = &next.PR{Number: number, Draft: pr.Draft, State: "open",
+		f.PR = &next.PR{Number: number, Head: pr.Head, Draft: pr.Draft, State: "open",
 			Checks: map[string]string{"FAILURE": "failure", "SUCCESS": "success", "PENDING": "pending"}[strings.ToUpper(pr.Checks)],
 			Review: map[string]string{"approved": "approved", "changes": "changes_requested"}[pr.Review]}
 		// Open PRs live on the repository row; retained merged PRs are read

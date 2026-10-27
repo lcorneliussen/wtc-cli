@@ -59,3 +59,12 @@ the view does not run them on every refresh.
 - `wtc docs [path]` lists or prints the guidance embedded in the installed binary, even outside a collection. Inside a collection, read `.wtc/instructions/` for the effective guidance including harness overrides.
 - `wtc upgrade [--version X] [--dry-run]` moves a harness to a newer wtc release: it bumps `.wtc-cli-version` and the `wtc.toml` compatibility range together, refreshes the collection's mise config, runs `mise install`, and prints the new release's notes since the old pin. It commits nothing. `--dry-run` writes nothing and reads the published GitHub release notes. `wtc upgrade --rollout [--dry-run]`, after the harness change merged, is `wtc catch-up --all --harness-only --clean-only --idle-only --install-tools`: collections with a dirty harness, a conflicting branch or a working or blocked herdr agent are reported `needs-owner` and left alone. See [release notes and upgrades](release-notes.md#upgrade-a-harness).
 - `wtc release-notes [version|unreleased]` reads embedded Markdown offline, defaulting to the latest numbered release. `--since <old-pin>` reads newer numbered releases in upgrade order; `--list` lists available versions. Use the target binary when preparing a harness upgrade. See [release notes and upgrades](release-notes.md).
+
+In `wtc status --tui`, press `n` for next actions, Space to select a repository,
+Right to choose an alternative, or `s` to select visible suggestions. Enter
+previews a selection and Enter again confirms it. Each selected action is
+revalidated; stale or blocked targets are reported separately. `c` cancels queued
+dispatches. Unchanged handoffs cannot be sent twice in the current view; check
+the conversation before using `x` to allow an explicit retry. Agent tasks in one collection are combined into one sequential
+handoff; check that conversation for completion. Publication authority is not
+broadened by a selection, and follow-up steps require a new selection.

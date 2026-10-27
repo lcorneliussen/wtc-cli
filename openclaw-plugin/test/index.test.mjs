@@ -47,6 +47,14 @@ test("next actions recheck membership and state, preserve approvals and use only
   row.next = { ...step, command: ["sh", "-c", "untrusted"] };
   assert.equal((await act()).result.performed, false);
   assert.equal(commands.length, 0);
+  const alternative = { step: "review", by: "agent", skill: "wtc-local-review", key: "review:exact-head", available: true };
+  row.choices = { actions: [alternative, { ...alternative, key: step.key, available: false, blocked: "Head changed" }] };
+  assert.equal((await act()).ok, false, "blocked choices cannot fall back to legacy next");
+  const selected = await act({ key: alternative.key });
+  assert.equal(selected.result.repo.next.key, alternative.key);
+  assert.equal(selected.result.performed, false);
+  assert.equal(commands.length, 0, "an alternative skill is a handoff, not a shell command");
+  delete row.choices;
   row.next = step;
   block = true;
   const first = act({ command: ["sh", "-c", "ignored"] });

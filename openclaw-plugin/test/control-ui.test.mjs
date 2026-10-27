@@ -105,6 +105,7 @@ let controlledSend;
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
 let personal = null;
+let controlledOptions;
 // Methods a test makes fail.
 const failing = new Set();
 // The Bitbucket plugin: absent unless a test installs it with a login (or null).
@@ -123,6 +124,7 @@ const hostRequest = async (method, params) => {
     }
     if (params.actionId === "publish-confirm") return { ok: true, result: bitbucketConfirmResult ?? { status: "published", created: true, url: "https://bitbucket.org/ws/hooks/pull-requests/3" } };
   }
+  if (method === "sessions.github.options" && controlledOptions) return controlledOptions;
   if (method === "sessions.github.options") return { personal, shared: { source: "system-detected", login: "octo-bot" } };
   if (method === "sessions.github.status") return { confirmation: { generation: personal?.generation, account: personal?.account, requestDigest: "d1" } };
   if (method === "plugins.sessionAction" && params.actionId === "collection") {
@@ -140,7 +142,7 @@ const hostRequest = async (method, params) => {
   if (method === "sessions.send" && controlledSend) return controlledSend;
   if (method === "plugins.sessionAction" && params.actionId === "svc") return svcResult;
   if (method === "plugins.sessionAction" && params.actionId === "catch-up") return catchUpResult;
-  if (method === "plugins.sessionAction" && params.actionId === "next") return nextResult;
+  if (method === "plugins.sessionAction" && params.actionId === "next") return typeof nextResult === "function" ? nextResult(params) : nextResult;
   if (method === "sessions.delete") return { ok: true, key: params.key, deleted: true, archived: [], ...(preserved[params.key] ? { worktreePreserved: preserved[params.key] } : {}) };
   if (method === "sessions.github.publish") return typeof githubPublishResult === "function" ? githubPublishResult(params) : githubPublishResult;
   if (method === "sessions.github.confirm") return typeof githubConfirmResult === "function" ? githubConfirmResult(params) : githubConfirmResult ?? { status: "published", url: "https://github.com/octo/api/pull/7" };
@@ -153,11 +155,12 @@ async function mount(kind, data, history, key) {
   if (history) histories.set(sessionKey, history);
   collections.set(sessionKey, data);
   const host = container();
-  const ctx = { props: { sessionKey, agentId: "main" }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} };
+  const controller = new AbortController();
+  const ctx = { props: { sessionKey, agentId: "main" }, signal: controller.signal, presented: true, mountDefault: () => () => {} };
   ctx.host = { request: hostRequest, ui: { openPanel() {} } };
   const view = mounts[kind](host, ctx);
   await settle();
-  return { host, view };
+  return { host, view, abort: () => controller.abort() };
 }
 
 const collection = (repos, services = []) => ({
@@ -1228,4 +1231,164 @@ test("composer: a sub-session with uncommitted files is reviewed by the conversa
   await buttons().find((n) => /^2 commits of the collection's site not on openclaw\/13-docs-nav/.test(n.title)).onclick();
   assert.deepEqual(calls.map((c) => [c.actionId, c.sessionKey, c.payload]), [["catch-up", "agent:main:owner:site-nav", { from: "openclaw/test" }]]);
   clean.view.dispose();
+});
+
+
+const withChoices = (name, kind = "fix-checks") => {
+  const step = { repo: name, step: kind, by: "agent", skill: "wtc-follow", key: `${name}:${kind}:head1`, reason: `${name} needs ${kind}` };
+  const alternative = { ...step, step: "follow-pr", key: `${name}:follow-pr:head1`, reason: `Check ${name}'s current PR` };
+  return repo(name, { next: step, choices: { recommended: step.key, actions: [{ ...step, available: true }, { ...alternative, available: true }, { ...step, step: "review", key: `${name}:review`, available: false, blocked: "No review adapter" }] } });
+};
+const clickText = async (host, text) => {
+  const b = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === text);
+  assert.ok(b, text); b.onclick({ preventDefault() {}, stopPropagation() {} });
+  for (let i = 0; i < 6; i++) await settle();
+};
+
+test("selected mixed actions preview exact alternatives and combine author handoffs", async () => {
+  for (const kind of ["composer", "panel"]) {
+    const api = withChoices("api"), web = withChoices("web", "address-review");
+    const { host, view } = await mount(kind, collection([api, web]));
+    try {
+      const select = [...host.all()].find((n) => n.tagName === "SELECT" && n.ariaLabel === "Action for web");
+      select.value = web.choices.actions[1].key; select.onchange();
+      await clickText(host, "Select suggested");
+      calls.length = 0;
+      await clickText(host, "Run selected (2)");
+      assert.equal(calls.length, 0, "preview must not dispatch");
+      assert.match(host.textContent, /web: Check PR progress/);
+      nextResult = ({ payload }) => {
+        const r = payload.ownerSessionKey === api.sessionKey ? api : web;
+        return { ok: true, result: { performed: false, repo: { ...r, next: r.choices.actions.find((a) => a.key === payload.key) } } };
+      };
+      await clickText(host, "Confirm 2 actions");
+      const sends = calls.filter((c) => c.method === "sessions.send");
+      assert.equal(sends.length, 1, "one author conversation gets one prompt");
+      assert.match(sends[0].message, /api needs fix-checks/);
+      assert.match(sends[0].message, /Check web's current PR/);
+      assert.doesNotMatch(sends[0].message, /web needs address-review/);
+      assert.match(host.textContent, /completion pending/);
+      await clickText(host, "Select suggested");
+      assert.ok(buttons(host).includes("Run selected (0)"), "unchanged handoffs cannot be immediately resent");
+      await clickText(host, "Allow retry"); await clickText(host, "Select suggested");
+      assert.ok(buttons(host).includes("Run selected (2)"), "explicit retry recovers an unchanged failed handoff");
+    } finally { view.dispose(); nextResult = undefined; }
+  }
+});
+
+test("batch stale targets fail independently and an unselected new repository stays excluded", async () => {
+  for (const kind of ["composer", "panel"]) {
+    const api = withChoices("api"), web = withChoices("web");
+    const sessionKey = `agent:main:batch:${++sessions}`;
+    const { host, view } = await mount(kind, collection([api, web]), undefined, sessionKey);
+    try {
+      await clickText(host, "Select suggested");
+      await clickText(host, "Run selected (2)");
+      const tools = withChoices("tools");
+      collections.set(sessionKey, collection([api, web, tools]));
+      await clickText(host, "↻");
+      assert.match(host.textContent, /tools/);
+      calls.length = 0;
+      nextResult = ({ payload }) => payload.ownerSessionKey === api.sessionKey ? { ok: false, error: "Head changed" } : { ok: true, result: { performed: false, repo: web } };
+      await clickText(host, "Confirm 2 actions");
+      assert.match(host.textContent, /Failed or stale: Head changed/);
+      const sends = calls.filter((c) => c.method === "sessions.send");
+      assert.equal(sends.length, 1);
+      assert.match(sends[0].message, /web needs/); assert.doesNotMatch(sends[0].message, /api needs|tools/);
+      assert.equal(calls.filter((c) => c.actionId === "next" && c.payload.ownerSessionKey === tools.sessionKey).length, 0);
+    } finally { view.dispose(); nextResult = undefined; }
+  }
+});
+
+test("cancelling a batch or switching conversations prevents queued handoffs", async () => {
+  for (const kind of ["composer", "panel"]) for (const switchView of [false, true]) {
+    const r = withChoices("api"); const { host, view } = await mount(kind, collection([r]));
+    let release;
+    try {
+      await clickText(host, "Select suggested"); await clickText(host, "Run selected (1)");
+      nextResult = () => new Promise((resolve) => { release = resolve; }); calls.length = 0;
+      await clickText(host, "Confirm 1 actions");
+      assert.ok(release);
+      if (switchView) {
+        const key = `agent:main:other:${++sessions}`; collections.set(key, collection([repo("other")]));
+        view.update({ props: { sessionKey: key, agentId: "main" }, host: { request: hostRequest, ui: { openPanel() {} } }, signal: new AbortController().signal, presented: true, mountDefault: () => () => {} }); await settle();
+      } else await clickText(host, "Cancel queued");
+      release({ ok: true, result: { performed: false, repo: r } });
+      for (let i=0;i<6;i++) await settle();
+      assert.equal(calls.filter((c) => c.method === "sessions.send").length, 0);
+      if (switchView) assert.doesNotMatch(host.textContent, /api needs|completion pending/);
+      else assert.match(host.textContent, /Cancelled before dispatch/);
+    } finally { view.dispose(); nextResult = undefined; }
+  }
+});
+
+
+test("closing or aborting a view cancels selected work before handoff", async () => {
+ for(const kind of ["composer","panel"])for(const lifecycle of ["dispose","abort"]){
+  const r=withChoices("api");const {host,view,abort}=await mount(kind,collection([r]));let release;
+  try{
+   await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
+   nextResult=()=>new Promise(resolve=>{release=resolve});calls.length=0;
+   await clickText(host,"Confirm 1 actions");assert.ok(release);
+   if(lifecycle==="dispose")view.dispose();else abort();
+   release({ok:true,result:{performed:false,repo:r}});
+   for(let i=0;i<6;i++)await settle();
+   assert.equal(calls.filter(c=>c.method==="sessions.send").length,0,`${kind}/${lifecycle}`);
+   assert.equal(calls.filter(c=>c.actionId==="next").length,1,"no queued recheck after exit");
+  }finally{view.dispose();nextResult=undefined;}
+ }
+});
+
+test("a captured batch cannot duplicate an in-flight individual author handoff", async () => {
+ for(const kind of ["composer","panel"]){
+  const r=withChoices("api");const {host,view}=await mount(kind,collection([r]));let finish;
+  try{
+   nextResult={ok:true,result:{performed:false,repo:r}};
+   await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
+   controlledSend=new Promise(resolve=>{finish=resolve});calls.length=0;
+   await clickText(host,"Ask agent: fix checks");
+   assert.equal(calls.filter(c=>c.method==="sessions.send").length,1);
+   await clickText(host,"Confirm 1 actions");
+   assert.equal(calls.filter(c=>c.method==="sessions.send").length,1,"batch reused an in-flight reservation");
+   finish({});for(let i=0;i<6;i++)await settle();
+  }finally{finish?.({});view.dispose();nextResult=undefined;controlledSend=undefined;}
+ }
+});
+
+
+test("publication preparation checks cancellation after revalidation and account lookup", async () => {
+ for(const kind of ["composer","panel"])for(const boundary of ["revalidation","options"]){
+  const step={step:"push",by:"wtc",approve:"person",gateway:"github_publish",key:"push:h1",reason:"Push exact commits"};
+  const r=repo("api",{ahead:1,unpublished:1,next:step,choices:{recommended:step.key,actions:[{...step,available:true}]}});
+  personal={state:"connected",account:{login:"demo"},generation:"g1"};
+  const {host,view}=await mount(kind,collection([r]));let release;
+  try{
+   await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
+   nextResult=boundary==="revalidation"?()=>new Promise(resolve=>{release=resolve}):{ok:true,result:{performed:false,repo:r}};
+   if(boundary==="options")controlledOptions=new Promise(resolve=>{release=resolve});
+   calls.length=0;await clickText(host,"Confirm 1 actions");assert.ok(release);
+   await clickText(host,"Cancel queued");
+   release(boundary==="revalidation"?{ok:true,result:{performed:false,repo:r}}:{personal});
+   for(let i=0;i<6;i++)await settle();
+   assert.equal(calls.filter(c=>c.method==="sessions.github.publish"||c.method==="sessions.github.confirm").length,0,`${kind}/${boundary}`);
+   assert.match(host.textContent,/Cancelled/);
+  }finally{view.dispose();nextResult=undefined;controlledOptions=undefined;personal=null;}
+ }
+});
+
+test("publication preparation stops after abort or disposal during account lookup", async () => {
+ for(const kind of ["composer","panel"])for(const lifecycle of ["abort","dispose"]){
+  const step={step:"push",by:"wtc",approve:"person",gateway:"github_publish",key:"push:h1",reason:"Push exact commits"};
+  const r=repo("api",{ahead:1,unpublished:1,next:step,choices:{recommended:step.key,actions:[{...step,available:true}]}});
+  personal={state:"connected",account:{login:"demo"},generation:"g1"};
+  const {host,view,abort}=await mount(kind,collection([r]));let release;
+  try{
+   await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
+   nextResult={ok:true,result:{performed:false,repo:r}};controlledOptions=new Promise(resolve=>{release=resolve});calls.length=0;
+   await clickText(host,"Confirm 1 actions");assert.ok(release);
+   if(lifecycle==="abort")abort();else view.dispose();
+   release({personal});for(let i=0;i<6;i++)await settle();
+   assert.equal(calls.filter(c=>c.method==="sessions.github.publish"||c.method==="sessions.github.confirm").length,0,`${kind}/${lifecycle}`);
+  }finally{view.dispose();nextResult=undefined;controlledOptions=undefined;personal=null;}
+ }
 });
