@@ -40,7 +40,7 @@ export const wtcVersionOf = (output) => /^wtc version (\S+)/.exec(String(output 
 export function versionWarning(pluginVersion, wtcVersionOutput) {
   const m = /^wtc version v?(\d+\.\d+\.\d+)$/.exec(String(wtcVersionOutput ?? "").trim());
   if (!m || !/^\d+\.\d+\.\d+$/.test(String(pluginVersion ?? "")) || m[1] === pluginVersion) return null;
-  return `This card is the wtc ${pluginVersion} plugin, but the gateway runs wtc ${m[1]}: run "wtc openclaw install" on the gateway host.`;
+  return `This card is the taba ${pluginVersion} plugin, but the gateway runs wtc ${m[1]}: run "wtc openclaw install" on the gateway host.`;
 }
 
 const onPath = (program) => String(process.env.PATH ?? "").split(path.delimiter).some((dir) => dir && existsSync(path.join(dir, program)));
@@ -365,7 +365,7 @@ const worktreeOf = (entry) => (entry?.worktree ? entry.workspaceDir || entry.spa
 
 export default {
   id: PLUGIN_ID,
-  name: "Worktree Collection",
+  name: "taba",
   register(api) {
     // Without a runtime (the openclaw CLI's metadata capture, setup of a
     // disabled plugin) the session actions and services cannot work.
