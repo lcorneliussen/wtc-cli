@@ -400,7 +400,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return m, nil
 						}
 					}
-					if m.nextPreview == nil {
+					if m.nextPreview == nil && statusNextConfirmTargets(statusNextTargets(m.snapshot, m.nextSelected)) {
 						var lines []string
 						m.nextPreview = statusNextTargets(m.snapshot, m.nextSelected)
 						for _, target := range m.nextPreview {
@@ -408,6 +408,9 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						m.nextNotice = "Selected single steps:\n" + strings.Join(lines, "\n") + "\nEnter confirms; Space changes selection. Publication retains its authority requirements."
 						return m, nil
+					}
+					if m.nextPreview == nil {
+						m.nextPreview = statusNextTargets(m.snapshot, m.nextSelected)
 					}
 					ctx, cancel := context.WithCancel(context.Background())
 					m.nextCancel = cancel

@@ -108,6 +108,11 @@ func TestStatusNextAlternativeRequiresExactFreshChoice(t *testing.T) {
 
 func TestStatusNextSelectionPreviewAndRemovedTargets(t *testing.T) {
 	c, rows := batchFixture(t)
+	for i := range rows {
+		step := *rows[i].Next
+		step.Step = "push"
+		rows[i].Next = &step
+	}
 	m := statusTUIModel{context: c, snapshot: wtc.StatusSnapshot{Repos: rows}, showNext: true, width: 100, height: 30}
 	key := func(code rune, text string) tea.Cmd {
 		model, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: code, Text: text}))
@@ -212,5 +217,36 @@ func TestStatusNextCancellationAtDispatchBoundary(t *testing.T) {
 				t.Fatalf("dispatch started after cancellation: %s (%d)", result.text, writes)
 			}
 		})
+	}
+}
+
+func TestStatusNextCatchUpNeedsOneClick(t *testing.T) {
+	c, rows := batchFixture(t)
+	r := rows[0]
+	r.Next = &next.Step{Step: "catch-up", By: next.ByWTC, Approve: next.ApproveAgent, Command: []string{"wtc", "catch-up", "task", "--repos", "api"}}
+	if _, ok := statusNextCommand(r, true); !ok {
+		t.Fatal("explicit catch-up needs no second approval")
+	}
+	for _, invalid := range []struct{ step, approval string }{{"catch-up", next.ApprovePerson}, {"merge", next.ApproveAgent}} {
+		rejected := r
+		step := *r.Next
+		step.Step = invalid.step
+		step.Approve = invalid.approval
+		rejected.Next = &step
+		if _, ok := statusNextCommand(rejected, true); ok {
+			t.Fatalf("interactive selection bypassed %s/%s", invalid.step, invalid.approval)
+		}
+	}
+	if _, ok := statusNextCommand(r); ok {
+		t.Fatal("implicit callers must retain the agent gate")
+	}
+	m := statusTUIModel{context: c, snapshot: wtc.StatusSnapshot{Repos: []wtc.StatusRepo{r}}, showNext: true, nextSelected: map[string]wtc.StatusRepo{statusNextIdentity(r): r}}
+	model, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	m = model.(statusTUIModel)
+	if cmd == nil || !m.nextRunning {
+		t.Fatal("catch-up selection did not dispatch on first Enter")
+	}
+	if m.nextCancel != nil {
+		m.nextCancel()
 	}
 }

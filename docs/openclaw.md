@@ -665,8 +665,9 @@ installed from a path, which is how `wtc openclaw install` installs.
 Development builds expose CLI-derived recommendations and alternatives in the
 Collection card and panel. Choose an action per repository, check its selection,
 or use **Select suggested** to select the visible recommendations. Existing
-alternative choices are preserved. **Run selected** previews the exact targets;
-**Confirm actions** rechecks those same actions before dispatch. A changed head,
+alternative choices are preserved. **Run selected** starts catch-up and other local steps directly, rechecking the
+exact targets first. Publication selections show a preview and retain each
+repository’s account/commit confirmation. A changed head,
 base, worktree state or PR observation makes an old selection stale. It is not
 silently replaced with a new recommendation or expanded to newly appearing repos.
 

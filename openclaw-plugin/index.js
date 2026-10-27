@@ -822,7 +822,8 @@ export default {
           const step = choice ?? (!repo?.choices && repo?.next?.key === key ? repo.next : null);
           if (!repo || repo.error || !step) return { ok: false, error: "the next step changed; refresh the collection" };
           const selectedRepo = { ...repo, next: step };
-          if (step.by === "wtc" && !step.approve && JSON.stringify(step.command) === JSON.stringify(["wtc", "catch-up"])) {
+          const approvedCatchUp = action.payload?.approveCatchUp === true && step.step === "catch-up" && step.approve === "agent";
+          if (step.by === "wtc" && (!step.approve || approvedCatchUp) && JSON.stringify(step.command) === JSON.stringify(["wtc", "catch-up"])) {
             const out = await catchUp({ ...action, sessionKey: ownerSessionKey, payload: {} });
             return out.ok ? { ok: true, result: { ...out.result, performed: true, repo: selectedRepo } } : out;
           }

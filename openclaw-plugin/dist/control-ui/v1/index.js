@@ -607,6 +607,8 @@ function collectionTables(v) {
     : s.by === "agent" && (!s.approve || s.approve === "agent") && s.skill ? "agent"
     : s.by === "wtc" && s.approve === "agent" && s.command?.[0] === "wtc" && s.command?.[1] === "catch-up" ? "agent"
     : s.by === "wtc" && !s.approve && JSON.stringify(s.command) === JSON.stringify(["wtc", "catch-up"]) ? "run" : null;
+  const nextPayload = (r, step) => ({ ownerSessionKey: r.sessionKey, key: step.key,
+    ...(step.step === "catch-up" && step.by === "wtc" && step.approve === "agent" ? { approveCatchUp: true } : {}) });
   async function actNext(r) {
     if (batchRunning || v.alive?.() === false || dispatched.has(handoffKey(r, r.next))) return;
     if (acting.has(r.sessionKey)) return;
@@ -616,7 +618,7 @@ function collectionTables(v) {
     acting.add(r.sessionKey);
     v.rerender();
     try {
-      const out = await call(v.host, "next", conversationKey, v.agent(), { ownerSessionKey: r.sessionKey, key: r.next.key });
+      const out = await call(v.host, "next", conversationKey, v.agent(), nextPayload(r, r.next));
       if (!active(conversationKey)) return;
       const fresh = out.repo;
       if (out.performed) {
@@ -658,7 +660,7 @@ function collectionTables(v) {
         if (sent.has(handoffKey(r, step))) { results.set(r.sessionKey, "Already sent to the conversation; completion pending"); continue; }
         results.set(r.sessionKey, "Rechecking…"); update();
         try {
-          const out = await call(v.host, "next", conversation, v.agent(), { ownerSessionKey: r.sessionKey, key: step.key });
+          const out = await call(v.host, "next", conversation, v.agent(), nextPayload(r, step));
           if (!active(conversation)) break;
           const fresh = out.repo;
           if (out.performed) results.set(r.sessionKey, out.code ? "Failed: " + (out.message ?? out.code) : "Completed");
@@ -690,7 +692,7 @@ function collectionTables(v) {
         const { repo: r, step } = target;
         if (batchCancelled || !active(conversation)) { results.set(r.sessionKey, "Cancelled before handoff"); continue; }
         try {
-          const fresh = await call(v.host, "next", conversation, v.agent(), { ownerSessionKey: r.sessionKey, key: step.key });
+          const fresh = await call(v.host, "next", conversation, v.agent(), nextPayload(r, step));
           if (!fresh.repo?.next || fresh.repo.next.key !== step.key) throw Error("The selection changed");
           ready.push(target);
         } catch (err) { results.set(r.sessionKey, "Failed or stale: " + String(err?.message ?? err)); }
@@ -714,38 +716,58 @@ function collectionTables(v) {
     const currentKeys = new Set(rows.flatMap((r) => choicesOf(r).map((a) => handoffKey(r, a))));
     for (const key of dispatched) if (!currentKeys.has(key)) dispatched.delete(key);
     if (!rows.length && !batchResults.size) return null;
+    const control = (text, title, run, { primary = false, disabled = false } = {}) => {
+      const button = smallButton(text, title, run);
+      button.disabled = disabled;
+      button.style.cssText = `border:1px solid ${primary ? "transparent" : "var(--border-strong,rgba(128,128,128,.25))"};border-radius:7px;background:${primary ? "var(--accent,#75c8c1)" : "transparent"};color:${primary ? "var(--accent-foreground,#151a22)" : "var(--text,inherit)"};font:inherit;font-size:12px;font-weight:500;line-height:18px;padding:5px 9px;white-space:nowrap;cursor:${disabled ? "default" : "pointer"};opacity:${disabled ? ".45" : "1"}`;
+      return button;
+    };
     const controls = rows.some((r) => r.choices) ? css(el("div", {},
-      smallButton("Select suggested", "Select current recommendations without replacing chosen alternatives", () => {
+      control("Select suggested", "Select current recommendations without replacing chosen alternatives", () => {
         for (const r of rows) if (!selection.has(r.sessionKey) && r.next && !reserved(r) && !dispatched.has(handoffKey(r, r.next)) && choicesOf(r).some((a) => a.available && a.key === r.next.key)) selection.set(r.sessionKey, { repo: r, step: r.next });
         batchPreview = null; v.rerender();
-      }),
-      smallButton(batchPreview ? `Confirm ${batchPreview.length} actions` : `Run selected (${selection.size})`, "Preview the exact selection, then recheck and run one step per repository", () => {
+      }, { disabled: batchRunning }),
+      control(batchRunning ? "Running…" : batchPreview ? `Confirm ${batchPreview.length} actions` : (selection.size ? `Run selected (${selection.size})` : "Run selected"), "Run selected actions; publication keeps its confirmation", () => {
         if (batchRunning || !selection.size) return;
         if (batchPreview) void runSelected(batchPreview);
-        else { batchPreview = [...selection.values()]; v.rerender(); }
-      }),
-      dispatched.size ? smallButton("Allow retry", "Check the conversation first; allow explicit reselection of unchanged handoffs", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }) : null,
-      batchRunning ? smallButton("Cancel queued", "Stop remaining dispatches; active work is not undone", () => { batchCancelled = true; v.rerender(); }) : null,
-      batchPreview ? muted("One step per selected repository: " + batchPreview.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)}${step.by === "person" ? " (open the PR link manually)" : step.approve ? ` (${step.approve} approval)` : ""}`).join("; ")) : null), "display:flex;flex-wrap:wrap;gap:6px;align-items:center") : null;
-    return css(el("div", { className: "wtc-next-actions" }, muted("Next actions"), controls, ...rows.map((r) => {
+        else {
+          const targets = [...selection.values()];
+          if (targets.every(({ step }) => !step.approve || step.approve !== "person") && targets.every(({ step }) => step.step !== "push")) void runSelected(targets);
+          else { batchPreview = targets; v.rerender(); }
+        }
+      }, { primary: true, disabled: batchRunning || !selection.size }),
+      dispatched.size ? control("Allow retry", "Check the conversation first; allow explicit reselection of unchanged handoffs", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }) : null,
+      batchRunning ? control("Cancel queued", "Stop remaining dispatches; active work is not undone", () => { batchCancelled = true; v.rerender(); }) : null,
+      batchPreview ? control("Back", "Change the selection", () => { batchPreview = null; v.rerender(); }) : null), "display:flex;flex-wrap:wrap;gap:6px;align-items:center") : null;
+    const header = css(el("div", {}, css(el("span", { textContent: "Next actions" }), "font-size:12px;font-weight:600;color:var(--text,inherit)"), controls), "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap");
+    return css(el("div", { className: "wtc-next-actions" }, header, batchPreview ? css(el("div", { textContent: "Review the selected publication requests. You will confirm each repository’s account and commits before pushing." }), "font-size:12px;line-height:1.5;color:var(--muted,#888);padding:8px 10px;border-radius:7px;background:rgba(128,128,128,.08)") : null, ...rows.map((r) => {
       const available = choicesOf(r);
       const picked = selection.get(r.sessionKey);
       const step = picked?.step ?? r.next ?? { step: "commit", by: "agent", reason: `${plural(r.dirty, "uncommitted file")}. Save intended changes as local commits; pushing and opening a PR are separate.` };
       const stale = picked && !available.some((a) => a.available && a.key === step.key);
       const commit = !r.next && !r.choices && r.dirty > 0;
       const route = commit ? "commit" : nextRoute(step);
+      const hasAlternatives = r.choices && available.length > 1;
       const action = route === "pr" && r.pullRequest?.url
         ? link(nextLabel(step), r.pullRequest.url)
-        : smallButton(acting.has(r.sessionKey) ? "Working…" : commit ? "Commit changes" : route === "agent" ? `Ask agent: ${nextLabel(step).toLowerCase()}` : nextLabel(step), step.reason, () => commit ? askCommit(r) : actNext({ ...r, next: step }));
+        : control(hasAlternatives ? (route === "agent" && !nextPayload(r, step).approveCatchUp ? "Ask agent" : "Run") : commit ? "Commit changes" : nextLabel(step), step.reason, () => commit ? askCommit(r) : actNext({ ...r, next: step }));
       if (action.tagName === "BUTTON") action.disabled = !!stale || dispatched.has(handoffKey(r, step)) || batchRunning || !route || route === "pr" || acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey);
+      if (action.disabled) { action.style.opacity = ".45"; action.style.cursor = "default"; }
       const check = r.choices ? el("input", { type: "checkbox", checked: !!picked, disabled: batchRunning || reserved(r), ariaLabel: `Select ${nameOf(r)}` }) : null;
       if (check) check.onchange = () => { if (selection.has(r.sessionKey)) selection.delete(r.sessionKey); else if (r.next && !reserved(r) && !dispatched.has(handoffKey(r, r.next))) selection.set(r.sessionKey, { repo: r, step: r.next }); batchPreview = null; v.rerender(); };
-      const alternatives = r.choices ? el("select", { ariaLabel: `Action for ${nameOf(r)}`, disabled: batchRunning || reserved(r) }, ...available.map((a) => el("option", { value: a.key, selected: a.key === step.key, disabled: !a.available, textContent: `${nextLabel(a)}${a.available ? "" : ` — ${a.blocked}`}` }))) : null;
-      if (alternatives) { alternatives.style.cssText = "max-width:100%;min-width:0;background:var(--bg,inherit);color:inherit"; alternatives.onchange = () => { const chosen = available.find((a) => a.available && a.key === alternatives.value); if (chosen) selection.set(r.sessionKey, { repo: r, step: chosen }); batchPreview = null; v.rerender(); }; }
-      return css(el("div", {}, check, css(el("strong", { textContent: nameOf(r) }), "font-size:12px"), alternatives, action,
-        muted(dispatched.has(handoffKey(r, step)) ? "Sent to conversation; wait for completion before retrying" : stale ? "Selection is stale; unselect and choose again" : `${step.reason}${step.approve ? ` · ${step.approve} approval` : ` · ${step.by}`}`),
-        batchResults.has(r.sessionKey) ? muted(batchResults.get(r.sessionKey)) : null), "display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0");
-    }), ...[...batchResults].filter(([key]) => !rows.some((r) => r.sessionKey === key)).map(([key, result]) => muted(`${batchLabels.get(key) ?? "Repository"}: ${result}`))), "display:grid;gap:6px;padding:8px 0");
+      if (check) check.style.cssText = "width:15px;height:15px;margin:6px 0 0;accent-color:var(--accent,#75c8c1);cursor:pointer";
+      const alternatives = hasAlternatives ? el("select", { ariaLabel: `Action for ${nameOf(r)}`, disabled: batchRunning || reserved(r) }, ...available.map((a) => el("option", { value: a.key, selected: a.key === step.key, disabled: !a.available, textContent: `${nextLabel(a)}${a.available ? "" : ` — ${a.blocked}`}` }))) : null;
+      if (alternatives) { alternatives.style.cssText = "appearance:none;max-width:190px;min-width:0;border:1px solid var(--border-strong,rgba(128,128,128,.25));border-radius:7px;padding:5px 26px 5px 9px;font:inherit;font-size:12px;line-height:18px;background:var(--bg,#151a22);color:var(--text,inherit);cursor:pointer"; alternatives.onchange = () => { const chosen = available.find((a) => a.available && a.key === alternatives.value); if (chosen) selection.set(r.sessionKey, { repo: r, step: chosen }); batchPreview = null; v.rerender(); }; }
+      const reason = dispatched.has(handoffKey(r, step)) ? "Sent to conversation; waiting for completion" : stale ? "Selection changed. Unselect and choose again." : step.reason;
+      const menu = alternatives ? css(el("span", {}, alternatives, css(el("span", { textContent: "⌄", ariaHidden: "true" }), "position:absolute;right:9px;top:5px;pointer-events:none;color:var(--muted,#888)")), "display:inline-flex;position:relative;min-width:0") : null;
+      const actions = css(el("div", {}, menu, action), "display:flex;align-items:center;gap:6px;flex:none;max-width:100%");
+      const detail = css(el("div", {}, css(el("strong", { textContent: nameOf(r) }), "font-size:13px;font-weight:600;color:var(--text,inherit)"),
+        css(el("div", { textContent: reason }), "font-size:12px;line-height:1.5;color:var(--muted,#888);margin-top:3px;overflow-wrap:anywhere")), "flex:1;min-width:120px");
+      const result = batchResults.get(r.sessionKey) ?? (batchRunning && picked ? "Queued" : "");
+      return css(el("div", {}, check ?? el("span"), css(el("div", {},
+        css(el("div", {}, detail, actions), "display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap"),
+        result ? css(el("div", { textContent: result, role: "status" }), "font-size:12px;line-height:1.5;margin-top:6px;color:var(--muted,#888)") : null), "min-width:0")), "display:grid;grid-template-columns:15px minmax(0,1fr);gap:10px;padding:10px 0;border-bottom:1px solid rgba(128,128,128,.12)");
+    }), ...[...batchResults].filter(([key]) => !rows.some((r) => r.sessionKey === key)).map(([key, result]) => muted(`${batchLabels.get(key) ?? "Repository"}: ${result}`))), "display:grid;gap:0;padding:12px 0 2px;border-top:1px solid rgba(128,128,128,.12);margin-top:6px");
   }
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.

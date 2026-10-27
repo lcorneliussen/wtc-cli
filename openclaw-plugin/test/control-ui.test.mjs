@@ -1245,7 +1245,7 @@ const clickText = async (host, text) => {
   for (let i = 0; i < 6; i++) await settle();
 };
 
-test("selected mixed actions preview exact alternatives and combine author handoffs", async () => {
+test("selected mixed actions retain alternatives and combine author handoffs", async () => {
   for (const kind of ["composer", "panel"]) {
     const api = withChoices("api"), web = withChoices("web", "address-review");
     const { host, view } = await mount(kind, collection([api, web]));
@@ -1254,14 +1254,12 @@ test("selected mixed actions preview exact alternatives and combine author hando
       select.value = web.choices.actions[1].key; select.onchange();
       await clickText(host, "Select suggested");
       calls.length = 0;
-      await clickText(host, "Run selected (2)");
-      assert.equal(calls.length, 0, "preview must not dispatch");
-      assert.match(host.textContent, /web: Check PR progress/);
+      assert.equal(calls.length, 0, "selection must not dispatch");
       nextResult = ({ payload }) => {
         const r = payload.ownerSessionKey === api.sessionKey ? api : web;
         return { ok: true, result: { performed: false, repo: { ...r, next: r.choices.actions.find((a) => a.key === payload.key) } } };
       };
-      await clickText(host, "Confirm 2 actions");
+      await clickText(host, "Run selected (2)");
       const sends = calls.filter((c) => c.method === "sessions.send");
       assert.equal(sends.length, 1, "one author conversation gets one prompt");
       assert.match(sends[0].message, /api needs fix-checks/);
@@ -1269,7 +1267,7 @@ test("selected mixed actions preview exact alternatives and combine author hando
       assert.doesNotMatch(sends[0].message, /web needs address-review/);
       assert.match(host.textContent, /completion pending/);
       await clickText(host, "Select suggested");
-      assert.ok(buttons(host).includes("Run selected (0)"), "unchanged handoffs cannot be immediately resent");
+      assert.ok(buttons(host).includes("Run selected"), "unchanged handoffs cannot be immediately resent");
       await clickText(host, "Allow retry"); await clickText(host, "Select suggested");
       assert.ok(buttons(host).includes("Run selected (2)"), "explicit retry recovers an unchanged failed handoff");
     } finally { view.dispose(); nextResult = undefined; }
@@ -1283,14 +1281,13 @@ test("batch stale targets fail independently and an unselected new repository st
     const { host, view } = await mount(kind, collection([api, web]), undefined, sessionKey);
     try {
       await clickText(host, "Select suggested");
-      await clickText(host, "Run selected (2)");
       const tools = withChoices("tools");
       collections.set(sessionKey, collection([api, web, tools]));
       await clickText(host, "↻");
       assert.match(host.textContent, /tools/);
       calls.length = 0;
       nextResult = ({ payload }) => payload.ownerSessionKey === api.sessionKey ? { ok: false, error: "Head changed" } : { ok: true, result: { performed: false, repo: web } };
-      await clickText(host, "Confirm 2 actions");
+      await clickText(host, "Run selected (2)");
       assert.match(host.textContent, /Failed or stale: Head changed/);
       const sends = calls.filter((c) => c.method === "sessions.send");
       assert.equal(sends.length, 1);
@@ -1305,9 +1302,9 @@ test("cancelling a batch or switching conversations prevents queued handoffs", a
     const r = withChoices("api"); const { host, view } = await mount(kind, collection([r]));
     let release;
     try {
-      await clickText(host, "Select suggested"); await clickText(host, "Run selected (1)");
+      await clickText(host, "Select suggested");
       nextResult = () => new Promise((resolve) => { release = resolve; }); calls.length = 0;
-      await clickText(host, "Confirm 1 actions");
+      await clickText(host, "Run selected (1)");
       assert.ok(release);
       if (switchView) {
         const key = `agent:main:other:${++sessions}`; collections.set(key, collection([repo("other")]));
@@ -1327,9 +1324,9 @@ test("closing or aborting a view cancels selected work before handoff", async ()
  for(const kind of ["composer","panel"])for(const lifecycle of ["dispose","abort"]){
   const r=withChoices("api");const {host,view,abort}=await mount(kind,collection([r]));let release;
   try{
-   await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
+   await clickText(host,"Select suggested");
    nextResult=()=>new Promise(resolve=>{release=resolve});calls.length=0;
-   await clickText(host,"Confirm 1 actions");assert.ok(release);
+   await clickText(host,"Run selected (1)");assert.ok(release);
    if(lifecycle==="dispose")view.dispose();else abort();
    release({ok:true,result:{performed:false,repo:r}});
    for(let i=0;i<6;i++)await settle();
@@ -1344,11 +1341,11 @@ test("a captured batch cannot duplicate an in-flight individual author handoff",
   const r=withChoices("api");const {host,view}=await mount(kind,collection([r]));let finish;
   try{
    nextResult={ok:true,result:{performed:false,repo:r}};
-   await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
+   await clickText(host,"Select suggested");
    controlledSend=new Promise(resolve=>{finish=resolve});calls.length=0;
-   await clickText(host,"Ask agent: fix checks");
+   await clickText(host,"Ask agent");
    assert.equal(calls.filter(c=>c.method==="sessions.send").length,1);
-   await clickText(host,"Confirm 1 actions");
+   await clickText(host,"Run selected (1)");
    assert.equal(calls.filter(c=>c.method==="sessions.send").length,1,"batch reused an in-flight reservation");
    finish({});for(let i=0;i<6;i++)await settle();
   }finally{finish?.({});view.dispose();nextResult=undefined;controlledSend=undefined;}
@@ -1390,5 +1387,36 @@ test("publication preparation stops after abort or disposal during account looku
    release({personal});for(let i=0;i<6;i++)await settle();
    assert.equal(calls.filter(c=>c.method==="sessions.github.publish"||c.method==="sessions.github.confirm").length,0,`${kind}/${lifecycle}`);
   }finally{view.dispose();nextResult=undefined;controlledOptions=undefined;personal=null;}
+ }
+});
+
+test("catch-up selections dispatch on one click without redundant single-choice menus", async () => {
+ for(const kind of ["composer","panel"]){
+  const rows=["api","docs"].map((name,i)=>{const next={step:"catch-up",by:"wtc",...(i===0?{approve:"agent"}:{}),command:["wtc","catch-up"],key:`${name}:catchup`,reason:`${i+1} new on main`};return repo(name,{next,choices:{recommended:next.key,actions:[{...next,available:true}]}})});
+  const {host,view}=await mount(kind,collection(rows));
+  try{
+   assert.equal([...host.all()].filter(n=>n.tagName==="SELECT").length,0);
+   nextResult=({payload})=>({ok:true,result:{performed:true,repo:rows.find(r=>r.sessionKey===payload.ownerSessionKey),code:0}});
+   await clickText(host,"Select suggested");calls.length=0;await clickText(host,"Run selected (2)");
+   const nextCalls=calls.filter(c=>c.actionId==="next");assert.equal(nextCalls.length,2);assert.equal(nextCalls[0].payload.approveCatchUp,true);
+   assert.equal(buttons(host).some(b=>/^Confirm /.test(b)),false);
+   assert.match(host.textContent,/Completed/);
+   assert.equal(calls.filter(c=>c.method==="sessions.send").length,0,"a person's catch-up click can run the mechanical action directly");
+  }finally{view.dispose();nextResult=undefined;}
+ }
+});
+
+
+test("manual catch-up with alternatives promises Run rather than an agent handoff", async () => {
+ for(const kind of ["composer","panel"]){
+  const step={step:"catch-up",by:"wtc",approve:"agent",command:["wtc","catch-up"],key:"catchup:h1",reason:"Merge the current base cleanly"};
+  const r=repo("api",{next:step,choices:{recommended:step.key,actions:[{...step,available:true},{step:"follow-pr",by:"agent",skill:"wtc-follow",key:"follow:h1",available:true}]}});
+  const {host,view}=await mount(kind,collection([r]));
+  try{
+   assert.ok(buttons(host).includes("Run"));assert.equal(buttons(host).includes("Ask agent"),false);
+   nextResult={ok:true,result:{performed:true,repo:r,code:0}};calls.length=0;await clickText(host,"Run");
+   assert.equal(calls.find(c=>c.actionId==="next").payload.approveCatchUp,true);
+   assert.equal(calls.some(c=>c.method==="sessions.send"),false);
+  }finally{view.dispose();nextResult=undefined;}
  }
 });

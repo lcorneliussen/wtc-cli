@@ -66,6 +66,13 @@ test("next actions recheck membership and state, preserve approvals and use only
   assert.deepEqual(commands[0].argv, ["wtc", "catch-up", "--json"]);
   assert.equal(commands[0].opts.cwd, entry.workspaceDir);
   assert.equal(commands[0].opts.env.OPENCLAW_SHELL, "exec");
+  block = false;
+  row.next = { ...step, step: "catch-up", approve: "agent" };
+  assert.equal((await act()).result.performed, false, "automatic callers still leave the decision to the agent");
+  assert.equal((await act({ approveCatchUp: true })).result.performed, true, "a person's explicit catch-up click is sufficient");
+  row.next = { ...step, approve: "person", gateway: "github_publish" };
+  assert.equal((await act({ approveCatchUp: true })).result.performed, false, "catch-up permission cannot authorize publication");
+
 });
 
 test("the panel warns when the gateway's wtc is not the release the plugin came from", () => {
