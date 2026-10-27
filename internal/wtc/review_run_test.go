@@ -21,7 +21,7 @@ func TestReviewRunnerUsesSeparateProcessResultsAndClosesIncompleteCoverage(t *te
 	if err := os.WriteFile(filepath.Join(harness, ".harness-repos.yml"), []byte("repos:\n  - name: app\n    remote: https://github.com/example/app.git\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	manifest := ReviewManifest{Repo: "app", Forge: "github", Slug: "example/app", HeadSHA: "1234567890abcdef1234567890abcdef12345678", Round: 3, RepoDir: filepath.Join(collection, "app")}
+	manifest := ReviewManifest{Repo: "app", PR: "7", Forge: "github", Slug: "example/app", HeadSHA: "1234567890abcdef1234567890abcdef12345678", Round: 3, RepoDir: filepath.Join(collection, "app")}
 	if err := writeReviewManifest(bundle, manifest); err != nil {
 		t.Fatal(err)
 	}
@@ -62,6 +62,13 @@ if [ "${FAIL_CONCERN:-}" = "$id" ]; then exit 3; fi
 	if err := os.WriteFile(launcher, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
+	checkBin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(checkBin, "gh"), []byte("#!/bin/sh\nprintf '%s' '{\"headRefOid\":\"1234567890abcdef1234567890abcdef12345678\",\"statusCheckRollup\":[{\"conclusion\":\"FAILURE\",\"status\":\"COMPLETED\"}]}'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", checkBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("WTC_FORGE_MIN_INTERVAL", "0")
 	t.Setenv("WTC_REVIEW_AGENT_CMD", launcher)
 	c, err := OpenCollection(collection)
 	if err != nil {
@@ -71,6 +78,10 @@ if [ "${FAIL_CONCERN:-}" = "$id" ]; then exit 3; fi
 	got, err := c.RunReviewBundle(bundle, opt)
 	if err != nil || got.Verdict != "pass" || got.Concerns != 2 {
 		t.Fatalf("healthy run: %+v %v", got, err)
+	}
+	redSummary, err := os.ReadFile(filepath.Join(bundle, "summary.md"))
+	if err != nil || !strings.Contains(string(redSummary), "Confirmed failing check on the reviewed head") || !strings.Contains(string(redSummary), "Required-check policy is unknown") {
+		t.Fatalf("passing code review hid red checks: %s %v", redSummary, err)
 	}
 	statsData, err := os.ReadFile(filepath.Join(bundle, "stats", "code.json"))
 	var stats reviewRunStats

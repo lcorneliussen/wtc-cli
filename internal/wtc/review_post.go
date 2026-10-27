@@ -202,6 +202,11 @@ func (c *Context) PostReviewBundle(bundle string, opt ReviewPostOptions) (Review
 	body = reviewModeBody(body, manifest)
 	finalBody := body
 	if mode == "summary" {
+		evidence, err := writeReviewChecks(bundle, manifest)
+		if err != nil {
+			return ReviewPostResult{}, err
+		}
+		body += "\n\n### Forge checks at publication\n\n" + strings.TrimPrefix(evidence.report(), "### Forge checks\n\n")
 		finalBody = presentReviewSummary(body, manifest, reviewSourceFiles(manifest))
 		body = fmt.Sprintf("⏳ **Local review: posting findings**\n\nRound %d, head `%s`.\n\n`wtc-review v1 head=%s verdict=pending blockers=0 round=%d lead=pending`\n", manifest.Round, manifest.HeadSHA[:7], manifest.HeadSHA, manifest.Round)
 	}
