@@ -262,7 +262,7 @@ test("panel: repositories on different branches", async () => {
     repo("api", { ahead: 1 }), repo("web", { ahead: 1 }), repo("docs", { branch: "release", ahead: 1 }), repo("site"),
   ]));
   // One with nothing on its branch yet shows its base.
-  assert.deepEqual(tables(host)[0].slice(1).map((r) => r[1]), ["openclaw/test", "openclaw/test", "release", "main"]);
+  assert.deepEqual(tables(host)[0].slice(1).map((r) => r[1]), ["openclaw/test", "openclaw/test", "release", "at main"]);
   view.dispose();
 });
 
@@ -936,7 +936,7 @@ test("completed rounds leave the repository row and remain in the PR list", asyn
     const [repos, prs] = tables(host);
     assert.equal(repos[1][0], "site");
     assert.equal(repos[1][1], "at main");
-    assert.equal(repos[1][3], "History 1");
+    assert.equal(repos[1][3], "1 archived PR");
     if (kind === "panel") assert.deepEqual(prs[1].slice(0, 3), ["#2", "site", "merged"]);
     else assert.equal(prs, undefined, "the conversation card keeps history in the sidebar");
     assert.ok(!buttons(host).some((b) => b.startsWith("↑") || b.startsWith("↓")));
@@ -1176,9 +1176,9 @@ test("composer: a repository with nothing on its branch shows its base", async (
   card.open = true;
   for (const fn of card.listeners.toggle) fn();
   const codes = [...card.all()].filter((n) => n.tagName === "CODE");
-  const site = codes.find((n) => n.textContent === "main");
+  const site = codes.find((n) => n.textContent === "at main");
   assert.ok(site, "the untouched one shows its base");
-  assert.match(site.title, /nothing on openclaw\/test yet/);
+  assert.match(site.title, /Checked out on branch openclaw\/test/);
   assert.ok(codes.some((n) => n.textContent === "openclaw/test"), "the one with a commit shows its branch");
   view.dispose();
 });
@@ -1196,7 +1196,7 @@ test("composer: a sub-session has its own rows, merges into the task's checkout,
   // site once for the task; the worker's site is a sub-row under it, with the
   // same columns against the task: ± its files, ↑ into the task, no PR.
   assert.deepEqual(repos.slice(1), [
-    ["site", "main", "", "", ""],
+    ["site", "at main", "", "", ""],
     ["↳docs✕", "openclaw/test--docs", "± 13↑ 2", "", ""],
   ]);
   const named = (re) => [...card.all()].find((n) => n.tagName === "BUTTON" && re.test(n.title));
@@ -1360,7 +1360,10 @@ test("selected mixed actions retain alternatives and combine author handoffs", a
       assert.match(host.textContent, /Sent to agent|completion pending/);
       await chooseSteps(host); await clickText(host, "Select suggested");
       assert.ok(buttons(host).includes("Run selected"), "unchanged handoffs cannot be immediately resent");
-      await clickText(host, "Allow retry"); await chooseSteps(host); await clickText(host, "Select suggested");
+      await clickText(host, "Allow retry");
+      const rowActions = [...host.all()].filter(n => n.className === "wtc-next-step");
+      assert.ok(rowActions.some(n => [...n.all()].some(b => b.tagName === "BUTTON" && b.textContent === "Fix checks" && !b.disabled)), "retry restores the per-row action");
+      await chooseSteps(host); await clickText(host, "Select suggested");
       assert.ok(buttons(host).includes("Run selected (2)"), "explicit retry recovers an unchanged failed handoff");
     } finally { view.dispose(); nextResult = undefined; }
   }
@@ -1572,10 +1575,10 @@ test("repository folding has its own breakpoint on both surfaces", async () => {
    const start = observers.length;
    const { host, view } = await mount(kind, busy);
    try {
-    for (const width of [600, 740, 360]) {
+    for (const width of [600, 800, 360]) {
      for (const o of observers.slice(start)) o.fn([{ contentRect: { width } }]);
      const rows = tables(host), repos = rows[0], services = rows[kind === "panel" ? 2 : 1];
-     assert.deepEqual(repos[0], width < 720 ? ["Repository", "Next"] : ["Repository", "Branch", "Changes", "Pull request", "Next"]);
+     assert.deepEqual(repos[0], width < 768 ? ["Repository", "Next"] : ["Repository", "Branch", "Changes", "Pull request", "Next"]);
      assert.equal(services[0].includes("Repo"), width >= 520, `${kind}/${width}: service layout follows its own breakpoint`);
     }
    } finally { view.dispose(); }
@@ -1661,12 +1664,12 @@ test("PR hints distinguish current, other active and completed PRs and open side
  const { host, view } = await mount("composer", collection([r]));
  try {
   assert.equal(tables(host).length, 1, "no second PR list occupies the conversation");
-  assert.equal(tables(host)[0][1][3], "#7#8History 3");
+  assert.equal(tables(host)[0][1][3], "#7#83 archived PRs");
   const active = [...host.all()].find(n => n.tagName === "A" && n.textContent === "#8");
   assert.equal(active.href, "https://github.com/octo/api/pull/8");
   assert.match(active.style.cssText, /--muted/);
   const before = openedPanels.length;
-  const history = [...host.all()].find(n => n.tagName === "BUTTON" && n.textContent === "History 3" && /for api/.test(n.title));
+  const history = [...host.all()].find(n => n.tagName === "BUTTON" && n.textContent === "3 archived PRs" && /for api/.test(n.title));
   history.onclick({ preventDefault() {}, stopPropagation() {} });
   assert.equal(openedPanels.length, before + 1);
   assert.equal(openedPanels.at(-1)[0], "collection");
@@ -1767,4 +1770,38 @@ test("a fetched conflict never hands off a changed or unreadable resolution step
    assert.match(host.textContent, failure === "unreadable" ? /Cannot recheck conflict resolution: Collection unavailable/ : /Catch-up stopped; its current resolution step changed/);
   } finally { view.dispose(); nextResult = undefined; }
  }
+});
+
+
+test("a finished mixed batch restores PR navigation instead of claiming it is running", async () => {
+ for (const kind of ["composer", "panel"]) {
+  const catchup = { step: "catch-up", by: "wtc", command: ["wtc", "catch-up"], key: "api:catchup:h1", reason: "Behind main" };
+  const navigate = { step: "merge-pr", by: "person", approve: "person", key: "web:merge:h1", reason: "Review merge requirements" };
+  const rows = [["api", catchup], ["web", navigate]].map(([name, next]) => repo(name, { next, choices: { recommended: next.key, actions: [{ ...next, available: true }] }, ...(name === "web" ? { pullRequest: { number: 7, state: "open", url: "https://github.com/octo/web/pull/7" } } : {}) }));
+  const { host, view } = await mount(kind, collection(rows));
+  try {
+   nextResult = ({ payload }) => {
+    const r = rows.find(r => r.sessionKey === payload.ownerSessionKey);
+    return { ok: true, result: { performed: r === rows[0], repo: r, code: 0 } };
+   };
+   await clickText(host, "Do next (2) →");
+   const action = [...host.all()].find(n => n.className === "wtc-next-step" && [...n.all()].some(a => a.tagName === "A" && a.href === rows[1].pullRequest.url));
+   assert.ok(action, "the repository retains its PR navigation action");
+   assert.match(action.textContent, /Open pull request/);
+   assert.doesNotMatch(host.textContent, /Running…|Catching up…/);
+   assert.equal(calls.filter(c => c.method === "sessions.send").length, 0);
+  } finally { view.dispose(); nextResult = undefined; }
+ }
+});
+
+
+test("baseline labels agree while hover text identifies actual branch versus detached HEAD", async () => {
+ const { host, view } = await mount("composer", collection([
+  repo("untouched", { branch: "openclaw/task", ahead: 0 }), repo("detached", { branch: null }), repo("working", { branch: "main", dirty: 1 }),
+ ]));
+ try {
+  assert.deepEqual(tables(host)[0].slice(1).map(r => r[1]), ["at main", "at main", "main"]);
+  assert.ok([...host.all()].some(n => n.title === "Checked out on branch openclaw/task; no task commits ahead of main"));
+  assert.ok([...host.all()].some(n => n.title === "Detached HEAD at main; no branch is checked out"));
+ } finally { view.dispose(); }
 });

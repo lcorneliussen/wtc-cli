@@ -551,15 +551,16 @@ const brand = (size, version, compact = false) => css(el("span", {},
     "display:inline-flex;align-items:baseline;gap:.3em;color:var(--text-strong, inherit);text-decoration:none;font-weight:700"),
   compact ? null : el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
 
-// Browser surfaces share the CLI's facts and actions. Repository, changes, PR
-// and next step keep fixed positions; narrow views fold facts beneath the name.
+// Browser surfaces share the CLI's facts and actions. Repository, branch,
+// changes, PR and next step keep fixed columns aligned with the header action;
+// narrow views fold facts beneath the name.
 // Actions stay on the relevant fact, in the row's next-step slot, or in the
 // header toolbar, which remains available when the card is collapsed.
 // v supplies the view lifecycle, conversation and gateway operations.
 const NARROW_PX = 520;
 // Single-line repository groups need more width; keep their fold separate
 // from PR/service tables so denser repository rows do not change those layouts.
-const REPO_NARROW_PX = 720;
+const REPO_NARROW_PX = 768;
 const pullRequestRows = (repos) => {
   const rows = new Map();
   for (const r of repos) for (const pr of [...(r.pullRequests ?? []), ...(r.pullRequest ? [r.pullRequest] : [])]) {
@@ -579,7 +580,7 @@ function recordActivity(collection, id, item) {
 }
 const repositoryColumns = (narrow) => narrow
   ? [{ head: "Repository", width: "minmax(0,1fr)" }, { head: "Next", width: "100px" }]
-  : [{ head: "Repository", width: "minmax(100px,1.2fr)" }, { head: "Branch", width: "minmax(80px,1fr)" }, { head: "Changes", width: "120px" }, { head: "Pull request", width: "minmax(180px,.8fr)" }, { head: "Next", width: "176px" }];
+  : [{ head: "Repository", width: "minmax(100px,1.7fr)" }, { head: "Branch", width: "minmax(80px,1fr)" }, { head: "Changes", width: "120px" }, { head: "Pull request", width: "200px" }, { head: "Next", width: "176px" }];
 const repositoryTemplate = (narrow) => repositoryColumns(narrow).map((c) => c.width).join(" ");
 const actionFeedback = () => el("style", { textContent: `
 .wtc-action-control:not(:disabled):hover { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 30%,transparent); --wtc-control-border:var(--accent,#75c8c1); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:inset 0 0 0 1px var(--accent,#75c8c1); }
@@ -797,7 +798,9 @@ function collectionTables(v) {
     if (!r.next && r.choices) return nextButton("Choose step…", "Inspect available actions and blocked reasons", () => { choosing = true; v.rerender(); });
     const step = r.next ?? { step: "commit", reason: "Review and commit intended changes locally" };
     const phase = batchKeys.get(r.sessionKey) === step.key ? batchResults.get(r.sessionKey) : null;
-    if (phase) {
+    // Informational results belong in the log; after dispatch they must not
+    // hide a PR link or a publication confirmation behind a running label.
+    if (phase && (batchRunning || phase === "Completed" || /^(Failed|Handoff failed|Cannot |Cancel)|pending|Sent/.test(phase))) {
       const complete = phase === "Completed";
       const failed = /^Failed|^Handoff failed|^Cannot /.test(phase);
       const label = complete ? step.step === "catch-up" ? "✓ Caught up" : "✓ Done" : failed ? "⚠ Failed" : /Cancel/.test(phase) ? "Cancelled" : phase === "Queued" ? "Queued" : /pending|Sent/.test(phase) ? "Sent to agent" : step.step === "catch-up" ? "Catching up…" : "Running…";
@@ -851,7 +854,7 @@ function collectionTables(v) {
           else { batchPreview = targets; v.rerender(); }
         }
       }, { primary: true, disabled: batchRunning || !selection.size }),
-      dispatched.size ? control("Allow retry", "Check the conversation first; allow explicit reselection of unchanged handoffs", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }) : null,
+      dispatched.size ? control("Allow retry", "Check the conversation first; allow explicit reselection of unchanged handoffs", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } }) : null,
       batchRunning ? control("Cancel queued", "Stop remaining dispatches; active work is not undone", () => { batchCancelled = true; v.rerender(); }) : null,
       batchPreview ? control("Back", "Change the selection", () => { batchPreview = null; v.rerender(); }) : null), "display:flex;flex-wrap:wrap;gap:6px;align-items:center") : null;
     const header = css(el("div", {}, smallButton("Done choosing", "Close action selection", () => { choosing = false; batchPreview = null; v.rerender(); }), controls), "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap");
@@ -899,7 +902,7 @@ function collectionTables(v) {
     const targets = selection.size ? [...selection.values()] : suggestedTargets(rows);
     const single = !selection.size && targets.length === 1 ? targets[0] : null;
     const same = targets.length && targets.every(({ step }) => step.step === targets[0].step.step);
-    const processed = [...batchResults.values()].filter((value) => value === "Completed" || /Failed|Cancelled|pending|confirmation/.test(value)).length;
+    const processed = [...batchResults.values()].filter((value) => value === "Completed" || /Failed|failed|Cannot |stopped|Cancelled|pending|confirmation/.test(value)).length;
     const label = batchRunning ? compact ? `… ${processed}/${batchResults.size}` : `Running ${processed}/${batchResults.size}` : batchPreview ? `Review ${batchPreview.length}` : selection.size ? `Run chosen (${targets.length}) →`
       : same ? `${nextLabel(targets[0].step)}${targets.length > 1 ? compact ? ` ${targets.length}` : ` ${targets.length} repos` : ""}${compact ? "" : " →"}` : `Do next (${targets.length}) →`;
     const title = (batchRunning ? `Running: ${processed} of ${batchResults.size} selected steps handled.\n` : "") + targets.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)} — ${step.reason}`).join("\n");
@@ -935,7 +938,7 @@ function collectionTables(v) {
     }
     return css(el("span", { className: "wtc-action-toolbar" }, primary,
       !batchRunning ? nextButton(compact ? "⋯" : "Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.reveal?.(); v.rerender(); }) : null,
-      dispatched.size && !batchRunning ? nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }, batchRunning) : null,
+      dispatched.size && !batchRunning ? nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } }, batchRunning) : null,
       (activityStore.get(v.collectionKey?.() ?? v.key())?.size ?? 0) > 0 && (targets.length || batchRunning) ? nextButton(compact ? "≡" : "Action log", "Open next-action activity in the taba sidebar", openActivity) : null,
       batchRunning ? nextButton(compact ? "Stop" : "Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); }) : null), "display:inline-flex;align-items:center;gap:4px;min-width:0;white-space:nowrap");
   }
@@ -1227,7 +1230,7 @@ function collectionTables(v) {
       const hint = link(`#${pr.number}`, pr.url);
       return css(el("span", { title: `Other active PR #${pr.number}: ${pr.title ?? ""}` }, typeof hint === "object" ? css(hint, "color:var(--muted,#888);text-decoration:none") : hint), "color:var(--muted,#888)");
     });
-    const history = archived.length ? nextButton(`History ${archived.length}`, `${archived.length} completed pull requests for ${nameOf(r)}. Open collection PR history in the taba sidebar`, openPRHistory) : null;
+    const history = archived.length ? nextButton(plural(archived.length, "archived PR"), `${archived.length} completed pull requests for ${nameOf(r)}. Open collection PR history in the taba sidebar`, openPRHistory) : null;
     if (history) history.style.flexShrink = "0";
     return active.length || history ? css(el("span", {}, css(el("span", {}, ...active), "display:inline-flex;gap:4px;min-width:0;overflow:hidden"), history), "display:inline-flex;align-items:center;gap:4px;min-width:0;overflow:hidden;white-space:nowrap") : null;
   }
@@ -1247,8 +1250,8 @@ function collectionTables(v) {
       repoName(r),
       r.error ? toned(r.error, TONE.failure, r.error)
         : untouched(r)
-          ? css(el("code", { textContent: baseOf(r), title: `At ${baseOf(r)}: nothing on ${r.branch} yet, which the first commit there starts` }), "font-size:12px;color:var(--muted, #888)")
-          : css(el("code", { textContent: r.branch ?? `at ${baseOf(r)}`, title: r.branch ? `${r.branch}, ${r.ahead ?? 0} ahead of ${baseOf(r)}` : "No branch yet: the first push creates one" }), "font-size:12px;color:var(--muted, #888)"),
+          ? css(el("code", { textContent: `at ${baseOf(r)}`, title: `Checked out on branch ${r.branch}; no task commits ahead of ${baseOf(r)}` }), "font-size:12px;color:var(--muted, #888)")
+          : css(el("code", { textContent: r.branch ?? `at ${baseOf(r)}`, title: r.branch ? `${r.branch}, ${r.ahead ?? 0} ahead of ${baseOf(r)}` : `Detached HEAD at ${baseOf(r)}; no branch is checked out` }), "font-size:12px;color:var(--muted, #888)"),
       r.dirty ? toned(String(r.dirty), TONE.pending, `${plural(r.dirty, "file")} changed, not committed yet`) : null,
       busy.has(r.sessionKey) ? working() : pushCell(r, n),
       catching.has(r.sessionKey) ? working() : toCatchUp(r) ? catchUpCell(r) : null,
@@ -1324,7 +1327,7 @@ function collectionTables(v) {
         ? count(behind.some((r) => r.behind) ? `↓ ${behind.reduce((n, r) => n + (r.behind ?? 0), 0)}` : "↓", `Catch up ${behind.map((r) => `${nameOf(r)} (${r.behind || `#${r.pullRequest.number} merged`})`).join(", ")}: merge locally into live branches and return completed branches to the tip, without rebasing. For an open PR, Push publishes the updated branch afterward`, TONE.pending, () => catchUp(behind)) : null),
       slot("PR", css(el("span", {}, prs.length ? toned(`${prs.length}${worst && prTone(worst) === TONE.failure ? " ✗" : worst && prTone(worst) === TONE.success ? " ✓" : ""}`, prTone(worst),
         prs.map((r) => `${nameOf(r)} #${r.pullRequest.number}: ${[r.pullRequest.title, ...prState(r.pullRequest)].filter(Boolean).join(", ")}`).join("\n")) : archivedCount ? null : DOT(),
-        archivedCount ? nextButton(`History ${archivedCount}`, "Open completed pull requests in the collection's taba sidebar", openPRHistory) : null), "display:inline-flex;align-items:center;gap:4px")),
+        archivedCount ? nextButton(plural(archivedCount, "archived PR"), "Open completed pull requests in the collection's taba sidebar", openPRHistory) : null), "display:inline-flex;align-items:center;gap:4px")),
     ];
     if (groups.length) {
       const up = groups.filter((g) => g.running).length;

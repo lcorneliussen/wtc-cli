@@ -161,8 +161,12 @@ PR, the next **Update PR** / **Push** action prepares the branch update with the
 personal-account confirmation. Catch-up alone does not publish it. In a local
 collection, `wtc catch-up` already pushes merges to open or draft PR branches.
 
+A baseline row consistently says **at main** (or its configured base). Hover
+text distinguishes an untouched task branch from detached HEAD; it does not
+imply that the checkout owns the main branch.
+
 The repository row links its current PR and shows other active PRs as muted
-number links. A **History 3** control represents completed PRs and opens the full
+number links. A **3 archived PRs** control represents completed PRs and opens the full
 collection PR list in the taba sidebar. The conversation card omits that full
 list, keeping its footprint small.
 

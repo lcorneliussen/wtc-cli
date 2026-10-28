@@ -46,7 +46,7 @@ columns; the top action aligns above the row actions. Narrow views fold facts
 only when needed.
 
 The current PR is a link in its repository row. Other active PRs are muted
-number links; completed PRs use a **History 3** button that opens and focuses
+number links; completed PRs use a **3 archived PRs** button that opens and focuses
 the collection PR list in the taba sidebar. The card does not repeat that list.
 A batch shows one phase per row and a handled count in the header. Completion
 closes the chooser and offers a named result such as **Caught up 2**, opening
