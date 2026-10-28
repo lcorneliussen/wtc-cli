@@ -265,7 +265,7 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 			checks = "NONE"
 		}
 		details[i] = statusPRDetail{Number: record.Number, State: "MERGED", Checks: checks,
-			Merge: "MERGED", Review: "merged", Title: record.Title, MergedOn: record.MergedOn, MergeCommit: record.MergeCommit, Base: record.MergeBase}
+			Merge: "MERGED", Review: "merged", Title: record.Title, MergedOn: record.MergedOn, MergeCommit: record.MergeCommit, HeadCommit: record.MergeHead, Base: record.MergeBase}
 		recorded++
 	}
 	if recorded != 0 {
@@ -382,13 +382,16 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		row := StatusPRRow{Repo: record.Repo, Number: detail.Number, State: detail.State, Checks: statusString(detail.Checks),
 			Merge: statusString(detail.Merge), Review: statusString(detail.Review), Title: detail.Title,
 			DisplayTitle: detail.Title, Slug: slug, URL: statusString(url), MergedOn: statusString(detail.MergedOn),
-			Draft: detail.State == "DRAFT", OnBranch: detail.State == "MERGED" && branchRow >= 0, MergeCommit: detail.MergeCommit, Base: detail.Base,
+			Draft: detail.State == "DRAFT", OnBranch: detail.State == "MERGED" && branchRow >= 0, MergeCommit: detail.MergeCommit, HeadCommit: detail.HeadCommit, Base: detail.Base,
 			Archived:       detail.State == "MERGED" && branchRow < 0 && statusArchived(detail.MergedOn, time.Now()),
 			MergeConflicts: detail.MergeConflicts, MergeSource: detail.MergeSource, MergeHead: mergeHead, MergeBase: mergeBase,
 			worktreeDir: worktreeDir,
 		}
 		if row.OnBranch {
-			row.DisplayTitle = "MERGED — still on " + record.Branch + "; catch-up  " + detail.Title
+			repoRow := &snapshot.Repos[branchRow]
+			row.Landing = statusMergedLanding(*repoRow, detail)
+			repoRow.Landing = row.Landing
+			row.DisplayTitle = "MERGED — " + row.LandingLabel() + "; still on " + record.Branch + "  " + detail.Title
 		}
 		snapshot.PRs = append(snapshot.PRs, row)
 	}

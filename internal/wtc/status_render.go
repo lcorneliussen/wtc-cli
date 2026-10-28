@@ -139,7 +139,14 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 			parts = append(parts, "runtime "+row.Runtime)
 		}
 		if row.Ahead > 0 {
-			parts = append(parts, fmt.Sprintf("↑%d", row.Ahead))
+			label := fmt.Sprintf("↑%d", row.Ahead)
+			if row.AheadRef != "" {
+				label += " vs " + row.AheadRef
+			}
+			if row.Landing != nil {
+				label += " (" + row.Landing.State + ")"
+			}
+			parts = append(parts, label)
 		}
 		if row.Behind > 0 {
 			parts = append(parts, fmt.Sprintf("↓%d", row.Behind))
@@ -223,7 +230,7 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 		for _, row := range active {
 			bits := []string{fmt.Sprintf("**%s**", row.Repo), "#" + row.Number}
 			if row.OnBranch {
-				bits = append(bits, "⚠ MERGED — still on branch; catch-up")
+				bits = append(bits, "⚠ MERGED — "+row.LandingLabel())
 			} else if row.Draft {
 				bits = append(bits, "◇ draft")
 			}
