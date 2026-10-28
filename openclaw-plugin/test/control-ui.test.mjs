@@ -1784,7 +1784,10 @@ test("a finished mixed batch restores PR navigation instead of claiming it is ru
     const r = rows.find(r => r.sessionKey === payload.ownerSessionKey);
     return { ok: true, result: { performed: r === rows[0], repo: r, code: 0 } };
    };
+   calls.length = 0;
    await clickText(host, "Do next (2) →");
+   await clickText(host, "Confirm 2 actions");
+   assert.equal(calls.filter(c => c.actionId === "next").length, 2, "the test must dispatch the batch rather than stop at its preview");
    const action = [...host.all()].find(n => n.className === "wtc-next-step" && [...n.all()].some(a => a.tagName === "A" && a.href === rows[1].pullRequest.url));
    assert.ok(action, "the repository retains its PR navigation action");
    assert.match(action.textContent, /Open pull request/);
