@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -140,30 +141,37 @@ func addReviewCommands(root *cobra.Command, asJSON *bool) {
 				return err
 			}
 		}
+		var progressErr error
 		if postRun {
 			if _, err := c.PostReviewBundle(args[0], wtc.ReviewPostOptions{Mode: "progress"}); err != nil {
-				return fmt.Errorf("post review progress: %w", err)
+				progressErr = fmt.Errorf("post review progress: %w", err)
+				fmt.Fprintln(os.Stderr, "Review progress could not be confirmed; continuing locally without further posting:", err)
 			}
 		}
-		result, err := c.RunReviewBundle(args[0], wtc.ReviewRunOptions{Strong: strong, Standard: standard, Fast: fast, Lead: lead, Parallel: parallel, Timeout: time.Duration(timeout) * time.Second, Only: ids})
-		if err != nil {
-			if postRun {
-				if _, postErr := c.PostReviewBundle(args[0], wtc.ReviewPostOptions{Mode: "failed", Reason: err.Error()}); postErr != nil {
-					return fmt.Errorf("review failed: %v; failed to update progress comment: %w", err, postErr)
+		result, runErr := c.RunReviewBundle(args[0], wtc.ReviewRunOptions{Strong: strong, Standard: standard, Fast: fast, Lead: lead, Parallel: parallel, Timeout: time.Duration(timeout) * time.Second, Only: ids})
+		var finalPostErr error
+		// A failed progress write may have succeeded remotely without returning an
+		// ID. Do not risk creating another comment or publishing a passing receipt.
+		if postRun && progressErr == nil {
+			mode, reason := "summary", ""
+			if runErr != nil {
+				mode, reason = "failed", runErr.Error()
+			}
+			if _, err := c.PostReviewBundle(args[0], wtc.ReviewPostOptions{Mode: mode, Reason: reason}); err != nil {
+				finalPostErr = fmt.Errorf("post review %s: %w", mode, err)
+			}
+		}
+		finalErr := errors.Join(progressErr, runErr, finalPostErr)
+		if runErr == nil {
+			if *asJSON {
+				if err := emit(envelope{OK: finalErr == nil, Data: result, Summary: result.Verdict}, true); err != nil {
+					finalErr = errors.Join(finalErr, err)
 				}
-			}
-			return err
-		}
-		if postRun {
-			if _, err := c.PostReviewBundle(args[0], wtc.ReviewPostOptions{Mode: "summary"}); err != nil {
-				return fmt.Errorf("post review result: %w", err)
+			} else {
+				fmt.Printf("%s: %s (%d blockers)\n", result.Bundle, result.Verdict, result.Blockers)
 			}
 		}
-		if *asJSON {
-			return emit(envelope{OK: true, Data: result, Summary: result.Verdict}, true)
-		}
-		fmt.Printf("%s: %s (%d blockers)\n", result.Bundle, result.Verdict, result.Blockers)
-		return nil
+		return finalErr
 	}
 	review.AddCommand(run)
 	var force, progress, failed bool
