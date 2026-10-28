@@ -493,8 +493,8 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 			// branch it saw.
 			pr := catchUpPR{state: "MERGED", mergeCommit: details[i].MergeCommit, branch: record.Branch}
 			if !catchUpLanded(t, tip, pr) {
-				// Recorded merges carry no PR head. Ask the forge for it, as
-				// catch-up does, before giving up on the head evidence.
+				// Reconciliation deliberately omits the recorded head observation.
+				// Refresh head and merge together from the forge, as catch-up does.
 				full := c.catchUpPRState(t, record.Branch)
 				if full.state != "MERGED" {
 					break
