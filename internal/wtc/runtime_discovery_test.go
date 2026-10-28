@@ -260,7 +260,7 @@ func discoveryCommitShared(t *testing.T, c *Context) {
 	t.Helper()
 	repo := filepath.Join(c.Collection, "widget")
 	fixtureGit(t, "-C", repo, "-c", "core.hooksPath=/dev/null", "add", ".harness/dekit.tasks.yaml")
-	fixtureGit(t, "-C", repo, "-c", "core.hooksPath=/dev/null", "-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "Declare synthetic services")
+	fixtureGit(t, "-C", repo, "-c", "core.hooksPath=/dev/null", "-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid", "-c", "commit.gpgsign=false", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "commit", "-qm", "Declare synthetic services")
 }
 
 func TestRuntimeDiscoveryWorkspaceSweep(t *testing.T) {
@@ -410,8 +410,24 @@ func TestRuntimeDiscoveryLinkedRepository(t *testing.T) {
 					}
 				}
 			}
-			if !reflect.DeepEqual(beforeCollection, discoverySnapshot(t, c.Collection)) || !reflect.DeepEqual(beforeCheckout, discoverySnapshot(t, checkout)) {
-				t.Fatal("linked discovery changed collection or checkout files")
+			for label, root := range map[string]string{"collection": c.Collection, "checkout": checkout} {
+				before := beforeCollection
+				if label == "checkout" {
+					before = beforeCheckout
+				}
+				after := discoverySnapshot(t, root)
+				for path, value := range before {
+					if got, ok := after[path]; !ok || got != value {
+						rel, _ := filepath.Rel(root, path)
+						t.Errorf("linked discovery changed %s entry %s", label, rel)
+					}
+				}
+				for path := range after {
+					if _, ok := before[path]; !ok {
+						rel, _ := filepath.Rel(root, path)
+						t.Errorf("linked discovery created %s entry %s", label, rel)
+					}
+				}
 			}
 		})
 	}
