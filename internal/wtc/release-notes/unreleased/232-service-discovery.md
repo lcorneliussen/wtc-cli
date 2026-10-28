@@ -1,4 +1,4 @@
-### Fixed
+## Services
 
 - Service lists discover shared and collection-local task declarations before
   their first start, including tasks in a newly added repository. New tasks show
