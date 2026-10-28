@@ -1274,7 +1274,7 @@ func (m statusTUIModel) headerLine() string {
 	if m.refreshing {
 		age += " · refreshing"
 	}
-	return fmt.Sprintf(branding.Text("{{command}} status · %s · %s"), name, age)
+	return fmt.Sprintf(branding.Text("{{command}} %s · status · %s · %s"), wtc.RunningCLIVersion(), name, age)
 }
 
 func statusTUIProgressLine(step string, elapsed time.Duration, width int) string {
@@ -1294,7 +1294,10 @@ func (m statusTUIModel) contentLines() []string {
 	if width <= 0 {
 		width = 80
 	}
-	lines := []string{statusTUIStyle(m.headerLine(), statusToneHeading), ""}
+	versionLabel := branding.Name() + " " + wtc.RunningCLIVersion()
+	header := statusTUILinkTone(versionLabel, wtc.StatusVersionNotesURL(wtc.CLIVersion), statusToneHeading) +
+		statusTUIStyle(strings.TrimPrefix(m.headerLine(), versionLabel), statusToneHeading)
+	lines := []string{header, ""}
 	if m.refreshing && m.progressStep != "" {
 		elapsed := time.Since(m.startedAt).Truncate(time.Second)
 		if m.startedAt.IsZero() {

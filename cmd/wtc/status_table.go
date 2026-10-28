@@ -13,7 +13,7 @@ func statusTable(snapshot wtc.StatusSnapshot, reposOnly bool, width int) string 
 	if name == "" {
 		name = "(all)"
 	}
-	lines := []string{statusTUIFit(fmt.Sprintf(branding.Text("{{command}} status · %s · %s"), name, snapshot.GeneratedAt), width), ""}
+	lines := []string{statusTUIFit(fmt.Sprintf(branding.Text("{{command}} %s · status · %s · %s"), wtc.StatusVersionLabel(snapshot.CLIVersion), name, snapshot.GeneratedAt), width), ""}
 	lines = append(lines, statusTUIRepoLines(snapshot, width, false)...)
 	lines = append(lines, statusTUIRuntimeLines(snapshot, width, false)...)
 	if !reposOnly {
