@@ -211,21 +211,29 @@ func (c *Context) PostReviewBundle(bundle string, opt ReviewPostOptions) (Review
 		body = fmt.Sprintf("⏳ **Local review: posting findings**\n\nRound %d, head `%s`.\n\n`wtc-review v1 head=%s verdict=pending blockers=0 round=%d lead=pending`\n", manifest.Round, manifest.HeadSHA[:7], manifest.HeadSHA, manifest.Round)
 	}
 	body = reviewModeBody(body, manifest)
-	var posted ReviewPostResult
-	if cid != "" {
-		posted, err = postReviewComment(manifest, cid, body)
+	createPending := filepath.Join(bundle, "comment.create-pending")
+	if cid == "" {
+		// Record intent before sending: a lost response or interrupted process
+		// must not turn the next invocation into another uncertain create.
+		pending, err := os.OpenFile(createPending, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: update of review comment %s failed; creating a new comment: %v\n"), cid, err)
+			return ReviewPostResult{}, fmt.Errorf("cannot start review comment create; reconcile any prior uncertain create (comment.create-pending): %w", err)
 		}
-	}
-	if cid == "" || err != nil {
-		posted, err = postReviewComment(manifest, "", body)
-		if err != nil {
+		if err := pending.Close(); err != nil {
 			return ReviewPostResult{}, err
 		}
 	}
+	posted, err := postReviewComment(manifest, cid, body)
+	if err != nil {
+		// A failed update is not evidence that the original comment is absent.
+		// Keep the saved ID and let an explicit retry update the same comment.
+		return ReviewPostResult{}, err
+	}
 	if posted.CommentID != "" {
 		if err := os.WriteFile(idPath, []byte(posted.CommentID+"\n"), 0644); err != nil {
+			return posted, err
+		}
+		if err := os.Remove(createPending); err != nil && !os.IsNotExist(err) {
 			return posted, err
 		}
 	}
