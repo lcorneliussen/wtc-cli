@@ -302,9 +302,9 @@ func (c *Context) writePRFile(data []byte) error {
 	return os.Rename(tmp.Name(), filepath.Join(c.Collection, ".wtc-prs"))
 }
 
-// recordMergedPRs freezes facts that cannot change after a merge. The extra
-// comment rows keep the registry readable by older shell tools, which ignore
-// comments and continue to parse the ordinary PR rows.
+// recordMergedPRs records settled merge facts and an optional observed PR head.
+// The head observation is not guaranteed to be the immutable pre-merge head.
+// Extra comment rows keep older readers parsing the ordinary PR rows.
 func (c *Context) recordMergedPRs(records []PRRecord, details []statusPRDetail) (int, error) {
 	if len(records) != len(details) {
 		return 0, fmt.Errorf("PR records and details differ in length")
