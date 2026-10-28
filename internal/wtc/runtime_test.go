@@ -94,7 +94,7 @@ echo '{}'
 func TestRuntimeOptInPlanAndReadOnlyStatus(t *testing.T) {
 	c := runtimeFixture(t)
 	fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), "touch should-not-run\n", 0600)
-	if items := c.RuntimeStatus(); len(items) != 0 {
+	if items := c.RuntimeStatus(); len(items) != 2 || items[0].State != "unconfigured" {
 		t.Fatal(items)
 	}
 	if _, err := os.Stat(c.runtimeRoot()); !os.IsNotExist(err) {

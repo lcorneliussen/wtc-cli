@@ -274,7 +274,7 @@ func (c *Context) RuntimeStatus() []RuntimeItem {
 	// address answers, and whether each tunnel's provider can serve.
 	runtimeTunnelLogins(items, runtimeLoginCheck)
 	runtimeAnswering(items, runtimeAnswerCheck)
-	return items
+	return c.runtimeWithDeclarations(items)
 }
 
 // runtimeStatusOnly is the runner's view, without looking at addresses: what
@@ -290,13 +290,12 @@ func (c *Context) runtimeStatusOnly() []RuntimeItem {
 	return c.runtimeStatus(m)
 }
 
-// RuntimeEnlisted lists the services, tunnels and resource hooks recorded at
-// the last wtc up, in the state "checking", without asking the runner. Status
-// shows them at once and fills in states from RuntimeStatus.
+// RuntimeEnlisted lists recorded tasks as checking and newly discovered tasks
+// as unconfigured, without asking the runner or executing task definitions.
 func (c *Context) RuntimeEnlisted() []RuntimeItem {
 	m, err := c.runtimeManifest()
 	if err != nil || m == nil {
-		return nil
+		return c.runtimeWithDeclarations(nil)
 	}
 	var items []RuntimeItem
 	for _, task := range m.Tasks {
@@ -307,7 +306,7 @@ func (c *Context) RuntimeEnlisted() []RuntimeItem {
 		}
 		items = append(items, item)
 	}
-	return append(items, c.runtimeResourceItems(m, true)...)
+	return c.runtimeWithDeclarations(append(items, c.runtimeResourceItems(m, true)...))
 }
 
 // runtimeResourceItems shows what resource hooks manage: one item per
