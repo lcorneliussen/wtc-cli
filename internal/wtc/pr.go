@@ -68,19 +68,6 @@ func prURL(remote, number string) string {
 	return ""
 }
 
-func (c *Context) inferredPRURL(repo, number string) string {
-	for _, r := range c.Registry.Repos {
-		if r.Name == repo && r.Remote != "" {
-			return prURL(r.Remote, number)
-		}
-	}
-	command := exec.Command("git", "-C", filepath.Join(c.Collection, repo), "remote", "get-url", "origin")
-	if b, err := command.Output(); err == nil {
-		return prURL(string(b), number)
-	}
-	return ""
-}
-
 func parsePR(line string) (PRRecord, bool) {
 	fields := strings.Fields(line)
 	if len(fields) < 2 || strings.HasPrefix(fields[0], "#") {
@@ -237,11 +224,41 @@ func (c *Context) rewritePRsLocked(removeRepo, removeNumber string, add *PRRecor
 		return err
 	}
 	var out bytes.Buffer
+	repos := c.prRepositories(removeRepo)
+	identity, err := repos.resolve(removeRepo)
+	if err != nil {
+		return err
+	}
+	matching := map[string]bool{removeRepo: true}
+	if identity != nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if record, ok := parsePR(line); ok && record.Number == removeNumber {
+				other, err := repos.resolve(record.Repo)
+				if err == nil && other == identity {
+					matching[record.Repo] = true
+				}
+			}
+		}
+	}
+	previous := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if record, ok := parsePR(line); ok && matching[record.Repo] && record.Number == removeNumber {
+			previous++
+			if add != nil {
+				// Keep a legacy row's key: its merge markers and older clients
+				// still refer to that spelling. New enlistments use the canonical key.
+				add.Repo = record.Repo
+			}
+		}
+	}
+	if previous > 1 {
+		return fmt.Errorf("multiple enlisted rows for repository %q PR %s; reconcile duplicate rows first", removeRepo, removeNumber)
+	}
 	for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
-		if record, ok := parsePR(line); ok && record.Repo == removeRepo && record.Number == removeNumber {
+		if record, ok := parsePR(line); ok && matching[record.Repo] && record.Number == removeNumber {
 			continue
 		}
-		if repo, number, _, _, ok := parseMergedPR(line); ok && repo == removeRepo && number == removeNumber && add == nil {
+		if repo, number, _, _, ok := parseMergedPR(line); ok && matching[repo] && number == removeNumber && add == nil {
 			continue
 		}
 		fmt.Fprintln(&out, line)
@@ -389,14 +406,24 @@ func (c *Context) EnlistPR(r PRRecord) (PRRecord, error) {
 	if err := ValidatePRIdentity(r.Repo, r.Number); err != nil {
 		return r, err
 	}
-	if r.Branch == "" {
-		command := exec.Command("git", "-C", filepath.Join(c.Collection, r.Repo), "symbolic-ref", "-q", "--short", "HEAD")
+	repo, err := c.prRepositories(r.Repo).resolve(r.Repo)
+	if err != nil {
+		return r, err
+	}
+	dir := ""
+	if repo != nil {
+		r.Repo, dir = repo.name, repo.dir()
+	}
+	if r.Branch == "" && dir != "" {
+		command := exec.Command("git", "-C", filepath.Join(c.Collection, dir), "symbolic-ref", "-q", "--short", "HEAD")
 		if b, err := command.Output(); err == nil {
 			r.Branch = strings.TrimSpace(string(b))
 		}
 	}
 	if r.URL == "" {
-		r.URL = c.inferredPRURL(r.Repo, r.Number)
+		if repo != nil {
+			r.URL = prURL(repo.remote, r.Number)
+		}
 	}
 	if err := c.rewritePRs(r.Repo, r.Number, &r); err != nil {
 		return r, err

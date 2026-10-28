@@ -66,26 +66,8 @@ func prURLForStatus(forge, slug, number string) string {
 	return prURL("https://"+forge+"/"+slug, number)
 }
 
-func (c *Context) statusRecordForge(record PRRecord, rows []StatusRepo) (slug, forge string) {
-	harnessName, _ := c.HarnessRepoName()
-	for _, repo := range c.Registry.Repos {
-		if repo.Name == record.Repo || (record.Repo == "harness" && repo.Name == harnessName) {
-			if slug, forge = catchUpForge(repo.Remote); forge != "" {
-				return slug, forge
-			}
-		}
-	}
-	for _, row := range rows {
-		if row.Repo == record.Repo || (record.Repo == "harness" && row.Dir == "harness") {
-			if row.Slug != "" {
-				remote, err := statusGit(row.Worktree, "remote", "get-url", "origin")
-				if err == nil {
-					return catchUpForge(remote)
-				}
-			}
-		}
-	}
-	return "", ""
+func (c *Context) statusRecordForge(record PRRecord, _ []StatusRepo) (slug, forge string) {
+	return c.prRepositories(record.Repo).forge(record.Repo)
 }
 
 func statusUnknownDetail(record PRRecord) statusPRDetail {
@@ -264,6 +246,7 @@ func statusViewPR(record PRRecord, slug, forge string, bypassCache bool) statusP
 // Forge CLIs spend most of their time waiting on network responses. Bound the
 // fan-out so a large enlistment refreshes promptly without flooding a forge.
 func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]statusPRDetail, error) {
+	repos := c.prRepositories()
 	details := make([]statusPRDetail, len(records))
 	pending := make([]int, 0, len(records))
 	recorded := 0
@@ -305,7 +288,7 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 			defer workers.Done()
 			limit <- struct{}{}
 			defer func() { <-limit }()
-			slug, forge := c.statusRecordForge(record, rows)
+			slug, forge := repos.forge(record.Repo)
 			details[i] = statusEnrichRecord(record, slug, forge)
 			done <- struct{}{}
 		}()
@@ -355,22 +338,16 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		}
 		c.statusReturnMerged(&snapshot, records, details)
 	}
-	forgeByRepo := map[string]struct{ slug, forge string }{}
+	repos := c.prRepositories()
 	for i, record := range records {
-		origin, ok := forgeByRepo[record.Repo]
-		if !ok {
-			origin.slug, origin.forge = c.statusRecordForge(record, snapshot.Repos)
-			forgeByRepo[record.Repo] = origin
-		}
-		slug, forge := origin.slug, origin.forge
+		slug, forge := repos.forge(record.Repo)
 		detail := statusPredictBBMerge(details[i], forge, slug, snapshot.Repos)
 		mergeHead, mergeBase := statusMergeProvenance(detail)
-		worktreeDir := record.Repo
-		harnessName, _ := c.HarnessRepoName()
-		if record.Repo == "harness" || record.Repo == harnessName {
-			worktreeDir = "harness"
+		worktreeDir := ""
+		if repo, err := repos.resolve(record.Repo); err == nil {
+			worktreeDir = repo.dir()
 		}
-		if record.Branch != "" {
+		if record.Branch != "" && worktreeDir != "" {
 			enlistedBranches[worktreeDir+"\x00"+record.Branch] = true
 		}
 		branchRow := -1
@@ -418,7 +395,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		if row.BranchKind != "branch" || row.PR != nil || enlistedBranches[row.Dir+"\x00"+row.Branch] {
 			continue
 		}
-		slug, forge := c.statusRecordForge(PRRecord{Repo: row.Repo}, snapshot.Repos)
+		slug, forge := repos.forge(row.Repo)
 		c.statusProgress(fmt.Sprintf("Finding branch pull requests %d/%d", i+1, len(snapshot.Repos)))
 		number, err := statusDiscoverBranch(forge, slug, row.Branch)
 		if err != nil || number == "" {
@@ -474,11 +451,12 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 	if inherited, _ := c.HarnessRepoName(); inherited != harnessName {
 		return
 	}
-	worktreeDir := func(repo string) string {
-		if repo == "harness" || repo == harnessName {
-			return "harness"
+	repos := c.prRepositories()
+	worktreeDir := func(name string) string {
+		if repo, err := repos.resolve(name); err == nil {
+			return repo.dir()
 		}
-		return repo
+		return ""
 	}
 	// A branch name may be reused: any other record on it that is not merged
 	// leaves the branch to its owner. This is stricter than catch-up, which
