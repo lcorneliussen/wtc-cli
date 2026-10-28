@@ -12,12 +12,14 @@ import (
 // Exercise the real command and separate synthetic reviewer/forge processes.
 func TestReviewProgressFailurePreservesIndependentRun(t *testing.T) {
 	for _, tc := range []struct {
-		name, response string
-		runFail        bool
+		name, response      string
+		runFail, progressOK bool
 	}{
-		{"ambiguous-create", "echo '{}'", false},
-		{"transport", "echo synthetic-post-failure >&2; exit 9", false},
-		{"post-and-run-fail", "echo '{}'", true},
+		{"ambiguous-create", "echo '{}'", false, false},
+		{"transport", "echo synthetic-post-failure >&2; exit 9", false, false},
+		{"post-and-run-fail", "echo '{}'", true, false},
+		{"final-post-fail", `echo '{"id":301}'`, false, true},
+		{"run-and-final-post-fail", `echo '{"id":301}'`, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			collection := t.TempDir()
@@ -42,6 +44,7 @@ func TestReviewProgressFailurePreservesIndependentRun(t *testing.T) {
 			write(filepath.Join(bin, "gh"), `#!/bin/sh
 case "$*" in
  *'--json headRefOid'*) echo '{"headRefOid":"1234567890abcdef1234567890abcdef12345678"}';;
+ *'api -X PATCH'*) cat >/dev/null; echo PATCH >> "$FORGE_LOG"; echo synthetic-update-failure >&2; exit 9;;
  *'api -X POST'*) cat >/dev/null; echo POST >> "$FORGE_LOG"; `+tc.response+`;;
  *) echo "unexpected forge invocation: $*" >&2; exit 8;;
 esac
@@ -71,7 +74,14 @@ esac
 			cmd := exec.Command(os.Args[0], "-test.run=^TestReviewProgressCommandChild$")
 			cmd.Env = append(os.Environ(), "WTC_PROGRESS_ARGS="+string(encoded))
 			output, err := cmd.CombinedOutput()
-			if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !strings.Contains(string(output), "post review progress:") {
+			postError := "post review progress:"
+			if tc.progressOK {
+				postError = "post review summary:"
+				if tc.runFail {
+					postError = "post review failed:"
+				}
+			}
+			if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !strings.Contains(string(output), postError) {
 				t.Fatalf("missing final posting error/exit 1: %v %s", err, output)
 			}
 			if tc.runFail && !strings.Contains(string(output), "lead review failed") {
@@ -105,10 +115,18 @@ esac
 				}
 				read(filepath.Join(bundle, "summary.md"))
 			}
-			if got := read(filepath.Join(collection, "forge.log")); got != "POST\n" {
+			writes := "POST\n"
+			if tc.progressOK {
+				writes += "PATCH\n"
+			}
+			if got := read(filepath.Join(collection, "forge.log")); got != writes {
 				t.Fatalf("ambiguous write was retried: %q", got)
 			}
-			if _, err := os.Stat(filepath.Join(bundle, "comment.id")); !os.IsNotExist(err) {
+			if tc.progressOK {
+				if got := strings.TrimSpace(read(filepath.Join(bundle, "comment.id"))); got != "301" {
+					t.Fatalf("lost saved ID: %q", got)
+				}
+			} else if _, err := os.Stat(filepath.Join(bundle, "comment.id")); !os.IsNotExist(err) {
 				t.Fatalf("invented comment id: %v", err)
 			}
 			receipts, _ := filepath.Glob(filepath.Join(collection, ".wtc-review-posted", "*"))
