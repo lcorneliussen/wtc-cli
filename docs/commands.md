@@ -8,14 +8,17 @@ conflict marker, such as `✗3`; compact views retain the warning when counts do
 not fit. Passing checks or a clean local checkout do not clear a PR conflict.
 Local unmerged files are shown separately in the working-tree (`±`) cell.
 
-The terminal table and live view show **Next actions** from each repository's
-status. In the live view, press `n`, choose with `↑`/`↓`, and press Enter. A
-step needing no approval can run catch-up for that repository; status is read
+The terminal table shows **Next actions** from each repository's status; the
+live view keeps a compact next-step hint until you press `n`. Choose with
+`↑`/`↓`, then press Enter. A step needing no approval can run catch-up for that repository; status is read
 again first, and newly dirty or busy checkouts stay with their owner. Steps
-needing judgment ask the collection's idle herdr agent to follow the named
-skill. In a plain terminal, or when that agent is busy, the view shows the
-instruction to give it. An approved pull request opens in the browser for the
-person to merge. `Esc` returns to the status table. These are manual actions;
+needing judgment go to the single author pane labelled `agent` in the owning
+collection's herdr workspace, when it reports idle or done. The receipt names
+the collection, agent and pane; dispatch is pending completion. Focused review,
+status and shell panes are never substitutes. If the workspace or author pane
+is missing or ambiguous, or its agent is busy, the view says **Not sent** and
+shows the instruction to give it. Plain terminals show the same instruction.
+An approved pull request opens in the browser for the person to merge. `Esc` returns to the status table. These are manual actions;
 the view does not run them on every refresh.
 
 - `wtc env list` shows variable names, source files, and whether a collection-local entry overrides an earlier one. It opens a scrollable, width-aware view in an interactive terminal; `--no-tui` prints a compact table and `--json` emits structured data. It never prints values. Bare `wtc env` shows help.

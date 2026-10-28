@@ -551,15 +551,10 @@ const brand = (size, version) => css(el("span", {},
     "display:inline-flex;align-items:baseline;gap:.3em;color:var(--text-strong, inherit);text-decoration:none;font-weight:700"),
   el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
 
-// The collection as wtc status's tables, for the card and the panel alike: a
-// column per fact, always in its place, "·" where there is none. What can be
-// done about a fact is done on it: the ↑ count pushes, the ↓ count catches up,
-// a conflict is resolved, a service's state starts or stops it.
-//
-// v is the view: { host, key(), agent(), svc, say(text), refresh(), pause() → resume,
-// rerender() }. Narrow, a row wraps into two lines: what it is (the repository
-// and its branch, the service), then its facts under the header, still in
-// their columns.
+// Browser surfaces share the CLI's facts and actions. Repository, changes, PR
+// and next step keep fixed positions; narrow views fold facts beneath the name.
+// Actions stay on the relevant fact or in the row's next-step slot.
+// v supplies the view lifecycle, conversation and gateway operations.
 const NARROW_PX = 520;
 const pullRequestRows = (repos) => {
   const rows = new Map();
@@ -647,6 +642,7 @@ function collectionTables(v) {
     } catch (err) { say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
     finally { acting.delete(r.sessionKey); if(active(conversationKey))await v.refresh(); }
   }
+  let choosing = false;
   let selection = new Map(), batchResults = new Map(), batchLabels = new Map(), batchPreview = null, dispatched = new Set();
   let batchKey = null, batchRunning = false, batchCancelled = false;
   const handoffKey = (r, step) => `${r.sessionKey}:${r.choices ? step.key.split(":").at(-1) : step.key}`;
@@ -656,7 +652,7 @@ function collectionTables(v) {
     const conversation = v.key();
     const sent = dispatched;
     const reservations = new Set();
-    const results = new Map(); batchResults = results;
+    const results = new Map(targets.map(({ repo }) => [repo.sessionKey, "Queued"])); batchResults = results;
     batchLabels = new Map(targets.map(({ repo }) => [repo.sessionKey, nameOf(repo)]));
     batchRunning = true; batchCancelled = false; batchPreview = null;
     const update = () => { if (active(conversation)) v.rerender(); };
@@ -719,9 +715,39 @@ function collectionTables(v) {
       if (active(conversation)) { selection.clear(); await v.refresh(); update(); }
     }
   }
+  function syncConversation() {
+    if (batchKey !== v.key()) { batchKey = v.key(); choosing = false; selection = new Map(); batchResults = new Map(); batchLabels = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true; }
+  }
+  function suggestedTargets(repos) {
+    return repos.filter((r) => actionable(r) && r.next && !reserved(r) && !dispatched.has(handoffKey(r, r.next)) && choicesOf(r).some((a) => a.available && a.key === r.next.key)).map((repo) => ({ repo, step: repo.next }));
+  }
+  function startTargets(targets) {
+    if (batchRunning || !targets.length) return;
+    if (targets.every(({ step }) => step.approve !== "person" && step.step !== "push")) void runSelected(targets);
+    else { choosing = true; selection = new Map(targets.map((t) => [t.repo.sessionKey, t])); batchPreview = targets; v.rerender(); }
+  }
+  function nextCell(r) {
+    if (!actionable(r)) return null;
+    if (!r.next && r.choices) return smallButton("Choose step…", "Inspect available actions and blocked reasons", () => { choosing = true; v.rerender(); });
+    const step = r.next ?? { step: "commit", reason: "Review and commit intended changes locally" };
+    const pending = dispatched.has(handoffKey(r, step));
+    const result = batchResults.get(r.sessionKey);
+    const running = reserved(r);
+    const action = nextRoute(step) === "pr" && r.pullRequest?.url ? link(nextLabel(step), r.pullRequest.url)
+      : smallButton(pending ? "Sent to agent" : running ? "Working…" : nextLabel(step), step.reason, () => !r.next ? askCommit(r) : actNext(r));
+    action.style.cssText += ";font-size:12px;line-height:20px;color:var(--accent,inherit);padding:2px 0;text-align:left;white-space:normal";
+    if (action.tagName === "BUTTON") {
+      action.disabled = pending || running || batchRunning || (!!r.next && !nextRoute(step));
+      action.ariaLabel = `${nextLabel(step)}: ${step.reason}`;
+      if (action.disabled) { action.style.color = "var(--muted,#888)"; action.style.cursor = "default"; }
+    }
+    return css(el("div", { className: "wtc-next-step" }, action,
+      choicesOf(r).length > 1 ? smallButton("⋯", `Choose another action for ${nameOf(r)}`, () => { choosing = !choosing; v.rerender(); }) : null,
+      result ? css(el("span", { textContent: result, role: "status" }), "flex-basis:100%;font-size:11px;color:var(--muted,#888);overflow-wrap:anywhere") : null), "display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0");
+  }
   function nextActions(repos) {
     const rows = repos.filter(actionable);
-    if (batchKey !== v.key()) { batchKey = v.key(); selection = new Map(); batchResults = new Map(); batchLabels = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true; }
+    syncConversation();
     const currentKeys = new Set(rows.flatMap((r) => choicesOf(r).map((a) => handoffKey(r, a))));
     for (const key of dispatched) if (!currentKeys.has(key)) dispatched.delete(key);
     if (!rows.length && !batchResults.size) return null;
@@ -731,6 +757,18 @@ function collectionTables(v) {
       button.style.cssText = `border:1px solid ${primary ? "transparent" : "var(--border-strong,rgba(128,128,128,.25))"};border-radius:7px;background:${primary ? "var(--accent,#75c8c1)" : "transparent"};color:${primary ? "var(--accent-foreground,#151a22)" : "var(--text,inherit)"};font:inherit;font-size:12px;font-weight:500;line-height:18px;padding:5px 9px;white-space:nowrap;cursor:${disabled ? "default" : "pointer"};opacity:${disabled ? ".45" : "1"}`;
       return button;
     };
+    const targets = selection.size ? [...selection.values()] : suggestedTargets(rows);
+    if (!choosing) {
+      const same = targets.length && targets.every(({ step }) => step.step === targets[0].step.step);
+      const label = selection.size ? `Run chosen (${targets.length}) →` : same ? `${nextLabel(targets[0].step)}${targets.length > 1 ? ` ${targets.length} repos` : ""} →` : `Do next (${targets.length}) →`;
+      return css(el("div", { className: "wtc-next-actions" },
+        (targets.length > 1 || selection.size) ? smallButton(label, targets.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)} — ${step.reason}`).join("\n"), () => startTargets(targets)) : null,
+        smallButton("Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.rerender(); }),
+        dispatched.size ? smallButton("Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }) : null,
+        batchRunning ? smallButton("Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); }) : null,
+        ...[...batchResults].filter(([key]) => !rows.some((r) => r.sessionKey === key)).map(([key, result]) => muted(`${batchLabels.get(key) ?? "Repository"}: ${result}`))),
+        "display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:11px;line-height:20px");
+    }
     const controls = rows.some((r) => r.choices) ? css(el("div", {},
       control("Select suggested", "Select current recommendations without replacing chosen alternatives", () => {
         for (const r of rows) if (!selection.has(r.sessionKey) && r.next && !reserved(r) && !dispatched.has(handoffKey(r, r.next)) && choicesOf(r).some((a) => a.available && a.key === r.next.key)) selection.set(r.sessionKey, { repo: r, step: r.next });
@@ -748,7 +786,7 @@ function collectionTables(v) {
       dispatched.size ? control("Allow retry", "Check the conversation first; allow explicit reselection of unchanged handoffs", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }) : null,
       batchRunning ? control("Cancel queued", "Stop remaining dispatches; active work is not undone", () => { batchCancelled = true; v.rerender(); }) : null,
       batchPreview ? control("Back", "Change the selection", () => { batchPreview = null; v.rerender(); }) : null), "display:flex;flex-wrap:wrap;gap:6px;align-items:center") : null;
-    const header = css(el("div", {}, css(el("span", { textContent: "Next actions" }), "font-size:12px;font-weight:600;color:var(--text,inherit)"), controls), "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap");
+    const header = css(el("div", {}, smallButton("Done choosing", "Close action selection", () => { choosing = false; batchPreview = null; v.rerender(); }), controls), "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap");
     return css(el("div", { className: "wtc-next-actions" }, header, batchPreview ? css(el("div", { textContent: "Review the selected publication requests. You will confirm each repository’s account and commits before pushing." }), "font-size:12px;line-height:1.5;color:var(--muted,#888);padding:8px 10px;border-radius:7px;background:rgba(128,128,128,.08)") : null, ...rows.map((r) => {
       const available = choicesOf(r);
       const picked = selection.get(r.sessionKey);
@@ -975,10 +1013,9 @@ function collectionTables(v) {
     }
   }
 
-  // The card is wtc status's tables: a column per fact, always in its place,
-  // "·" where there is none. What can be done about a fact is done on it: the
-  // ↑ count pushes, the ↓ count catches up, a conflict is resolved, a
-  // service's state starts or stops it.
+  // PR and service tables keep one column per fact, with dots for empty cells.
+  // Repository rows group their facts and leave unused groups blank. Actions
+  // stay on the relevant fact: ↑ pushes, ↓ catches up, service state toggles it.
   const DOT = () => css(el("span", { textContent: "·" }), "color:var(--muted, #888)");
   const muted = (text, title) => css(el("span", { textContent: text, title: title ?? "" }), "color:var(--muted, #888)");
   const toned = (text, tone, title) => css(el("span", { textContent: text, title: title ?? "" }), `color:${tone}`);
@@ -995,23 +1032,23 @@ function collectionTables(v) {
     return b;
   };
   const working = () => muted("…", "Working");
-  // columns: { head, title, width, align, under }. Narrow, a column marked
-  // under (a repository's branch, a service's repository) goes below the
-  // cell before it, so that every fact keeps its column under one header,
-  // as wtc status keeps them when it narrows.
-  const table = (columns, rows, narrow = false) => {
+  // columns: { head, title, width, align, under }. Narrow, an under column
+  // (the service's repository) folds below its preceding cell. Repository
+  // grouping is composed by repoTable. blank leaves unused cells empty.
+  const table = (columns, rows, narrow = false, blank = false) => {
     const align = (c) => (c.align === "center" ? "justify-self:center;" : "");
     const shown = columns.map((c, i) => i).filter((i) => !(narrow && columns[i].under));
     const grid = css(el("div", { className: "wtc-table" }),
       `display:grid;grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${narrow ? 8 : 14}px;row-gap:${narrow ? 6 : 4}px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums`);
     const empty = (value) => value == null || value === "" || value === 0;
+    grid.setAttribute("data-columns", shown.length);
     grid.append(...shown.map((i) => css(el("span", { title: columns[i].title ?? "" }, columns[i].head ?? ""),
       `${align(columns[i])}font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted, #888);white-space:nowrap`)));
     for (const row of rows) {
       grid.append(...shown.map((i) => {
         const c = columns[i];
         const below = narrow && columns[i + 1]?.under && !empty(row[i + 1]) ? row[i + 1] : null;
-        const value = empty(row[i]) ? DOT() : row[i];
+        const value = empty(row[i]) ? blank ? "" : DOT() : row[i];
         if (below) {
           return css(el("span", {}, css(el("span", {}, value), "display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;white-space:nowrap"),
             css(el("span", {}, below), "display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px")),
@@ -1023,18 +1060,6 @@ function collectionTables(v) {
     return grid;
   };
 
-  // REPO BRANCH ± ↑ ↓ PR C M R, as in wtc status.
-  const REPO_COLUMNS = [
-    { head: "Repo", width: "minmax(0,max-content)" },
-    { head: "Branch", width: "minmax(0,1fr)", under: true },
-    { head: "±", title: "Uncommitted files: Commit changes saves intended changes locally", align: "center" },
-    { head: "↑", title: "Push commits to the branch: its open PR includes them automatically; create a draft PR if none exists. Review the PR title and description when its scope changes", align: "center" },
-    { head: "↓", title: "Commits on the base not merged in: click to catch up", align: "center" },
-    { head: "PR", title: "The pull request" },
-    { head: "C", title: "CI", align: "center" },
-    { head: "M", title: "Merges with its base: a conflict is resolved by the conversation", align: "center" },
-    { head: "R", title: "Review", align: "center" },
-  ];
   const repoName = (r) => {
     const href = webUrlOf(r);
     const label = css(el(href ? "a" : "span", { textContent: nameOf(r) ?? "?", title: [r.owner ? `${r.owner}/${nameOf(r)}` : nameOf(r), r.path].filter(Boolean).join("\n") }),
@@ -1090,7 +1115,7 @@ function collectionTables(v) {
       busy.has(r.sessionKey) ? working() : pushCell(r, n),
       catching.has(r.sessionKey) ? working() : toCatchUp(r) ? catchUpCell(r) : null,
       pr ? css(el("span", { title: pr.title ?? "" }, link(`#${pr.number}`, pr.url), pr.draft && open ? muted("draft") : pr.state !== "open" ? muted(pr.state) : null), "display:inline-flex;gap:4px") : null,
-      ci, conflict, review,
+      ci, conflict, review, nextCell(r),
     ];
   }
 
@@ -1252,10 +1277,22 @@ function collectionTables(v) {
   }
   return { table, checkAccount, notice, nextActions,
     nextSummary: (repos) => repos.some(actionable) ? smallButton(plural(repos.filter(actionable).length, "next action"), "Show next actions and pending commits", () => { v.reveal?.(); v.rerender(); }) : null,
-    repoTable: (repos, narrow, workers) =>
-    // Narrow, the repository (with its branch below) takes the room the
-    // branch had.
-    table(narrow ? REPO_COLUMNS.map((c, i) => (i === 0 ? { ...c, width: "minmax(0,1fr)" } : c)) : REPO_COLUMNS, repoRows(repos, workers), narrow), serviceTable, totals, prTable };
+    repoTable: (repos, narrow, workers) => {
+      syncConversation();
+      const columns = narrow ? [{ head: "Repository", width: "minmax(0,1fr)" }, { head: "Next", width: "minmax(80px,120px)" }]
+        : [{ head: "Repository", width: "minmax(120px,1.2fr)" }, { head: "Changes", width: "100px" }, { head: "Pull request", width: "minmax(130px,1fr)" }, { head: "Next", width: "minmax(100px,.8fr)" }];
+      const rows = repoRows(repos, workers).map((row) => {
+        if (row[1]?.style) row[1].style.fontFamily = "inherit";
+        const changes = css(el("span", {}, ...[row[2] ? css(el("span", {}, muted("± "), row[2]), "") : null, row[3], row[4]].map((cell) => css(el("span", {}, cell), "min-width:24px;display:inline-block"))), "display:inline-flex;gap:6px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums");
+        const pr = css(el("span", {}, row[5], row[6] ? css(el("span", { title: "Checks" }, row[6], " checks"), "font-size:11px") : null,
+          row[7] ? css(el("span", { title: "Merge conflict" }, row[7], " conflict"), "font-size:11px") : null,
+          row[8] ? css(el("span", { title: "Review" }, row[8], " review"), "font-size:11px") : null), "display:flex;align-items:center;gap:6px;flex-wrap:wrap");
+        const identity = css(el("div", {}, row[0], css(el("div", {}, row[1]), "font-size:11px;line-height:18px;overflow:hidden;text-overflow:ellipsis"),
+          narrow ? css(el("div", {}, changes, pr), "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:2px") : null), "min-width:0;padding:5px 0");
+        return narrow ? [identity, row[9]] : [identity, changes, pr, row[9]];
+      });
+      return table(columns, rows, false, true);
+    }, serviceTable, totals, prTable };
 }
 
 // The text of the latest message the person wrote, from chat.history.
