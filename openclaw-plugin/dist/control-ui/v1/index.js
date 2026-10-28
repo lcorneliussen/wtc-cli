@@ -764,7 +764,7 @@ function collectionTables(v) {
       return css(el("div", { className: "wtc-next-actions" },
         (targets.length > 1 || selection.size) ? smallButton(label, targets.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)} — ${step.reason}`).join("\n"), () => startTargets(targets)) : null,
         smallButton("Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.rerender(); }),
-        dispatched.size ? smallButton("Allow retry", "Check the conversation before retrying unchanged work", () => { dispatched.clear(); v.rerender(); }) : null,
+        dispatched.size ? smallButton("Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }) : null,
         batchRunning ? smallButton("Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); }) : null,
         ...[...batchResults].filter(([key]) => !rows.some((r) => r.sessionKey === key)).map(([key, result]) => muted(`${batchLabels.get(key) ?? "Repository"}: ${result}`))),
         "display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:11px;line-height:20px");
@@ -1013,10 +1013,9 @@ function collectionTables(v) {
     }
   }
 
-  // The card is wtc status's tables: a column per fact, always in its place,
-  // "·" where there is none. What can be done about a fact is done on it: the
-  // ↑ count pushes, the ↓ count catches up, a conflict is resolved, a
-  // service's state starts or stops it.
+  // PR and service tables keep one column per fact, with dots for empty cells.
+  // Repository rows group their facts and leave unused groups blank. Actions
+  // stay on the relevant fact: ↑ pushes, ↓ catches up, service state toggles it.
   const DOT = () => css(el("span", { textContent: "·" }), "color:var(--muted, #888)");
   const muted = (text, title) => css(el("span", { textContent: text, title: title ?? "" }), "color:var(--muted, #888)");
   const toned = (text, tone, title) => css(el("span", { textContent: text, title: title ?? "" }), `color:${tone}`);
@@ -1033,10 +1032,9 @@ function collectionTables(v) {
     return b;
   };
   const working = () => muted("…", "Working");
-  // columns: { head, title, width, align, under }. Narrow, a column marked
-  // under (a repository's branch, a service's repository) goes below the
-  // cell before it, so that every fact keeps its column under one header,
-  // as wtc status keeps them when it narrows.
+  // columns: { head, title, width, align, under }. Narrow, an under column
+  // (the service's repository) folds below its preceding cell. Repository
+  // grouping is composed by repoTable. blank leaves unused cells empty.
   const table = (columns, rows, narrow = false, blank = false) => {
     const align = (c) => (c.align === "center" ? "justify-self:center;" : "");
     const shown = columns.map((c, i) => i).filter((i) => !(narrow && columns[i].under));

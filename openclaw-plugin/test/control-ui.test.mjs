@@ -190,7 +190,7 @@ const busy = collection([
 ]);
 
 // The card's cells, row by row: a table is a grid of a header and rows of
-// as many cells, as in wtc status.
+// as many cells.
 const tables = (node) => [...node.all()].filter((n) => n.className === "wtc-table").map((t) => {
   const cells = t.children;
   const width = Number(t.attributes["data-columns"]);

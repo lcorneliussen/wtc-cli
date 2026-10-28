@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lcorneliussen/wtc-cli/internal/next"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
@@ -224,5 +226,35 @@ func TestStatusNextHandoffDestination(t *testing.T) {
 				t.Fatal("unsent work reported as pending", result)
 			}
 		})
+	}
+}
+
+func TestStatusNextCompactHintAndScrolling(t *testing.T) {
+	var rows []wtc.StatusRepo
+	for i := 0; i < 8; i++ {
+		rows = append(rows, wtc.StatusRepo{Collection: "task", Dir: fmt.Sprintf("repo%d", i), Next: &next.Step{Step: "commit", By: next.ByAgent, Key: fmt.Sprint(i), Reason: fmt.Sprintf("intended changes %d", i)}})
+	}
+	m := statusTUIModel{snapshot: wtc.StatusSnapshot{Collection: "task", Repos: rows}, width: 100, height: 12}
+	idle := ansi.Strip(strings.Join(m.contentLines(), "\n"))
+	if !strings.Contains(idle, "[n] Next · repo0: Commit changes") || strings.Contains(idle, "intended changes") || strings.Contains(idle, "Next actions") {
+		t.Fatal(idle)
+	}
+	updated, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Text: "n"}))
+	m = updated.(statusTUIModel)
+	if text := ansi.Strip(strings.Join(m.contentLines(), "\n")); !strings.Contains(text, "Local steps run here") || !strings.Contains(text, "owning collection's idle agent pane") {
+		t.Fatal(text)
+	}
+	for i := 1; i < len(rows); i++ {
+		updated, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+		m = updated.(statusTUIModel)
+		visible := ansi.Strip(m.View().Content)
+		if !strings.Contains(visible, fmt.Sprintf("› [ ] repo%d", i)) || !strings.Contains(visible, fmt.Sprintf("intended changes %d", i)) {
+			t.Fatalf("selected row %d hidden: %s", i, visible)
+		}
+	}
+	m.showNext = false
+	m.snapshot.ShowCollectionColumn = true
+	if text := ansi.Strip(strings.Join(m.contentLines(), "\n")); !strings.Contains(text, "task/repo0: Commit changes") {
+		t.Fatal(text)
 	}
 }

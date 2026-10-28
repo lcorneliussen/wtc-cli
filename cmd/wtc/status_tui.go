@@ -1341,7 +1341,11 @@ func (m statusTUIModel) contentLines() []string {
 		if repos := statusNextRepos(m.snapshot); len(repos) > 0 {
 			var hints []string
 			for _, r := range repos {
-				hints = append(hints, r.Dir+": "+statusNextLabel(r.Next))
+				name := r.Dir
+				if m.snapshot.ShowCollectionColumn {
+					name = r.Collection + "/" + name
+				}
+				hints = append(hints, statusTUISafe(name+": "+statusNextLabel(r.Next)))
 			}
 			lines = append(lines, "", statusTUIFit("[n] Next · "+strings.Join(hints, " · "), width))
 		}
