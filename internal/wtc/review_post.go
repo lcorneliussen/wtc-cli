@@ -211,18 +211,11 @@ func (c *Context) PostReviewBundle(bundle string, opt ReviewPostOptions) (Review
 		body = fmt.Sprintf("⏳ **Local review: posting findings**\n\nRound %d, head `%s`.\n\n`wtc-review v1 head=%s verdict=pending blockers=0 round=%d lead=pending`\n", manifest.Round, manifest.HeadSHA[:7], manifest.HeadSHA, manifest.Round)
 	}
 	body = reviewModeBody(body, manifest)
-	var posted ReviewPostResult
-	if cid != "" {
-		posted, err = postReviewComment(manifest, cid, body)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, branding.Text("{{command}}: warning: update of review comment %s failed; creating a new comment: %v\n"), cid, err)
-		}
-	}
-	if cid == "" || err != nil {
-		posted, err = postReviewComment(manifest, "", body)
-		if err != nil {
-			return ReviewPostResult{}, err
-		}
+	posted, err := postReviewComment(manifest, cid, body)
+	if err != nil {
+		// A failed update is not evidence that the original comment is absent.
+		// Keep the saved ID and let an explicit retry update the same comment.
+		return ReviewPostResult{}, err
 	}
 	if posted.CommentID != "" {
 		if err := os.WriteFile(idPath, []byte(posted.CommentID+"\n"), 0644); err != nil {
