@@ -14,14 +14,23 @@ A local passing verdict does not establish a posted or trusted review.
 After a progress-post error, that invocation makes no further posting attempts.
 A remote write may have succeeded without returning a usable comment ID, so
 posting the summary or failure automatically could create a duplicate. No
-successful publication receipt is manufactured. If a saved comment ID exists,
-a failed update retains it and returns the error instead of creating a new
+successful publication receipt is manufactured.
+
+Before sending a new summary/progress comment, the poster exclusively creates
+`comment.create-pending` in the bundle. The marker remains after an uncertain
+failure or interrupted create and blocks later creates from that bundle, even
+in a separate invocation. It is cleared only after the returned comment ID has
+been saved. If a saved comment ID exists, a failed update retains it and returns the error instead of creating a new
 comment; an explicit retry uses the same ID. The receipt for an earlier passing
 publication is invalidated before attempting the update.
 
 Inspect the remote comment and reconcile any ambiguous create before explicitly
-posting again. Recovery of an unknown created ID, transport migration, and
-writable Bitbucket contract certification remain separate work under #60.
+posting again. If the comment exists, save its verified numeric ID in the
+bundle's `comment.id` so the next post updates it. Only remove
+`comment.create-pending` to permit a new create after verifying that no comment
+was created. An unconfirmed outcome must keep the marker.
+
+Recovery of an unknown created ID, transport migration, and writable Bitbucket contract certification remain separate work under #60.
 This change does not certify a CLI version or authentication contract.
 
 Hosted-review deferral still occurs before the progress attempt. Publication

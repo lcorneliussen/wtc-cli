@@ -7,9 +7,16 @@ import (
 	"testing"
 )
 
-func TestReviewProgressUpdateFailureDoesNotCreateDuplicate(t *testing.T) {
-	for _, response := range []string{"exit 9", "echo '{}'"} {
-		t.Run(response, func(t *testing.T) {
+func TestReviewProgressPostingFailuresDoNotCreateDuplicates(t *testing.T) {
+	for _, tc := range []struct {
+		name, response string
+		saveID         bool
+	}{
+		{"update-transport", "exit 9", true},
+		{"update-malformed", "echo '{}'", true},
+		{"create-id-save", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			collection := t.TempDir()
 			repo := filepath.Join(collection, "app")
 			bundle := filepath.Join(collection, "bundle")
@@ -30,7 +37,11 @@ func TestReviewProgressUpdateFailureDoesNotCreateDuplicate(t *testing.T) {
 			if err := writeReviewManifest(bundle, m); err != nil {
 				t.Fatal(err)
 			}
-			write(filepath.Join(bundle, "comment.id"), "301\n", 0644)
+			if tc.saveID {
+				write(filepath.Join(bundle, "comment.id"), "301\n", 0644)
+			} else if err := os.Mkdir(filepath.Join(bundle, "comment.id"), 0755); err != nil {
+				t.Fatal(err)
+			}
 			c, err := OpenCollection(collection)
 			if err != nil {
 				t.Fatal(err)
@@ -39,11 +50,13 @@ func TestReviewProgressUpdateFailureDoesNotCreateDuplicate(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(receipt), 0755); err != nil {
 				t.Fatal(err)
 			}
-			write(receipt, "", 0600)
+			if tc.saveID {
+				write(receipt, "", 0600)
+			}
 			write(filepath.Join(bin, "gh"), `#!/bin/sh
 case "$*" in
  *'--json headRefOid'*) echo '{"headRefOid":"1234567890abcdef1234567890abcdef12345678"}';;
- *'api -X PATCH'*) cat >/dev/null; echo PATCH >> "$FORGE_LOG"; `+response+`;;
+ *'api -X PATCH'*) cat >/dev/null; echo PATCH >> "$FORGE_LOG"; `+tc.response+`;;
  *'api -X POST'*) cat >/dev/null; echo POST >> "$FORGE_LOG"; echo '{"id":302}';;
  *) exit 8;;
 esac
@@ -56,12 +69,20 @@ esac
 				}
 			}
 			log, err := os.ReadFile(filepath.Join(collection, "forge.log"))
-			if err != nil || string(log) != "PATCH\nPATCH\n" {
+			want := "PATCH\nPATCH\n"
+			if !tc.saveID {
+				want = "POST\n"
+			}
+			if err != nil || string(log) != want {
 				t.Fatalf("blind create/retry: %s %v", log, err)
 			}
-			id, err := os.ReadFile(filepath.Join(bundle, "comment.id"))
-			if err != nil || strings.TrimSpace(string(id)) != "301" {
-				t.Fatalf("saved ID lost: %s %v", id, err)
+			if tc.saveID {
+				id, err := os.ReadFile(filepath.Join(bundle, "comment.id"))
+				if err != nil || strings.TrimSpace(string(id)) != "301" {
+					t.Fatalf("saved ID lost: %s %v", id, err)
+				}
+			} else if _, err := os.Stat(filepath.Join(bundle, "comment.create-pending")); err != nil {
+				t.Fatalf("lost uncertain-create marker: %v", err)
 			}
 			if _, err := os.Stat(receipt); !os.IsNotExist(err) {
 				t.Fatalf("passing receipt survived ambiguous write: %v", err)

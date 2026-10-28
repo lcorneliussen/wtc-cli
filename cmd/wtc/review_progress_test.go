@@ -129,6 +129,29 @@ esac
 			} else if _, err := os.Stat(filepath.Join(bundle, "comment.id")); !os.IsNotExist(err) {
 				t.Fatalf("invented comment id: %v", err)
 			}
+			marker := filepath.Join(bundle, "comment.create-pending")
+			if tc.progressOK {
+				if _, err := os.Stat(marker); !os.IsNotExist(err) {
+					t.Fatalf("confirmed create left marker: %v", err)
+				}
+			} else {
+				if _, err := os.Stat(marker); err != nil {
+					t.Fatalf("uncertain create lost marker: %v", err)
+				}
+				retry := exec.Command(os.Args[0], "-test.run=^TestReviewProgressCommandChild$")
+				retry.Env = cmd.Env
+				retried, err := retry.CombinedOutput()
+				if err == nil || !strings.Contains(string(retried), "reconcile any prior uncertain create") {
+					t.Fatalf("retry did not fail closed: %v %s", err, retried)
+				}
+				if got := read(filepath.Join(collection, "forge.log")); got != "POST\n" {
+					t.Fatalf("retry duplicated uncertain create: %q", got)
+				}
+				if got := read(filepath.Join(collection, "agent.log")); got != "concern\nlead\nconcern\nlead\n" {
+					t.Fatalf("guard prevented local retry: %q", got)
+				}
+			}
+
 			receipts, _ := filepath.Glob(filepath.Join(collection, ".wtc-review-posted", "*"))
 			if len(receipts) != 0 {
 				t.Fatalf("invented receipts: %v", receipts)
