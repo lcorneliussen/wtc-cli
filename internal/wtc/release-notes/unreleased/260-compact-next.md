@@ -1,3 +1,0 @@
-## Status and OpenClaw
-
-- **Compact next steps.** The collection card and panel keep repository, changes, pull request and next step in stable groups, with one direct action per repository. A small shortcut runs current recommendations across repositories; alternatives and mixed selections appear on demand. Catch-up stays one-click and publication retains its confirmation. The status TUI keeps a compact hint until `n` opens actions. Agent handoff receipts identify the owning collection's author pane; busy, missing or ambiguous destinations are explicitly unsent rather than reported as pending.
