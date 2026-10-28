@@ -72,3 +72,19 @@ dispatches. Unchanged handoffs cannot be sent twice in the current view; check
 the conversation before using `x` to allow an explicit retry. Agent tasks in one collection are combined into one sequential
 handoff; check that conversation for completion. Publication authority is not
 broadened by a selection, and follow-up steps require a new selection.
+
+## Retirement readiness
+
+`wtc status` includes a retirement assessment for each selected collection: known
+blockers, unverified checks and when the evidence was observed. JSON exposes it
+in the `retirement` array; terminal and Markdown views show the summary.
+
+`wtc retire [collection] --dry-run [--transcript <file>] [--json]` reads fresh
+evidence and explains what needs verification or preservation. With `--dry-run`,
+the collection defaults to the current one. Explicit Claude JSONL transcripts
+are untrusted evidence; their availability does not establish archive state.
+
+The dry run performs no status refresh, hooks, handoff or cleanup. Real `retire`
+still requires an explicit collection name and retains its existing fresh
+execution checks; this slice does not add a new approval or automation policy.
+See [retirement readiness](retirement.md) for source coverage and limits.

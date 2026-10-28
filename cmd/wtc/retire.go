@@ -15,9 +15,26 @@ import (
 const cleanupWorkspaceLabel = "--cleanup--"
 
 func addRetireCommand(root *cobra.Command, asJSON *bool) {
-	var force bool
-	cmd := &cobra.Command{Use: "retire <collection>", Short: "Retire a finished worktree collection", Args: cobra.ExactArgs(1)}
+	var force, dryRun bool
+	var transcripts []string
+	cmd := &cobra.Command{Use: "retire [collection]", Short: "Retire a finished collection or inspect its readiness", Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) > 1 {
+			return fmt.Errorf("expected one collection name")
+		}
+		if !dryRun && len(args) == 0 {
+			return fmt.Errorf("retire requires a collection name; --dry-run defaults to the current collection")
+		}
+		if !dryRun && len(transcripts) > 0 {
+			return fmt.Errorf("--transcript requires --dry-run")
+		}
+		if dryRun && force {
+			return fmt.Errorf("--force cannot be combined with --dry-run; the assessment retains every blocker")
+		}
+		return nil
+	}}
 	cmd.Flags().BoolVar(&force, "force", false, "Allow dirty or unpushed work after checking that it is disposable")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Read fresh retirement evidence without hooks, cleanup or source changes")
+	cmd.Flags().StringArrayVar(&transcripts, "transcript", nil, "With --dry-run: explicit Claude JSONL task transcript (up to eight); archive state remains unknown")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -26,6 +43,17 @@ func addRetireCommand(root *cobra.Command, asJSON *bool) {
 		c, err := wtc.Discover(cwd)
 		if err != nil {
 			return err
+		}
+		if dryRun {
+			name := "."
+			if len(args) > 0 {
+				name = args[0]
+			}
+			report, err := c.InspectRetirement(name, transcripts)
+			if err != nil {
+				return err
+			}
+			return emit(envelope{OK: true, Data: report, Summary: report.Text()}, *asJSON)
 		}
 		name := filepath.Base(c.Collection)
 		if args[0] != "." {

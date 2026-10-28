@@ -137,9 +137,15 @@ func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.
 			return snapshot, report, err
 		}
 		snapshot.Repos = append(snapshot.Repos, part.Repos...)
+		snapshot.Retirement = append(snapshot.Retirement, part.Retirement...)
 		snapshot.StaleCount += part.StaleCount
 	}
 	c.statusRetired(&snapshot)
 	c.statusRuntime(&snapshot, true)
+	// Read leftover assessments too, without rerunning the complete status collector.
+	for _, retired := range snapshot.Retired {
+		c.appendRetirement(&snapshot, retired.Folder)
+	}
+	statusRetirementFacts(&snapshot)
 	return snapshot, report, nil
 }

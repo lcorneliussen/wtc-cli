@@ -1366,6 +1366,9 @@ func (m statusTUIModel) contentLines() []string {
 			lines = append(lines, "", fmt.Sprintf("%d worktree(s) behind the development tip", m.snapshot.StaleCount))
 		}
 	}
+	if !m.procs {
+		lines = append(lines, statusRetirementLines(m.snapshot, width)...)
+	}
 	if m.errorText != "" {
 		lines = append(lines, "", statusTUIStyle("warning: "+statusTUISafe(m.errorText), statusToneWarning))
 	}
