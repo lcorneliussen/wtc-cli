@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -177,5 +178,51 @@ func TestStatusNextExecution(t *testing.T) {
 	updated, _ = m.Update(statusLoadedMsg{snapshot: wtc.StatusSnapshot{Repos: []wtc.StatusRepo{r}}})
 	if updated.(statusTUIModel).selectedNext != 0 {
 		t.Fatal("selection did not follow shrinking action list")
+	}
+}
+
+func TestStatusNextHandoffDestination(t *testing.T) {
+	c, rows := batchFixture(t)
+	author := openPaneInfo{ID: "author", Label: "agent", Agent: "codex", AgentStatus: "idle"}
+	reviewer := openPaneInfo{ID: "reviewer", Label: "review", Agent: "claude", AgentStatus: "idle", Focused: true}
+	for _, tc := range []struct {
+		name  string
+		panes []openPaneInfo
+		sent  bool
+		want  string
+	}{
+		{"focused reviewer", []openPaneInfo{reviewer, author}, true, "Sent to task / codex (author); completion pending"},
+		{"reviewer only", []openPaneInfo{reviewer}, false, "Cannot identify one author agent pane"},
+		{"ambiguous authors", []openPaneInfo{author, {ID: "second", Label: "agent", Agent: "claude", AgentStatus: "idle"}}, false, "Cannot identify one author agent pane"},
+		{"busy author", []openPaneInfo{{ID: "author", Label: "agent", Agent: "codex", AgentStatus: "working"}, reviewer}, false, "Author agent task / codex (author) is working"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sent := false
+			run := statusNextRunner{readStatus: func(*wtc.Context) (wtc.StatusSnapshot, error) { return wtc.StatusSnapshot{Repos: rows}, nil },
+				herdr: func(_ string, args ...string) (openHerdrResponse, error) {
+					var out openHerdrResponse
+					switch args[0] {
+					case "workspace":
+						out.Result.Workspaces = []openWorkspaceInfo{{ID: "w", Label: "task"}}
+					case "pane":
+						out.Result.Panes = tc.panes
+					case "agent":
+						if args[2] != "author" {
+							t.Fatal("wrong destination", args)
+						}
+						sent = true
+					default:
+						t.Fatal(args)
+					}
+					return out, nil
+				}}
+			result := statusNextBatch(context.Background(), c, rows[:2], run)().(statusNextDoneMsg)
+			if result.err != nil || sent != tc.sent || !strings.Contains(result.text, tc.want) {
+				t.Fatal(sent, result)
+			}
+			if !tc.sent && (len(result.pending) != 0 || strings.Contains(result.text, "handoff pending") || !strings.Contains(result.text, "Not sent")) {
+				t.Fatal("unsent work reported as pending", result)
+			}
+		})
 	}
 }

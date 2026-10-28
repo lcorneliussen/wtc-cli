@@ -142,13 +142,13 @@ retained, and its PR moves from the repository row to the collection's pull
 request list. Follow-up commits must move to a new branch before returning
 to the tip; catch-up refuses to leave them behind.
 
-The collection card and panel show **Next actions** with their reasons and
-required approvals. A click rechecks the repository's current status. A clean
-return to tip or catch-up can run on the gateway; a merge into a live branch
-asks the conversation's `wtc-catch-up` skill to decide. Conflicts, failed
-checks and requested changes ask the corresponding skill. Push uses the
-existing personal account and confirmation flow; merge opens the pull request
-for the person. Refreshing the card alone does not execute these actions.
+The collection card and panel keep repository/branch, changes, pull request
+and next step in stable groups. The **Next** affordance on a repository runs
+that step after rechecking status. Catch-up runs on the first click, including
+a clean merge into a live branch; active-author and conflict checks still apply.
+Judgment work asks the conversation's named skill. Push keeps the personal
+account and confirmation flow; merge opens the pull request for the person.
+Refreshing the card alone does not execute actions.
 
 Uncommitted files offer **Commit changes**: the conversation reviews intended
 changes and saves them as **local commits**. This does not push them or create
@@ -666,14 +666,21 @@ installed from a path, which is how `wtc openclaw install` installs.
 
 ### Select next actions
 
-Development builds expose CLI-derived recommendations and alternatives in the
-Collection card and panel. Choose an action per repository, check its selection,
-or use **Select suggested** to select the visible recommendations. Existing
-alternative choices are preserved. **Run selected** starts catch-up and other local steps directly, rechecking the
-exact targets first. Publication selections show a preview and retain each
-repository’s account/commit confirmation. A changed head,
-base, worktree state or PR observation makes an old selection stale. It is not
-silently replaced with a new recommendation or expanded to newly appearing repos.
+Development builds put the recommendation beside each repository instead of
+repeating the repository list in a checklist. Reasons are available on the
+affordance. When several repositories have a recommendation, a quiet shortcut
+such as **Catch up 2 repos →** or **Do next (2) →** captures those exact steps.
+Catch-up and local steps start directly. Publication selections show a preview
+and retain each repository's account/commit confirmation.
+
+**Choose steps…** reveals alternatives and mixed selection controls. Choose an
+action per repository, check its selection, or use **Select suggested**. Existing
+alternative choices are preserved. **Run selected** rechecks the exact targets.
+A changed head, base, worktree state or PR observation makes an old selection
+stale. New repositories do not join a captured selection. **Done choosing**
+returns to the compact view; **Run chosen** retains your exact selection there.
+Running, queued and pending results stay beside
+the repository in either view.
 
 Each batch dispatches one step per selected repository. Results stay per target;
 a failure does not undo other targets. Selected author tasks are sent together
