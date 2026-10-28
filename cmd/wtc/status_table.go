@@ -6,6 +6,7 @@ import (
 
 	"github.com/lcorneliussen/wtc-cli/internal/branding"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
+	"github.com/mattn/go-runewidth"
 )
 
 func statusTable(snapshot wtc.StatusSnapshot, reposOnly bool, width int) string {
@@ -13,7 +14,11 @@ func statusTable(snapshot wtc.StatusSnapshot, reposOnly bool, width int) string 
 	if name == "" {
 		name = "(all)"
 	}
-	lines := []string{statusTUIFit(fmt.Sprintf(branding.Text("{{command}} status · %s · %s"), name, snapshot.GeneratedAt), width), ""}
+	header := fmt.Sprintf(branding.Text("{{command}} status · %s · %s"), name, snapshot.GeneratedAt)
+	if remaining := width - runewidth.StringWidth(header); remaining > 0 {
+		header += statusTUIFit(" · "+wtc.StatusVersionLabel(snapshot.CLIVersion), remaining)
+	}
+	lines := []string{statusTUIFit(header, width), ""}
 	lines = append(lines, statusTUIRepoLines(snapshot, width, false)...)
 	lines = append(lines, statusTUIRuntimeLines(snapshot, width, false)...)
 	if !reposOnly {

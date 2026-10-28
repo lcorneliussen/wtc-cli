@@ -14,9 +14,12 @@ import (
 // and, once ported, the live renderer. This is the local Git portion; forge
 // and process facts are added by later collection stages.
 type StatusSnapshot struct {
-	Schema               int            `json:"schema"`
-	Collection           string         `json:"collection"`
-	GeneratedAt          string         `json:"generated_at"`
+	Schema      int    `json:"schema"`
+	Collection  string `json:"collection"`
+	GeneratedAt string `json:"generated_at"`
+	// CLIVersion identifies the snapshot producer, not a later cache reader.
+	// Absent in older schema-1 snapshots.
+	CLIVersion           string         `json:"cli_version,omitempty"`
 	ShowCollectionColumn bool           `json:"show_collection_column"`
 	StaleCount           int            `json:"stale_count"`
 	Repos                []StatusRepo   `json:"repos"`
@@ -227,6 +230,7 @@ func statusLocalRepo(t catchUpTarget) (StatusRepo, error) {
 // forge, updating refs, or writing a cache. All is an explicit workspace sweep.
 func (c *Context) StatusLocalSnapshot(all bool) (StatusSnapshot, error) {
 	snapshot := StatusSnapshot{Schema: 1,
+		CLIVersion:           RunningCLIVersion(),
 		GeneratedAt:          time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 		ShowCollectionColumn: all,
 		Repos:                []StatusRepo{}, PRs: []StatusPRRow{}, Orphans: []StatusOrphan{}}
