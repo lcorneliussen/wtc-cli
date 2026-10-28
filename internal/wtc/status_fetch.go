@@ -117,6 +117,7 @@ func (c *Context) StatusLiveSnapshotWithFetchAge(all, noFetch bool, maxAge time.
 		return StatusSnapshot{}, report, err
 	}
 	snapshot := StatusSnapshot{Schema: 1, GeneratedAt: time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		CLIVersion:           RunningCLIVersion(),
 		ShowCollectionColumn: true, Repos: []StatusRepo{}, PRs: []StatusPRRow{}, Orphans: []StatusOrphan{}}
 	for i, dir := range collections {
 		collection, err := OpenCollection(dir)

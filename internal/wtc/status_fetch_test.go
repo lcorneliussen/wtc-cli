@@ -52,6 +52,9 @@ func TestStatusRefreshRefsUsesSharedOwnerAgeGate(t *testing.T) {
 }
 
 func TestStatusLiveSnapshotWritesOnlyScopedCaches(t *testing.T) {
+	oldVersion := CLIVersion
+	t.Cleanup(func() { CLIVersion = oldVersion })
+	CLIVersion = "1.2.3"
 	c := newWorkspaceFixture(t)
 	if _, err := c.NewCollection(NewOptions{Slug: "other"}); err != nil {
 		t.Fatal(err)
@@ -62,6 +65,9 @@ func TestStatusLiveSnapshotWritesOnlyScopedCaches(t *testing.T) {
 	}
 	if !all.ShowCollectionColumn || all.Collection != "" || len(all.Repos) != 2 || len(all.PRs) != 0 {
 		t.Fatalf("wrong workspace status scope: %+v", all)
+	}
+	if all.CLIVersion != "1.2.3" {
+		t.Fatalf("workspace live snapshot lost producer version: %q", all.CLIVersion)
 	}
 	allMD := all.Markdown()
 	if !strings.Contains(allMD, "**main/harness**") || !strings.Contains(allMD, "**other/harness**") || strings.Contains(allMD, "## PRs") {
@@ -75,6 +81,10 @@ func TestStatusLiveSnapshotWritesOnlyScopedCaches(t *testing.T) {
 	one, _, err := c.StatusLiveSnapshot(false, true)
 	if err != nil || one.Collection != "main" {
 		t.Fatalf("scoped status failed: %+v %v", one, err)
+	}
+	cached, cacheErr := c.ReadStatusSnapshot()
+	if one.CLIVersion != "1.2.3" || cacheErr != nil || cached.CLIVersion != "1.2.3" {
+		t.Fatalf("scoped live snapshot/cache lost producer: %q / %q (%v)", one.CLIVersion, cached.CLIVersion, cacheErr)
 	}
 	if _, err := os.Stat(filepath.Join(c.Collection, ".wtc-status.json")); err != nil {
 		t.Fatalf("scoped cache missing: %v", err)

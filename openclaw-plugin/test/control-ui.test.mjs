@@ -112,6 +112,8 @@ const failing = new Set();
 let bitbucket;
 let bitbucketRefusedAction;
 let bitbucketConfirmResult;
+let bitbucketPublishError;
+let bitbucketDropDescription = false;
 const hostRequest = async (method, params) => {
   if (failing.has(method)) throw new Error(`${method} failed`);
   if (method === "plugins.sessionAction" && params.pluginId === "bitbucket") {
@@ -120,7 +122,8 @@ const hostRequest = async (method, params) => {
     calls.push({ method, ...params });
     if (params.actionId === bitbucketRefusedAction) return { ok: true, result: { status: "blocked", message: "The requested publication is no longer valid." } };
     if (params.actionId === "publish") {
-      return { ok: true, result: bitbucket ? { status: "needs_confirmation", requestId: "bb-1", confirmation: { account: bitbucket.user, name: bitbucket.name, requestDigest: "bd1", branch: "openclaw/test", head: "abcdef0123", dest: "main", uncommitted: 0 } } : { status: "not_connected" } };
+      if (bitbucketPublishError) throw bitbucketPublishError;
+      return { ok: true, result: bitbucket ? { status: "needs_confirmation", requestId: "bb-1", confirmation: { account: bitbucket.user, name: bitbucket.name, requestDigest: "bd1", branch: "openclaw/test", head: "abcdef0123", dest: "main", uncommitted: 0, title: params.payload?.title, description: bitbucketDropDescription ? undefined : params.payload?.description } } : { status: "not_connected" } };
     }
     if (params.actionId === "publish-confirm") return { ok: true, result: bitbucketConfirmResult ?? { status: "published", created: true, url: "https://bitbucket.org/ws/hooks/pull-requests/3" } };
   }
@@ -187,10 +190,10 @@ const busy = collection([
 ]);
 
 // The card's cells, row by row: a table is a grid of a header and rows of
-// as many cells, as in wtc status.
+// as many cells.
 const tables = (node) => [...node.all()].filter((n) => n.className === "wtc-table").map((t) => {
   const cells = t.children;
-  const width = t.style.cssText.match(/grid-template-columns:([^;]*)/)[1].split(" ").filter((w) => w && !/^\d|^\)|^minmax\(0,$/.test(w)).length;
+  const width = Number(t.attributes["data-columns"]);
   const rows = [];
   for (let i = 0; i < cells.length; i += width) rows.push(cells.slice(i, i + width).map((c) => {
     // A choice reads as its prompt, not its options.
@@ -240,7 +243,7 @@ test("panel: a busy collection", async () => {
   // The shared branch once in the header, every repository's in its row.
   assert.ok(all.includes("3 repositories · 1/2 services running"));
   const [repos, prs, services] = tables(host);
-  assert.deepEqual(repos[1], ["api", "openclaw/test", "·", "↑ 2", "↓ 3", "#7", "✗", "✗", "○"]);
+  assert.deepEqual(repos[1], ["apiopenclaw/test", "↑ 2↓ 3", "#7✗ checks✗ conflict○ review", ""]);
   // wtc status's PRs: number, repository, state, C M R, title.
   assert.deepEqual(prs, [["PR", "Repo", "State", "C", "M", "R", "Title"], ["#7", "api", "open", "✗", "✗", "○", "Add paging"]]);
   assert.deepEqual(services[1].slice(1), ["preview", "api", "ready", ":42201", "calm-river✕", "+"]);
@@ -257,7 +260,7 @@ test("panel: repositories on different branches", async () => {
     repo("api", { ahead: 1 }), repo("web", { ahead: 1 }), repo("docs", { branch: "release", ahead: 1 }), repo("site"),
   ]));
   // One with nothing on its branch yet shows its base.
-  assert.deepEqual(tables(host)[0].slice(1).map((r) => r[1]), ["openclaw/test", "openclaw/test", "release", "main"]);
+  assert.deepEqual(tables(host)[0].slice(1).map((r) => r[0]), ["apiopenclaw/test", "webopenclaw/test", "docsrelease", "sitemain"]);
   view.dispose();
 });
 
@@ -372,12 +375,12 @@ test("composer: the card for a busy collection", async () => {
   assert.ok(card, "the card is shown");
   assert.equal(host.children[0], card, "above the message box");
   const [repos, services] = tables(card);
-  // A column per fact, in its place; "·" where there is none.
+  // The browser groups related facts in stable places, with the branch below its repository.
   assert.deepEqual(repos, [
-    ["Repo", "Branch", "±", "↑", "↓", "PR", "C", "M", "R"],
-    ["api", "openclaw/test", "·", "↑ 2", "↓ 3", "#7", "✗", "✗", "○"],
-    ["web", "openclaw/test", "1", "↑", "·", "·", "·", "·", "·"],
-    ["hooks", "openclaw/test", "·", "↑ 1", "·", "·", "·", "·", "·"],
+    ["Repository", "Changes", "Pull request", "Next"],
+    ["apiopenclaw/test", "↑ 2↓ 3", "#7✗ checks✗ conflict○ review", ""],
+    ["webopenclaw/test", "± 1↑", "", "Commit changes"],
+    ["hooksopenclaw/test", "↑ 1", "", ""],
   ]);
   // A service and its tunnel are one row; the tunnel has its column.
   assert.deepEqual(services.map((r) => r.slice(1)), [
@@ -710,7 +713,7 @@ test("composer: a new pull request opens with the title and description the agen
   const card = () => [...host.all()].find((n) => n.className === "wtc-collection-card");
   const push = (what) => [...card().all()].find((n) => n.tagName === "BUTTON" && n.title.startsWith(what));
   assert.match(push("1 uncommitted file to publish").title, /Title: "Add a web preview", with the agent's description\./);
-  assert.match([...card().all()].find((n) => n.tagName === "BUTTON" && /Bitbucket/.test(n.title)).title, /Title: "Add a web preview"\.$/);
+  assert.match([...card().all()].find((n) => n.tagName === "BUTTON" && /Bitbucket/.test(n.title)).title, /Title: "Add a web preview", with the agent's description\.$/);
   assert.match(push("1 commit to push. Commit pending changes and push the branch; create a draft pull request if none exists, with your own GitHub").title, /proposed no title or description/);
   assert.doesNotMatch(push("1 commit to push. Commit pending changes and push the branch to PR #7").title, /Title|proposed/);
   calls.length = 0;
@@ -726,10 +729,68 @@ test("composer: a new pull request opens with the title and description the agen
   const bb = [...card().all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push.*Bitbucket/.test(n.title));
   await bb.onclick();
   await settle();
-  assert.deepEqual(calls.at(-1).payload, { draft: true, dest: "main", title: "Add a web preview" });
+  assert.deepEqual(calls.at(-1).payload, { draft: true, dest: "main", title: "Add a web preview", description: proposal.body });
   bitbucket = undefined;
   personal = null;
   view.dispose();
+});
+
+test("Bitbucket descriptions reach the publisher and the captured confirmation in both views", async () => {
+  for (const kind of ["composer", "panel"]) for (const title of ["Proposed title", undefined]) {
+    bitbucket = { user: "ada@example.com", name: "Ada" };
+    const body = "# Summary\n\n**Markdown** 🗂️\n\n<em>literal text</em>\n";
+    const proposal = { branch: "openclaw/test", body, ...(title ? { title } : {}) };
+    const { host, view } = await mount(kind, collection([repo("docs", { forge: "bitbucket", unpublished: 1, proposal })]));
+    try {
+      calls.length = 0;
+      const push = [...host.all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push.*Bitbucket/.test(n.title));
+      assert.match(push.title, /agent's description/);
+      await push.onclick();
+      await settle();
+      const request = calls.find((c) => c.actionId === "publish");
+      assert.equal(request.payload.description, body);
+      assert.equal(request.payload.title, title);
+      const confirm = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "confirm ↑ 1");
+      assert.ok(confirm.title.includes(body), "confirmation previews the exact captured description");
+      assert.match(confirm.title, /existing PR text is kept/);
+      assert.equal([...host.all()].some((n) => n.tagName === "EM"), false, "description is plain text in the tooltip");
+      await confirm.onclick();
+      await settle();
+      assert.equal(calls.find((c) => c.actionId === "publish-confirm").payload.requestDigest, "bd1");
+    } finally { view.dispose(); bitbucket = undefined; }
+  }
+});
+
+test("an older Bitbucket publisher requests an upgrade instead of dropping the description", async () => {
+  for (const kind of ["composer", "panel"]) for (const drops of [false, true]) {
+    bitbucket = { user: "ada@example.com", name: "Ada" };
+    bitbucketDropDescription = drops;
+    bitbucketPublishError = drops ? undefined : new Error("plugin session action payload does not match schema: must NOT have additional properties");
+    const { host, view } = await mount(kind, collection([repo("docs", { forge: "bitbucket", unpublished: 1, proposal: { branch: "openclaw/test", body: "A useful description." } })]));
+    try {
+      calls.length = 0;
+      await [...host.all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push.*Bitbucket/.test(n.title)).onclick();
+      await settle();
+      assert.match(host.textContent, /Bitbucket plugin 0\.3\.4 or later/);
+      assert.match(host.textContent, /nothing was published/);
+      assert.equal(calls.filter((c) => c.actionId === "publish").length, 1, "no retry discards the body");
+      assert.equal(calls.some((c) => c.actionId === "publish-confirm" || c.method === "sessions.send"), false);
+    } finally { view.dispose(); bitbucket = undefined; bitbucketPublishError = undefined; bitbucketDropDescription = false; }
+  }
+});
+
+test("a title-only Bitbucket proposal says the description is absent and remains compatible", async () => {
+  bitbucket = { user: "ada@example.com", name: "Ada" };
+  const { host, view } = await mount("composer", collection([repo("docs", { forge: "bitbucket", unpublished: 1, proposal: { branch: "openclaw/test", title: "Title only" } })]));
+  try {
+    calls.length = 0;
+    const push = [...host.all()].find((n) => n.tagName === "BUTTON" && /^1 commit to push.*Bitbucket/.test(n.title));
+    assert.match(push.title, /without a proposed description/);
+    await push.onclick();
+    await settle();
+    assert.deepEqual(calls.find((c) => c.actionId === "publish").payload, { draft: true, dest: "main", title: "Title only" });
+    assert.ok([...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "confirm ↑ 1"));
+  } finally { view.dispose(); bitbucket = undefined; }
 });
 
 test("composer: a repository without a branch yet", async () => {
@@ -871,8 +932,8 @@ test("completed rounds leave the repository row and remain in the PR list", asyn
   for (const kind of ["composer", "panel"]) {
     const { host, view } = await mount(kind, collection([current]));
     const [repos, prs] = tables(host);
-    assert.equal(repos[1][1], "at main");
-    assert.equal(repos[1][5], "·");
+    assert.equal(repos[1][0], "siteat main");
+    assert.equal(repos[1][2], "");
     assert.deepEqual(prs[1].slice(0, 3), ["#2", "site", "merged"]);
     assert.ok(!buttons(host).some((b) => b.startsWith("↑") || b.startsWith("↓")));
     view.dispose();
@@ -885,7 +946,7 @@ test("completed rounds leave the repository row and remain in the PR list", asyn
   view.dispose();
 });
 
-test("narrow: one header, every fact in its column, the branch below the name", async () => {
+test("narrow: repository facts fold together and next steps retain their position", async () => {
   // A ResizeObserver whose width the test sets.
   const observers = [];
   globalThis.ResizeObserver = class { constructor(fn) { this.fn = fn; observers.push(this); } observe() {} disconnect() {} };
@@ -893,9 +954,8 @@ test("narrow: one header, every fact in its column, the branch below the name", 
     const { host, view } = await mount("panel", busy);
     for (const o of observers) o.fn([{ contentRect: { width: 360 } }]);
     const [repos, , services] = tables(host);
-    // The branch column folds under the repository; the rest stays as wide.
-    assert.deepEqual(repos[0], ["Repo", "±", "↑", "↓", "PR", "C", "M", "R"]);
-    assert.deepEqual(repos[1], ["apiopenclaw/test", "·", "↑ 2", "↓ 3", "#7", "✗", "✗", "○"]);
+    assert.deepEqual(repos[0], ["Repository", "Next"]);
+    assert.deepEqual(repos[1], ["apiopenclaw/test↑ 2↓ 3#7✗ checks✗ conflict○ review", ""]);
     assert.deepEqual(services[1].slice(1), ["previewapi", "ready", ":42201", "calm-river✕", "+"]);
     view.dispose();
   } finally {
@@ -1132,8 +1192,8 @@ test("composer: a sub-session has its own rows, merges into the task's checkout,
   // site once for the task; the worker's site is a sub-row under it, with the
   // same columns against the task: ± its files, ↑ into the task, no PR.
   assert.deepEqual(repos.slice(1), [
-    ["site", "main", "·", "·", "·", "·", "·", "·", "·"],
-    ["↳docs✕", "openclaw/test--docs", "13", "↑ 2", "·", "·", "·", "·", "·"],
+    ["sitemain", "", "", ""],
+    ["↳docs✕openclaw/test--docs", "± 13↑ 2", "", ""],
   ]);
   const named = (re) => [...card.all()].find((n) => n.tagName === "BUTTON" && re.test(n.title));
 
@@ -1235,7 +1295,7 @@ test("composer: a sub-session with uncommitted files is reviewed by the conversa
   const dirty = await mount("composer", sub({ dirty: 3,
     uncommitted: [{ path: "a.md", state: "same" }, { path: "b.md", state: "differs" }, { path: "c.mjs", state: "only" }] }));
   let card = [...dirty.host.all()].find((n) => n.className === "wtc-collection-card");
-  assert.deepEqual(tables(card)[0][2], ["↳nav✕", "openclaw/13-docs-nav", "3", "·", "↓ 2", "·", "·", "·", "·"]);
+  assert.deepEqual(tables(card)[0][2], ["↳nav✕openclaw/13-docs-nav", "± 3↓ 2", "", ""]);
   const buttons = () => [...card.all()].filter((n) => n.tagName === "BUTTON");
   // With uncommitted files there is no catch-up to click: it would refuse.
   assert.equal(buttons().find((n) => /^2 commits of the collection's site/.test(n.title)), undefined);
@@ -1268,14 +1328,19 @@ const clickText = async (host, text) => {
   for (let i = 0; i < 6; i++) await settle();
 };
 
+const chooseSteps = async (host) => {
+  if (buttons(host).includes("Choose steps…")) await clickText(host, "Choose steps…");
+};
+
 test("selected mixed actions retain alternatives and combine author handoffs", async () => {
   for (const kind of ["composer", "panel"]) {
     const api = withChoices("api"), web = withChoices("web", "address-review");
     const { host, view } = await mount(kind, collection([api, web]));
     try {
+      await chooseSteps(host);
       const select = [...host.all()].find((n) => n.tagName === "SELECT" && n.ariaLabel === "Action for web");
       select.value = web.choices.actions[1].key; select.onchange();
-      await clickText(host, "Select suggested");
+      await chooseSteps(host); await clickText(host, "Select suggested");
       calls.length = 0;
       assert.equal(calls.length, 0, "selection must not dispatch");
       nextResult = ({ payload }) => {
@@ -1289,9 +1354,9 @@ test("selected mixed actions retain alternatives and combine author handoffs", a
       assert.match(sends[0].message, /Check web's current PR/);
       assert.doesNotMatch(sends[0].message, /web needs address-review/);
       assert.match(host.textContent, /completion pending/);
-      await clickText(host, "Select suggested");
+      await chooseSteps(host); await clickText(host, "Select suggested");
       assert.ok(buttons(host).includes("Run selected"), "unchanged handoffs cannot be immediately resent");
-      await clickText(host, "Allow retry"); await clickText(host, "Select suggested");
+      await clickText(host, "Allow retry"); await chooseSteps(host); await clickText(host, "Select suggested");
       assert.ok(buttons(host).includes("Run selected (2)"), "explicit retry recovers an unchanged failed handoff");
     } finally { view.dispose(); nextResult = undefined; }
   }
@@ -1303,7 +1368,7 @@ test("batch stale targets fail independently and an unselected new repository st
     const sessionKey = `agent:main:batch:${++sessions}`;
     const { host, view } = await mount(kind, collection([api, web]), undefined, sessionKey);
     try {
-      await clickText(host, "Select suggested");
+      await chooseSteps(host); await clickText(host, "Select suggested");
       const tools = withChoices("tools");
       collections.set(sessionKey, collection([api, web, tools]));
       await clickText(host, "↻");
@@ -1325,7 +1390,7 @@ test("cancelling a batch or switching conversations prevents queued handoffs", a
     const r = withChoices("api"); const { host, view } = await mount(kind, collection([r]));
     let release;
     try {
-      await clickText(host, "Select suggested");
+      await chooseSteps(host); await clickText(host, "Select suggested");
       nextResult = () => new Promise((resolve) => { release = resolve; }); calls.length = 0;
       await clickText(host, "Run selected (1)");
       assert.ok(release);
@@ -1347,7 +1412,7 @@ test("closing or aborting a view cancels selected work before handoff", async ()
  for(const kind of ["composer","panel"])for(const lifecycle of ["dispose","abort"]){
   const r=withChoices("api");const {host,view,abort}=await mount(kind,collection([r]));let release;
   try{
-   await clickText(host,"Select suggested");
+   await chooseSteps(host); await clickText(host,"Select suggested");
    nextResult=()=>new Promise(resolve=>{release=resolve});calls.length=0;
    await clickText(host,"Run selected (1)");assert.ok(release);
    if(lifecycle==="dispose")view.dispose();else abort();
@@ -1364,7 +1429,7 @@ test("a captured batch cannot duplicate an in-flight individual author handoff",
   const r=withChoices("api");const {host,view}=await mount(kind,collection([r]));let finish;
   try{
    nextResult={ok:true,result:{performed:false,repo:r}};
-   await clickText(host,"Select suggested");
+   await chooseSteps(host); await clickText(host,"Select suggested");
    controlledSend=new Promise(resolve=>{finish=resolve});calls.length=0;
    await clickText(host,"Ask agent");
    assert.equal(calls.filter(c=>c.method==="sessions.send").length,1);
@@ -1383,7 +1448,7 @@ test("publication preparation checks cancellation after revalidation and account
   personal={state:"connected",account:{login:"demo"},generation:"g1"};
   const {host,view}=await mount(kind,collection([r]));let release;
   try{
-   await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
+   await chooseSteps(host); await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
    nextResult=boundary==="revalidation"?()=>new Promise(resolve=>{release=resolve}):{ok:true,result:{performed:false,repo:r}};
    if(boundary==="options")controlledOptions=new Promise(resolve=>{release=resolve});
    calls.length=0;await clickText(host,"Confirm 1 actions");assert.ok(release);
@@ -1403,7 +1468,7 @@ test("publication preparation stops after abort or disposal during account looku
   personal={state:"connected",account:{login:"demo"},generation:"g1"};
   const {host,view,abort}=await mount(kind,collection([r]));let release;
   try{
-   await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
+   await chooseSteps(host); await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");
    nextResult={ok:true,result:{performed:false,repo:r}};controlledOptions=new Promise(resolve=>{release=resolve});calls.length=0;
    await clickText(host,"Confirm 1 actions");assert.ok(release);
    if(lifecycle==="abort")abort();else view.dispose();
@@ -1420,7 +1485,7 @@ test("catch-up selections dispatch on one click without redundant single-choice 
   try{
    assert.equal([...host.all()].filter(n=>n.tagName==="SELECT").length,0);
    nextResult=({payload})=>({ok:true,result:{performed:true,repo:rows.find(r=>r.sessionKey===payload.ownerSessionKey),code:0}});
-   await clickText(host,"Select suggested");calls.length=0;await clickText(host,"Run selected (2)");
+   await chooseSteps(host); await clickText(host,"Select suggested");calls.length=0;await clickText(host,"Run selected (2)");
    const nextCalls=calls.filter(c=>c.actionId==="next");assert.equal(nextCalls.length,2);assert.equal(nextCalls[0].payload.approveCatchUp,true);
    assert.equal(buttons(host).some(b=>/^Confirm /.test(b)),false);
    assert.match(host.textContent,/Completed/);
@@ -1436,10 +1501,60 @@ test("manual catch-up with alternatives promises Run rather than an agent handof
   const r=repo("api",{next:step,choices:{recommended:step.key,actions:[{...step,available:true},{step:"follow-pr",by:"agent",skill:"wtc-follow",key:"follow:h1",available:true}]}});
   const {host,view}=await mount(kind,collection([r]));
   try{
+   await chooseSteps(host);
    assert.ok(buttons(host).includes("Run"));assert.equal(buttons(host).includes("Ask agent"),false);
    nextResult={ok:true,result:{performed:true,repo:r,code:0}};calls.length=0;await clickText(host,"Run");
    assert.equal(calls.find(c=>c.actionId==="next").payload.approveCatchUp,true);
    assert.equal(calls.some(c=>c.method==="sessions.send"),false);
   }finally{view.dispose();nextResult=undefined;}
+ }
+});
+
+test("compact recommendations run directly and keep selection controls on demand", async () => {
+ for (const kind of ["composer", "panel"]) {
+  const rows = ["api", "docs"].map(name => {
+   const next = { step: "catch-up", by: "wtc", approve: "agent", command: ["wtc", "catch-up"], key: `${name}:catchup:h1`, reason: "Behind main; merges cleanly" };
+   return repo(name, { behind: 3, next, choices: { recommended: next.key, actions: [{ ...next, available: true }] } });
+  });
+  const { host, view } = await mount(kind, collection(rows));
+  let release;
+  try {
+   assert.equal([...host.all()].some(n => n.type === "checkbox" || n.tagName === "SELECT"), false);
+   assert.equal(buttons(host).includes("Select suggested"), false);
+   assert.equal(buttons(host).includes("Run selected"), false);
+   assert.equal([...host.all()].filter(n => n.className === "wtc-next-step").length, 2);
+   nextResult = () => new Promise(resolve => { release = resolve; }); calls.length = 0;
+   await clickText(host, "Catch up 2 repos →");
+   assert.match(host.textContent, /Rechecking…/); assert.match(host.textContent, /Queued/);
+   assert.equal(calls.filter(c => c.actionId === "next").length, 1);
+   await clickText(host, "Cancel queued");
+   release({ ok: true, result: { performed: true, repo: rows[0], code: 0 } });
+   for (let i = 0; i < 6; i++) await settle();
+   assert.equal(calls.filter(c => c.actionId === "next").length, 1);
+   assert.equal(buttons(host).some(b => /^Confirm/.test(b)), false);
+   assert.match(host.textContent, /Cancelled before dispatch/);
+  } finally { view.dispose(); nextResult = undefined; }
+ }
+});
+
+test("compact mixed recommendations preserve publication preview and exact captured targets", async () => {
+ for (const kind of ["composer", "panel"]) {
+  const api = withChoices("api");
+  const step = { step: "push", by: "wtc", approve: "person", gateway: "github_publish", key: "docs:push:h1", reason: "Push exact commits" };
+  const docs = repo("docs", { next: step, choices: { recommended: step.key, actions: [{ ...step, available: true }] } });
+  const key = `agent:main:compact:${++sessions}`;
+  const { host, view } = await mount(kind, collection([api, docs]), undefined, key);
+  try {
+   calls.length = 0;
+   await clickText(host, "Do next (2) →");
+   assert.ok(buttons(host).includes("Confirm 2 actions"));
+   assert.equal(calls.some(c => c.actionId === "next" || c.method === "sessions.send" || c.method === "sessions.github.publish"), false);
+   collections.set(key, collection([api, docs, withChoices("extra")]));
+   await clickText(host, "↻");
+   assert.ok(buttons(host).includes("Confirm 2 actions"));
+   await clickText(host, "Back");
+   await clickText(host, "Done choosing");
+   assert.ok(buttons(host).includes("Run chosen (2) →"), "closing the chooser retains the captured selection and excludes new repositories");
+  } finally { view.dispose(); }
  }
 });

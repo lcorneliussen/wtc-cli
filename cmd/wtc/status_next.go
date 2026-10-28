@@ -237,43 +237,61 @@ func statusNextPrompt(owner *wtc.Context, r wtc.StatusRepo, prompt string, run s
 	if err := ctx.Err(); err != nil {
 		return failed(err)
 	}
-	instruction := statusNextDoneMsg{text: "Ask the collection's agent: " + prompt}
-	// A plain terminal provides the exact instruction. In herdr, submit
-	// only to this collection's idle agent, never a running or blocked one.
+	instruction := func(reason string) tea.Msg {
+		return statusNextDoneMsg{text: reason + ". Not sent. Ask the collection's agent: " + prompt}
+	}
+	// The owning collection's named author pane is the destination. Focus can
+	// point to status, a shell or a reviewer, so it never selects a recipient.
 	session := openSession(owner, "")
 	workspaces, err := run.herdr(session, "workspace", "list")
 	if err := ctx.Err(); err != nil {
 		return failed(err)
 	}
 	if err != nil {
-		return instruction
+		return instruction("No herdr destination available")
 	}
+	var matches []openWorkspaceInfo
 	for _, workspace := range workspaces.Result.Workspaces {
-		if workspace.Label != r.Collection {
-			continue
+		if workspace.Label == r.Collection {
+			matches = append(matches, workspace)
 		}
-		panes, err := run.herdr(session, "pane", "list", "--workspace", workspace.ID)
-		if err := ctx.Err(); err != nil {
-			return failed(err)
-		}
-		if err != nil {
-			return failed(err)
-		}
-		pane := openPaneByLabel(panes.Result.Panes, "agent")
-		if pane.ID == "" || pane.Agent == "" || (pane.AgentStatus != "idle" && pane.AgentStatus != "done") {
-			return instruction
-		}
-		if err := ctx.Err(); err != nil {
-			return failed(err)
-		}
-		_, err = run.herdr(session, "agent", "prompt", pane.ID, prompt)
-		result := statusNextDoneMsg{text: "Asked the collection's agent to " + strings.ToLower(statusNextLabel(r.Next)), err: err}
-		if err == nil {
-			result.pending = []string{statusNextPendingKey(r)}
-		}
-		return result
 	}
-	return instruction
+	if len(matches) != 1 {
+		return instruction("Cannot identify one workspace for " + r.Collection)
+	}
+	panes, err := run.herdr(session, "pane", "list", "--workspace", matches[0].ID)
+	if err := ctx.Err(); err != nil {
+		return failed(err)
+	}
+	if err != nil {
+		return failed(err)
+	}
+	var agents []openPaneInfo
+	for _, pane := range panes.Result.Panes {
+		if pane.Label == "agent" && pane.ID != "" && pane.Agent != "" {
+			agents = append(agents, pane)
+		}
+	}
+	if len(agents) != 1 {
+		return instruction("Cannot identify one author agent pane in " + r.Collection)
+	}
+	pane := agents[0]
+	destination := r.Collection + " / " + pane.Agent + " (" + pane.ID + ")"
+	if pane.AgentStatus != "idle" && pane.AgentStatus != "done" {
+		return instruction("Author agent " + destination + " is " + pane.AgentStatus)
+	}
+	if err := ctx.Err(); err != nil {
+		return failed(err)
+	}
+	_, err = run.herdr(session, "agent", "prompt", pane.ID, prompt)
+	result := statusNextDoneMsg{err: err}
+	if err == nil {
+		result.text = "Sent to " + destination + "; completion pending"
+		result.pending = []string{statusNextPendingKey(r)}
+	} else {
+		result.text = "Could not send to " + destination
+	}
+	return result
 }
 
 // Selected batches serialize collection-wide commands and send one prompt per
@@ -345,8 +363,10 @@ func statusNextBatch(ctx context.Context, c *wtc.Context, targets []wtc.StatusRe
 						pending = append(pending, statusNextPendingKey(h.repo))
 					}
 				}
-				for _, h := range current {
-					lines = append(lines, h.repo.Dir+": handoff pending; verify completion in the author conversation")
+				if len(result.pending) > 0 {
+					for _, h := range current {
+						lines = append(lines, h.repo.Dir+": handoff pending; verify completion in the author conversation")
+					}
 				}
 			}
 		}
