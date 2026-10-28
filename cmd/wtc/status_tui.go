@@ -1259,6 +1259,8 @@ func statusTUIGlyphStyle(glyph string) string {
 	}
 }
 
+// headerLine is the primary heading; refresh hit testing excludes the optional
+// version suffix so clicking release notes never toggles the log.
 func (m statusTUIModel) headerLine() string {
 	name := m.snapshot.Collection
 	if m.procs {
@@ -1274,7 +1276,7 @@ func (m statusTUIModel) headerLine() string {
 	if m.refreshing {
 		age += " · refreshing"
 	}
-	return fmt.Sprintf(branding.Text("{{command}} %s · status · %s · %s"), wtc.RunningCLIVersion(), name, age)
+	return fmt.Sprintf(branding.Text("{{command}} status · %s · %s"), name, age)
 }
 
 func statusTUIProgressLine(step string, elapsed time.Duration, width int) string {
@@ -1294,12 +1296,17 @@ func (m statusTUIModel) contentLines() []string {
 	if width <= 0 {
 		width = 80
 	}
-	versionLabel := branding.Name() + " " + wtc.RunningCLIVersion()
-	header := statusTUIStyle(versionLabel, statusToneHeading)
-	if target := wtc.StatusVersionNotesURL(wtc.CLIVersion); target != "" {
-		header = statusTUILinkTone(versionLabel, target, statusToneHeading)
+	primary := m.headerLine()
+	header := statusTUIStyle(primary, statusToneHeading)
+	if remaining := width - ansi.StringWidth(primary); remaining > 0 {
+		suffix := " · " + wtc.RunningCLIVersion()
+		if target := wtc.StatusVersionNotesURL(wtc.CLIVersion); target != "" {
+			suffix = statusTUILinkTone(suffix, target, statusToneDim)
+		} else {
+			suffix = statusTUIStyle(suffix, statusToneDim)
+		}
+		header += statusTUIFitANSI(suffix, remaining)
 	}
-	header += statusTUIStyle(strings.TrimPrefix(m.headerLine(), versionLabel), statusToneHeading)
 	lines := []string{header, ""}
 	if m.refreshing && m.progressStep != "" {
 		elapsed := time.Since(m.startedAt).Truncate(time.Second)
