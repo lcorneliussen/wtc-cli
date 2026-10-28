@@ -10,6 +10,7 @@ import (
 
 func TestRuntimeDiscoveryBeforeFirstStart(t *testing.T) {
 	c := runtimeFixture(t)
+	discoveryCommitShared(t, c)
 	before := discoverySnapshot(t, c.Collection)
 	for _, items := range [][]RuntimeItem{c.RuntimeEnlisted(), c.RuntimeStatus()} {
 		if len(items) != 2 {
@@ -28,6 +29,7 @@ func TestRuntimeDiscoveryBeforeFirstStart(t *testing.T) {
 
 func TestRuntimeDiscoveryNewSiblingPreservesRecordedFacts(t *testing.T) {
 	c := runtimeFixture(t)
+	discoveryCommitShared(t, c)
 	task := runtimeTask{RuntimeItem: RuntimeItem{Collection: filepath.Base(c.Collection), Dir: "existing", Repo: "existing", Path: "existing/web/main", Group: "existing/web", Kind: "service", URL: "http://127.0.0.1:43100", State: "ready"}}
 	task.Log = filepath.Join(c.runtimeRoot(), "logs", "existing/web/main.log")
 	m := runtimeManifest{Schema: 1, Root: c.runtimeRoot(), Binary: c.Config.Runtime.Binary, Tasks: []runtimeTask{task}}
@@ -253,4 +255,12 @@ func TestRuntimeDiscoveryIncludesHarnessDeclarations(t *testing.T) {
 	if len(got) != 4 || !reflect.DeepEqual(got[0], recorded[0]) {
 		t.Fatalf("lost harness observations or new tasks: %+v", got)
 	}
+}
+
+// Exercise shared definitions as tracked repository content, without real hooks.
+func discoveryCommitShared(t *testing.T, c *Context) {
+	t.Helper()
+	repo := filepath.Join(c.Collection, "widget")
+	fixtureGit(t, "-C", repo, "-c", "core.hooksPath=/dev/null", "add", ".harness/dekit.tasks.yaml")
+	fixtureGit(t, "-C", repo, "-c", "core.hooksPath=/dev/null", "-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "Declare synthetic services")
 }
