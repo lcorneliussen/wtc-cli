@@ -7,6 +7,9 @@ For a registered repository named `widget`, a checked-out `ext.widget` is an
 alias only when its origin identifies the same forge, owner/workspace and
 repository as the registry remote. SSH and HTTPS spellings of that identity
 are equivalent. New enlistments using either spelling use the registry name.
+GitHub owner and repository spelling [ignores case](https://docs.github.com/en/rest/repos/repos#get-a-repository);
+local repository names are not folded. Other forge identities retain their
+existing exact comparison.
 
 For an unmanaged `ext.widget`, the bare spelling `widget` is accepted when
 the origin is a supported forge and its repository basename is `widget`.
@@ -24,6 +27,12 @@ and status does not guess a forge or attach that spelling to a branch. Use
 distinct directory names to remove the collision. This is PR bookkeeping;
 it does not rename worktrees or change registry and catch-up selector syntax.
 
+A registry entry without a forge remote and only an `ext.<name>` checkout has
+no verified link between those identities. The bare spelling reports ambiguity
+until the registry remote is configured. The exact `ext.<name>` spelling still
+identifies its checkout. This refusal avoids silently selecting an unrelated
+repository from its basename.
+
 Existing enlistment rows retain their spelling, merge markers and merge commit
 metadata when updated through a verified alias. Re-enlisting the same PR does
 not add another alias row. Conflicting duplicate rows require reconciliation;
@@ -38,3 +47,8 @@ the repository resolves. Scoped status records final merged facts only after
 the merge time and settled checks are known. Forge errors, unknown states and
 unsettled checks retain their existing behavior; this alias fix adds no new
 landing or branch-deletion policy.
+
+Retained merged PRs use the verified directory association when computing the
+existing next action, including `new-branch` for follow-up work. This internal
+association adds no JSON fields. Cached snapshots retain their computed next
+actions; older observations use exact-name matching without guessing aliases.

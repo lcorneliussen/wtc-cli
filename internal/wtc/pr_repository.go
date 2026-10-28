@@ -28,7 +28,7 @@ func (repos prRepositories) add(alias string, repo *prRepository) {
 func (repos prRepositories) resolve(name string) (*prRepository, error) {
 	candidates := repos[name]
 	if len(candidates) > 1 || len(candidates) == 1 && len(candidates[0].dirs) > 1 {
-		return nil, fmt.Errorf("ambiguous enlisted repository %q; use distinct repository directories", name)
+		return nil, fmt.Errorf("ambiguous enlisted repository %q; verify registry remotes and use distinct repository directories", name)
 	}
 	if len(candidates) == 0 {
 		return nil, nil
@@ -59,6 +59,9 @@ func prForgeIdentity(remote string) string {
 		if !prRepoName.MatchString(part) || part == "." || part == ".." {
 			return ""
 		}
+	}
+	if forge == "github.com" {
+		slug = strings.ToLower(slug)
 	}
 	return forge + "/" + slug
 }
@@ -143,6 +146,10 @@ func (c *Context) prRepositories(names ...string) prRepositories {
 		}
 		stem, ext := strings.CutPrefix(name, "ext.")
 		forgeID := prForgeIdentity(remote)
+		stemKey := stem
+		if strings.HasPrefix(forgeID, "github.com/") {
+			stemKey = strings.ToLower(stemKey)
+		}
 		// One ext. prefix is a directory convention, not a general name
 		// normalization rule. Registered aliases need the entire forge identity.
 		alias := checkout.local && ext && stem != "" && !strings.HasPrefix(stem, "ext.") && forgeID != ""
@@ -156,11 +163,20 @@ func (c *Context) prRepositories(names ...string) prRepositories {
 		}
 		identity.dirs = append(identity.dirs, name)
 		repos.add(name, identity)
-		if alias && (registered[stem] == identity || strings.HasSuffix(forgeID, "/"+stem)) {
+		if alias && (registered[stem] == identity || strings.HasSuffix(forgeID, "/"+stemKey)) {
 			repos.add(stem, identity)
 		}
 	}
 	return repos
+}
+
+func statusPRMatchesRepo(pr StatusPRRow, repo StatusRepo) bool {
+	if pr.worktreeDir != "" {
+		return pr.worktreeDir == repo.Dir
+	}
+	// Older snapshots have no verified association. Keep their exact-name
+	// behavior without inferring aliases from a prefix or a shared slug.
+	return pr.Repo == repo.Repo || pr.Repo == repo.Dir
 }
 
 // matchesDir also reports ambiguity involving this directory, so catch-up

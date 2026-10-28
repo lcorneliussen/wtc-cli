@@ -385,6 +385,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 			Draft: detail.State == "DRAFT", OnBranch: detail.State == "MERGED" && branchRow >= 0, MergeCommit: detail.MergeCommit, Base: detail.Base,
 			Archived:       detail.State == "MERGED" && branchRow < 0 && statusArchived(detail.MergedOn, time.Now()),
 			MergeConflicts: detail.MergeConflicts, MergeSource: detail.MergeSource, MergeHead: mergeHead, MergeBase: mergeBase,
+			worktreeDir: worktreeDir,
 		}
 		if row.OnBranch {
 			row.DisplayTitle = "MERGED — still on " + record.Branch + "; catch-up  " + detail.Title
@@ -446,8 +447,8 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 	if err != nil {
 		return
 	}
-	// Retain the inherited-harness mismatch guard: a caller initialized for
-	// another collection must not return this worktree.
+	// If an inherited WTC_HARNESS_REPO names a different repository from this
+	// collection's own harness, do not return its worktree.
 	if inherited, _ := c.HarnessRepoName(); inherited != harnessName {
 		return
 	}
