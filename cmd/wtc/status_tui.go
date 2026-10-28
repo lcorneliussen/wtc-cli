@@ -1295,8 +1295,11 @@ func (m statusTUIModel) contentLines() []string {
 		width = 80
 	}
 	versionLabel := branding.Name() + " " + wtc.RunningCLIVersion()
-	header := statusTUILinkTone(versionLabel, wtc.StatusVersionNotesURL(wtc.CLIVersion), statusToneHeading) +
-		statusTUIStyle(strings.TrimPrefix(m.headerLine(), versionLabel), statusToneHeading)
+	header := statusTUIStyle(versionLabel, statusToneHeading)
+	if target := wtc.StatusVersionNotesURL(wtc.CLIVersion); target != "" {
+		header = statusTUILinkTone(versionLabel, target, statusToneHeading)
+	}
+	header += statusTUIStyle(strings.TrimPrefix(m.headerLine(), versionLabel), statusToneHeading)
 	lines := []string{header, ""}
 	if m.refreshing && m.progressStep != "" {
 		elapsed := time.Since(m.startedAt).Truncate(time.Second)
