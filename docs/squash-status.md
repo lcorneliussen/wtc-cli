@@ -22,6 +22,9 @@ observation, also exposed on its repository row:
 | `follow-up` | Full landing is not established, the recorded PR merge is reachable from the development tip, and HEAD has commits after that same PR's recorded head. The label says **follow-up; inspect unlanded work**. |
 | `unknown` | Available evidence does not establish full landing or a descendant of the recorded PR head. The label says **landing unknown; inspect branch**. |
 
+Terminal STATE cells abbreviate follow-up as `⚠ extra` and unknown as
+`unknown`; the PR title carries the full explanation.
+
 These observations describe historical landing, not equality with today's tip.
 Later edits, renames, and reverts on the base do not erase the fact that work
 landed. Conversely, comparing only the paths a branch touched cannot reliably

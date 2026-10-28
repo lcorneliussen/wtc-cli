@@ -1150,9 +1150,9 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 			if row.Landing != nil {
 				switch row.Landing.State {
 				case "follow-up":
-					state = "⚠ follow-up"
+					state = "⚠ extra"
 				case "unknown":
-					state = "⚠ unknown"
+					state = "unknown"
 				}
 			}
 		} else if row.Draft {

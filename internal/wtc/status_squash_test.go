@@ -25,14 +25,16 @@ func TestStatusSquashReproduction(t *testing.T) {
 				t.Fatal(err)
 			}
 			data, _ := json.Marshal(snapshot)
-			t.Logf("late=%v raw ahead=%d; merge message=%q", late, snapshot.Repos[1].Ahead, fixtureGit(t, "-C", target.path, "show", "-s", "--format=%s", squash))
 			var payload StatusSnapshot
 			if err := json.Unmarshal(data, &payload); err != nil {
 				t.Fatal(err)
 			}
-			want := "landed"
+			want, count := "landed", 2
 			if late {
-				want = "follow-up"
+				want, count = "follow-up", 3
+			}
+			if len(payload.Repos) != 2 || payload.Repos[1].Ahead != count {
+				t.Fatalf("raw ahead count changed: %+v", payload.Repos)
 			}
 			if len(payload.PRs) != 1 || payload.PRs[0].Landing == nil || payload.PRs[0].Landing.State != want {
 				t.Errorf("want %s classification; got %s", want, data)

@@ -438,8 +438,8 @@ func (c *Context) statusReturnMergedEnabled() bool {
 
 // statusReturnMerged returns each clean worktree still on a branch whose PR is
 // merged to the development tip, as a single-worktree catch-up would, once
-// landing is established. Everything else keeps its "MERGED — still on
-// <branch>; catch-up" PR row.
+// landing is established. Remaining branches keep their merged PR row,
+// labelled by the observed landing state.
 func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecord, details []statusPRDetail) {
 	if !c.statusReturnMergedEnabled() || len(records) != len(details) {
 		return

@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/charmbracelet/x/ansi"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 )
 
