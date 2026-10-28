@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// PR repository names are local identities, not just forge basenames. Only a
-// checked-out ext.<name> with matching origin evidence can supply an alias.
+// Registry names and the harness alias establish local PR identities.
+// Additional ext.<name> aliases require checked-out origin evidence.
 type prRepository struct {
 	name, remote string
 	dirs         []string
@@ -71,7 +71,7 @@ func (c *Context) prRepositories(names ...string) prRepositories {
 		registered[repo.Name] = identity
 		repos.add(repo.Name, identity)
 	}
-	harness, _ := c.HarnessRepoName()
+	harness, _ := c.catchUpHarnessRepo()
 	if repo := registered[harness]; !c.AdHoc && repo != nil {
 		repos.add("harness", repo)
 	}
@@ -94,12 +94,17 @@ func (c *Context) prRepositories(names ...string) prRepositories {
 		return repos
 	}
 	entries, _ := os.ReadDir(c.Collection)
+	type checkout struct {
+		name, remote string
+		local        bool
+	}
+	var checkouts []checkout
 	for _, entry := range entries {
 		name := entry.Name()
 		if len(names) != 0 && !selected[name] {
 			continue
 		}
-		if ValidatePRIdentity(name, "1") != nil {
+		if ValidatePRIdentity(name, "1") != nil && registered[name] == nil {
 			continue
 		}
 		path := filepath.Join(c.Collection, name)
@@ -107,7 +112,7 @@ func (c *Context) prRepositories(names ...string) prRepositories {
 			continue
 		}
 		real, err := filepath.EvalSymlinks(path)
-		if err != nil || filepath.Dir(real) != root {
+		if err != nil {
 			continue
 		}
 		top, err := gitOutput("-C", path, "rev-parse", "--show-toplevel")
@@ -122,11 +127,25 @@ func (c *Context) prRepositories(names ...string) prRepositories {
 		if name == "harness" && !c.AdHoc {
 			identity = registered[harness]
 		}
+		// Preserve exact-name checkout origins when the registry cannot
+		// supply a forge. Collect these before considering ext. aliases so
+		// directory enumeration order cannot choose an identity.
+		if identity != nil && prForgeIdentity(identity.remote) == "" {
+			identity.remote = remote
+		}
+		checkouts = append(checkouts, checkout{name, remote, filepath.Dir(real) == root})
+	}
+	for _, checkout := range checkouts {
+		name, remote := checkout.name, checkout.remote
+		identity := registered[name]
+		if name == "harness" && !c.AdHoc {
+			identity = registered[harness]
+		}
 		stem, ext := strings.CutPrefix(name, "ext.")
 		forgeID := prForgeIdentity(remote)
 		// One ext. prefix is a directory convention, not a general name
 		// normalization rule. Registered aliases need the entire forge identity.
-		alias := ext && stem != "" && !strings.HasPrefix(stem, "ext.") && forgeID != ""
+		alias := checkout.local && ext && stem != "" && !strings.HasPrefix(stem, "ext.") && forgeID != ""
 		if identity == nil && alias {
 			if repo := registered[stem]; repo != nil && prForgeIdentity(repo.remote) == forgeID {
 				identity = repo

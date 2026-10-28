@@ -319,3 +319,105 @@ func TestEnlistedRepositoryAliasLiveRecordBlocksMergedReturn(t *testing.T) {
 		t.Fatalf("live alias failed to preserve branch: %s", branch)
 	}
 }
+
+func TestEnlistedRepositoryExactLinkedCheckoutRetainsAssociation(t *testing.T) {
+	c, path := enlistedIdentityFixture(t, true)
+	outside := filepath.Join(t.TempDir(), "widget")
+	if err := os.Rename(path, outside); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(c.Collection, "widget")
+	if err := os.Symlink(outside, linked); err != nil {
+		t.Fatal(err)
+	}
+	r, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "7"})
+	if err != nil || r.Branch != "topic" {
+		t.Errorf("linked checkout lost branch inference: %+v %v", r, err)
+	}
+	fixtureFile(t, c.PRFile(), "widget 7 topic\n", 0644)
+	bin := t.TempDir()
+	fixtureFile(t, filepath.Join(bin, "gh"), `#!/bin/sh
+if [ "$2" = view ]; then
+  printf '%s\n' '{"number":7,"state":"OPEN","baseRefName":"main"}'
+else
+  printf '[]\n'
+fi
+`, 0755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	snapshot, err := c.statusForgePreview(false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range snapshot.Repos {
+		if row.Dir == "widget" {
+			found = row.PR != nil && row.PR.Number == "7"
+		}
+	}
+	if !found {
+		t.Error("linked checkout lost enlisted branch facts")
+	}
+	_, targets, err := c.CatchUpInventory(CatchUpOptions{Repos: []string{"widget"}, DryRun: true})
+	if err != nil || len(targets) != 1 {
+		t.Fatalf("inventory: %+v %v", targets, err)
+	}
+	if pr := c.catchUpPRState(targets[0], "topic"); pr.state != "OPEN" || pr.base != "main" {
+		t.Errorf("linked checkout lost enlisted PR: %+v", pr)
+	}
+}
+
+func TestEnlistedRepositoryExactCheckoutKeepsEmptyRemoteFallback(t *testing.T) {
+	c := fixture(t)
+	c.Registry.Repos[1].Remote = ""
+	enlistedIdentityGit(t, filepath.Join(c.Collection, "widget"), "https://github.com/example/widget.git")
+	r, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "7"})
+	if err != nil || r.URL != "https://github.com/example/widget/pull/7" || r.Branch != "topic" {
+		t.Errorf("empty registry remote lost origin fallback: %+v %v", r, err)
+	}
+	if slug, forge := c.statusRecordForge(PRRecord{Repo: "widget"}, nil); slug != "example/widget" || forge != "github.com" {
+		t.Errorf("empty registry remote lost status origin: %s %s", slug, forge)
+	}
+}
+
+func TestEnlistedRepositoryUnlistCanReconcileDuplicatesAndAmbiguity(t *testing.T) {
+	for _, ambiguous := range []bool{false, true} {
+		name := "verified-duplicates"
+		if ambiguous {
+			name = "ambiguous-exact-key"
+		}
+		t.Run(name, func(t *testing.T) {
+			c, path := enlistedIdentityFixture(t, true)
+			if ambiguous {
+				fixtureGit(t, "-C", path, "remote", "set-url", "origin", "https://github.com/another/widget.git")
+			}
+			fixtureFile(t, c.PRFile(), "widget 7 topic\next.widget 7 other\n# merged-pr widget 7 2026-09-30T12:00:00Z SUCCESS\n", 0644)
+			if err := c.UnlistPR("widget", "7"); err != nil {
+				t.Fatal(err)
+			}
+			records, _ := c.ListPRs()
+			if ambiguous {
+				if len(records) != 1 || records[0].Repo != "ext.widget" {
+					t.Fatalf("ambiguous unlist changed another identity: %+v", records)
+				}
+			} else if len(records) != 0 {
+				t.Fatalf("verified alias duplicates remain: %+v", records)
+			}
+			data, _ := os.ReadFile(c.PRFile())
+			if strings.Contains(string(data), "# merged-pr widget 7") {
+				t.Fatal("unlisted exact key kept merged marker")
+			}
+		})
+	}
+}
+
+func TestEnlistedRepositoryHarnessAssociationUsesTargetIdentity(t *testing.T) {
+	c := newWorkspaceFixture(t)
+	t.Setenv("WTC_HARNESS_REPO", "widget")
+	repos := c.prRepositories()
+	if match, err := repos.matchesDir("agent-harness", "harness"); err != nil || !match {
+		t.Errorf("target harness lost directory association: %v %v", match, err)
+	}
+	if match, err := repos.matchesDir("widget", "harness"); err != nil || match {
+		t.Errorf("inherited harness redirected another repository: %v %v", match, err)
+	}
+}

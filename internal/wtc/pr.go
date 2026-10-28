@@ -226,7 +226,7 @@ func (c *Context) rewritePRsLocked(removeRepo, removeNumber string, add *PRRecor
 	var out bytes.Buffer
 	repos := c.prRepositories(removeRepo)
 	identity, err := repos.resolve(removeRepo)
-	if err != nil {
+	if err != nil && add != nil {
 		return err
 	}
 	matching := map[string]bool{removeRepo: true}
@@ -251,7 +251,7 @@ func (c *Context) rewritePRsLocked(removeRepo, removeNumber string, add *PRRecor
 			}
 		}
 	}
-	if previous > 1 {
+	if previous > 1 && add != nil {
 		return fmt.Errorf("multiple enlisted rows for repository %q PR %s; reconcile duplicate rows first", removeRepo, removeNumber)
 	}
 	for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {

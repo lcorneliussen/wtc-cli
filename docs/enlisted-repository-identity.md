@@ -14,9 +14,11 @@ New enlistments use the actual directory name, `ext.widget`. An unrelated
 `ext.notes` pointing at a repository named `widget` does not gain a `notes`
 alias. Prefixes are not stripped repeatedly.
 
-The resolver considers Git roots inside the current collection. It does not
-borrow an enclosing repository's origin or follow a directory symlink outside
-the collection. An unknown name stays unresolved. If a spelling identifies
+Alias inference uses Git roots inside the current collection. It does not
+borrow an enclosing repository's origin or use a directory symlink outside
+the collection as alias evidence. Exact-name linked checkouts keep their
+existing branch association and origin fallback when the registry supplies no
+forge identity. An unknown name stays unresolved. If a spelling identifies
 different repositories or more than one worktree, enlistment reports ambiguity
 and status does not guess a forge or attach that spelling to a branch. Use
 distinct directory names to remove the collision. This is PR bookkeeping;
@@ -25,9 +27,10 @@ it does not rename worktrees or change registry and catch-up selector syntax.
 Existing enlistment rows retain their spelling, merge markers and merge commit
 metadata when updated through a verified alias. Re-enlisting the same PR does
 not add another alias row. Conflicting duplicate rows require reconciliation;
-the command does not silently choose one. Status reads existing rows without
-requiring a migration. Forge caches continue to use the full forge/repository
-identity and PR number.
+enlistment does not silently choose one. Unlisting can remove verified alias
+duplicates; an ambiguous spelling removes only its exact-key rows. Status reads
+existing rows without requiring a migration. Forge caches continue to use the
+full forge/repository identity and PR number.
 
 When an enlisted PR is absent from the open list, status already looks it up
 by number. A missing branch or merge marker does not prevent that lookup once

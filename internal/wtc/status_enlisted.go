@@ -446,8 +446,8 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 	if err != nil {
 		return
 	}
-	// Forge facts were looked up under the environment-first identity. When
-	// it disagrees, they may describe another repository's PR: move nothing.
+	// Retain the inherited-harness mismatch guard: a caller initialized for
+	// another collection must not return this worktree.
 	if inherited, _ := c.HarnessRepoName(); inherited != harnessName {
 		return
 	}
