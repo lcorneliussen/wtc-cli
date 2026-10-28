@@ -1558,3 +1558,48 @@ test("compact mixed recommendations preserve publication preview and exact captu
   } finally { view.dispose(); }
  }
 });
+
+
+test("repository folding has its own breakpoint on both surfaces", async () => {
+ const observers = [];
+ globalThis.ResizeObserver = class { constructor(fn) { this.fn = fn; observers.push(this); } observe() {} disconnect() {} };
+ try {
+  for (const kind of ["composer", "panel"]) {
+   const start = observers.length;
+   const { host, view } = await mount(kind, busy);
+   try {
+    for (const width of [600, 700, 360]) {
+     for (const o of observers.slice(start)) o.fn([{ contentRect: { width } }]);
+     const rows = tables(host), repos = rows[0], services = rows[kind === "panel" ? 2 : 1];
+     assert.deepEqual(repos[0], width < 680 ? ["Repository", "Next"] : ["Repository", "Changes", "Pull request", "Next"]);
+     assert.equal(services[0].includes("Repo"), width >= 520, `${kind}/${width}: service layout follows its own breakpoint`);
+    }
+   } finally { view.dispose(); }
+  }
+ } finally { delete globalThis.ResizeObserver; }
+});
+
+test("running compact batch controls show disabled state while cancellation stays available", async () => {
+ for (const kind of ["composer", "panel"]) {
+  const api = withChoices("api");
+  const local = ["docs", "tools"].map(name => {
+   const next = { step: "catch-up", by: "wtc", command: ["wtc", "catch-up"], key: `${name}:catchup:h1`, reason: "Behind main" };
+   return repo(name, { next, choices: { recommended: next.key, actions: [{ ...next, available: true }] } });
+  });
+  const { host, view } = await mount(kind, collection([api, ...local]));
+  let release;
+  try {
+   nextResult = { ok: true, result: { performed: false, repo: api } };
+   await clickText(host, "Fix checks");
+   await chooseSteps(host); await clickText(host, "Select suggested"); await clickText(host, "Done choosing");
+   nextResult = () => new Promise(resolve => { release = resolve; });
+   await clickText(host, "Run chosen (2) →");
+   const button = text => [...host.all()].find(n => n.tagName === "BUTTON" && n.textContent === text);
+   assert.equal(button("Run chosen (2) →").disabled, true);
+   assert.equal(button("Allow retry").disabled, true);
+   assert.equal(button("Cancel queued").disabled, false);
+   await clickText(host, "Cancel queued"); release({ ok: true, result: { performed: true, repo: local[0], code: 0 } });
+   for (let i = 0; i < 6; i++) await settle();
+  } finally { view.dispose(); nextResult = undefined; }
+ }
+});

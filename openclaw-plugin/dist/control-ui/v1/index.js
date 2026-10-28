@@ -556,6 +556,8 @@ const brand = (size, version) => css(el("span", {},
 // Actions stay on the relevant fact or in the row's next-step slot.
 // v supplies the view lifecycle, conversation and gateway operations.
 const NARROW_PX = 520;
+// Single-line repository groups need more width; keep their fold separate
+// from PR/service tables so denser repository rows do not change those layouts.
 const REPO_NARROW_PX = 680;
 const pullRequestRows = (repos) => {
   const rows = new Map();
@@ -1291,7 +1293,7 @@ function collectionTables(v) {
     repoTable: (repos, narrow, workers) => {
       syncConversation();
       const columns = narrow ? [{ head: "Repository", width: "minmax(0,1fr)" }, { head: "Next", width: "minmax(80px,120px)" }]
-        : [{ head: "Repository", width: "minmax(90px,1fr)" }, { head: "Changes", width: "106px" }, { head: "Pull request", width: "220px" }, { head: "Next", width: "180px" }];
+        : [{ head: "Repository", width: "minmax(64px,1fr)" }, { head: "Changes", width: "132px" }, { head: "Pull request", width: "220px" }, { head: "Next", width: "180px" }];
       const rows = repoRows(repos, workers).map((row) => {
         if (row[1]?.style) row[1].style.fontFamily = "inherit";
         const changes = css(el("span", {}, ...[row[2] ? css(el("span", {}, muted("± "), row[2]), "") : null, row[3], row[4]].map((cell) => css(el("span", {}, cell), "min-width:24px;display:inline-block"))), "display:inline-flex;gap:6px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums");
@@ -1360,7 +1362,6 @@ function mountComposer(container, context) {
   let noteFailed = false;
   let noteAction = null;
   const say = (text, failed = false, action = null) => { note = text; noteFailed = failed; noteAction = action; if (entry) render(entry); };
-  // Narrow (a phone, a narrow window), rows wrap into two lines.
   let narrow = false, repoNarrow = false;
   const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([e]) => {
     const now = e.contentRect.width > 0 && e.contentRect.width < NARROW_PX;
@@ -1646,8 +1647,6 @@ function mountCollection(container, context) {
     get host() { return ctx.host; }, alive: () => !disposed && !ctx.signal?.aborted, key: sessionKeyOf, agent: () => ctx.props.agentId, svc, say,
     refresh: () => watch?.refresh(), pause: () => pauseCollection(watch), rerender: () => render(),
   });
-  // The panel is often narrow, beside the conversation or on a phone: rows
-  // then wrap into two lines.
   let narrow = false, repoNarrow = false;
   const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([e]) => {
     const now = e.contentRect.width > 0 && e.contentRect.width < NARROW_PX;
