@@ -335,10 +335,10 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showNext, m.scroll = false, 0
 			case "up", "k":
 				m.selectedNext = max(0, m.selectedNext-1)
-				m.scroll = max(0, 2*m.selectedNext+7-max(1, m.height-2))
+				m.scroll = max(0, 2*m.selectedNext+8-max(1, m.height-2))
 			case "down", "j":
 				m.selectedNext = min(max(0, len(repos)-1), m.selectedNext+1)
-				m.scroll = max(0, 2*m.selectedNext+7-max(1, m.height-2))
+				m.scroll = max(0, 2*m.selectedNext+8-max(1, m.height-2))
 			case "pgup":
 				m.scroll = max(0, m.scroll-max(1, m.height/2))
 			case "pgdown":
@@ -1318,6 +1318,7 @@ func (m statusTUIModel) contentLines() []string {
 	if m.showNext {
 		lines = append(lines, "↑/↓ choose · Enter run or ask agent · Space select · → alternative · s suggested · c cancel · x allow retry · Esc back")
 		selected := min(m.selectedNext, max(0, len(statusNextRepos(m.snapshot))-1))
+		lines = append(lines, statusTUIFit("Local steps run here · Agent steps → owning collection's idle agent pane", width))
 		lines = append(lines, statusNextLines(m.snapshot, width, true, selected, m.nextSelected)...)
 		if len(statusNextRepos(m.snapshot)) == 0 {
 			lines = append(lines, "", "No next actions.")
@@ -1337,7 +1338,17 @@ func (m statusTUIModel) contentLines() []string {
 			lines = append(lines, statusTUIPRLines(m.snapshot, width, m.showArchived, true)...)
 		}
 		lines = append(lines, statusTUIRetiredLines(m.snapshot, width, true)...)
-		lines = append(lines, statusNextLines(m.snapshot, width, true, -1)...)
+		if repos := statusNextRepos(m.snapshot); len(repos) > 0 {
+			var hints []string
+			for _, r := range repos {
+				name := r.Dir
+				if m.snapshot.ShowCollectionColumn {
+					name = r.Collection + "/" + name
+				}
+				hints = append(hints, statusTUISafe(name+": "+statusNextLabel(r.Next)))
+			}
+			lines = append(lines, "", statusTUIFit("[n] Next · "+strings.Join(hints, " · "), width))
+		}
 		if m.snapshot.StaleCount > 0 {
 			lines = append(lines, "", fmt.Sprintf("%d worktree(s) behind the development tip", m.snapshot.StaleCount))
 		}

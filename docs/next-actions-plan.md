@@ -34,6 +34,38 @@ publication of exact commits; it cannot silently confirm newly authored commits
 because an earlier batch was allowed to continue through review. An explicit
 future grant for conditional publication would need its own bounded contract.
 
+## Surface design and terminal delivery
+
+The browser keeps four stable groups: repository with branch below, changes,
+pull request with labelled status, and next step. Unused fact slots stay empty.
+It does not copy the terminal's letter headings, monospaced branch column or
+empty-dot matrix. Narrow views fold facts beneath the repository and retain the
+next step at the right. No default duplicate checklist. Per-row action is the
+entry point; a small collection shortcut captures visible recommendations.
+Alternatives and heterogeneous selections are revealed only when requested.
+
+The terminal keeps its established fact columns. Its idle screen has one next
+hint; `n` opens actions, arrows choose, Enter executes, Space marks rows, Right
+cycles alternatives, and `s` marks suggestions. Enter runs a local batch directly
+unless publication authority requires a preview. Local commands execute as wtc
+processes, not as text typed into a shell pane. Agent judgment uses herdr's
+`agent prompt` operation, with one sequential prompt per owning collection.
+
+Current routing uses one workspace whose label matches the owning collection,
+then its single pane labelled `agent`, with a live agent reporting idle or done.
+The focused pane is not an ownership signal: it may be a review, status or shell
+pane. Ambiguous/missing/busy destinations produce an explicit unsent instruction;
+there is no silent fallback or claim that such work is pending. Successful
+receipts name collection/agent/pane and remain pending until facts change.
+
+A future multi-author workspace should offer an explicit destination picker
+showing agent, pane and state. A choice binds to that pane and collection,
+revalidates before send, and expires if either disappears or changes owner.
+Sending to a working agent needs a separately visible queue/steer choice with
+host-specific semantics; selecting a repository does not authorize interrupting
+an agent, spawning one, or sending to a reviewer. This phase adds no persistent
+queue, completion watcher, auto-focus switch or multi-agent destination picker.
+
 ## 1. Separate facts, choices, plans and execution
 
 Keep deterministic derivation in the CLI so the card and TUI use identical
