@@ -1744,6 +1744,8 @@ test("batch completion stays compact and its shared sidebar log retains the deta
    const log = [...sidebar.host.all()].find(n => n.className === "wtc-activity-log");
    assert.ok(log?.scrolled); assert.match(log.textContent, /api: Catch up/); assert.match(log.textContent, /docs: Catch up/);
    assert.equal((log.textContent.match(/Completed/g) ?? []).length, 2);
+   const services = [...sidebar.host.all()].find(n => n.tagName === "H3" && n.textContent === "Services").parentNode.parentNode;
+   assert.ok(log.parentNode.children.indexOf(services) < log.parentNode.children.indexOf(log), "services precede the action log");
   } finally { sidebar.view.dispose(); }
   const unrelated = await mount("panel", collection([repo("other")]));
   try { assert.equal([...unrelated.host.all()].some(n => n.className === "wtc-activity-log"), false); }
