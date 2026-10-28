@@ -54,18 +54,22 @@ The digest is a storage key, not anonymization for publication.
 `evaluated_at`, `configured`, `phase`, `timezone`, `source`, optional
 `current_window`, `next_window`, `next_transition`, `extension`, and
 `reminder_claimed`. Windows use RFC3339 instants with local offsets. Unknown
-identity or absent schedules return `unconfigured`. Facts do not claim reminders
-or write state. `view` and facts are private output: do not paste personal times
+identity or absent schedules return `unconfigured`. An unsupported host also
+returns `unavailable_reason` and explains the missing adapter. Facts do not
+claim reminders or write state. `view` and facts are private output: do not paste personal times
 or project identities into public records.
 
 Phases are `working`, `wind-down` (last hour), `wrap-up` (last 15 minutes),
 `outside`, and `extended`. For short windows, the appropriate later phase starts
-immediately. Continuous weekly coverage returns `continuous: true` with no bounded current
-window or end-of-day transition.
+immediately. Continuous weekly coverage returns `continuous: true` with no
+bounded current window or end-of-day transition.
 `next_window` means the next interval after now, including the next split window;
 `next_transition` identifies when to evaluate again. Always use a fresh result,
 not the model's remembered clock. TUI status evaluates fresh local facts on its
-normal tick, independently of forge refresh; one-shot human status adds a hint.
+normal tick, independently of forge refresh. The hint shares the existing
+progress row and yields while a refresh is in progress; click targets keep their
+positions. One-shot terminal-table status adds a hint; Markdown and default
+nonterminal output do not include private hours.
 Cached snapshots and status JSON retain their existing schema; adapters use
 `hours facts --json` for current hours.
 
@@ -109,13 +113,9 @@ working-hours person mapping and prompt/transition lifecycle. A later adapter
 must verify authenticated human identity and installed-version hooks, bind a
 separate per-person record, and test cross-person/session isolation. It must
 never apply a gateway OS owner's schedule to all sessions, or infer a person
-from agent IDs, display names, or shared USER.md. No plugin upgrade is assumed. The official [multi-user contract](https://docs.openclaw.ai/concepts/multi-user)
+from agent IDs, display names, or shared USER.md. No plugin upgrade is assumed.
+The official [multi-user contract](https://docs.openclaw.ai/concepts/multi-user)
 distinguishes creator, assignable owner, and participants; ownership alone does
 not prove the current requesting person. Official [prompt/session hooks](https://docs.openclaw.ai/plugins/hooks/prompt-and-session)
 describe prompt enrichment, but this slice has not established installed-host
 compatibility and does not register a hook.
-
-Site coverage decision: this first local reference remains upstream-only until
-the documentation owner schedules a working-hours guide. Existing site command
-and release intake paths remain with their current owner; this change does not
-publish a website update.

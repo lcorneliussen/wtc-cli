@@ -1,4 +1,4 @@
-### Private working hours and gradual wrap-up
+## Private working hours and gradual wrap-up
 
 - Add explicit `wtc hours setup` / `edit` / `view` / `clear`, personal defaults
   and project overrides shared across collections using one private local record.

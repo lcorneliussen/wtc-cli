@@ -28,20 +28,21 @@ type HoursExtension struct {
 	Until time.Time `json:"until"`
 }
 type WorkingHoursFacts struct {
-	Version         int             `json:"version"`
-	EvaluatedAt     time.Time       `json:"evaluated_at"`
-	Configured      bool            `json:"configured"`
-	Continuous      bool            `json:"continuous,omitempty"`
-	Phase           string          `json:"phase"`
-	Timezone        string          `json:"timezone,omitempty"`
-	Source          string          `json:"source,omitempty"`
-	Current         *HoursWindow    `json:"current_window,omitempty"`
-	Next            *HoursWindow    `json:"next_window,omitempty"`
-	Transition      *time.Time      `json:"next_transition,omitempty"`
-	Extension       *HoursExtension `json:"extension,omitempty"`
-	ReminderClaimed bool            `json:"reminder_claimed"`
-	Guidance        string          `json:"guidance"`
-	reminderKey     string
+	Version           int             `json:"version"`
+	EvaluatedAt       time.Time       `json:"evaluated_at"`
+	Configured        bool            `json:"configured"`
+	UnavailableReason string          `json:"unavailable_reason,omitempty"`
+	Continuous        bool            `json:"continuous,omitempty"`
+	Phase             string          `json:"phase"`
+	Timezone          string          `json:"timezone,omitempty"`
+	Source            string          `json:"source,omitempty"`
+	Current           *HoursWindow    `json:"current_window,omitempty"`
+	Next              *HoursWindow    `json:"next_window,omitempty"`
+	Transition        *time.Time      `json:"next_transition,omitempty"`
+	Extension         *HoursExtension `json:"extension,omitempty"`
+	ReminderClaimed   bool            `json:"reminder_claimed"`
+	Guidance          string          `json:"guidance"`
+	reminderKey       string
 }
 
 func clockMinute(s string) (int, error) {
@@ -122,8 +123,8 @@ func EvaluateWorkingHours(s *WorkingSchedule, extension *HoursExtension, now tim
 		}
 		return false
 	}
-	// A weekly window wholly inside a DST gap may skip one recurrence.
-	// Look two weeks ahead, with overnight and timezone-transition margin.
+	// Search 8 days back for the current interval and 16 days ahead so a
+	// window inside a DST gap can skip one weekly recurrence.
 	start := now.UTC().Truncate(time.Minute).Add(-8 * 24 * time.Hour)
 	end := now.UTC().Truncate(time.Minute).Add(16 * 24 * time.Hour)
 	intervals := []HoursWindow{}
@@ -139,7 +140,8 @@ func EvaluateWorkingHours(s *WorkingSchedule, extension *HoursExtension, now tim
 			open = nil
 		}
 	}
-	// A fully covered week has no closing edge in the search range.
+	// Preserve coverage still open at the search horizon; the continuous
+	// current-window case is detected below.
 	if open != nil {
 		intervals = append(intervals, HoursWindow{open.In(loc), end.In(loc)})
 	}
@@ -210,6 +212,9 @@ func EvaluateWorkingHours(s *WorkingSchedule, extension *HoursExtension, now tim
 }
 
 func (f WorkingHoursFacts) Summary() string {
+	if f.UnavailableReason != "" {
+		return "Working hours unavailable: " + f.UnavailableReason
+	}
 	if !f.Configured {
 		return "Set working hours… (wtc hours setup --help)"
 	}

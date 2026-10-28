@@ -78,6 +78,7 @@ type statusTUIModel struct {
 	startedAt      time.Time
 	errorText      string
 	hover          string
+	hoursHint      string
 }
 
 func statusTUITick() tea.Cmd {
@@ -271,6 +272,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case statusTickMsg:
+		m.refreshHours(time.Time(msg))
 		if !m.refreshing && !m.nextRunning && !m.nextRefresh.IsZero() && !time.Now().Before(m.nextRefresh) {
 			m.startRefresh()
 			return m, tea.Batch(statusTUITick(), statusTUIRefresh(m.context, m.all, m.procs, m.noFetch, m.fetchAge))
@@ -1316,13 +1318,8 @@ func (m statusTUIModel) contentLines() []string {
 		header += statusTUIFitANSI(suffix, remaining)
 	}
 	lines := []string{header, ""}
-	if m.context != nil && !m.procs {
-		f, err := localHoursFacts(m.context, time.Now())
-		hint := "Working hours unavailable; run wtc hours facts"
-		if err == nil {
-			hint = f.Summary()
-		}
-		lines = append(lines, statusTUIStyle(statusTUIFit(statusTUISafe(hint), width), statusToneDim))
+	if m.hoursHint != "" {
+		lines[1] = statusTUIStyle(statusTUIFit(statusTUISafe(m.hoursHint), width), statusToneDim)
 	}
 	if m.refreshing && m.progressStep != "" {
 		elapsed := time.Since(m.startedAt).Truncate(time.Second)
@@ -1448,6 +1445,7 @@ func runStatusTUI(c *wtc.Context, all, procs, reposOnly, noFetch, noClick bool, 
 	}
 	model := statusTUIModel{context: c, all: all, procs: procs, reposOnly: reposOnly, noFetch: noFetch, noClick: noClick, fetchAge: fetchAge, interval: interval,
 		background: background, focused: true, refreshing: true}
+	model.refreshHours(time.Now())
 	model.startRefresh()
 	if !all && !procs {
 		model.snapshot.Collection = filepath.Base(c.Collection)
@@ -1475,4 +1473,18 @@ func runStatusTUI(c *wtc.Context, all, procs, reposOnly, noFetch, noClick bool, 
 		return nil // The watcher lease was cancelled.
 	}
 	return err
+}
+
+// Refresh once per clock tick, rather than doing profile I/O during rendering
+// and mouse hit testing. The hint shares the existing progress/blank row.
+func (m *statusTUIModel) refreshHours(now time.Time) {
+	if m.context == nil || m.procs {
+		m.hoursHint = ""
+		return
+	}
+	f, err := localHoursFacts(m.context, now)
+	m.hoursHint = "Working hours unavailable; run wtc hours facts"
+	if err == nil {
+		m.hoursHint = f.Summary()
+	}
 }

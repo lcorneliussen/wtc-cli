@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,7 +91,7 @@ func TestWorkingHoursOpenClawNeverUsesGatewayPerson(t *testing.T) {
 				t.Fatal("gateway identity accepted")
 			}
 			f, err := localHoursFacts(c, time.Now())
-			if err != nil || f.Configured || f.Phase != "unconfigured" || f.Timezone != "" {
+			if err != nil || f.Configured || f.Phase != "unconfigured" || f.Timezone != "" || strings.Contains(f.Summary(), "setup") || f.UnavailableReason == "" {
 				t.Fatal("leaked gateway schedule", f, err)
 			}
 		})
@@ -100,6 +101,7 @@ func TestWorkingHoursTUIRefreshesPhaseWithoutForgeRefresh(t *testing.T) {
 	hoursTestLocal(t)
 	c := &wtc.Context{Collection: t.TempDir(), ConfigRoot: t.TempDir()}
 	m := statusTUIModel{context: c, width: 120}
+	m.refreshHours(time.Now())
 	if got := strings.Join(m.contentLines(), "\n"); !strings.Contains(got, "Set working hours") {
 		t.Fatal(got)
 	}
@@ -113,13 +115,100 @@ func TestWorkingHoursTUIRefreshesPhaseWithoutForgeRefresh(t *testing.T) {
 	if err := store.Extend(time.Now(), time.Hour); err != nil {
 		t.Fatal(err)
 	}
+	m.refreshHours(time.Now())
 	if got := strings.Join(m.contentLines(), "\n"); !strings.Contains(got, "extended") {
 		t.Fatal(got)
 	}
 	if err := store.Clear(false); err != nil {
 		t.Fatal(err)
 	}
+	m.refreshHours(time.Now())
 	if got := strings.Join(m.contentLines(), "\n"); !strings.Contains(got, "Set working hours") {
 		t.Fatal(got)
+	}
+}
+
+func TestWorkingHoursHintPreservesTUIRowAndClickMapping(t *testing.T) {
+	hoursTestLocal(t)
+	t.Setenv("TERM", "xterm-256color")
+	c := &wtc.Context{Collection: t.TempDir(), ConfigRoot: t.TempDir()}
+	first, second := "https://github.com/example/first", "https://github.com/example/second"
+	m := statusTUIModel{context: c, width: 120, height: 24, snapshot: wtc.StatusSnapshot{Collection: "synthetic", Repos: []wtc.StatusRepo{
+		{Dir: "first", Slug: "example/first", Forge: "github.com", BranchDisplay: "main"}, {Dir: "second", Slug: "example/second", Forge: "github.com", BranchDisplay: "main"},
+	}}}
+	m.refreshHours(time.Now())
+	for _, help := range []bool{false, true} {
+		m.showHelp = help
+		row := 3
+		if help {
+			row += 4
+		}
+		lines := m.contentLines()
+		if !strings.Contains(lines[row], "first") || !strings.Contains(lines[row+1], "second") {
+			t.Fatal("hint shifted rows", lines)
+		}
+		if got := m.buildClickTarget(1, row); got != first {
+			t.Fatalf("first click = %q", got)
+		}
+		if got := m.buildClickTarget(1, row+1); got != second {
+			t.Fatalf("second click = %q", got)
+		}
+		if got := m.buildClickTarget(1, row-1); got != "" {
+			t.Fatalf("header clickable: %q", got)
+		}
+		m.startRefresh()
+		if !strings.Contains(m.contentLines()[row], "first") {
+			t.Fatal("progress shifted table")
+		}
+		m.refreshing = false
+	}
+}
+
+func TestWorkingHoursStayOutOfStatusMarkdownAndDefaultCapturedOutput(t *testing.T) {
+	hoursTestLocal(t)
+	t.Setenv("WTC_CONFIG_ROOT", t.TempDir())
+	t.Setenv("TABA_CONFIG_ROOT", "")
+	collection := filepath.Join(t.TempDir(), "synthetic")
+	if _, err := wtc.InitAdHoc(collection); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(collection)
+	c, err := wtc.Discover(collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := localHoursStore(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Setup(wtc.WorkingSchedule{Timezone: "Etc/UTC", Windows: []wtc.WorkingWindow{{Days: []int{1}, Start: "10:00", End: "16:00"}}}, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, md := range []bool{false, true} {
+		root := &cobra.Command{Use: "wtc", SilenceUsage: true, SilenceErrors: true}
+		asJSON := false
+		addStatusCommand(root, &asJSON)
+		args := []string{"status", "--local", "--no-watch"}
+		if md {
+			args = append(args, "--md")
+		}
+		root.SetArgs(args)
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		original := os.Stdout
+		os.Stdout = w
+		err = root.Execute()
+		os.Stdout = original
+		w.Close()
+		out, readErr := io.ReadAll(r)
+		r.Close()
+		if err != nil || readErr != nil {
+			t.Fatal(err, readErr)
+		}
+		if !strings.HasPrefix(string(out), "# ") || strings.Contains(string(out), "Working hours:") || strings.Contains(string(out), "Etc/UTC") {
+			t.Fatalf("private facts entered status Markdown: %s", out)
+		}
 	}
 }

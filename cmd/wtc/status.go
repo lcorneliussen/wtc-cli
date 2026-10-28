@@ -197,10 +197,10 @@ func addStatusCommand(root *cobra.Command, asJSON *bool) {
 		if *asJSON {
 			return json.NewEncoder(os.Stdout).Encode(snapshot)
 		}
-		if f, hoursErr := localHoursFacts(c, time.Now()); hoursErr == nil {
-			fmt.Println(f.Summary())
-		}
 		if ansi || (!md && term.IsTerminal(os.Stdout.Fd())) {
+			if f, hoursErr := localHoursFacts(c, time.Now()); hoursErr == nil {
+				fmt.Println(f.Summary())
+			}
 			fmt.Print(statusTable(snapshot, reposOnly, statusTerminalWidth()))
 			return nil
 		}

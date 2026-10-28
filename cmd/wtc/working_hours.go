@@ -24,7 +24,10 @@ func localHoursStore(c *wtc.Context) (wtc.WorkingHoursStore, error) {
 }
 func localHoursFacts(c *wtc.Context, now time.Time) (wtc.WorkingHoursFacts, error) {
 	if currentHost() == openclaw.HostOpenClaw {
-		return wtc.EvaluateWorkingHours(nil, nil, now)
+		f, err := wtc.EvaluateWorkingHours(nil, nil, now)
+		f.UnavailableReason = "authenticated-person adapter is not available on this host"
+		f.Guidance = "Keep working hours unconfigured until an authenticated-person adapter is available; do not use the gateway account's schedule."
+		return f, err
 	}
 	store, err := localHoursStore(c)
 	if err != nil {
