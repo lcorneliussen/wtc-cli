@@ -292,6 +292,8 @@ func statusNext(snapshot *StatusSnapshot) {
 		r.Choices = &choices
 		r.Next = choices.Primary()
 	}
+	// Refresh collection blockers after PR/build facts change, without source reads.
+	statusRetirementFacts(snapshot)
 }
 
 // statusFacts is what a local row tells about the next step. Ahead counts
