@@ -26,9 +26,10 @@ type StatusSnapshot struct {
 	PRs                  []StatusPRRow  `json:"prs"`
 	Orphans              []StatusOrphan `json:"orphans"`
 	// Retired lists folders a retire could not delete, in a workspace sweep.
-	Retired      []StatusRetired `json:"retired,omitempty"`
-	PRsEmptyHint bool            `json:"prs_empty_hint,omitempty"`
-	Runtime      []RuntimeItem   `json:"runtime,omitempty"`
+	Retired      []StatusRetired        `json:"retired,omitempty"`
+	PRsEmptyHint bool                   `json:"prs_empty_hint,omitempty"`
+	Runtime      []RuntimeItem          `json:"runtime,omitempty"`
+	Retirement   []RetirementAssessment `json:"retirement,omitempty"`
 }
 
 type StatusRepo struct {
@@ -260,6 +261,7 @@ func (c *Context) StatusLocalSnapshot(all bool) (StatusSnapshot, error) {
 	}
 	c.statusRuntime(&snapshot, all)
 	statusNext(&snapshot)
+	c.statusRetirement(&snapshot, all)
 	return snapshot, nil
 }
 

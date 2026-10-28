@@ -1,9 +1,9 @@
-## Discovery
+## Retirement
 
-- **Private retirement evidence, without cleanup.** `wtc discover [collection]`
-  prints local Git and metadata facts, explicit source gaps and proposed
-  verification/preservation steps. Optional `--transcript` inputs read bounded,
-  collection-scoped Claude JSONL assistant notes as untrusted hints with provenance.
-  Transcript availability does not establish archive state. Forge, delivery and
-  live-resource verification remain blockers; no cleanup action or automation
-  policy is enabled. ([#250](https://github.com/lcorneliussen/wtc-cli/issues/250)).
+- **Retirement readiness is part of status.** `wtc status` includes observed
+  blockers and unknown checks for each selected collection.
+  `wtc retire [collection] --dry-run` reads fresh evidence and explains
+  preservation and follow-up work, with optional bounded Claude JSONL transcript
+  hints. No archive discovery, cleanup action or approval policy is enabled;
+  real retirement retains its existing fresh preflight checks.
+  ([#250](https://github.com/lcorneliussen/wtc-cli/issues/250)).

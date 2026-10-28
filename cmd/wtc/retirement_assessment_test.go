@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestDiscoveryCLIExplicitInputsAndPrivateEnvelope(t *testing.T) {
+func TestRetireDryRunExplicitInputsAndEnvelope(t *testing.T) {
 	collection := filepath.Join(t.TempDir(), "example-task")
 	harness := filepath.Join(collection, "harness")
 	if err := os.MkdirAll(harness, 0700); err != nil {
@@ -34,8 +34,8 @@ func TestDiscoveryCLIExplicitInputsAndPrivateEnvelope(t *testing.T) {
 		var jsonOutput bool
 		root := &cobra.Command{Use: "wtc", SilenceUsage: true, SilenceErrors: true}
 		root.PersistentFlags().BoolVar(&jsonOutput, "json", false, "")
-		addDiscoveryCommand(root, &jsonOutput)
-		args := []string{"discover", "--transcript", transcript, "--transcript", transcript}
+		addRetireCommand(root, &jsonOutput)
+		args := []string{"retire", "--dry-run", "--transcript", transcript, "--transcript", transcript}
 		if asJSON {
 			args = append(args, "--json")
 		} else {
@@ -61,17 +61,40 @@ func TestDiscoveryCLIExplicitInputsAndPrivateEnvelope(t *testing.T) {
 		}
 		if asJSON {
 			var got struct {
-				OK   bool                `json:"ok"`
-				Data wtc.DiscoveryReport `json:"data"`
+				OK   bool                 `json:"ok"`
+				Data wtc.RetirementReport `json:"data"`
 			}
 			if e := json.Unmarshal(raw, &got); e != nil {
 				t.Fatalf("invalid JSON: %v %s", e, raw)
 			}
-			if !got.OK || got.Data.Schema != 1 || got.Data.Collection != collection || got.Data.Disposition != "needs-verification" || len(got.Data.Transcripts) != 2 || got.Data.Transcripts[0].ArchiveState != "unknown" || got.Data.Transcripts[0].MatchedNotes != 1 || len(got.Data.Blockers) == 0 {
-				t.Fatalf("lost private evidence contract: %s", raw)
+			if !got.OK || got.Data.Schema != 1 || got.Data.Collection != collection || got.Data.Assessment.State != "unknown" || len(got.Data.Transcripts) != 2 || got.Data.Transcripts[0].ArchiveState != "unknown" || got.Data.Transcripts[0].MatchedNotes != 1 || len(got.Data.Assessment.Unknowns) == 0 {
+				t.Fatalf("lost evidence contract: %s", raw)
 			}
 		} else if !strings.Contains(string(raw), "no cleanup authorization") || !strings.Contains(string(raw), "Untrusted hint") {
 			t.Fatalf("missing evidence labels: %s", raw)
 		}
+	}
+}
+
+func TestRetireTranscriptAndForceFlagsCannotReachExecution(t *testing.T) {
+	for _, args := range [][]string{{"retire"}, {"retire", "example", "--transcript", "untrusted.jsonl"}, {"retire", "example", "--dry-run", "--force"}} {
+		var asJSON bool
+		root := &cobra.Command{Use: "wtc", SilenceUsage: true, SilenceErrors: true}
+		addRetireCommand(root, &asJSON)
+		root.SetArgs(args)
+		if err := root.Execute(); err == nil {
+			t.Fatalf("accepted unsafe flag combination: %v", args)
+		}
+	}
+}
+
+func TestRetirementSummaryInTerminalStatus(t *testing.T) {
+	snapshot := wtc.StatusSnapshot{Collection: "example", Retirement: []wtc.RetirementAssessment{{Collection: "example", State: "blocked", Blockers: []string{"Preserve local work"}, Unknowns: []string{"Archive state unknown"}}}}
+	if text := statusTable(snapshot, false, 120); !strings.Contains(text, "Retirement example: blocked") || !strings.Contains(text, "retire --dry-run") {
+		t.Fatalf("missing terminal assessment: %s", text)
+	}
+	model := statusTUIModel{snapshot: snapshot, width: 120}
+	if text := strings.Join(model.contentLines(), "\n"); !strings.Contains(text, "Retirement example: blocked") {
+		t.Fatalf("missing live assessment: %s", text)
 	}
 }

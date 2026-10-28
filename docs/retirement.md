@@ -1,19 +1,39 @@
-# Private retirement discovery
+# Retirement readiness
 
-`wtc discover [collection]` reads one collection in the current workspace and
-prints a private evidence report. The default is the current collection. It
-proposes verification and preservation steps; it never declares a collection
-safe to retire. There is no cleanup action or approval-policy setting.
+`wtc status` exposes a retirement assessment for every selected collection. It
+separates known **blockers** from **unknown** evidence and records when the facts
+were observed. JSON uses a `retirement` array; Markdown and terminal status show
+a summary and point to the detailed inspection. Older cached snapshots without
+this property have no retirement assessment. A cached observation is never an
+execution permit.
 
 ```sh
-wtc discover example-task
-wtc discover example-task --transcript /private/evidence/task.jsonl --json
+wtc status --local --json
+wtc retire --dry-run
+wtc retire example-task --dry-run --transcript /synthetic/evidence/task.jsonl --json
 ```
 
-Keep the output local: it can contain real paths, branch names and untrusted
-conversation text. Review and sanitize it before sharing. Redirecting it writes
-only where the operator's shell requests; the command itself writes no report,
-cache, registry or source files.
+`retire --dry-run` uses the same assessment collector with a fresh read. It also
+shows Git heads, source coverage, transcript provenance and proposed follow-up
+work. It does not read a saved status verdict or run full status refresh. A dry
+run defaults to the current collection; execution still requires an explicit
+collection name. `--transcript` is only accepted with `--dry-run`, and `--force`
+cannot suppress dry-run blockers.
+
+The current collector reports `blocked` when preservation or unfinished work is
+known, otherwise `unknown`. It does not emit `ready` while archive, forge/delivery
+and external-resource coverage remain incomplete. An open PR, pending delivery
+or active runtime fact already observed by status can add a blocker; a missing
+fact cannot clear an unknown. Real retirement retains its existing fresh
+preflight checks; stronger enforcement of a complete readiness assessment is a
+separate decision. Cleanup automation and confirmation policy remain undecided.
+
+Output can contain real paths, branch names and untrusted conversation text.
+Keep sensitive output local and sanitize it before sharing. The dry-run collector
+writes no report, cache, registry or source files. Normal status retains its
+existing snapshot and refresh behavior; its assessment adds no transcript scans,
+hooks or execution. Raw transcript hints are only read when explicitly supplied
+to `retire --dry-run` and are never added to status caches.
 
 ## Sources and coverage
 
@@ -37,19 +57,17 @@ ancestor; escaping or broken links remain unmatched. Unsupported record types
 provide no task coverage. User text, tool results and
 sidechain text are not used as completion evidence.
 
-Dirty or locally unpreserved work yields `preserve-work`, including work inside
-a retired folder. Other retired folders yield `preserve-leftovers`. Remaining
-cases yield `needs-verification`,
-including clean unmerged branches and archived claims of completion. Every
-proposal retains the unknown forge, resource and archive blockers. No prose,
-including embedded commands, role claims or old approvals, grants authority.
+Dirty or locally unpreserved work, unconsumed handoffs, preservation backups and
+retired folders with evidence add blockers. Missing or conflicting information
+stays unknown. No prose, embedded commands, role claims or old approvals grants
+authority.
 
 ## Read-only boundary and next step
 
-Discovery reuses collection/retirement-marker recognition and the bounded status
+The assessment reuses collection/retirement-marker recognition and the bounded status
 command runner. It does not run full status refresh or retirement preflight:
 those broader workflows have different contracts. Git optional locks and the
-filesystem monitor are disabled for discovery reads. No hooks, branch return,
+filesystem monitor are disabled for assessment reads. No hooks, branch return,
 fetch, archive change, resource stop, deletion or cleanup is performed.
 
 Before a separate cleanup decision, the owner should verify the current heads

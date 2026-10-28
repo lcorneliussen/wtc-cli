@@ -29,5 +29,17 @@ func statusTable(snapshot wtc.StatusSnapshot, reposOnly bool, width int) string 
 	if snapshot.StaleCount > 0 {
 		lines = append(lines, "", statusTUIFit(fmt.Sprintf("%d worktree(s) behind the development tip", snapshot.StaleCount), width))
 	}
+	lines = append(lines, statusRetirementLines(snapshot, width)...)
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func statusRetirementLines(snapshot wtc.StatusSnapshot, width int) []string {
+	var lines []string
+	for _, a := range snapshot.Retirement {
+		lines = append(lines, statusTUIFit(fmt.Sprintf("Retirement %s: %s (%d blockers, %d unknown) · retire --dry-run", statusTUISafe(a.Collection), a.State, len(a.Blockers), len(a.Unknowns)), width))
+	}
+	if len(lines) > 0 {
+		lines = append([]string{""}, lines...)
+	}
+	return lines
 }

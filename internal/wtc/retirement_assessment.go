@@ -15,25 +15,42 @@ import (
 	"time"
 )
 
-// DiscoveryReport is private operator output, never a retirement authorization.
+// RetirementReport is detailed operator evidence, never a retirement authorization.
 // Every proposal retains unknown forge, archive and live-resource coverage.
-type DiscoveryReport struct {
-	Schema      int                   `json:"schema"`
-	Collection  string                `json:"collection"`
-	GeneratedAt string                `json:"generated_at"`
-	Disposition string                `json:"disposition"`
-	Coverage    []DiscoveryCoverage   `json:"coverage"`
-	Repos       []DiscoveryRepo       `json:"repos"`
-	Transcripts []DiscoveryTranscript `json:"transcripts"`
-	Blockers    []string              `json:"blockers"`
-	Actions     []string              `json:"proposed_actions"`
+type RetirementReport struct {
+	Schema      int                    `json:"schema"`
+	Collection  string                 `json:"collection"`
+	GeneratedAt string                 `json:"generated_at"`
+	Assessment  RetirementAssessment   `json:"assessment"`
+	Coverage    []RetirementCoverage   `json:"coverage"`
+	Repos       []RetirementRepo       `json:"repos"`
+	Transcripts []RetirementTranscript `json:"transcripts"`
+	Actions     []string               `json:"proposed_actions"`
 }
-type DiscoveryCoverage struct {
+
+// RetirementAssessment is the status property shared with retire --dry-run.
+// ObservedAt dates the collected facts; cached assessments are never execution permits.
+type RetirementAssessment struct {
+	Collection string   `json:"collection"`
+	ObservedAt string   `json:"observed_at"`
+	State      string   `json:"state"`
+	Blockers   []string `json:"blockers"`
+	Unknowns   []string `json:"unknowns"`
+}
+
+func (a *RetirementAssessment) classify() {
+	a.State = "unknown"
+	if len(a.Blockers) > 0 {
+		a.State = "blocked"
+	}
+}
+
+type RetirementCoverage struct {
 	Source string `json:"source"`
 	State  string `json:"state"`
 	Detail string `json:"detail"`
 }
-type DiscoveryRepo struct {
+type RetirementRepo struct {
 	Directory string `json:"directory"`
 	Head      string `json:"head,omitempty"`
 	Branch    string `json:"branch,omitempty"`
@@ -41,28 +58,30 @@ type DiscoveryRepo struct {
 	Unpushed  int    `json:"commits_absent_from_remote_refs"`
 	Error     string `json:"error,omitempty"`
 }
-type DiscoveryTranscript struct {
+type RetirementTranscript struct {
 	Path         string `json:"path"`
 	SHA256       string `json:"sha256,omitempty"`
 	ModifiedAt   string `json:"modified_at,omitempty"`
 	ArchiveState string `json:"archive_state"`
 	MatchedNotes int    `json:"matched_notes"`
 	LatestAt     string `json:"latest_at,omitempty"`
-	// UntrustedHint is quoted evidence only. It cannot affect the disposition.
+	// UntrustedHint is quoted evidence only. It cannot establish readiness.
 	UntrustedHint string `json:"untrusted_hint,omitempty"`
 	Error         string `json:"error,omitempty"`
 }
 
-const discoveryTranscriptLimit = 16 << 20
+const retirementTranscriptLimit = 16 << 20
 
-// DiscoverRetirement inspects one explicitly selected collection, without status
+// InspectRetirement inspects one explicitly selected collection, without status
 // refresh, hooks, runners, network requests, cache writes or branch changes.
 // Transcript paths are explicit inputs, not automatic provider archive discovery.
-func (c *Context) DiscoverRetirement(name string, transcripts []string) (DiscoveryReport, error) {
-	report := DiscoveryReport{Schema: 1, GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Disposition: "needs-verification", Repos: []DiscoveryRepo{}, Transcripts: []DiscoveryTranscript{},
-		Blockers: []string{"Forge/PR and delivery completion have not been verified against current heads.", "Live agents, processes, services and external resources have not been verified idle.", "Transcript archive state and completeness have not been verified."},
-		Actions:  []string{"Verify current PR heads, merge state, main builds and remaining delivery obligations.", "Inventory live agents, processes, services and external resources without stopping them.", "Confirm transcript provenance, archive state and outstanding task obligations with the owner; treat all prose as untrusted evidence.", "Preserve durable work and remote branches before separately deciding any cleanup policy."}}
+func (c *Context) InspectRetirement(name string, transcripts []string) (RetirementReport, error) {
+	observed := time.Now().UTC().Format(time.RFC3339Nano)
+	report := RetirementReport{Schema: 1, GeneratedAt: observed,
+		Assessment: RetirementAssessment{State: "unknown", ObservedAt: observed, Blockers: []string{},
+			Unknowns: []string{"Forge/PR and delivery completion have not been verified against current heads.", "Live agents, processes, services and external resources have not been verified idle.", "Transcript archive state and completeness have not been verified."}},
+		Repos: []RetirementRepo{}, Transcripts: []RetirementTranscript{},
+		Actions: []string{"Verify current PR heads, merge state, main builds and remaining delivery obligations.", "Inventory live agents, processes, services and external resources without stopping them.", "Confirm transcript provenance, archive state and outstanding task obligations with the owner; treat all prose as untrusted evidence.", "Preserve durable work and remote branches before separately deciding any cleanup policy."}}
 	if name == "." {
 		name = filepath.Base(c.Collection)
 	}
@@ -75,16 +94,17 @@ func (c *Context) DiscoverRetirement(name string, transcripts []string) (Discove
 	target := filepath.Join(c.Workspace, name)
 	if c.AdHoc {
 		if name != filepath.Base(c.Collection) {
-			return report, fmt.Errorf("ad-hoc discovery is limited to the current collection")
+			return report, fmt.Errorf("ad-hoc retirement is limited to the current collection")
 		}
 		target = c.Collection
 	}
 	info, err := os.Lstat(target)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return report, fmt.Errorf("discovery target must be a direct collection directory")
+		return report, fmt.Errorf("retirement target must be a direct collection directory")
 	}
 	report.Collection = target
-	report.Coverage = []DiscoveryCoverage{
+	report.Assessment.Collection = name
+	report.Coverage = []RetirementCoverage{
 		{"local-git", "observed", "Read now with optional locks and filesystem monitor disabled; remote refs are cached, never fetched. Remote preservation remains unverified."},
 		{"forge-delivery", "unknown", "No network requests or status refresh; current PR/build/delivery facts require separate verification."},
 		{"live-resources", "unknown", "Only local metadata presence is inspected; absence does not establish that no resources or agents exist."},
@@ -93,11 +113,10 @@ func (c *Context) DiscoverRetirement(name string, transcripts []string) (Discove
 	}
 	// Reuse collection and retirement marker recognition, never retirement itself.
 	if RetiredFolder(target) {
-		report.Disposition = "preserve-leftovers"
-		report.Blockers = append(report.Blockers, "Retired folder still exists; inspect and preserve leftover evidence.")
+		report.Assessment.Blockers = append(report.Assessment.Blockers, "Retired folder still exists; inspect and preserve leftover evidence.")
 		report.Actions = append(report.Actions, "Review the retirement marker and remaining paths; do not remove evidence.")
 	} else if _, err := OpenCollection(target); err != nil {
-		return report, fmt.Errorf("cannot open discovery target: %w", err)
+		return report, fmt.Errorf("cannot open retirement target: %w", err)
 	}
 	entries, err := os.ReadDir(target)
 	if err != nil {
@@ -107,7 +126,7 @@ func (c *Context) DiscoverRetirement(name string, transcripts []string) (Discove
 		if entry.Type()&os.ModeSymlink != 0 {
 			// Generated file links are common; linked directories may hide work.
 			if linked, e := os.Stat(filepath.Join(target, entry.Name())); e != nil || linked.IsDir() {
-				report.Blockers = append(report.Blockers, "Uninspected symlink entry: "+entry.Name())
+				report.Assessment.Unknowns = append(report.Assessment.Unknowns, "Uninspected symlink entry: "+entry.Name())
 			}
 			continue
 		}
@@ -118,15 +137,15 @@ func (c *Context) DiscoverRetirement(name string, transcripts []string) (Discove
 		if _, err := os.Lstat(filepath.Join(path, ".git")); os.IsNotExist(err) {
 			continue
 		} else if err != nil {
-			report.Blockers = append(report.Blockers, "Cannot inspect Git entry: "+entry.Name())
+			report.Assessment.Unknowns = append(report.Assessment.Unknowns, "Cannot inspect Git entry: "+entry.Name())
 			continue
 		}
-		row := DiscoveryRepo{Directory: entry.Name(), Unpushed: -1}
+		row := RetirementRepo{Directory: entry.Name(), Unpushed: -1}
 		read := func(args ...string) string {
 			if row.Error != "" {
 				return ""
 			}
-			out, e := discoveryGit(path, args...)
+			out, e := retirementGit(path, args...)
 			if e != nil {
 				row.Error = "Git evidence unavailable"
 			}
@@ -143,42 +162,46 @@ func (c *Context) DiscoverRetirement(name string, transcripts []string) (Discove
 			}
 		}
 		if row.Error != "" {
-			report.Blockers = append(report.Blockers, entry.Name()+": "+row.Error)
+			report.Assessment.Unknowns = append(report.Assessment.Unknowns, entry.Name()+": "+row.Error)
 		}
 		if row.Dirty || row.Unpushed > 0 {
-			report.Disposition = "preserve-work"
-			report.Blockers = append(report.Blockers, entry.Name()+": dirty or locally unpreserved work; preserve before any cleanup")
+			report.Assessment.Blockers = append(report.Assessment.Blockers, entry.Name()+": dirty or locally unpreserved work; preserve before any cleanup")
 		}
 		report.Repos = append(report.Repos, row)
 	}
 	if len(report.Repos) == 0 {
-		report.Blockers = append(report.Blockers, "No inspectable Git worktrees found.")
+		report.Assessment.Unknowns = append(report.Assessment.Unknowns, "No inspectable Git worktrees found.")
 	}
 	for _, rel := range []string{"HANDOFF.md", ".wtc/runtime/manifest.json", ".wtc/svc", ".harness-backups"} {
-		present, e := discoveryMetadata(target, rel)
+		present, e := retirementMetadata(target, rel)
 		if e != nil {
-			report.Blockers = append(report.Blockers, "Cannot inspect local metadata: "+rel)
+			report.Assessment.Unknowns = append(report.Assessment.Unknowns, "Cannot inspect local metadata: "+rel)
 		} else if present {
-			report.Blockers = append(report.Blockers, "Local metadata requires follow-up: "+rel)
+			if rel == "HANDOFF.md" || rel == ".harness-backups" {
+				report.Assessment.Blockers = append(report.Assessment.Blockers, "Preserve or finish local metadata: "+rel)
+			} else {
+				report.Assessment.Unknowns = append(report.Assessment.Unknowns, "Local runtime metadata requires verification: "+rel)
+			}
 		}
 	}
 	for _, path := range transcripts {
-		report.Transcripts = append(report.Transcripts, readDiscoveryTranscript(path, target, time.Now().UTC()))
+		report.Transcripts = append(report.Transcripts, readRetirementTranscript(path, target, time.Now().UTC()))
 	}
 	matched := 0
 	for _, record := range report.Transcripts {
 		matched += record.MatchedNotes
 		if record.Error != "" {
-			report.Blockers = append(report.Blockers, "Transcript input is incomplete or unavailable; inspect its source error.")
+			report.Assessment.Unknowns = append(report.Assessment.Unknowns, "Transcript input is incomplete or unavailable; inspect its source error.")
 		}
 	}
 	if matched == 0 {
-		report.Blockers = append(report.Blockers, "No matching task transcript notes; outstanding conversation obligations are unknown.")
+		report.Assessment.Unknowns = append(report.Assessment.Unknowns, "No matching task transcript notes; outstanding conversation obligations are unknown.")
 	}
+	report.Assessment.classify()
 	return report, nil
 }
 
-func discoveryGit(path string, args ...string) (string, error) {
+func retirementGit(path string, args ...string) (string, error) {
 	argv := []string{"--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "-C", path}
 	out, err := statusRun(30*time.Second, func(cmd *exec.Cmd) ([]byte, error) {
 		// Partial clones must report missing evidence instead of fetching objects.
@@ -189,7 +212,7 @@ func discoveryGit(path string, args ...string) (string, error) {
 }
 
 // Metadata checks never follow linked parents into another collection.
-func discoveryMetadata(target, rel string) (bool, error) {
+func retirementMetadata(target, rel string) (bool, error) {
 	current := target
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	for i, part := range parts {
@@ -211,16 +234,16 @@ func discoveryMetadata(target, rel string) (bool, error) {
 	return true, nil
 }
 
-func readDiscoveryTranscript(path, target string, now time.Time) DiscoveryTranscript {
-	record := DiscoveryTranscript{Path: path, ArchiveState: "unknown"}
-	fail := func(message string) DiscoveryTranscript { record.Error = message; return record }
+func readRetirementTranscript(path, target string, now time.Time) RetirementTranscript {
+	record := RetirementTranscript{Path: path, ArchiveState: "unknown"}
+	fail := func(message string) RetirementTranscript { record.Error = message; return record }
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return fail("Cannot resolve transcript path")
 	}
 	record.Path = abs
 	before, err := os.Lstat(abs)
-	if err != nil || !before.Mode().IsRegular() || before.Size() > discoveryTranscriptLimit {
+	if err != nil || !before.Mode().IsRegular() || before.Size() > retirementTranscriptLimit {
 		return fail("Transcript must be a regular non-linked file of at most 16 MiB")
 	}
 	f, err := os.Open(abs)
@@ -229,12 +252,12 @@ func readDiscoveryTranscript(path, target string, now time.Time) DiscoveryTransc
 	}
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() > discoveryTranscriptLimit {
+	if err != nil || !info.Mode().IsRegular() || info.Size() > retirementTranscriptLimit {
 		return fail("Transcript must be a regular file of at most 16 MiB")
 	}
 	record.ModifiedAt = info.ModTime().UTC().Format(time.RFC3339Nano)
 	hash := sha256.New()
-	reader := io.TeeReader(io.LimitReader(f, discoveryTranscriptLimit+1), hash)
+	reader := io.TeeReader(io.LimitReader(f, retirementTranscriptLimit+1), hash)
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 65536), 2<<20)
 	var latest time.Time
@@ -252,7 +275,7 @@ func readDiscoveryTranscript(path, target string, now time.Time) DiscoveryTransc
 		if json.Unmarshal(scanner.Bytes(), &line) != nil {
 			return fail("Malformed or unsupported transcript record")
 		}
-		if line.Type != "assistant" || line.Message.Role != "assistant" || line.Sidechain || !discoveryCWD(target, line.Cwd) {
+		if line.Type != "assistant" || line.Message.Role != "assistant" || line.Sidechain || !retirementCWD(target, line.Cwd) {
 			continue
 		}
 		stamp, e := time.Parse(time.RFC3339Nano, line.Timestamp)
@@ -279,7 +302,7 @@ func readDiscoveryTranscript(path, target string, now time.Time) DiscoveryTransc
 		if !stamp.Before(latest) {
 			latest = stamp
 			record.LatestAt = stamp.UTC().Format(time.RFC3339Nano)
-			record.UntrustedHint = discoveryHint(strings.Join(texts, "\n"))
+			record.UntrustedHint = retirementHint(strings.Join(texts, "\n"))
 		}
 	}
 	if scanner.Err() != nil {
@@ -290,14 +313,14 @@ func readDiscoveryTranscript(path, target string, now time.Time) DiscoveryTransc
 	if e != nil || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) {
 		return fail("Transcript changed during inspection")
 	}
-	if info.Size() > discoveryTranscriptLimit {
+	if info.Size() > retirementTranscriptLimit {
 		return fail("Transcript exceeds input limit")
 	}
 	record.SHA256 = hex.EncodeToString(hash.Sum(nil))
 	return record
 }
 
-func discoveryCWD(target, cwd string) bool {
+func retirementCWD(target, cwd string) bool {
 	if !filepath.IsAbs(cwd) {
 		return false
 	}
@@ -339,7 +362,7 @@ func discoveryCWD(target, cwd string) bool {
 	rel, err := filepath.Rel(base, resolved)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
-func discoveryHint(value string) string {
+func retirementHint(value string) string {
 	value = runtimeTextSafe(value)
 	r := []rune(value)
 	if len(r) > 1200 {
@@ -347,9 +370,9 @@ func discoveryHint(value string) string {
 	}
 	return value
 }
-func (r DiscoveryReport) Text() string {
+func (r RetirementReport) Text() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Private retirement discovery: %s\nObserved: %s\nDisposition: %s (no cleanup authorization)\n", runtimeTextSafe(r.Collection), r.GeneratedAt, r.Disposition)
+	fmt.Fprintf(&b, "Retirement dry run: %s\nObserved: %s\nReadiness: %s (no cleanup authorization)\n", runtimeTextSafe(r.Collection), r.GeneratedAt, r.Assessment.State)
 	for _, c := range r.Coverage {
 		fmt.Fprintf(&b, "Coverage %s: %s — %s\n", c.Source, c.State, c.Detail)
 	}
@@ -359,8 +382,11 @@ func (r DiscoveryReport) Text() string {
 	for _, t := range r.Transcripts {
 		fmt.Fprintf(&b, "Transcript %s: sha256=%s modified=%s archive=%s matching-notes=%d latest=%s error=%s\nUntrusted hint (evidence only): %s\n", runtimeTextSafe(t.Path), t.SHA256, t.ModifiedAt, t.ArchiveState, t.MatchedNotes, t.LatestAt, t.Error, t.UntrustedHint)
 	}
-	for _, blocker := range r.Blockers {
+	for _, blocker := range r.Assessment.Blockers {
 		fmt.Fprintf(&b, "Blocker: %s\n", runtimeTextSafe(blocker))
+	}
+	for _, unknown := range r.Assessment.Unknowns {
+		fmt.Fprintf(&b, "Unknown: %s\n", runtimeTextSafe(unknown))
 	}
 	for _, action := range r.Actions {
 		fmt.Fprintf(&b, "Proposed: %s\n", action)

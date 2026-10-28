@@ -441,6 +441,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 	}
 	// The pull requests change what comes next.
 	statusNext(&snapshot)
+	statusRetirementFacts(&snapshot)
 	return snapshot, nil
 }
 
