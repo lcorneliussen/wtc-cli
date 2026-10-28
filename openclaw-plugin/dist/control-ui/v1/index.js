@@ -551,6 +551,10 @@ const brand = (size, version, compact = false) => css(el("span", {},
     "display:inline-flex;align-items:baseline;gap:.3em;color:var(--text-strong, inherit);text-decoration:none;font-weight:700"),
   compact ? null : el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
 
+const sectionHeading = (text, ...extra) => css(el("div", {},
+  css(el("h3", { textContent: text }), "margin:0;font-size:14px;font-weight:600;color:var(--text-strong,inherit)"), ...extra),
+  "display:flex;align-items:center;gap:8px;margin-bottom:6px");
+
 // Browser surfaces share the CLI's facts and actions. Repository, branch,
 // changes, PR and next step keep fixed columns aligned with the header action;
 // narrow views fold facts beneath the name.
@@ -891,7 +895,7 @@ function collectionTables(v) {
   function activityLog() {
     const records = [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].sort((a, b) => b.at - a.at);
     if (!records.length) return null;
-    return css(el("div", { className: "wtc-activity-log" }, el("strong", { textContent: "Action log" }), ...records.map((item) =>
+    return css(el("div", { className: "wtc-activity-log" }, sectionHeading("Action log"), ...records.map((item) =>
       css(el("div", {}, css(el("span", { textContent: `${item.repo}: ${nextLabel({ step: item.action ?? "action" })}` }), "font-weight:600"),
         css(el("span", { textContent: item.status }), "overflow-wrap:anywhere"),
         css(el("span", { textContent: ago(item.at) }), "font-size:11px;color:var(--muted,#888)")), "display:grid;grid-template-columns:minmax(90px,.6fr) minmax(0,1fr) auto;gap:8px;font-size:12px;align-items:start"))), "display:grid;gap:6px");
@@ -940,7 +944,7 @@ function collectionTables(v) {
       !batchRunning ? nextButton(compact ? "⋯" : "Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.reveal?.(); v.rerender(); }) : null,
       dispatched.size && !batchRunning ? nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } }, batchRunning) : null,
       (activityStore.get(v.collectionKey?.() ?? v.key())?.size ?? 0) > 0 && (targets.length || batchRunning) ? nextButton(compact ? "≡" : "Action log", "Open next-action activity in the taba sidebar", openActivity) : null,
-      batchRunning ? nextButton(compact ? "Stop" : "Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); }) : null), "display:inline-flex;align-items:center;gap:4px;min-width:0;white-space:nowrap");
+      batchRunning ? nextButton(compact ? "Stop" : "Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); }) : null), `display:inline-flex;align-items:center;gap:${compact ? 4 : 8}px;min-width:0;flex-wrap:${compact ? "nowrap" : "wrap"};white-space:${compact ? "nowrap" : "normal"}`);
   }
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
@@ -1711,8 +1715,7 @@ function mountCollection(container, context) {
   const muted = (text, extra = "") => css(el("span", { textContent: text }), `color:var(--muted, #888);font-size:12px;${extra}`);
   const mono = (text, title) => css(el("code", { textContent: text, title: title ?? text }),
     "font-family:var(--mono, ui-monospace, monospace);font-size:12px;color:var(--muted, #888);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0");
-  const heading = (text, ...extra) => css(el("div", {}, css(el("span", { textContent: text }), "font-size:12px;font-weight:600;color:var(--muted, #888)"), ...extra),
-    "display:flex;align-items:center;gap:8px;margin-bottom:6px");
+  const heading = sectionHeading;
   const row = (...kids) => css(el("div", {}, ...kids), "display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap");
   const button = (text, title, run, primary) => {
     const b = css(el("button", { textContent: text, type: "button", title }),
@@ -1732,7 +1735,7 @@ function mountCollection(container, context) {
     return b;
   };
 
-  const header = el("div");
+  const header = css(el("header"), "display:grid;gap:6px;min-width:0");
   const log = css(el("div"), "font-size:12px;color:var(--muted, #888);min-height:0");
   const body = css(el("div"), "display:grid;gap:16px");
   root.append(actionFeedback(), header, log, body);
@@ -2004,15 +2007,17 @@ function mountCollection(container, context) {
       say(note, noteFailed, noteAction);
       return;
     }
+    const toolbar = tables.actionToolbar(repos);
     header.replaceChildren(
-      css(el("div", {}, css(el("span", {}, brand("12px", data.version)), "grid-column:1/-2"), css(el("span", {}, tables.actionToolbar(repos)), "grid-column:-2/-1;min-width:0")), `display:${repoNarrow ? "flex" : "grid"};grid-template-columns:${repositoryTemplate(repoNarrow)};column-gap:${repoNarrow ? 6 : 10}px;align-items:center`),
-      row(css(el("span", { textContent: data.collection.label ?? data.collection.sessionKey }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit)"),
-        css(el("span", {}, muted(`Updated ${ago(entry.at)}`), iconButton("↻", "Refresh", () => void watch?.refresh())), "margin-left:auto;display:flex;align-items:center;gap:2px")),
+      row(brand("14px", data.version), css(el("span", {}, muted(`Updated ${ago(entry.at)}`),
+        iconButton("↻", "Refresh", () => void watch?.refresh())), "margin-left:auto;display:flex;align-items:center;gap:2px")),
+      css(el("div", { textContent: data.collection.label ?? data.collection.sessionKey }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit);overflow-wrap:anywhere"),
       row(data.collection.project ? muted(data.collection.project === "ad-hoc" ? "ad-hoc taba project" : `taba project ${data.collection.project}`) : null, data.collection.project ? muted("·") : null,
         branch ? mono(branch, "The collection's branch; a repository on another one shows its own") : null, branch ? muted("·") : null,
         muted(`${repos.length} ${repos.length === 1 ? "repository" : "repositories"}${groups.length ? ` · ${groups.filter((g) => g.running).length}/${plural(groups.length, "service")} running` : ""}`)),
       // Not when there is no folder: replaceChildren writes a null as "null".
       ...(data.collection.folder ? [css(el("div", {}, mono(data.collection.folder, "The collection's folder: one link per repository to its worktree")), "display:flex;margin-top:2px")] : []),
+      ...(toolbar ? [css(el("div", {}, toolbar), "display:flex;min-width:0;margin-top:4px")] : []),
     );
 
     const repoSection = css(el("div", {}, heading("Repositories")), "display:grid;gap:10px");
@@ -2033,7 +2038,7 @@ function mountCollection(container, context) {
 
     const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
     const activitySection = tables.activityLog();
-    body.replaceChildren(...[repoSection, prSection, activitySection, serviceSection, ...warnings, footer(data)].filter(Boolean));
+    body.replaceChildren(...[repoSection, prSection, serviceSection, activitySection, ...warnings, footer(data)].filter(Boolean));
     say(note, noteFailed, noteAction);
     const destination = focusSection === "activity" ? activitySection : focusSection === "pull-requests" ? prSection : null;
     if (focusSection) { focusSection = null; destination?.scrollIntoView?.({ block: "start" }); }
