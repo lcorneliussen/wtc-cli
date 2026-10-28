@@ -44,6 +44,7 @@ class Node {
     siblings.splice(siblings.indexOf(this), 1);
     this.parentNode = null;
   }
+  scrollIntoView() { this.scrolled = true; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
   removeEventListener(type, fn) { this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn); }
@@ -153,21 +154,22 @@ const hostRequest = async (method, params) => {
 };
 
 let sessions = 0;
-async function mount(kind, data, history, key) {
+const openedPanels = [];
+async function mount(kind, data, history, key, props = {}) {
   const sessionKey = key ?? `agent:main:test:${++sessions}`;
   if (history) histories.set(sessionKey, history);
   collections.set(sessionKey, data);
   const host = container();
   const controller = new AbortController();
-  const ctx = { props: { sessionKey, agentId: "main" }, signal: controller.signal, presented: true, mountDefault: () => () => {} };
-  ctx.host = { request: hostRequest, ui: { openPanel() {} } };
+  const ctx = { props: { sessionKey, agentId: "main", ...props }, signal: controller.signal, presented: true, mountDefault: () => () => {} };
+  ctx.host = { request: hostRequest, ui: { openPanel(...args) { openedPanels.push(args); } } };
   const view = mounts[kind](host, ctx);
   await settle();
-  return { host, view, abort: () => controller.abort() };
+  return { host, view, context: ctx, abort: () => controller.abort() };
 }
 
 const collection = (repos, services = []) => ({
-  collection: { label: "test collection", sessionKey: "agent:main:test", folder: "/state/wtc-collections/test" },
+  collection: { label: "test collection", folder: "/state/wtc-collections/test" },
   repos,
   services,
 });
@@ -243,7 +245,7 @@ test("panel: a busy collection", async () => {
   // The shared branch once in the header, every repository's in its row.
   assert.ok(all.includes("3 repositories · 1/2 services running"));
   const [repos, prs, services] = tables(host);
-  assert.deepEqual(repos[1], ["apiopenclaw/test", "↑ 2↓ 3", "#7✗ checks✗ conflict○ review", ""]);
+  assert.deepEqual(repos[1], ["api", "openclaw/test", "↑ 2↓ 3", "#7✗✗○", ""]);
   // wtc status's PRs: number, repository, state, C M R, title.
   assert.deepEqual(prs, [["PR", "Repo", "State", "C", "M", "R", "Title"], ["#7", "api", "open", "✗", "✗", "○", "Add paging"]]);
   assert.deepEqual(services[1].slice(1), ["preview", "api", "ready", ":42201", "calm-river✕", "+"]);
@@ -260,7 +262,7 @@ test("panel: repositories on different branches", async () => {
     repo("api", { ahead: 1 }), repo("web", { ahead: 1 }), repo("docs", { branch: "release", ahead: 1 }), repo("site"),
   ]));
   // One with nothing on its branch yet shows its base.
-  assert.deepEqual(tables(host)[0].slice(1).map((r) => r[0]), ["apiopenclaw/test", "webopenclaw/test", "docsrelease", "sitemain"]);
+  assert.deepEqual(tables(host)[0].slice(1).map((r) => r[1]), ["openclaw/test", "openclaw/test", "release", "at main"]);
   view.dispose();
 });
 
@@ -310,8 +312,8 @@ test("next actions: run the rechecked step and hand judgment to the conversation
     calls.length = 0;
     action().onclick({ preventDefault() {}, stopPropagation() {} });
     await settle();
-    assert.deepEqual(calls.map((c) => c.actionId ?? c.method), ["next", "sessions.send"]);
-    assert.match(calls[1].message, /^\/skill wtc-catch-up api:/);
+    assert.deepEqual(calls.map((c) => c.actionId ?? c.method), ["next"]);
+    assert.match(host.textContent, /did not execute this deterministic catch-up/);
     view.dispose();
   }
 });
@@ -377,10 +379,10 @@ test("composer: the card for a busy collection", async () => {
   const [repos, services] = tables(card);
   // The browser groups related facts in stable places, with the branch below its repository.
   assert.deepEqual(repos, [
-    ["Repository", "Changes", "Pull request", "Next"],
-    ["apiopenclaw/test", "↑ 2↓ 3", "#7✗ checks✗ conflict○ review", ""],
-    ["webopenclaw/test", "± 1↑", "", "Commit changes"],
-    ["hooksopenclaw/test", "↑ 1", "", ""],
+    ["Repository", "Branch", "Changes", "Pull request", "Next"],
+    ["api", "openclaw/test", "↑ 2↓ 3", "#7✗✗○", ""],
+    ["web", "openclaw/test", "± 1↑", "", "Commit changes"],
+    ["hooks", "openclaw/test", "↑ 1", "", ""],
   ]);
   // A service and its tunnel are one row; the tunnel has its column.
   assert.deepEqual(services.map((r) => r.slice(1)), [
@@ -898,14 +900,14 @@ test("composer: collapsed, the same facts summed", async () => {
   const { host, view } = await mount("composer", busy);
   const card = [...host.all()].find((n) => n.className === "wtc-collection-card");
   const summary = card.children.find((n) => n.tagName === "SUMMARY");
-  assert.equal(summary.children[1].textContent, "±1↑ 2↓ 3PR1 ✗svc▶1/21 next action");
+  assert.equal([...summary.all()].find(n => n.className === "wtc-summary-facts").textContent, "±1↑ 2↓ 3PR1 ✗svc▶1/2");
   // ↑ pushes every repository, ↓ catches every one up.
   assert.ok(titled(summary, "Push api, web, each to its pull request or a new draft one"));
   assert.ok([...summary.all()].some((n) => n.tagName === "BUTTON" && /^Catch up api \(3\)/.test(n.title)));
   // Open, the tables have them and the summary does not repeat them.
   card.open = true;
   for (const fn of card.listeners.toggle) fn();
-  assert.equal(summary.children[1].textContent, "");
+  assert.equal([...summary.all()].find(n => n.className === "wtc-summary-facts").textContent, "");
   view.dispose();
 });
 
@@ -932,9 +934,11 @@ test("completed rounds leave the repository row and remain in the PR list", asyn
   for (const kind of ["composer", "panel"]) {
     const { host, view } = await mount(kind, collection([current]));
     const [repos, prs] = tables(host);
-    assert.equal(repos[1][0], "siteat main");
-    assert.equal(repos[1][2], "");
-    assert.deepEqual(prs[1].slice(0, 3), ["#2", "site", "merged"]);
+    assert.equal(repos[1][0], "site");
+    assert.equal(repos[1][1], "at main");
+    assert.equal(repos[1][3], "1 archived PR");
+    if (kind === "panel") assert.deepEqual(prs[1].slice(0, 3), ["#2", "site", "merged"]);
+    else assert.equal(prs, undefined, "the conversation card keeps history in the sidebar");
     assert.ok(!buttons(host).some((b) => b.startsWith("↑") || b.startsWith("↓")));
     view.dispose();
   }
@@ -955,7 +959,7 @@ test("narrow: repository facts fold together and next steps retain their positio
     for (const o of observers) o.fn([{ contentRect: { width: 360 } }]);
     const [repos, , services] = tables(host);
     assert.deepEqual(repos[0], ["Repository", "Next"]);
-    assert.deepEqual(repos[1], ["apiopenclaw/test↑ 2↓ 3#7✗ checks✗ conflict○ review", ""]);
+    assert.deepEqual(repos[1], ["apiopenclaw/test↑ 2↓ 3#7✗✗○", ""]);
     assert.deepEqual(services[1].slice(1), ["previewapi", "ready", ":42201", "calm-river✕", "+"]);
     view.dispose();
   } finally {
@@ -1172,9 +1176,9 @@ test("composer: a repository with nothing on its branch shows its base", async (
   card.open = true;
   for (const fn of card.listeners.toggle) fn();
   const codes = [...card.all()].filter((n) => n.tagName === "CODE");
-  const site = codes.find((n) => n.textContent === "main");
+  const site = codes.find((n) => n.textContent === "at main");
   assert.ok(site, "the untouched one shows its base");
-  assert.match(site.title, /nothing on openclaw\/test yet/);
+  assert.match(site.title, /Checked out on branch openclaw\/test/);
   assert.ok(codes.some((n) => n.textContent === "openclaw/test"), "the one with a commit shows its branch");
   view.dispose();
 });
@@ -1192,8 +1196,8 @@ test("composer: a sub-session has its own rows, merges into the task's checkout,
   // site once for the task; the worker's site is a sub-row under it, with the
   // same columns against the task: ± its files, ↑ into the task, no PR.
   assert.deepEqual(repos.slice(1), [
-    ["sitemain", "", "", ""],
-    ["↳docs✕openclaw/test--docs", "± 13↑ 2", "", ""],
+    ["site", "at main", "", "", ""],
+    ["↳docs✕", "openclaw/test--docs", "± 13↑ 2", "", ""],
   ]);
   const named = (re) => [...card.all()].find((n) => n.tagName === "BUTTON" && re.test(n.title));
 
@@ -1295,7 +1299,7 @@ test("composer: a sub-session with uncommitted files is reviewed by the conversa
   const dirty = await mount("composer", sub({ dirty: 3,
     uncommitted: [{ path: "a.md", state: "same" }, { path: "b.md", state: "differs" }, { path: "c.mjs", state: "only" }] }));
   let card = [...dirty.host.all()].find((n) => n.className === "wtc-collection-card");
-  assert.deepEqual(tables(card)[0][2], ["↳nav✕openclaw/13-docs-nav", "± 3↓ 2", "", ""]);
+  assert.deepEqual(tables(card)[0][2], ["↳nav✕", "openclaw/13-docs-nav", "± 3↓ 2", "", ""]);
   const buttons = () => [...card.all()].filter((n) => n.tagName === "BUTTON");
   // With uncommitted files there is no catch-up to click: it would refuse.
   assert.equal(buttons().find((n) => /^2 commits of the collection's site/.test(n.title)), undefined);
@@ -1323,13 +1327,13 @@ const withChoices = (name, kind = "fix-checks") => {
   return repo(name, { next: step, choices: { recommended: step.key, actions: [{ ...step, available: true }, { ...alternative, available: true }, { ...step, step: "review", key: `${name}:review`, available: false, blocked: "No review adapter" }] } });
 };
 const clickText = async (host, text) => {
-  const b = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === text);
+  const b = [...host.all()].find((n) => n.tagName === "BUTTON" && (n.textContent === text || text === "Catch up 2 repos →" && n.textContent === "Catch up 2" || text === "Choose steps…" && n.title === "Choose alternatives or combine steps across repositories" || text === "Cancel queued" && n.title === "Stop queued dispatches; active work continues" || text === "Allow retry" && n.title === "Check the conversation before retrying unchanged work"));
   assert.ok(b, text); b.onclick({ preventDefault() {}, stopPropagation() {} });
   for (let i = 0; i < 6; i++) await settle();
 };
 
 const chooseSteps = async (host) => {
-  if (buttons(host).includes("Choose steps…")) await clickText(host, "Choose steps…");
+  if (!buttons(host).includes("Done choosing")) await clickText(host, "Choose steps…");
 };
 
 test("selected mixed actions retain alternatives and combine author handoffs", async () => {
@@ -1353,10 +1357,13 @@ test("selected mixed actions retain alternatives and combine author handoffs", a
       assert.match(sends[0].message, /api needs fix-checks/);
       assert.match(sends[0].message, /Check web's current PR/);
       assert.doesNotMatch(sends[0].message, /web needs address-review/);
-      assert.match(host.textContent, /completion pending/);
+      assert.match(host.textContent, /Sent to agent|completion pending/);
       await chooseSteps(host); await clickText(host, "Select suggested");
       assert.ok(buttons(host).includes("Run selected"), "unchanged handoffs cannot be immediately resent");
-      await clickText(host, "Allow retry"); await chooseSteps(host); await clickText(host, "Select suggested");
+      await clickText(host, "Allow retry");
+      const rowActions = [...host.all()].filter(n => n.className === "wtc-next-step");
+      assert.ok(rowActions.some(n => [...n.all()].some(b => b.tagName === "BUTTON" && b.textContent === "Fix checks" && !b.disabled)), "retry restores the per-row action");
+      await chooseSteps(host); await clickText(host, "Select suggested");
       assert.ok(buttons(host).includes("Run selected (2)"), "explicit retry recovers an unchanged failed handoff");
     } finally { view.dispose(); nextResult = undefined; }
   }
@@ -1376,7 +1383,7 @@ test("batch stale targets fail independently and an unselected new repository st
       calls.length = 0;
       nextResult = ({ payload }) => payload.ownerSessionKey === api.sessionKey ? { ok: false, error: "Head changed" } : { ok: true, result: { performed: false, repo: web } };
       await clickText(host, "Run selected (2)");
-      assert.match(host.textContent, /Failed or stale: Head changed/);
+      assert.ok([...host.all()].some(n => n.title === "Failed or stale: Head changed"));
       const sends = calls.filter((c) => c.method === "sessions.send");
       assert.equal(sends.length, 1);
       assert.match(sends[0].message, /web needs/); assert.doesNotMatch(sends[0].message, /api needs|tools/);
@@ -1402,7 +1409,7 @@ test("cancelling a batch or switching conversations prevents queued handoffs", a
       for (let i=0;i<6;i++) await settle();
       assert.equal(calls.filter((c) => c.method === "sessions.send").length, 0);
       if (switchView) assert.doesNotMatch(host.textContent, /api needs|completion pending/);
-      else assert.match(host.textContent, /Cancelled before dispatch/);
+      else assert.match(host.textContent, /Cancelled|Stopped/);
     } finally { view.dispose(); nextResult = undefined; }
   }
 });
@@ -1488,7 +1495,7 @@ test("catch-up selections dispatch on one click without redundant single-choice 
    await chooseSteps(host); await clickText(host,"Select suggested");calls.length=0;await clickText(host,"Run selected (2)");
    const nextCalls=calls.filter(c=>c.actionId==="next");assert.equal(nextCalls.length,2);assert.equal(nextCalls[0].payload.approveCatchUp,true);
    assert.equal(buttons(host).some(b=>/^Confirm /.test(b)),false);
-   assert.match(host.textContent,/Completed/);
+   assert.match(host.textContent,/✓ Caught up/);
    assert.equal(calls.filter(c=>c.method==="sessions.send").length,0,"a person's catch-up click can run the mechanical action directly");
   }finally{view.dispose();nextResult=undefined;}
  }
@@ -1525,14 +1532,14 @@ test("compact recommendations run directly and keep selection controls on demand
    assert.equal([...host.all()].filter(n => n.className === "wtc-next-step").length, 2);
    nextResult = () => new Promise(resolve => { release = resolve; }); calls.length = 0;
    await clickText(host, "Catch up 2 repos →");
-   assert.match(host.textContent, /Rechecking…/); assert.match(host.textContent, /Queued/);
+   assert.match(host.textContent, /Catching up…/); assert.match(host.textContent, /Queued/);
    assert.equal(calls.filter(c => c.actionId === "next").length, 1);
    await clickText(host, "Cancel queued");
    release({ ok: true, result: { performed: true, repo: rows[0], code: 0 } });
    for (let i = 0; i < 6; i++) await settle();
    assert.equal(calls.filter(c => c.actionId === "next").length, 1);
    assert.equal(buttons(host).some(b => /^Confirm/.test(b)), false);
-   assert.match(host.textContent, /Cancelled before dispatch/);
+   assert.match(host.textContent, /Cancelled|Stopped/);
   } finally { view.dispose(); nextResult = undefined; }
  }
 });
@@ -1557,4 +1564,247 @@ test("compact mixed recommendations preserve publication preview and exact captu
    assert.ok(buttons(host).includes("Run chosen (2) →"), "closing the chooser retains the captured selection and excludes new repositories");
   } finally { view.dispose(); }
  }
+});
+
+
+test("repository folding has its own breakpoint on both surfaces", async () => {
+ const observers = [];
+ globalThis.ResizeObserver = class { constructor(fn) { this.fn = fn; observers.push(this); } observe() {} disconnect() {} };
+ try {
+  for (const kind of ["composer", "panel"]) {
+   const start = observers.length;
+   const { host, view } = await mount(kind, busy);
+   try {
+    for (const width of [560, 660, 360]) {
+     for (const o of observers.slice(start)) o.fn([{ contentRect: { width } }]);
+     const rows = tables(host), repos = rows[0], services = rows[kind === "panel" ? 2 : 1];
+     assert.deepEqual(repos[0], width < 640 ? ["Repository", "Next"] : ["Repository", "Branch", "Changes", "Pull request", "Next"]);
+     assert.equal(services[0].includes("Repo"), width >= 520, `${kind}/${width}: service layout follows its own breakpoint`);
+    }
+   } finally { view.dispose(); }
+  }
+ } finally { delete globalThis.ResizeObserver; }
+});
+
+test("running compact batch controls show disabled state while cancellation stays available", async () => {
+ for (const kind of ["composer", "panel"]) {
+  const api = withChoices("api");
+  const local = ["docs", "tools"].map(name => {
+   const next = { step: "catch-up", by: "wtc", command: ["wtc", "catch-up"], key: `${name}:catchup:h1`, reason: "Behind main" };
+   return repo(name, { next, choices: { recommended: next.key, actions: [{ ...next, available: true }] } });
+  });
+  const { host, view } = await mount(kind, collection([api, ...local]));
+  let release;
+  try {
+   nextResult = { ok: true, result: { performed: false, repo: api } };
+   await clickText(host, "Fix checks");
+   await chooseSteps(host); await clickText(host, "Select suggested"); await clickText(host, "Done choosing");
+   nextResult = () => new Promise(resolve => { release = resolve; });
+   await clickText(host, "Run chosen (2) →");
+   const button = text => [...host.all()].find(n => n.tagName === "BUTTON" && (n.textContent === text || text === "Allow retry" && n.title === "Check the conversation before retrying unchanged work" || text === "Cancel queued" && n.title === "Stop queued dispatches; active work continues"));
+   assert.equal([...host.all()].find(n => n.tagName === "BUTTON" && /0\/2$/.test(n.textContent)).disabled, true);
+   assert.equal(button("Allow retry"), undefined, "retry is hidden while a batch is running");
+   assert.equal(button("Cancel queued").disabled, false);
+   await clickText(host, "Cancel queued"); release({ ok: true, result: { performed: true, repo: local[0], code: 0 } });
+   for (let i = 0; i < 6; i++) await settle();
+  } finally { view.dispose(); nextResult = undefined; }
+ }
+});
+
+test("collapsed card exposes the top action without expanding for local work", async () => {
+ const rows = ["api", "docs"].map(name => {
+  const next = { step: "catch-up", by: "wtc", command: ["wtc", "catch-up"], key: `${name}:catchup:h1`, reason: "Behind main" };
+  return repo(name, { next, choices: { recommended: next.key, actions: [{ ...next, available: true }] } });
+ });
+ const { host, view } = await mount("composer", collection(rows));
+ let release;
+ try {
+  const card = [...host.all()].find(n => n.className === "wtc-collection-card");
+  card.open = false; for (const fn of card.listeners.toggle) fn();
+  const summary = card.children.find(n => n.tagName === "SUMMARY");
+  assert.equal([...summary.all()].filter(n => n.className === "wtc-action-toolbar").length, 1);
+  assert.equal([...host.all()].filter(n => n.className === "wtc-action-toolbar").length, 1, "the controls are not repeated below the table");
+  nextResult = () => new Promise(resolve => { release = resolve; }); calls.length = 0;
+  await clickText(summary, "Catch up 2");
+  assert.equal(card.open, false, "local execution keeps the one-line card collapsed");
+  assert.equal(calls.filter(c => c.actionId === "next").length, 1);
+  await clickText(summary, "Cancel queued");
+  release({ ok: true, result: { performed: true, repo: rows[0], code: 0 } });
+  for (let i = 0; i < 6; i++) await settle();
+  assert.equal(card.open, false);
+  await clickText(summary, "Choose steps…");
+  assert.equal(card.open, true, "opening the chooser reveals its controls");
+ } finally { view.dispose(); nextResult = undefined; }
+});
+
+test("collapsed PR update uses the existing personal preparation and confirmation", async () => {
+ const next = { step: "push", by: "wtc", approve: "person", gateway: "github_publish", key: "api:push:h1", reason: "Send local commits to the PR" };
+ const r = repo("api", { ahead: 1, unpublished: 1, pullRequest: { number: 7, state: "open", url: "https://github.com/octo/api/pull/7" }, next, choices: { recommended: next.key, actions: [{ ...next, available: true }] } });
+ personal = { state: "connected", account: { login: "demo" }, generation: "g1" };
+ const { host, view } = await mount("composer", collection([r]));
+ try {
+  const card = [...host.all()].find(n => n.className === "wtc-collection-card"); card.open = false;
+  for (const fn of card.listeners.toggle) fn();
+  const toolbar = () => [...card.all()].find(n => n.className === "wtc-action-toolbar");
+  nextResult = { ok: true, result: { performed: false, repo: r } }; calls.length = 0;
+  await clickText(toolbar(), "Update PR");
+  assert.equal(card.open, false);
+  assert.equal(calls.filter(c => c.method === "sessions.github.publish").length, 1);
+  assert.equal(calls.filter(c => c.method === "sessions.github.confirm").length, 0);
+  await clickText(toolbar(), "confirm ↑ 1");
+  assert.equal(calls.filter(c => c.method === "sessions.github.confirm").length, 1);
+ } finally { view.dispose(); nextResult = undefined; personal = null; }
+});
+
+
+test("PR hints distinguish current, other active and completed PRs and open sidebar history", async () => {
+ const pr = (number, state) => ({ number, state, title: `Change ${number}`, url: `https://github.com/octo/api/pull/${number}` });
+ const current = pr(7, "open");
+ const r = repo("api", { pullRequest: current, pullRequests: [current, pr(8, "open"), pr(2, "merged"), pr(2, "merged"), pr(3, "closed"), pr(4, "merged")] });
+ const { host, view } = await mount("composer", collection([r]));
+ try {
+  assert.equal(tables(host).length, 1, "no second PR list occupies the conversation");
+  assert.equal(tables(host)[0][1][3], "#7#83 archived PRs");
+  const active = [...host.all()].find(n => n.tagName === "A" && n.textContent === "#8");
+  assert.equal(active.href, "https://github.com/octo/api/pull/8");
+  assert.match(active.style.cssText, /--muted/);
+  const before = openedPanels.length;
+  const history = [...host.all()].find(n => n.tagName === "BUTTON" && n.textContent === "3 archived PRs" && /for api/.test(n.title));
+  history.onclick({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(openedPanels.length, before + 1);
+  assert.equal(openedPanels.at(-1)[0], "collection");
+  assert.equal(openedPanels.at(-1)[1].focus, "pull-requests");
+  const { host: panel, view: sidebar, context } = await mount("panel", collection([r]));
+  try {
+   assert.notEqual([...panel.all()].find(n => n.className === "wtc-pr-history").scrolled, true);
+   sidebar.update({ ...context, props: { ...context.props, focus: "pull-requests" } });
+   assert.equal([...panel.all()].find(n => n.className === "wtc-pr-history").scrolled, true);
+   assert.equal(tables(panel)[1].length, 6, "sidebar retains all five distinct PRs");
+  } finally { sidebar.dispose(); }
+ } finally { view.dispose(); }
+});
+
+
+test("a fetched catch-up conflict hands only the fresh resolution step to its named skill", async () => {
+ for (const kind of ["composer", "panel"]) {
+  const key = `agent:main:conflict:${++sessions}`;
+  const next = { step: "catch-up", by: "wtc", command: ["wtc", "catch-up"], key: "api:catchup:h1", reason: "Merges cleanly" };
+  const r = repo("api", { next, choices: { recommended: next.key, actions: [{ ...next, available: true }] } });
+  const merge = { step: "merge", by: "agent", skill: "wtc-catch-up", key: "api:merge:h2", reason: "Merge conflicts in README.md" };
+  const fresh = repo("api", { next: merge, choices: { recommended: merge.key, actions: [{ ...merge, available: true }] } });
+  const snapshot = (repos) => ({ ...collection(repos), collection: { ...collection(repos).collection, sessionKey: key } });
+  const { host, view } = await mount(kind, snapshot([r]), undefined, key);
+  try {
+   await chooseSteps(host); await clickText(host, "Select suggested"); calls.length = 0;
+   nextResult = ({ payload }) => {
+    if (payload.key === next.key) {
+     collections.set(key, snapshot([fresh]));
+     return { ok: true, result: { performed: true, repo: r, code: 1, message: "merging origin/main conflicts in: README.md. The merge was aborted" } };
+    }
+    return { ok: true, result: { performed: false, repo: fresh } };
+   };
+   await clickText(host, "Run selected (1)");
+   const sends = calls.filter(c => c.method === "sessions.send");
+   assert.equal(sends.length, 1); assert.match(sends[0].message, /^\/skill wtc-catch-up api: Merge conflicts/);
+   assert.doesNotMatch(sends[0].message, /Carry out only these selected single steps|Merges cleanly/);
+   assert.equal(calls.filter(c => c.actionId === "next")[0].payload.key, next.key);
+   assert.equal(calls.filter(c => c.actionId === "next")[1].payload.key, merge.key);
+  } finally { view.dispose(); nextResult = undefined; }
+ }
+});
+
+
+test("batch completion stays compact and its shared sidebar log retains the details", async () => {
+ const key = `agent:main:activity:${++sessions}`;
+ const rows = ["api", "docs"].map(name => {
+  const next = { step: "catch-up", by: "wtc", command: ["wtc", "catch-up"], key: `${name}:catchup:h1`, reason: "Behind main" };
+  return repo(name, { next, choices: { recommended: next.key, actions: [{ ...next, available: true }] } });
+ });
+ const { host, view } = await mount("composer", collection(rows), undefined, key);
+ const releases = [];
+ try {
+  nextResult = () => new Promise(resolve => releases.push(resolve));
+  await chooseSteps(host); await clickText(host, "Select suggested"); await clickText(host, "Run selected (2)");
+  releases[0]({ ok: true, result: { performed: true, repo: rows[0], code: 0 } });
+  for(let i=0;i<6;i++) await settle();
+  assert.equal(releases.length, 2);
+  assert.match(host.textContent, /✓ Caught up/); assert.match(host.textContent, /Catching up…/);
+  assert.doesNotMatch(host.textContent, /Working…Completed/);
+  const fresh = collection([repo("api", { branch: null }), repo("docs", { branch: null })]);
+  collections.set(key, fresh);
+  releases[1]({ ok: true, result: { performed: true, repo: rows[1], code: 0 } });
+  for(let i=0;i<6;i++) await settle();
+  assert.ok(buttons(host).includes("✓ Caught up 2"));
+  assert.equal(buttons(host).some(text => /^Results/.test(text) || text === "Done choosing"), false);
+  assert.doesNotMatch(host.textContent, /api: Completed|docs: Completed/);
+  await clickText(host, "✓ Caught up 2");
+  assert.equal(openedPanels.at(-1)[1].focus, "activity");
+  const sidebar = await mount("panel", fresh, undefined, key, { focus: "activity" });
+  try {
+   const log = [...sidebar.host.all()].find(n => n.className === "wtc-activity-log");
+   assert.ok(log?.scrolled); assert.match(log.textContent, /api: Catch up/); assert.match(log.textContent, /docs: Catch up/);
+   assert.equal((log.textContent.match(/Completed/g) ?? []).length, 2);
+  } finally { sidebar.view.dispose(); }
+  const unrelated = await mount("panel", collection([repo("other")]));
+  try { assert.equal([...unrelated.host.all()].some(n => n.className === "wtc-activity-log"), false); }
+  finally { unrelated.view.dispose(); }
+ } finally { view.dispose(); nextResult = undefined; }
+});
+
+
+test("a fetched conflict never hands off a changed or unreadable resolution step", async () => {
+ for (const failure of ["changed", "unreadable"]) {
+  const key = `agent:main:conflict-refusal:${++sessions}`;
+  const next = { step: "catch-up", by: "wtc", command: ["wtc", "catch-up"], key: "api:catchup:h1", reason: "Merges cleanly" };
+  const r = repo("api", { next, choices: { recommended: next.key, actions: [{ ...next, available: true }] } });
+  const { host, view } = await mount("composer", collection([r]), undefined, key);
+  try {
+   await chooseSteps(host); await clickText(host, "Select suggested"); calls.length = 0;
+   nextResult = () => {
+    collections.set(key, failure === "unreadable" ? new Error("Collection unavailable") : collection([repo("api")]));
+    return { ok: true, result: { performed: true, repo: r, code: 1, message: "merging origin/main conflicts in: README.md. The merge was aborted" } };
+   };
+   await clickText(host, "Run selected (1)");
+   assert.equal(calls.filter(c => c.method === "sessions.send").length, 0);
+   await chooseSteps(host);
+   assert.match(host.textContent, failure === "unreadable" ? /Cannot recheck conflict resolution: Collection unavailable/ : /Catch-up stopped; its current resolution step changed/);
+  } finally { view.dispose(); nextResult = undefined; }
+ }
+});
+
+
+test("a finished mixed batch restores PR navigation instead of claiming it is running", async () => {
+ for (const kind of ["composer", "panel"]) {
+  const catchup = { step: "catch-up", by: "wtc", command: ["wtc", "catch-up"], key: "api:catchup:h1", reason: "Behind main" };
+  const navigate = { step: "merge-pr", by: "person", approve: "person", key: "web:merge:h1", reason: "Review merge requirements" };
+  const rows = [["api", catchup], ["web", navigate]].map(([name, next]) => repo(name, { next, choices: { recommended: next.key, actions: [{ ...next, available: true }] }, ...(name === "web" ? { pullRequest: { number: 7, state: "open", url: "https://github.com/octo/web/pull/7" } } : {}) }));
+  const { host, view } = await mount(kind, collection(rows));
+  try {
+   nextResult = ({ payload }) => {
+    const r = rows.find(r => r.sessionKey === payload.ownerSessionKey);
+    return { ok: true, result: { performed: r === rows[0], repo: r, code: 0 } };
+   };
+   calls.length = 0;
+   await clickText(host, "Do next (2) →");
+   await clickText(host, "Confirm 2 actions");
+   assert.equal(calls.filter(c => c.actionId === "next").length, 2, "the test must dispatch the batch rather than stop at its preview");
+   const action = [...host.all()].find(n => n.className === "wtc-next-step" && [...n.all()].some(a => a.tagName === "A" && a.href === rows[1].pullRequest.url));
+   assert.ok(action, "the repository retains its PR navigation action");
+   assert.match(action.textContent, /Open pull request/);
+   assert.doesNotMatch(host.textContent, /Running…|Catching up…/);
+   assert.equal(calls.filter(c => c.method === "sessions.send").length, 0);
+  } finally { view.dispose(); nextResult = undefined; }
+ }
+});
+
+
+test("baseline labels agree while hover text identifies actual branch versus detached HEAD", async () => {
+ const { host, view } = await mount("composer", collection([
+  repo("untouched", { branch: "openclaw/task", ahead: 0 }), repo("detached", { branch: null }), repo("working", { branch: "main", dirty: 1 }),
+ ]));
+ try {
+  assert.deepEqual(tables(host)[0].slice(1).map(r => r[1]), ["at main", "at main", "main"]);
+  assert.ok([...host.all()].some(n => n.title === "Checked out on branch openclaw/task; no task commits ahead of main"));
+  assert.ok([...host.all()].some(n => n.title === "Detached HEAD at main; no branch is checked out"));
+ } finally { view.dispose(); }
 });

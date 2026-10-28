@@ -206,7 +206,7 @@ async function catchUpRepo(host, agentId, r, say, ask, request) {
     say(`${name}: ${conflicts.join(", ")} changed on both sides; the conversation was asked to merge and resolve them.`);
     return;
   }
-  say(`${name}: ${out.json?.summary ?? (wtcMessage(out.message) || "exit " + out.code)}`, out.code !== 0);
+  say(`${name}: ${out.json?.summary ?? (wtcMessage(out.message) || "exit " + out.code)}${out.code === 0 && r.pullRequest?.state === "open" ? ". Local catch-up complete; use Update PR / Push to send the updated branch to its PR." : ""}`, out.code !== 0);
 }
 
 // One load of a session's collection, shared by the panel and the card above
@@ -544,18 +544,23 @@ function newTunnel(g, svc, data = {}, { compact = false } = {}) {
 // version is what the collection reports: the plugin's and the gateway's wtc.
 const versionText = (v) => (v?.plugin || v?.wtc ? `plugin ${v.plugin ?? "?"}, wtc ${v.wtc ?? "?"}` : "");
 // Use the word's baseline for the link; the centered logo must not supply it.
-const brand = (size, version) => css(el("span", {},
+const brand = (size, version, compact = false) => css(el("span", {},
   css(el("a", { href: HOME, target: "_blank", rel: "noopener noreferrer", ariaLabel: "taba home", title: `taba — Make room for the whole task. (opens taba.sh)${version ? `\n${versionText(version)}` : ""}` },
     css(el("span", { textContent: "束", lang: "ja", ariaHidden: "true" }), "display:inline-grid;place-items:center;align-self:center;flex:none;width:1.3em;height:1.3em;border-radius:.35em;background:#234e42;color:#f7f7ed;font-family:'Hiragino Kaku Gothic ProN','Yu Gothic','Noto Sans CJK JP',sans-serif;font-size:1.15em;font-weight:500;letter-spacing:0;line-height:1"),
     " ", el("span", { textContent: "taba" })),
     "display:inline-flex;align-items:baseline;gap:.3em;color:var(--text-strong, inherit);text-decoration:none;font-weight:700"),
-  el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
+  compact ? null : el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
 
-// Browser surfaces share the CLI's facts and actions. Repository, changes, PR
-// and next step keep fixed positions; narrow views fold facts beneath the name.
-// Actions stay on the relevant fact or in the row's next-step slot.
+// Browser surfaces share the CLI's facts and actions. Repository, branch,
+// changes, PR and next step keep fixed columns aligned with the header action;
+// narrow views fold facts beneath the name.
+// Actions stay on the relevant fact, in the row's next-step slot, or in the
+// header toolbar, which remains available when the card is collapsed.
 // v supplies the view lifecycle, conversation and gateway operations.
 const NARROW_PX = 520;
+// Single-line repository groups need more width; keep their fold separate
+// from PR/service tables so denser repository rows do not change those layouts.
+const REPO_NARROW_PX = 640;
 const pullRequestRows = (repos) => {
   const rows = new Map();
   for (const r of repos) for (const pr of [...(r.pullRequests ?? []), ...(r.pullRequest ? [r.pullRequest] : [])]) {
@@ -563,6 +568,25 @@ const pullRequestRows = (repos) => {
   }
   return [...rows.values()];
 };
+// Activity is shared by views of one collection for this browser session.
+// It is UI feedback, not an executable plan or a durable completion receipt.
+const activityStore = new Map();
+function recordActivity(collection, id, item) {
+  const records = activityStore.get(collection) ?? new Map();
+  records.set(id, { ...records.get(id), ...item, at: Date.now() });
+  while (records.size > 100) records.delete(records.keys().next().value);
+  activityStore.set(collection, records);
+  for (const [key, entry] of store) if (key === collection || entry.data?.collection?.sessionKey === collection) for (const notify of entry.listeners) notify(entry);
+}
+const repositoryColumns = (narrow) => narrow
+  ? [{ head: "Repository", width: "minmax(0,1fr)" }, { head: "Next", width: "100px" }]
+  : [{ head: "Repository", width: "minmax(120px,1.7fr)" }, { head: "Branch", width: "minmax(64px,1fr)" }, { head: "Changes", width: "120px" }, { head: "Pull request", width: "minmax(90px,220px)" }, { head: "Next", width: "176px" }];
+const repositoryTemplate = (narrow) => repositoryColumns(narrow).map((c) => c.width).join(" ");
+const actionFeedback = () => el("style", { textContent: `
+.wtc-action-control:not(:disabled):hover { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 30%,transparent); --wtc-control-border:var(--accent,#75c8c1); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:inset 0 0 0 1px var(--accent,#75c8c1); }
+.wtc-action-control:not(:disabled):active { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 45%,transparent); }
+.wtc-action-control:focus-visible { outline:2px solid var(--accent,#75c8c1); outline-offset:-2px; }
+` });
 function collectionTables(v) {
   // Repositories being pushed, and being caught up.
   const busy = new Set();
@@ -609,7 +633,7 @@ function collectionTables(v) {
   const nextRoute = (s) => s.by === "person" && s.step === "merge-pr" ? "pr"
     : s.by === "wtc" && s.approve === "person" && s.gateway === "github_publish" ? "publish"
     : s.by === "agent" && (!s.approve || s.approve === "agent") && s.skill ? "agent"
-    : s.by === "wtc" && s.approve === "agent" && s.command?.[0] === "wtc" && s.command?.[1] === "catch-up" ? "agent"
+    : s.by === "wtc" && s.approve === "agent" && s.command?.[0] === "wtc" && s.command?.[1] === "catch-up" ? "run"
     : s.by === "wtc" && !s.approve && JSON.stringify(s.command) === JSON.stringify(["wtc", "catch-up"]) ? "run" : null;
   const nextPayload = (r, step) => ({ ownerSessionKey: r.sessionKey, key: step.key,
     ...(step.step === "catch-up" && step.by === "wtc" && step.approve === "agent" ? { approveCatchUp: true } : {}) });
@@ -619,7 +643,10 @@ function collectionTables(v) {
     const sent = dispatched;
     const conversationKey = v.key();
     const say = (...args) => { if (active(conversationKey)) v.say(...args); };
+    const logKey = v.collectionKey?.() ?? conversationKey, logId = uuid();
+    const log = (status) => recordActivity(logKey, logId, { repo: nameOf(r), action: r.next.step, status });
     acting.add(r.sessionKey);
+    log("Rechecking…");
     v.rerender();
     try {
       const out = await call(v.host, "next", conversationKey, v.agent(), nextPayload(r, r.next));
@@ -627,23 +654,25 @@ function collectionTables(v) {
       const fresh = out.repo;
       if (out.performed) {
         await catchUpRepo(v.host, v.agent(), fresh, say, (input) => v.key() === conversationKey ? sendToAuthor(conversationKey, "wtc-catch-up", input) : undefined, async () => out);
+        log(out.code ? conflictsOf(out.message).length ? "Sent to conversation; completion pending" : "Failed: " + (out.message ?? out.code) : "Completed");
       } else if (fresh?.next) {
         const step = fresh.next;
         switch (nextRoute(step)) {
-          case "publish": await publish(fresh, conversationKey); break;
+          case "publish": await publish(fresh, conversationKey); log("Publication response received; inspect its confirmation or error"); break;
+          case "run": throw Error("The gateway did not execute this deterministic catch-up. Refresh or update its wtc plugin; no agent prompt was sent.");
           case "agent":
             await sendToAuthor(conversationKey, step.skill ?? "wtc-catch-up", `${nameOf(fresh)}: ${step.reason}. Work on this repository only; recheck its state before acting. Carry out only this selected step; report follow-up actions for separate selection.`);
-            sent.add(handoffKey(fresh, step));
+            sent.add(handoffKey(fresh, step)); log("Sent to conversation; completion pending");
             say(`${nameOf(fresh)}: asked the conversation to ${nextLabel(step).toLowerCase()}.`);
             break;
-          default: say("The next step changed; refresh the collection before acting.", true);
+          default: throw Error("The next step changed; refresh the collection before acting.");
         }
-      }
-    } catch (err) { say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
+      } else throw Error("The next step changed; refresh the collection before acting.");
+    } catch (err) { log("Failed: " + String(err?.message ?? err)); say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true); }
     finally { acting.delete(r.sessionKey); if(active(conversationKey))await v.refresh(); }
   }
   let choosing = false;
-  let selection = new Map(), batchResults = new Map(), batchLabels = new Map(), batchPreview = null, dispatched = new Set();
+  let selection = new Map(), batchResults = new Map(), batchLabels = new Map(), batchKeys = new Map(), batchKinds = new Map(), batchPreview = null, dispatched = new Set();
   let batchKey = null, batchRunning = false, batchCancelled = false;
   const handoffKey = (r, step) => `${r.sessionKey}:${r.choices ? step.key.split(":").at(-1) : step.key}`;
   const choicesOf = (r) => r.choices?.actions ?? (r.next ? [{ ...r.next, available: true }] : []);
@@ -652,71 +681,101 @@ function collectionTables(v) {
     const conversation = v.key();
     const sent = dispatched;
     const reservations = new Set();
-    const results = new Map(targets.map(({ repo }) => [repo.sessionKey, "Queued"])); batchResults = results;
+    const results = new Map(); batchResults = results;
     batchLabels = new Map(targets.map(({ repo }) => [repo.sessionKey, nameOf(repo)]));
+    batchKeys = new Map(targets.map(({ repo, step }) => [repo.sessionKey, step.key]));
+    batchKinds = new Map(targets.map(({ repo, step }) => [repo.sessionKey, step.step]));
+    const runId = uuid(), logKey = v.collectionKey?.() ?? conversation;
+    const setResult = (key, status) => {
+      results.set(key, status);
+      recordActivity(logKey, `${runId}:${key}`, { repo: batchLabels.get(key), action: batchKinds.get(key), status });
+    };
     batchRunning = true; batchCancelled = false; batchPreview = null;
     const update = () => { if (active(conversation)) v.rerender(); };
-    const agents = [];
+    const agents = [], conflicted = [];
+    for (const { repo } of targets) setResult(repo.sessionKey, "Queued");
     try {
       for (const { repo: r, step } of targets) {
-        if (batchCancelled || !active(conversation)) { results.set(r.sessionKey, "Cancelled before dispatch"); continue; }
-        if (reserved(r)) { results.set(r.sessionKey, "Waiting: an individual action is already in flight"); continue; }
+        if (batchCancelled || !active(conversation)) { setResult(r.sessionKey, "Cancelled before dispatch"); continue; }
+        if (reserved(r)) { setResult(r.sessionKey, "Waiting: an individual action is already in flight"); continue; }
         acting.add(r.sessionKey); reservations.add(r.sessionKey);
-        if (sent.has(handoffKey(r, step))) { results.set(r.sessionKey, "Already sent to the conversation; completion pending"); continue; }
-        results.set(r.sessionKey, "Rechecking…"); update();
+        if (sent.has(handoffKey(r, step))) { setResult(r.sessionKey, "Already sent to the conversation; completion pending"); continue; }
+        setResult(r.sessionKey, "Rechecking…"); update();
         try {
           const out = await call(v.host, "next", conversation, v.agent(), nextPayload(r, step));
           if (!active(conversation)) break;
           const fresh = out.repo;
-          if (out.performed) results.set(r.sessionKey, out.code ? "Failed: " + (out.message ?? out.code) : "Completed");
+          if (out.performed) {
+            const files = out.code ? conflictsOf(out.message) : [];
+            if (files.length) { conflicted.push(r); setResult(r.sessionKey, "Local merge aborted on conflicts; checking resolution step…"); }
+            else setResult(r.sessionKey, out.code ? "Failed: " + (out.message ?? out.code) : "Completed");
+          }
           else {
-            if (batchCancelled) { results.set(r.sessionKey, "Cancelled before dispatch"); continue; }
+            if (batchCancelled) { setResult(r.sessionKey, "Cancelled before dispatch"); continue; }
             const selected = fresh?.next;
             if (!selected || selected.key !== step.key) throw Error("The selection changed; choose again");
             switch (nextRoute(selected)) {
-              case "agent": agents.push({ repo: fresh, step: selected }); results.set(r.sessionKey, "Waiting for conversation handoff"); break;
+              case "agent": agents.push({ repo: fresh, step: selected }); setResult(r.sessionKey, "Waiting for conversation handoff"); break;
               case "publish":
                 // A batch never consumes an earlier per-repository confirmation.
                 // Each gateway confirmation still shows its exact commits/account.
                 if (!confirming.has(r.sessionKey)) {
                   const outcome = await publish(fresh, conversation, () => !batchCancelled);
-                  if (outcome?.cancelled) { results.set(r.sessionKey, "Cancelled before publication dispatch"); break; }
+                  if (outcome?.cancelled) { setResult(r.sessionKey, "Cancelled before publication dispatch"); break; }
                 }
-                results.set(r.sessionKey, "Use the repository's publication result or confirmation above"); break;
-              case "pr": results.set(r.sessionKey, "Open the PR link; inspect its current requirements"); break;
+                setResult(r.sessionKey, "Use the repository's publication result or confirmation above"); break;
+              case "run": throw Error("The gateway did not execute this deterministic catch-up. Refresh or update its wtc plugin; no agent prompt was sent.");
+              case "pr": setResult(r.sessionKey, "Open the PR link; inspect its current requirements"); break;
               default: throw Error("This action is unavailable on this host");
             }
           }
-        } catch (err) { results.set(r.sessionKey, "Failed or stale: " + String(err?.message ?? err)); }
+        } catch (err) { setResult(r.sessionKey, "Failed or stale: " + String(err?.message ?? err)); }
         update();
       }
+      // Fetching can reveal conflicts after an initially clean prediction.
+      // Re-read just once, and hand off only a current resolution step for the
+      // same selected repository; never turn a fetch failure into an agent task.
+      if (conflicted.length && !batchCancelled && active(conversation)) {
+        try {
+          const current = await call(v.host, "collection", conversation, v.agent());
+          if (active(conversation) && !batchCancelled) for (const r of conflicted) {
+            const fresh = current.repos?.find((candidate) => candidate.sessionKey === r.sessionKey);
+            const step = fresh?.next;
+            if (!fresh?.error && step?.by === "agent" && step.skill === "wtc-catch-up" && ["merge", "resolve"].includes(step.step)) agents.push({ repo: fresh, step });
+            else setResult(r.sessionKey, "Catch-up stopped; its current resolution step changed. Refresh before continuing.");
+          } else for (const r of conflicted) setResult(r.sessionKey, "Cancelled before conflict handoff");
+        } catch (err) { for (const r of conflicted) setResult(r.sessionKey, "Cannot recheck conflict resolution: " + String(err?.message ?? err)); }
+      } else for (const r of conflicted) setResult(r.sessionKey, "Cancelled before conflict handoff");
       // One author conversation receives one prompt, even when several selected
       // targets need judgment. Acceptance records dispatch, never completion.
       const ready = [];
       for (const target of agents) {
         const { repo: r, step } = target;
-        if (batchCancelled || !active(conversation)) { results.set(r.sessionKey, "Cancelled before handoff"); continue; }
+        if (batchCancelled || !active(conversation)) { setResult(r.sessionKey, "Cancelled before handoff"); continue; }
         try {
           const fresh = await call(v.host, "next", conversation, v.agent(), nextPayload(r, step));
           if (!fresh.repo?.next || fresh.repo.next.key !== step.key) throw Error("The selection changed");
           ready.push(target);
-        } catch (err) { results.set(r.sessionKey, "Failed or stale: " + String(err?.message ?? err)); }
+        } catch (err) { setResult(r.sessionKey, "Failed or stale: " + String(err?.message ?? err)); }
       }
       if (ready.length && !batchCancelled && active(conversation)) {
         try {
-          await sendToAuthor(conversation, "wtc", "Carry out only these selected single steps, sequentially. Recheck each repository's state, branch policy and ownership before acting. Preserve intended work. Do not broaden the selection, publish, merge, or automatically continue to another step. Publication is a separate personal confirmation.\n" + ready.map(({ repo, step }) => `${nameOf(repo)}: use the ${step.skill ?? "wtc-catch-up"} skill. ${step.reason}`).join("\n"));
-          for (const { repo, step } of ready) { sent.add(handoffKey(repo, step)); results.set(repo.sessionKey, "Sent to conversation; completion pending"); }
-        } catch (err) { for (const { repo } of ready) results.set(repo.sessionKey, "Handoff failed: " + String(err?.message ?? err)); }
-      } else for (const { repo } of ready) results.set(repo.sessionKey, "Cancelled before handoff");
+          const skills = [...new Set(ready.map(({ step }) => step.skill ?? "wtc-catch-up"))];
+          const skill = skills.length === 1 ? skills[0] : "wtc";
+          const tasks = ready.map(({ repo, step }) => `${nameOf(repo)}: ${skills.length > 1 ? `use ${step.skill ?? "wtc-catch-up"}. ` : ""}${step.reason}`).join("\n");
+          await sendToAuthor(conversation, skill, tasks + "\nOnly these selected steps; report follow-ups separately. Publication retains its personal confirmation.");
+          for (const { repo, step } of ready) { sent.add(handoffKey(repo, step)); setResult(repo.sessionKey, "Sent to conversation; completion pending"); }
+        } catch (err) { for (const { repo } of ready) setResult(repo.sessionKey, "Handoff failed: " + String(err?.message ?? err)); }
+      } else for (const { repo } of ready) setResult(repo.sessionKey, "Cancelled before handoff");
     } finally {
       for (const key of reservations) acting.delete(key);
-      batchRunning = false;
+      batchRunning = false; choosing = false; batchPreview = null;
       if (v.alive?.() !== false) v.rerender();
       if (active(conversation)) { selection.clear(); await v.refresh(); update(); }
     }
   }
   function syncConversation() {
-    if (batchKey !== v.key()) { batchKey = v.key(); choosing = false; selection = new Map(); batchResults = new Map(); batchLabels = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true; }
+    if (batchKey !== v.key()) { batchKey = v.key(); choosing = false; selection = new Map(); batchResults = new Map(); batchLabels = new Map(); batchKeys = new Map(); batchKinds = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true; }
   }
   function suggestedTargets(repos) {
     return repos.filter((r) => actionable(r) && r.next && !reserved(r) && !dispatched.has(handoffKey(r, r.next)) && choicesOf(r).some((a) => a.available && a.key === r.next.key)).map((repo) => ({ repo, step: repo.next }));
@@ -724,32 +783,55 @@ function collectionTables(v) {
   function startTargets(targets) {
     if (batchRunning || !targets.length) return;
     if (targets.every(({ step }) => step.approve !== "person" && step.step !== "push")) void runSelected(targets);
-    else { choosing = true; selection = new Map(targets.map((t) => [t.repo.sessionKey, t])); batchPreview = targets; v.rerender(); }
+    else { choosing = true; selection = new Map(targets.map((t) => [t.repo.sessionKey, t])); batchPreview = targets; v.reveal?.(); v.rerender(); }
   }
+  const nextControlStyle = "display:inline-block;vertical-align:middle;min-height:20px;min-width:20px;max-width:100%;box-sizing:border-box;border:1px solid var(--wtc-control-border,var(--border-strong,rgba(128,128,128,.35)));border-radius:4px;background:var(--wtc-control-bg,rgba(128,128,128,.08));color:var(--wtc-control-text,var(--text,inherit));font:inherit;font-size:11px;line-height:16px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer";
+  const nextButton = (text, title, run, disabled = false) => {
+    const button = css(smallButton(text, title, run), nextControlStyle);
+    button.className = "wtc-action-control";
+    button.disabled = disabled;
+    if (disabled) { button.style.opacity = ".55"; button.style.cursor = "default"; }
+    return button;
+  };
   function nextCell(r) {
     if (!actionable(r)) return null;
-    if (!r.next && r.choices) return smallButton("Choose step…", "Inspect available actions and blocked reasons", () => { choosing = true; v.rerender(); });
+    if (!r.next && r.choices) return nextButton("Choose step…", "Inspect available actions and blocked reasons", () => { choosing = true; v.rerender(); });
     const step = r.next ?? { step: "commit", reason: "Review and commit intended changes locally" };
+    const phase = batchKeys.get(r.sessionKey) === step.key ? batchResults.get(r.sessionKey) : null;
+    // Informational results belong in the log; after dispatch they must not
+    // hide a PR link or a publication confirmation behind a running label.
+    if (phase && (batchRunning || phase === "Completed" || /^(Failed|Handoff failed|Cannot |Cancel)|pending|Sent/.test(phase))) {
+      const complete = phase === "Completed";
+      const failed = /^Failed|^Handoff failed|^Cannot /.test(phase);
+      const label = complete ? step.step === "catch-up" ? "✓ Caught up" : "✓ Done" : failed ? "⚠ Failed" : /Cancel/.test(phase) ? "Cancelled" : phase === "Queued" ? "Queued" : /pending|Sent/.test(phase) ? "Sent to agent" : step.step === "catch-up" ? "Catching up…" : "Running…";
+      return css(el("span", { textContent: label, title: phase, role: "status" }), `font-size:11px;white-space:nowrap;color:${failed ? TONE.failure : complete ? TONE.success : "var(--muted,#888)"}`);
+    }
     const pending = dispatched.has(handoffKey(r, step));
-    const result = batchResults.get(r.sessionKey);
     const running = reserved(r);
     const action = nextRoute(step) === "pr" && r.pullRequest?.url ? link(nextLabel(step), r.pullRequest.url)
-      : smallButton(pending ? "Sent to agent" : running ? "Working…" : nextLabel(step), step.reason, () => !r.next ? askCommit(r) : actNext(r));
-    action.style.cssText += ";font-size:12px;line-height:20px;color:var(--accent,inherit);padding:2px 0;text-align:left;white-space:normal";
+      : nextButton(pending ? "Sent to agent" : running ? "Working…" : nextLabel(step), step.reason, () => !r.next ? askCommit(r) : actNext(r));
+    // Opening the PR is a navigation link with the same visible affordance.
+    if (action.tagName === "A") {
+      action.style.cssText = nextControlStyle + ";text-decoration:none";
+      action.className = "wtc-action-control";
+    }
     if (action.tagName === "BUTTON") {
       action.disabled = pending || running || batchRunning || (!!r.next && !nextRoute(step));
       action.ariaLabel = `${nextLabel(step)}: ${step.reason}`;
       if (action.disabled) { action.style.color = "var(--muted,#888)"; action.style.cursor = "default"; }
     }
     return css(el("div", { className: "wtc-next-step" }, action,
-      choicesOf(r).length > 1 ? smallButton("⋯", `Choose another action for ${nameOf(r)}`, () => { choosing = !choosing; v.rerender(); }) : null,
-      result ? css(el("span", { textContent: result, role: "status" }), "flex-basis:100%;font-size:11px;color:var(--muted,#888);overflow-wrap:anywhere") : null), "display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0");
+      choicesOf(r).length > 1 ? nextButton("⋯", `Choose another action for ${nameOf(r)}`, () => { choosing = !choosing; v.rerender(); }) : null), "display:flex;align-items:center;gap:6px;min-width:0;max-width:100%;white-space:nowrap");
   }
-  function nextActions(repos) {
+  function actionRows(repos) {
     const rows = repos.filter(actionable);
     syncConversation();
     const currentKeys = new Set(rows.flatMap((r) => choicesOf(r).map((a) => handoffKey(r, a))));
     for (const key of dispatched) if (!currentKeys.has(key)) dispatched.delete(key);
+    return rows;
+  }
+  function nextActions(repos) {
+    const rows = actionRows(repos);
     if (!rows.length && !batchResults.size) return null;
     const control = (text, title, run, { primary = false, disabled = false } = {}) => {
       const button = smallButton(text, title, run);
@@ -757,18 +839,7 @@ function collectionTables(v) {
       button.style.cssText = `border:1px solid ${primary ? "transparent" : "var(--border-strong,rgba(128,128,128,.25))"};border-radius:7px;background:${primary ? "var(--accent,#75c8c1)" : "transparent"};color:${primary ? "var(--accent-foreground,#151a22)" : "var(--text,inherit)"};font:inherit;font-size:12px;font-weight:500;line-height:18px;padding:5px 9px;white-space:nowrap;cursor:${disabled ? "default" : "pointer"};opacity:${disabled ? ".45" : "1"}`;
       return button;
     };
-    const targets = selection.size ? [...selection.values()] : suggestedTargets(rows);
-    if (!choosing) {
-      const same = targets.length && targets.every(({ step }) => step.step === targets[0].step.step);
-      const label = selection.size ? `Run chosen (${targets.length}) →` : same ? `${nextLabel(targets[0].step)}${targets.length > 1 ? ` ${targets.length} repos` : ""} →` : `Do next (${targets.length}) →`;
-      return css(el("div", { className: "wtc-next-actions" },
-        (targets.length > 1 || selection.size) ? smallButton(label, targets.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)} — ${step.reason}`).join("\n"), () => startTargets(targets)) : null,
-        smallButton("Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.rerender(); }),
-        dispatched.size ? smallButton("Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }) : null,
-        batchRunning ? smallButton("Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); }) : null,
-        ...[...batchResults].filter(([key]) => !rows.some((r) => r.sessionKey === key)).map(([key, result]) => muted(`${batchLabels.get(key) ?? "Repository"}: ${result}`))),
-        "display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:11px;line-height:20px");
-    }
+    if (!choosing) return null;
     const controls = rows.some((r) => r.choices) ? css(el("div", {},
       control("Select suggested", "Select current recommendations without replacing chosen alternatives", () => {
         for (const r of rows) if (!selection.has(r.sessionKey) && r.next && !reserved(r) && !dispatched.has(handoffKey(r, r.next)) && choicesOf(r).some((a) => a.available && a.key === r.next.key)) selection.set(r.sessionKey, { repo: r, step: r.next });
@@ -783,7 +854,7 @@ function collectionTables(v) {
           else { batchPreview = targets; v.rerender(); }
         }
       }, { primary: true, disabled: batchRunning || !selection.size }),
-      dispatched.size ? control("Allow retry", "Check the conversation first; allow explicit reselection of unchanged handoffs", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }) : null,
+      dispatched.size ? control("Allow retry", "Check the conversation first; allow explicit reselection of unchanged handoffs", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } }) : null,
       batchRunning ? control("Cancel queued", "Stop remaining dispatches; active work is not undone", () => { batchCancelled = true; v.rerender(); }) : null,
       batchPreview ? control("Back", "Change the selection", () => { batchPreview = null; v.rerender(); }) : null), "display:flex;flex-wrap:wrap;gap:6px;align-items:center") : null;
     const header = css(el("div", {}, smallButton("Done choosing", "Close action selection", () => { choosing = false; batchPreview = null; v.rerender(); }), controls), "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap");
@@ -816,6 +887,61 @@ function collectionTables(v) {
         result ? css(el("div", { textContent: result, role: "status" }), "font-size:12px;line-height:1.5;margin-top:6px;color:var(--muted,#888)") : null), "min-width:0")), "display:grid;grid-template-columns:15px minmax(0,1fr);gap:10px;padding:10px 0;border-bottom:1px solid rgba(128,128,128,.12)");
     }), ...[...batchResults].filter(([key]) => !rows.some((r) => r.sessionKey === key)).map(([key, result]) => muted(`${batchLabels.get(key) ?? "Repository"}: ${result}`))), "display:grid;gap:0;padding:12px 0 2px;border-top:1px solid rgba(128,128,128,.12);margin-top:6px");
   }
+  const openActivity = () => v.host.ui.openPanel("collection", { sessionKey: v.key(), agentId: v.agent(), focus: "activity" });
+  function activityLog() {
+    const records = [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].sort((a, b) => b.at - a.at);
+    if (!records.length) return null;
+    return css(el("div", { className: "wtc-activity-log" }, el("strong", { textContent: "Action log" }), ...records.map((item) =>
+      css(el("div", {}, css(el("span", { textContent: `${item.repo}: ${nextLabel({ step: item.action ?? "action" })}` }), "font-weight:600"),
+        css(el("span", { textContent: item.status }), "overflow-wrap:anywhere"),
+        css(el("span", { textContent: ago(item.at) }), "font-size:11px;color:var(--muted,#888)")), "display:grid;grid-template-columns:minmax(90px,.6fr) minmax(0,1fr) auto;gap:8px;font-size:12px;align-items:start"))), "display:grid;gap:6px");
+  }
+  function actionToolbar(repos, compact = false) {
+    const rows = actionRows(repos);
+    if (!rows.length && !batchResults.size && !(activityStore.get(v.collectionKey?.() ?? v.key())?.size)) return null;
+    const targets = selection.size ? [...selection.values()] : suggestedTargets(rows);
+    const single = !selection.size && targets.length === 1 ? targets[0] : null;
+    const same = targets.length && targets.every(({ step }) => step.step === targets[0].step.step);
+    const processed = [...batchResults.values()].filter((value) => value === "Completed" || /Failed|failed|Cannot |stopped|Cancelled|pending|confirmation/.test(value)).length;
+    const label = batchRunning ? compact ? `… ${processed}/${batchResults.size}` : `Running ${processed}/${batchResults.size}` : batchPreview ? `Review ${batchPreview.length}` : selection.size ? `Run chosen (${targets.length}) →`
+      : same ? `${nextLabel(targets[0].step)}${targets.length > 1 ? compact ? ` ${targets.length}` : ` ${targets.length} repos` : ""}${compact ? "" : " →"}` : `Do next (${targets.length}) →`;
+    const title = (batchRunning ? `Running: ${processed} of ${batchResults.size} selected steps handled.\n` : "") + targets.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)} — ${step.reason}`).join("\n");
+    let primary = null;
+    if (single && !batchRunning && !batchPreview) {
+      const { repo, step } = single;
+      if (nextRoute(step) === "pr" && repo.pullRequest?.url) {
+        primary = css(link(compact ? "Open PR" : nextLabel(step), repo.pullRequest.url), nextControlStyle + ";text-decoration:none");
+        primary.className = "wtc-action-control";
+      } else if (nextRoute(step) === "publish" && confirming.has(repo.sessionKey)) primary = pushCell(repo, toPush(repo));
+      else primary = nextButton(step.step === "push" && repo.pullRequest?.state === "open" ? "Update PR" : label, title, () => actNext({ ...repo, next: step }), reserved(repo) || !nextRoute(step));
+    } else if (targets.length || batchRunning) primary = nextButton(label, title, () => {
+      if (batchPreview) { v.reveal?.(); v.rerender(); } else startTargets(targets);
+    }, batchRunning);
+    else if (dispatched.size && !batchResults.size) primary = nextButton(compact ? "Sent" : "Sent to agent", "Handoff accepted; check the conversation for completion", () => {}, true);
+    else if (batchResults.size) {
+      const values = [...batchResults.values()];
+      const failed = values.filter((status) => /Failed|Handoff failed|Cannot /.test(status)).length;
+      const pending = values.some((status) => /pending|Sent/.test(status));
+      const completed = values.every((status) => status === "Completed");
+      const cancelled = values.some((status) => /Cancel/.test(status));
+      const allCatchUp = [...batchKinds.values()].every((kind) => kind === "catch-up");
+      const done = failed ? `⚠ ${failed} failed` : pending ? "Sent to agent" : cancelled ? "Stopped" : !completed ? "Check action" : allCatchUp ? `✓ Caught up ${values.length}` : `✓ Done ${values.length}`;
+      primary = nextButton(done, "Open details in the sidebar action log", openActivity);
+    }
+    else {
+      const dirty = rows.find((r) => !r.next && !r.choices && r.dirty > 0);
+      if (dirty) primary = nextButton("Commit changes", `Review and commit intended changes in ${nameOf(dirty)}`, () => askCommit(dirty), reserved(dirty));
+    }
+    if (!primary) {
+      const last = [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].at(-1);
+      if (last) primary = nextButton(last.status === "Completed" ? last.action === "catch-up" ? "✓ Caught up" : "✓ Done" : /^Failed/.test(last.status) ? "⚠ Failed" : "Action log", "Open details in the sidebar action log", openActivity);
+    }
+    return css(el("span", { className: "wtc-action-toolbar" }, primary,
+      !batchRunning ? nextButton(compact ? "⋯" : "Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.reveal?.(); v.rerender(); }) : null,
+      dispatched.size && !batchRunning ? nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } }, batchRunning) : null,
+      (activityStore.get(v.collectionKey?.() ?? v.key())?.size ?? 0) > 0 && (targets.length || batchRunning) ? nextButton(compact ? "≡" : "Action log", "Open next-action activity in the taba sidebar", openActivity) : null,
+      batchRunning ? nextButton(compact ? "Stop" : "Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); }) : null), "display:inline-flex;align-items:center;gap:4px;min-width:0;white-space:nowrap");
+  }
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
   const finished = (r) => r.pullRequest?.state === "merged";
@@ -827,8 +953,8 @@ function collectionTables(v) {
   const catchUpCell = (r) => finished(r)
     ? count(r.behind ? `↓ ${r.behind}` : "↓", `#${r.pullRequest.number} was merged. Return to ${baseOf(r)}'s tip, detached; keep it in the pull request list. The next change starts a new branch`, TONE.pending, () => catchUp([r]))
     : r.behind
-    ? count(`↓ ${r.behind}`, `${r.behind} new on ${baseOf(r)}. Catch up: merge them in; never rebases, never pushes`, TONE.pending, () => catchUp([r]))
-    : count("↓", `#${r.pullRequest.number} was merged. Catch up: fetch ${baseOf(r)} and merge it in, to continue from the merge; never rebases, never pushes`, TONE.pending, () => catchUp([r]));
+    ? count(`↓ ${r.behind}`, `${r.behind} new on ${baseOf(r)}. Catch up locally by merging, without rebasing.${r.pullRequest?.state === "open" ? " Then Update PR / Push publishes the updated branch." : " Push is a separate action."}`, TONE.pending, () => catchUp([r]))
+    : count("↓", `#${r.pullRequest.number} was merged. Return to ${baseOf(r)}'s tip; keep its completed PR in the pull request list`, TONE.pending, () => catchUp([r]));
   const nameOf = (r) => r.repo ?? r.project ?? r.label;
   const baseOf = (r) => (r.base ? r.base.replace(/^origin\//, "") : "base");
   // Pushes waiting for the person's confirmation, by owner session.
@@ -1021,8 +1147,8 @@ function collectionTables(v) {
   const toned = (text, tone, title) => css(el("span", { textContent: text, title: title ?? "" }), `color:${tone}`);
   // A fact that is also an action: a count in a pill.
   const count = (text, title, tone, run) => {
-    const b = css(el("button", { type: "button", textContent: String(text), title, ariaLabel: title, disabled: batchRunning }),
-      `border:1px solid var(--border-strong, rgba(128,128,128,.4));background:transparent;color:${tone};cursor:pointer;font:inherit;font-size:12px;line-height:16px;padding:0 6px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums`);
+    const b = css(el("button", { className: "wtc-action-control", type: "button", textContent: String(text), title, ariaLabel: title, disabled: batchRunning }),
+      `border:1px solid var(--wtc-control-border,var(--border-strong, rgba(128,128,128,.4)));background:var(--wtc-control-bg,transparent);color:var(--wtc-control-text,${tone});cursor:pointer;font:inherit;font-size:12px;line-height:16px;padding:0 6px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums`);
     b.onclick = async (e) => {
       e?.preventDefault();
       e?.stopPropagation();
@@ -1034,16 +1160,18 @@ function collectionTables(v) {
   const working = () => muted("…", "Working");
   // columns: { head, title, width, align, under }. Narrow, an under column
   // (the service's repository) folds below its preceding cell. Repository
-  // grouping is composed by repoTable. blank leaves unused cells empty.
+  // grouping is composed by repoTable. blank leaves unused cells empty, hides
+  // visual headings (retaining accessible names), and tightens the row gaps.
   const table = (columns, rows, narrow = false, blank = false) => {
     const align = (c) => (c.align === "center" ? "justify-self:center;" : "");
     const shown = columns.map((c, i) => i).filter((i) => !(narrow && columns[i].under));
     const grid = css(el("div", { className: "wtc-table" }),
-      `display:grid;grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${narrow ? 8 : 14}px;row-gap:${narrow ? 6 : 4}px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums`);
+      `display:grid;grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${blank ? 10 : narrow ? 8 : 14}px;row-gap:${blank ? 1 : narrow ? 6 : 4}px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums`);
     const empty = (value) => value == null || value === "" || value === 0;
     grid.setAttribute("data-columns", shown.length);
+    // Repository field names remain accessible without occupying a visible row.
     grid.append(...shown.map((i) => css(el("span", { title: columns[i].title ?? "" }, columns[i].head ?? ""),
-      `${align(columns[i])}font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted, #888);white-space:nowrap`)));
+      `${blank ? "position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);" : ""}${align(columns[i])}font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted, #888);white-space:nowrap`)));
     for (const row of rows) {
       grid.append(...shown.map((i) => {
         const c = columns[i];
@@ -1093,6 +1221,19 @@ function collectionTables(v) {
     if (mine[r.forge] === null) return count(label, `${activity}. Pushing needs your own ${account}: click to push, or for how to connect it`, TONE.none, () => publish(r));
     return count(label, `${activity}. ${pushTitle(r.pullRequest, r.forge)}, with your own ${account}, after you confirm.${proposalTitle(r)}${left}`, TONE.pending, () => publish(r));
   }
+  const openPRHistory = () => v.host.ui.openPanel("collection", { sessionKey: v.key(), agentId: v.agent(), focus: "pull-requests" });
+  const otherPRs = (r) => [...new Map((r.pullRequests ?? []).filter((pr) => String(pr.number) !== String(r.pullRequest?.number)).map((pr) => [String(pr.number), pr])).values()];
+  function prHints(r) {
+    const others = otherPRs(r);
+    const archived = others.filter((pr) => pr.state === "merged" || pr.state === "closed");
+    const active = others.filter((pr) => pr.state === "open").map((pr) => {
+      const hint = link(`#${pr.number}`, pr.url);
+      return css(el("span", { title: `Other active PR #${pr.number}: ${pr.title ?? ""}` }, typeof hint === "object" ? css(hint, "color:var(--muted,#888);text-decoration:none") : hint), "color:var(--muted,#888)");
+    });
+    const history = archived.length ? nextButton(plural(archived.length, "archived PR"), `${archived.length} completed pull requests for ${nameOf(r)}. Open collection PR history in the taba sidebar`, openPRHistory) : null;
+    if (history) history.style.flexShrink = "0";
+    return active.length || history ? css(el("span", {}, css(el("span", {}, ...active), "display:inline-flex;gap:4px;min-width:0;overflow:hidden"), history), "display:inline-flex;align-items:center;gap:4px;min-width:0;overflow:hidden;white-space:nowrap") : null;
+  }
   function repoRow(r) {
     const pr = r.pullRequest;
     const open = pr?.state === "open";
@@ -1109,13 +1250,13 @@ function collectionTables(v) {
       repoName(r),
       r.error ? toned(r.error, TONE.failure, r.error)
         : untouched(r)
-          ? css(el("code", { textContent: baseOf(r), title: `At ${baseOf(r)}: nothing on ${r.branch} yet, which the first commit there starts` }), "font-size:12px;color:var(--muted, #888)")
-          : css(el("code", { textContent: r.branch ?? `at ${baseOf(r)}`, title: r.branch ? `${r.branch}, ${r.ahead ?? 0} ahead of ${baseOf(r)}` : "No branch yet: the first push creates one" }), "font-size:12px;color:var(--muted, #888)"),
+          ? css(el("code", { textContent: `at ${baseOf(r)}`, title: `Checked out on branch ${r.branch}; no task commits ahead of ${baseOf(r)}` }), "font-size:12px;color:var(--muted, #888)")
+          : css(el("code", { textContent: r.branch ?? `at ${baseOf(r)}`, title: r.branch ? `${r.branch}, ${r.ahead ?? 0} ahead of ${baseOf(r)}` : `Detached HEAD at ${baseOf(r)}; no branch is checked out` }), "font-size:12px;color:var(--muted, #888)"),
       r.dirty ? toned(String(r.dirty), TONE.pending, `${plural(r.dirty, "file")} changed, not committed yet`) : null,
       busy.has(r.sessionKey) ? working() : pushCell(r, n),
       catching.has(r.sessionKey) ? working() : toCatchUp(r) ? catchUpCell(r) : null,
       pr ? css(el("span", { title: pr.title ?? "" }, link(`#${pr.number}`, pr.url), pr.draft && open ? muted("draft") : pr.state !== "open" ? muted(pr.state) : null), "display:inline-flex;gap:4px") : null,
-      ci, conflict, review, nextCell(r),
+      ci, conflict, review, nextCell(r), prHints(r),
     ];
   }
 
@@ -1177,14 +1318,16 @@ function collectionTables(v) {
     const behind = repos.filter(toCatchUp);
     const prs = repos.filter((r) => r.pullRequest?.state === "open");
     const worst = prs.map((r) => r.pullRequest).sort((a, b) => [TONE.failure, TONE.pending, TONE.success, TONE.none].indexOf(prTone(a)) - [TONE.failure, TONE.pending, TONE.success, TONE.none].indexOf(prTone(b)))[0];
+    const archivedCount = repos.reduce((n, r) => n + otherPRs(r).filter((pr) => pr.state === "merged" || pr.state === "closed").length, 0);
     const out = [
       slot("±", files ? toned(String(files), TONE.pending) : null, "Changed files not committed yet"),
       slot("↑", ready.some((r) => busy.has(r.sessionKey)) ? working() : ready.length
         ? count(commits ? `↑ ${commits}` : "↑", `Push ${ready.map(nameOf).join(", ")}, each to its pull request or a new draft one`, TONE.pending, () => pushAll(ready)) : null),
       slot("↓", behind.some((r) => catching.has(r.sessionKey)) ? working() : behind.length
-        ? count(behind.some((r) => r.behind) ? `↓ ${behind.reduce((n, r) => n + (r.behind ?? 0), 0)}` : "↓", `Catch up ${behind.map((r) => `${nameOf(r)} (${r.behind || `#${r.pullRequest.number} merged`})`).join(", ")}: return merged branches to the tip; merge the base into live branches; never rebases, never pushes`, TONE.pending, () => catchUp(behind)) : null),
-      slot("PR", prs.length ? toned(`${prs.length}${worst && prTone(worst) === TONE.failure ? " ✗" : worst && prTone(worst) === TONE.success ? " ✓" : ""}`, prTone(worst),
-        prs.map((r) => `${nameOf(r)} #${r.pullRequest.number}: ${[r.pullRequest.title, ...prState(r.pullRequest)].filter(Boolean).join(", ")}`).join("\n")) : null),
+        ? count(behind.some((r) => r.behind) ? `↓ ${behind.reduce((n, r) => n + (r.behind ?? 0), 0)}` : "↓", `Catch up ${behind.map((r) => `${nameOf(r)} (${r.behind || `#${r.pullRequest.number} merged`})`).join(", ")}: merge locally into live branches and return completed branches to the tip, without rebasing. For an open PR, Push publishes the updated branch afterward`, TONE.pending, () => catchUp(behind)) : null),
+      slot("PR", css(el("span", {}, prs.length ? toned(`${prs.length}${worst && prTone(worst) === TONE.failure ? " ✗" : worst && prTone(worst) === TONE.success ? " ✓" : ""}`, prTone(worst),
+        prs.map((r) => `${nameOf(r)} #${r.pullRequest.number}: ${[r.pullRequest.title, ...prState(r.pullRequest)].filter(Boolean).join(", ")}`).join("\n")) : archivedCount ? null : DOT(),
+        archivedCount ? nextButton(plural(archivedCount, "archived PR"), "Open completed pull requests in the collection's taba sidebar", openPRHistory) : null), "display:inline-flex;align-items:center;gap:4px")),
     ];
     if (groups.length) {
       const up = groups.filter((g) => g.running).length;
@@ -1275,21 +1418,22 @@ function collectionTables(v) {
     for (const s of sub.filter((s) => !repos.some((r) => r.repo && r.repo === s.r.repo))) rows.push(subRow(s.w, s.r));
     return rows;
   }
-  return { table, checkAccount, notice, nextActions,
-    nextSummary: (repos) => repos.some(actionable) ? smallButton(plural(repos.filter(actionable).length, "next action"), "Show next actions and pending commits", () => { v.reveal?.(); v.rerender(); }) : null,
+  return { table, checkAccount, notice, nextActions, actionToolbar, activityLog,
     repoTable: (repos, narrow, workers) => {
       syncConversation();
-      const columns = narrow ? [{ head: "Repository", width: "minmax(0,1fr)" }, { head: "Next", width: "minmax(80px,120px)" }]
-        : [{ head: "Repository", width: "minmax(120px,1.2fr)" }, { head: "Changes", width: "100px" }, { head: "Pull request", width: "minmax(130px,1fr)" }, { head: "Next", width: "minmax(100px,.8fr)" }];
+      const columns = repositoryColumns(narrow);
       const rows = repoRows(repos, workers).map((row) => {
         if (row[1]?.style) row[1].style.fontFamily = "inherit";
         const changes = css(el("span", {}, ...[row[2] ? css(el("span", {}, muted("± "), row[2]), "") : null, row[3], row[4]].map((cell) => css(el("span", {}, cell), "min-width:24px;display:inline-block"))), "display:inline-flex;gap:6px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums");
-        const pr = css(el("span", {}, row[5], row[6] ? css(el("span", { title: "Checks" }, row[6], " checks"), "font-size:11px") : null,
-          row[7] ? css(el("span", { title: "Merge conflict" }, row[7], " conflict"), "font-size:11px") : null,
-          row[8] ? css(el("span", { title: "Review" }, row[8], " review"), "font-size:11px") : null), "display:flex;align-items:center;gap:6px;flex-wrap:wrap");
-        const identity = css(el("div", {}, row[0], css(el("div", {}, row[1]), "font-size:11px;line-height:18px;overflow:hidden;text-overflow:ellipsis"),
-          narrow ? css(el("div", {}, changes, pr), "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:2px") : null), "min-width:0;padding:5px 0");
-        return narrow ? [identity, row[9]] : [identity, changes, pr, row[9]];
+        const pr = css(el("span", {}, row[5],
+          row[6] || row[7] || row[8] ? css(el("span", {}, ...[row[6], row[7], row[8]].map((mark) => css(el("span", {}, mark), "display:inline-flex;justify-content:center;width:16px;flex:none"))), "display:inline-flex;align-items:center;gap:2px;flex:none") : null,
+          row[10]), "display:inline-flex;align-items:center;gap:5px;white-space:nowrap;flex-wrap:wrap;min-width:0");
+        const nameAndBranch = css(el("div", { className: "wtc-repo-identity" },
+          css(el("span", {}, row[0]), "flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;max-width:65%"),
+          css(el("span", {}, row[1]), "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--muted,#888)")), "display:flex;align-items:center;gap:8px;min-width:0;white-space:nowrap");
+        const identity = css(el("div", {}, nameAndBranch,
+          narrow ? css(el("div", {}, changes, pr), "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:2px") : null), "min-width:0;padding:0");
+        return narrow ? [identity, row[9]] : [row[0], row[1], changes, pr, row[9]];
       });
       return table(columns, rows, false, true);
     }, serviceTable, totals, prTable };
@@ -1328,10 +1472,10 @@ function mountComposer(container, context) {
   let note = "";
 
   const card = css(el("details", { className: "wtc-collection-card", open: remembered() }),
-    "box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset, 36px));max-width:var(--chat-thread-max-width, 48rem);margin:8px auto 0;background:var(--card, #fff);color:var(--text, inherit);border:1px solid var(--border, rgba(0,0,0,.08));border-radius:25px;font:inherit;font-size:14px");
-  const summary = css(el("summary"), "list-style:none;display:flex;align-items:center;gap:8px;padding:6px 8px 6px 13px;cursor:pointer");
-  const detail = css(el("div"), "padding:4px 18px 14px 18px;display:grid;gap:14px");
-  card.append(summary, detail);
+    "box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset, 36px));max-width:var(--chat-thread-max-width, 48rem);margin:4px auto 0;background:var(--card, #fff);color:var(--text, inherit);border:1px solid var(--border, rgba(0,0,0,.08));border-radius:14px;font:inherit;font-size:14px");
+  const summary = css(el("summary"), "list-style:none;display:flex;align-items:center;gap:6px;padding:3px 12px;cursor:pointer;white-space:nowrap;overflow:hidden");
+  const detail = css(el("div"), "padding:2px 12px 8px;display:grid;gap:6px");
+  card.append(summary, detail, actionFeedback());
   card.addEventListener("toggle", () => remember(card.open));
   const composer = el("div");
   container.append(composer);
@@ -1339,18 +1483,18 @@ function mountComposer(container, context) {
 
   const iconButton = (text, title, run) => {
     const b = css(el("button", { type: "button", textContent: text, title }),
-      "border:0;background:transparent;color:var(--muted, #888);cursor:pointer;font:inherit;padding:2px 6px;border-radius:8px");
+      "border:0;background:transparent;color:var(--muted, #888);cursor:pointer;font:inherit;font-size:12px;line-height:16px;padding:1px 4px;border-radius:4px");
     b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); run(); };
     return b;
   };
   let noteFailed = false;
   let noteAction = null;
   const say = (text, failed = false, action = null) => { note = text; noteFailed = failed; noteAction = action; if (entry) render(entry); };
-  // Narrow (a phone, a narrow window), rows wrap into two lines.
-  let narrow = false;
+  let narrow = false, repoNarrow = false;
   const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([e]) => {
     const now = e.contentRect.width > 0 && e.contentRect.width < NARROW_PX;
-    if (now !== narrow) { narrow = now; if (entry) render(entry); }
+    const compactRepos = e.contentRect.width > 0 && e.contentRect.width < REPO_NARROW_PX;
+    if (now !== narrow || compactRepos !== repoNarrow) { narrow = now; repoNarrow = compactRepos; if (entry) render(entry); }
   });
   sized?.observe(card);
   const svcBusy = new Set();
@@ -1375,6 +1519,7 @@ function mountComposer(container, context) {
     },
   };
   const tables = collectionTables({
+    collectionKey: () => entry?.data?.collection?.sessionKey ?? key,
     get host() { return ctx.host; }, alive: () => !disposed && !ctx.signal?.aborted, key: () => key, agent: () => agentOf(ctx), svc, say,
     // What a push needs (the how-to of connecting GitHub) shows open.
     reveal: () => { if (!card.open) { card.open = true; remember(true); } },
@@ -1431,6 +1576,7 @@ function mountComposer(container, context) {
     return b;
   };
   function renderSuggestion(s) {
+    summary.style.display = "flex";
     const main = isMainSession(key);
     const what = css(el("span", {}, main ? "Start a conversation in taba project " : "Work in taba project ", el("strong", { textContent: s.project }), ` with ${s.repos.join(", ")}?`),
       "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
@@ -1488,25 +1634,25 @@ function mountComposer(container, context) {
       return;
     }
     const groups = serviceGroups(entry.data.services ?? []);
+    summary.style.display = repoNarrow ? "flex" : "grid";
+    summary.style.gridTemplateColumns = repositoryTemplate(repoNarrow);
+    summary.style.columnGap = repoNarrow ? "6px" : "10px";
+    const facts = css(el("span", { className: "wtc-summary-facts" }, ...(card.open ? [] : tables.totals(repos, groups))), "flex:1;min-width:0;height:20px;line-height:20px;overflow:hidden;display:flex;flex-wrap:wrap;align-content:flex-start;align-items:center;gap:0 8px");
     summary.replaceChildren(
-      brand("14px", entry.data.version),
-      css(el("span", {}, ...(card.open ? [] : [...tables.totals(repos, groups), tables.nextSummary(repos)])), "flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding-left:6px"),
-      // What an action is doing or why it failed shows here.
-      css(el("span", {}, note ? noteNode(note, noteFailed, "min-width:0;max-width:22em;overflow:hidden;text-overflow:ellipsis") : null,
+      css(el("span", {}, brand("12px", entry.data.version, repoNarrow), facts,
+        note ? noteNode(note, noteFailed, "min-width:0;max-width:18em;overflow:hidden;text-overflow:ellipsis") : null), "grid-column:1/-2;flex:1;display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden"),
+      css(el("span", {}, tables.actionToolbar(repos, true),
         iconButton("↻", `Updated ${ago(entry.at)}. Refresh`, () => void watch?.refresh()),
         iconButton("⤢", "Open the taba Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
-        css(el("span", { textContent: card.open ? "⌃" : "⌄" }), "color:var(--muted, #888);padding:0 6px")),
-      "flex:0 1 auto;min-width:0;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
-    );
+        css(el("span", { textContent: card.open ? "⌃" : "⌄" }), "color:var(--muted,#888);padding:0 2px")), "grid-column:-2/-1;flex:0 1 auto;display:flex;align-items:center;gap:2px;min-width:0;overflow:hidden;white-space:nowrap"));
     tables.checkAccount(repos);
-    detail.replaceChildren(...[tables.repoTable(repos, narrow, entry.data.subSessions),
+    detail.replaceChildren(...[tables.repoTable(repos, repoNarrow, entry.data.subSessions),
       note ? css(el("div", { className: "wtc-action-result", role: noteFailed ? "alert" : "status", ariaLive: "polite" },
         css(el("strong", { textContent: noteFailed ? "Action failed" : "Latest action" }), "font-size:12px"),
         noteNode(note, noteFailed, "white-space:normal;overflow-wrap:anywhere"),
         resultAction(noteAction, say),
         smallButton("Dismiss", "Dismiss the last action result", () => { note = ""; noteAction = null; render(entry); })), "display:grid;gap:4px") : null,
       tables.nextActions(repos), tables.notice(),
-      repos.some((r) => r.pullRequests?.length) ? el("div", {}, el("div", { textContent: "Pull requests" }), tables.prTable(repos, narrow)) : null,
       groups.length ? tables.serviceTable(groups, entry.data, narrow) : null].filter(Boolean));
     if (card.parentNode !== container) container.prepend(card);
   }
@@ -1589,7 +1735,7 @@ function mountCollection(container, context) {
   const header = el("div");
   const log = css(el("div"), "font-size:12px;color:var(--muted, #888);min-height:0");
   const body = css(el("div"), "display:grid;gap:16px");
-  root.append(header, log, body);
+  root.append(actionFeedback(), header, log, body);
   let note = "";
   let noteFailed = false;
   let noteAction = null;
@@ -1628,15 +1774,15 @@ function mountCollection(container, context) {
   };
 
   const tables = collectionTables({
+    collectionKey: sessionKeyOf,
     get host() { return ctx.host; }, alive: () => !disposed && !ctx.signal?.aborted, key: sessionKeyOf, agent: () => ctx.props.agentId, svc, say,
     refresh: () => watch?.refresh(), pause: () => pauseCollection(watch), rerender: () => render(),
   });
-  // The panel is often narrow, beside the conversation or on a phone: rows
-  // then wrap into two lines.
-  let narrow = false;
+  let narrow = false, repoNarrow = false;
   const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([e]) => {
     const now = e.contentRect.width > 0 && e.contentRect.width < NARROW_PX;
-    if (now !== narrow) { narrow = now; render(); }
+    const compactRepos = e.contentRect.width > 0 && e.contentRect.width < REPO_NARROW_PX;
+    if (now !== narrow || compactRepos !== repoNarrow) { narrow = now; repoNarrow = compactRepos; render(); }
   });
   sized?.observe(root);
 
@@ -1833,6 +1979,7 @@ function mountCollection(container, context) {
 
   // Which plugin and wtc the gateway runs, for telling builds apart.
   const footer = (data) => (versionText(data.version) ? muted(versionText(data.version), "font-size:11px;display:block") : null);
+  let focusSection = ctx.props?.focus;
   function render() {
     if (!entry?.data) {
       header.replaceChildren(css(el("div", { textContent: entry?.error ? `The collection could not be loaded: ${entry.error}` : "Loading…" }), "color:var(--muted, #888)"));
@@ -1858,7 +2005,7 @@ function mountCollection(container, context) {
       return;
     }
     header.replaceChildren(
-      row(brand("12px", data.version)),
+      css(el("div", {}, css(el("span", {}, brand("12px", data.version)), "grid-column:1/-2"), css(el("span", {}, tables.actionToolbar(repos)), "grid-column:-2/-1;min-width:0")), `display:${repoNarrow ? "flex" : "grid"};grid-template-columns:${repositoryTemplate(repoNarrow)};column-gap:${repoNarrow ? 6 : 10}px;align-items:center`),
       row(css(el("span", { textContent: data.collection.label ?? data.collection.sessionKey }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit)"),
         css(el("span", {}, muted(`Updated ${ago(entry.at)}`), iconButton("↻", "Refresh", () => void watch?.refresh())), "margin-left:auto;display:flex;align-items:center;gap:2px")),
       row(data.collection.project ? muted(data.collection.project === "ad-hoc" ? "ad-hoc taba project" : `taba project ${data.collection.project}`) : null, data.collection.project ? muted("·") : null,
@@ -1870,7 +2017,7 @@ function mountCollection(container, context) {
 
     const repoSection = css(el("div", {}, heading("Repositories")), "display:grid;gap:10px");
     if (repos.length === 0 && !data.subSessions?.length) repoSection.append(muted("No repositories yet. Ask in the conversation, or add one below.", "font-size:13px"));
-    else repoSection.append(tables.repoTable(repos, narrow, data.subSessions));
+    else repoSection.append(tables.repoTable(repos, repoNarrow, data.subSessions));
     const nextActions = tables.nextActions(repos);
     if (nextActions) repoSection.append(nextActions);
     tables.checkAccount(repos);
@@ -1878,15 +2025,18 @@ function mountCollection(container, context) {
     if (howTo) repoSection.append(howTo);
     repoSection.append(adder);
 
-    const prSection = pullRequestRows(repos).length ? el("div", {}, heading("Pull requests"), tables.prTable(repos, narrow)) : null;
+    const prSection = pullRequestRows(repos).length ? el("div", { className: "wtc-pr-history" }, heading("Pull requests"), tables.prTable(repos, narrow)) : null;
 
     const serviceSection = el("div", {}, heading("Services"));
     if (groups.length === 0) serviceSection.append(muted(data.servicesNote ?? "None running. Start them in the collection folder with wtc svc.", "font-size:13px"));
     else serviceSection.append(tables.serviceTable(groups, data, narrow));
 
     const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
-    body.replaceChildren(...[repoSection, prSection, serviceSection, ...warnings, footer(data)].filter(Boolean));
+    const activitySection = tables.activityLog();
+    body.replaceChildren(...[repoSection, prSection, activitySection, serviceSection, ...warnings, footer(data)].filter(Boolean));
     say(note, noteFailed, noteAction);
+    const destination = focusSection === "activity" ? activitySection : focusSection === "pull-requests" ? prSection : null;
+    if (focusSection) { focusSection = null; destination?.scrollIntoView?.({ block: "start" }); }
   }
 
   const show = (next) => { if (!ctx.signal.aborted) { entry = next; render(); } };
@@ -1909,7 +2059,8 @@ function mountCollection(container, context) {
     update(next) {
       const changed = next.props?.sessionKey !== ctx.props?.sessionKey;
       ctx = next;
-      if (changed) follow();
+      if (changed || next.props?.focus) focusSection = next.props?.focus;
+      if (changed) follow(); else render();
     },
     dispose() {
       disposed = true;

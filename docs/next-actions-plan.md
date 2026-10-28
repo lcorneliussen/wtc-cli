@@ -36,13 +36,31 @@ future grant for conditional publication would need its own bounded contract.
 
 ## Surface design and terminal delivery
 
-The browser keeps four stable groups: repository with branch below, changes,
-pull request with labelled status, and next step. Unused fact slots stay empty.
-It does not copy the terminal's letter headings, monospaced branch column or
-empty-dot matrix. Narrow views fold facts beneath the repository and retain the
-next step at the right. No default duplicate checklist. Per-row action is the
-entry point; a small collection shortcut captures visible recommendations.
-Alternatives and heterogeneous selections are revealed only when requested.
+The browser keeps stable positions for repository/branch, change counts, current
+PR/status and next step, without a visible header row. Dense single-line rows
+and a one-line collapsed card leave room for the conversation. Small outlined
+controls have clear hover and focus feedback; the top-bar action remains usable
+when collapsed. Names, branches and inline progress truncate with full text on
+hover. Normal-width rows use separate fixed name, branch, changes, PR and next-action
+columns; the top action aligns above the row actions. Narrow views fold facts
+only when needed.
+
+The current PR is a link in its repository row. Other active PRs are muted
+number links; completed PRs use a **3 archived PRs** button that opens and focuses
+the collection PR list in the taba sidebar. The card does not repeat that list.
+A batch shows one phase per row and a handled count in the header. Completion
+closes the chooser and offers a named result such as **Caught up 2**, opening
+the shared sidebar action log. This log is collection-scoped browser-session
+feedback, capped at 100 entries, not durable orchestration or a completion receipt.
+
+A single top-bar recommendation uses the same deterministic command or agent
+handoff as its repository button. A multi-run captures exact recommendations,
+revalidates each and runs deterministic steps before handoffs needing judgment.
+Clean catch-up must not become a generic prose skill prompt. Conflicts are
+handed to the named skill after a failed merge is aborted. Publication retains
+its personal authority and confirmation; an observed open PR offers Update PR
+as the next step after a local gateway catch-up. Alternatives and mixed
+selection are revealed on demand.
 
 The terminal keeps its established fact columns. Its idle screen has one next
 hint; `n` opens actions, arrows choose, Enter executes, Space marks rows, Right
