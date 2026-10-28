@@ -1,7 +1,10 @@
 # Service discovery before first start
 
 `wtc svc`, `wtc svc status` and the initial status inventory include tasks from
-checked-out repositories before their first render or start. Discovery reads
+checked-out repositories before their first render or start. Workspace-wide
+status uses the same declaration merge for each collection, including when its
+manifest is absent/invalid or the trusted runtime binary is unavailable. It keeps
+the sweep's trusted-binary rule and existing diagnostics. Discovery reads
 `.harness/dekit.tasks.yaml` and the collection's `.wtc/svc/<repo>.yaml` additions.
 A repository must be a Git worktree in the collection, as for runtime planning.
 

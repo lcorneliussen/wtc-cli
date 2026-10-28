@@ -264,3 +264,77 @@ func discoveryCommitShared(t *testing.T, c *Context) {
 	fixtureGit(t, "-C", repo, "-c", "core.hooksPath=/dev/null", "add", ".harness/dekit.tasks.yaml")
 	fixtureGit(t, "-C", repo, "-c", "core.hooksPath=/dev/null", "-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "Declare synthetic services")
 }
+
+func TestRuntimeDiscoveryWorkspaceSweep(t *testing.T) {
+	for _, scenario := range []string{"fresh", "manifest error", "existing", "unavailable binary"} {
+		t.Run(scenario, func(t *testing.T) {
+			c := runtimeFixture(t)
+			discoveryCommitShared(t, c)
+			marker := filepath.Join(c.Collection, "forbidden")
+			fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), "touch "+marker+"\n", 0600)
+			fixtureFile(t, c.Config.Runtime.Binary, `#!/bin/sh
+if [ "$1" = --version ]; then echo 'dekit 0.10.0'; exit; fi
+shift 3
+case "$*" in
+ 'runner status') echo '{"status":"running"}' ;;
+ 'ls') echo '{"tasks":[{"path":"existing/web/main","state":"failed","exit_code":17},{"path":"existing/web/tunnel","state":"ready"}]}' ;;
+ *) exit 99 ;;
+esac
+`, 0755)
+			switch scenario {
+			case "manifest error":
+				fixtureFile(t, filepath.Join(c.runtimeRoot(), "manifest.json"), "{", 0600)
+			case "existing", "unavailable binary":
+				// The sweep must never execute the foreign manifest's binary.
+				poison := filepath.Join(t.TempDir(), "foreign-runtime")
+				fixtureFile(t, poison, "#!/bin/sh\ntouch "+marker+"\nexit 99\n", 0755)
+				tasks := []runtimeTask{
+					{RuntimeItem: RuntimeItem{Collection: filepath.Base(c.Collection), Dir: "existing", Repo: "existing", Path: "existing/web/main", Group: "existing/web", Kind: "service"}},
+					{RuntimeItem: RuntimeItem{Collection: filepath.Base(c.Collection), Dir: "existing", Repo: "existing", Path: "existing/web/tunnel", Group: "existing/web", Kind: "endpoint", URL: "https://example.invalid", Provider: "cloudflare", Exposure: ExposurePublic, TunnelIntent: "on"}},
+				}
+				for i := range tasks {
+					tasks[i].Log = filepath.Join(c.runtimeRoot(), "logs", filepath.FromSlash(tasks[i].Path)+".log")
+				}
+				m := runtimeManifest{Schema: 1, Root: c.runtimeRoot(), Binary: poison, Tasks: tasks, Resources: []runtimeResource{{Dir: "existing", Repo: "existing", State: "provision-hook-completed"}}}
+				data, err := json.Marshal(m)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fixtureFile(t, filepath.Join(c.runtimeRoot(), "manifest.json"), string(data), 0600)
+				if scenario == "unavailable binary" {
+					c.Config.Runtime.Binary = filepath.Join(t.TempDir(), "missing")
+				}
+			}
+			before := discoverySnapshot(t, c.Collection)
+			var snapshot StatusSnapshot
+			c.statusRuntime(&snapshot, true)
+			byPath := map[string]RuntimeItem{}
+			for _, item := range snapshot.Runtime {
+				byPath[item.Path] = item
+			}
+			for _, path := range []string{"widget/web/server", "widget/web/tunnel"} {
+				if byPath[path].State != "unconfigured" {
+					t.Fatalf("sweep omitted declaration: %+v", snapshot.Runtime)
+				}
+			}
+			if scenario == "manifest error" && (byPath["runtime"].State != "unknown" || byPath["runtime"].Error == "") {
+				t.Fatalf("lost manifest diagnostic: %+v", snapshot.Runtime)
+			}
+			if scenario == "existing" || scenario == "unavailable binary" {
+				main, tunnel, resource := byPath["existing/web/main"], byPath["existing/web/tunnel"], byPath["existing/@resources"]
+				if tunnel.URL != "https://example.invalid" || tunnel.TunnelIntent != "on" || resource.State != "provision-hook-completed" {
+					t.Fatalf("lost persisted facts: %+v", snapshot.Runtime)
+				}
+				if scenario == "existing" && (main.State != "failed" || main.ExitCode == nil || *main.ExitCode != 17 || tunnel.State != "ready") {
+					t.Fatalf("lost live facts: %+v", snapshot.Runtime)
+				}
+				if scenario == "unavailable binary" && (main.State != "unknown" || main.Error == "") {
+					t.Fatalf("lost binary diagnostic: %+v", snapshot.Runtime)
+				}
+			}
+			if after := discoverySnapshot(t, c.Collection); !reflect.DeepEqual(before, after) {
+				t.Fatal("sweep executed foreign code or wrote collection files")
+			}
+		})
+	}
+}
