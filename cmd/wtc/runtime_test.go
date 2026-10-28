@@ -76,9 +76,14 @@ func TestRuntimeCommandsAreReadOnlyUntilAsked(t *testing.T) {
 		t.Fatalf("bad text preview: %q %v", out, err)
 	}
 	out, err = runtimeCLI(t, collection, "runtime", "status", "--json")
-	var items []any
-	if err != nil || json.Unmarshal([]byte(out), &items) != nil || len(items) != 0 {
+	var items []struct{ Path, State string }
+	if err != nil || json.Unmarshal([]byte(out), &items) != nil || len(items) != 2 || items[0].Path != "widget/web/server" || items[0].State != "unconfigured" || items[1].State != "unconfigured" {
 		t.Fatalf("status without a runtime: %q %v", out, err)
+	}
+	for _, args := range [][]string{{"svc"}, {"svc", "status"}, {"svc", "ls"}, {"svc", "list"}} {
+		if out, err := runtimeCLI(t, collection, args...); err != nil || !strings.Contains(out, "unconfigured") {
+			t.Fatalf("declarations missing from %v: %q %v", args, out, err)
+		}
 	}
 	for _, args := range [][]string{
 		{"logs", "widget/web/server"},

@@ -110,10 +110,10 @@ func TestRuntimeTunnelExposurePrecedence(t *testing.T) {
 	}
 }
 
-func TestRuntimeEnlistedComesFromTheManifestWithoutTheRunner(t *testing.T) {
+func TestRuntimeEnlistedIncludesDeclarationsWithoutTheRunner(t *testing.T) {
 	c := runtimeFixture(t)
-	if got := c.RuntimeEnlisted(); got != nil {
-		t.Fatalf("listed tasks before wtc up: %+v", got)
+	if got := c.RuntimeEnlisted(); len(got) != 2 || got[0].State != "unconfigured" {
+		t.Fatalf("missing declarations before wtc up: %+v", got)
 	}
 	if _, err := c.RuntimeAction("up", "", 0); err != nil {
 		t.Fatal(err)

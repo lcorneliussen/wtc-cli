@@ -26,27 +26,32 @@ func (c *Context) statusRuntime(snapshot *StatusSnapshot, all bool) {
 			if err != nil {
 				continue
 			}
+			add := func(items []RuntimeItem) {
+				snapshot.Runtime = append(snapshot.Runtime, target.runtimeWithDeclarations(items)...)
+			}
 			m, err := target.runtimeManifest()
 			if err != nil {
-				snapshot.Runtime = append(snapshot.Runtime, RuntimeItem{Collection: filepath.Base(dir), Path: "runtime", State: "unknown", Error: err.Error()})
+				add([]RuntimeItem{{Collection: filepath.Base(dir), Path: "runtime", State: "unknown", Error: err.Error()}})
 				continue
 			}
 			if m == nil {
+				add(nil)
 				continue
 			}
 			if binaryErr != nil {
+				var items []RuntimeItem
 				for _, task := range m.Tasks {
 					item := task.RuntimeItem
 					item.State = "unknown"
 					item.Error = binaryErr.Error()
-					snapshot.Runtime = append(snapshot.Runtime, item)
+					items = append(items, item)
 				}
 				// Resource hook facts come from the manifest, not the runner.
-				snapshot.Runtime = append(snapshot.Runtime, target.runtimeResourceItems(m, false)...)
+				add(append(items, target.runtimeResourceItems(m, false)...))
 				continue
 			}
 			m.Binary = binary
-			snapshot.Runtime = append(snapshot.Runtime, target.runtimeStatus(m)...)
+			add(target.runtimeStatus(m))
 		}
 	}
 	for i := range snapshot.Repos {
