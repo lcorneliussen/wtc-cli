@@ -560,7 +560,7 @@ const brand = (size, version, compact = false) => css(el("span", {},
 const NARROW_PX = 520;
 // Single-line repository groups need more width; keep their fold separate
 // from PR/service tables so denser repository rows do not change those layouts.
-const REPO_NARROW_PX = 768;
+const REPO_NARROW_PX = 640;
 const pullRequestRows = (repos) => {
   const rows = new Map();
   for (const r of repos) for (const pr of [...(r.pullRequests ?? []), ...(r.pullRequest ? [r.pullRequest] : [])]) {
@@ -580,7 +580,7 @@ function recordActivity(collection, id, item) {
 }
 const repositoryColumns = (narrow) => narrow
   ? [{ head: "Repository", width: "minmax(0,1fr)" }, { head: "Next", width: "100px" }]
-  : [{ head: "Repository", width: "minmax(100px,1.7fr)" }, { head: "Branch", width: "minmax(80px,1fr)" }, { head: "Changes", width: "120px" }, { head: "Pull request", width: "200px" }, { head: "Next", width: "176px" }];
+  : [{ head: "Repository", width: "minmax(120px,1.7fr)" }, { head: "Branch", width: "minmax(64px,1fr)" }, { head: "Changes", width: "120px" }, { head: "Pull request", width: "minmax(90px,220px)" }, { head: "Next", width: "176px" }];
 const repositoryTemplate = (narrow) => repositoryColumns(narrow).map((c) => c.width).join(" ");
 const actionFeedback = () => el("style", { textContent: `
 .wtc-action-control:not(:disabled):hover { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 30%,transparent); --wtc-control-border:var(--accent,#75c8c1); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:inset 0 0 0 1px var(--accent,#75c8c1); }
@@ -1166,7 +1166,7 @@ function collectionTables(v) {
     const align = (c) => (c.align === "center" ? "justify-self:center;" : "");
     const shown = columns.map((c, i) => i).filter((i) => !(narrow && columns[i].under));
     const grid = css(el("div", { className: "wtc-table" }),
-      `display:grid;grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${narrow ? 8 : 14}px;row-gap:${blank ? 1 : narrow ? 6 : 4}px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums`);
+      `display:grid;grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${blank ? 10 : narrow ? 8 : 14}px;row-gap:${blank ? 1 : narrow ? 6 : 4}px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums`);
     const empty = (value) => value == null || value === "" || value === 0;
     grid.setAttribute("data-columns", shown.length);
     // Repository field names remain accessible without occupying a visible row.
@@ -1427,7 +1427,7 @@ function collectionTables(v) {
         const changes = css(el("span", {}, ...[row[2] ? css(el("span", {}, muted("± "), row[2]), "") : null, row[3], row[4]].map((cell) => css(el("span", {}, cell), "min-width:24px;display:inline-block"))), "display:inline-flex;gap:6px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums");
         const pr = css(el("span", {}, row[5],
           row[6] || row[7] || row[8] ? css(el("span", {}, ...[row[6], row[7], row[8]].map((mark) => css(el("span", {}, mark), "display:inline-flex;justify-content:center;width:16px;flex:none"))), "display:inline-flex;align-items:center;gap:2px;flex:none") : null,
-          row[10]), "display:inline-flex;align-items:center;gap:5px;white-space:nowrap;min-width:0");
+          row[10]), "display:inline-flex;align-items:center;gap:5px;white-space:nowrap;flex-wrap:wrap;min-width:0");
         const nameAndBranch = css(el("div", { className: "wtc-repo-identity" },
           css(el("span", {}, row[0]), "flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;max-width:65%"),
           css(el("span", {}, row[1]), "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--muted,#888)")), "display:flex;align-items:center;gap:8px;min-width:0;white-space:nowrap");
@@ -1636,7 +1636,7 @@ function mountComposer(container, context) {
     const groups = serviceGroups(entry.data.services ?? []);
     summary.style.display = repoNarrow ? "flex" : "grid";
     summary.style.gridTemplateColumns = repositoryTemplate(repoNarrow);
-    summary.style.columnGap = repoNarrow ? "6px" : "14px";
+    summary.style.columnGap = repoNarrow ? "6px" : "10px";
     const facts = css(el("span", { className: "wtc-summary-facts" }, ...(card.open ? [] : tables.totals(repos, groups))), "flex:1;min-width:0;height:20px;line-height:20px;overflow:hidden;display:flex;flex-wrap:wrap;align-content:flex-start;align-items:center;gap:0 8px");
     summary.replaceChildren(
       css(el("span", {}, brand("12px", entry.data.version, repoNarrow), facts,
@@ -2005,7 +2005,7 @@ function mountCollection(container, context) {
       return;
     }
     header.replaceChildren(
-      css(el("div", {}, css(el("span", {}, brand("12px", data.version)), "grid-column:1/-2"), css(el("span", {}, tables.actionToolbar(repos)), "grid-column:-2/-1;min-width:0")), `display:${repoNarrow ? "flex" : "grid"};grid-template-columns:${repositoryTemplate(repoNarrow)};column-gap:${repoNarrow ? 6 : 14}px;align-items:center`),
+      css(el("div", {}, css(el("span", {}, brand("12px", data.version)), "grid-column:1/-2"), css(el("span", {}, tables.actionToolbar(repos)), "grid-column:-2/-1;min-width:0")), `display:${repoNarrow ? "flex" : "grid"};grid-template-columns:${repositoryTemplate(repoNarrow)};column-gap:${repoNarrow ? 6 : 10}px;align-items:center`),
       row(css(el("span", { textContent: data.collection.label ?? data.collection.sessionKey }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit)"),
         css(el("span", {}, muted(`Updated ${ago(entry.at)}`), iconButton("↻", "Refresh", () => void watch?.refresh())), "margin-left:auto;display:flex;align-items:center;gap:2px")),
       row(data.collection.project ? muted(data.collection.project === "ad-hoc" ? "ad-hoc taba project" : `taba project ${data.collection.project}`) : null, data.collection.project ? muted("·") : null,
