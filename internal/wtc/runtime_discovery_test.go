@@ -81,7 +81,9 @@ func TestRuntimeDiscoveryDoesNotExecuteOrRewrite(t *testing.T) {
 	fixtureFile(t, filepath.Join(c.Collection, ".env.collection.local"), command+"\n", 0600)
 	fixtureFile(t, c.Config.Runtime.Binary, "#!/bin/sh\n"+command+"\nexit 1\n", 0755)
 	fixtureFile(t, filepath.Join(c.Collection, "widget/.harness/dekit.tasks.yaml"), "tasks:\n web/main:\n  cmd: '"+command+"'\n  x-wtc: {port_env: PORT, url_env: WEB_URL}\n", 0644)
-	fixtureFile(t, filepath.Join(c.Collection, "widget/.harness/resources.sh"), "#!/bin/sh\n"+command+"\n", 0755)
+	for _, hook := range []string{"runtime-provision.sh", "runtime-teardown.sh"} {
+		fixtureFile(t, filepath.Join(c.Collection, "widget/.harness", hook), "#!/bin/sh\n"+command+"\n", 0755)
+	}
 	fixtureFile(t, filepath.Join(c.Collection, "widget/.harness/init.sh"), "#!/bin/sh\n"+command+"\n", 0755)
 	fixtureFile(t, c.runtimeLocalFragment("widget"), "tasks: {worker/main: {cmd: '"+command+"'}}\n", 0600)
 	login, answer := runtimeLoginCheck, runtimeAnswerCheck
@@ -164,8 +166,18 @@ func TestRuntimeDiscoveryUnsafeAndAmbiguousDefinitions(t *testing.T) {
 				}
 			}
 			got := c.RuntimeEnlisted()
-			if len(got) != 1 || got[0].Kind != "configuration" || got[0].State != "unknown" || got[0].Error == "" {
-				t.Fatalf("unsafe definition presented as a service: %+v", got)
+			want := 1
+			// The local directory is shared by both repositories.
+			if name == "symlink local parent" {
+				want = 2
+			}
+			if len(got) != want {
+				t.Fatalf("configuration diagnostics: %+v", got)
+			}
+			for _, item := range got {
+				if item.Kind != "configuration" || item.State != "unknown" || item.Error == "" {
+					t.Fatalf("unsafe definition presented as a service: %+v", got)
+				}
 			}
 		})
 	}
@@ -216,5 +228,29 @@ func TestRuntimeDiscoverySameNameInDifferentRepositories(t *testing.T) {
 	}
 	if len(got) != 3 || !paths["other/web/server"] || !paths["widget/web/server"] {
 		t.Fatalf("lost qualified names: %+v", got)
+	}
+}
+
+func TestRuntimeDiscoveryIncludesHarnessDeclarations(t *testing.T) {
+	c := runtimeFixture(t)
+	fixtureFile(t, runtimeSharedFragment(c.Harness), "tasks: {tools/main: {cmd: true}}\n", 0644)
+	fixtureFile(t, c.runtimeLocalFragment("harness"), "tasks: {worker/main: {cmd: true}}\n", 0600)
+	for _, got := range [][]RuntimeItem{c.RuntimeEnlisted(), c.RuntimeStatus()} {
+		paths := map[string]RuntimeItem{}
+		for _, item := range got {
+			paths[item.Path] = item
+		}
+		for _, path := range []string{"harness/tools/main", "harness/worker/main"} {
+			item := paths[path]
+			if item.Repo != "harness-example" || item.Dir != "harness" || item.State != "unconfigured" {
+				t.Fatalf("harness declaration missing: %+v", got)
+			}
+		}
+	}
+	// A newly added harness task must also appear beside persisted observations.
+	recorded := []RuntimeItem{{Path: "harness/tools/main", State: "ready", URL: "http://127.0.0.1:43100"}}
+	got := c.runtimeWithDeclarations(recorded)
+	if len(got) != 4 || !reflect.DeepEqual(got[0], recorded[0]) {
+		t.Fatalf("lost harness observations or new tasks: %+v", got)
 	}
 }

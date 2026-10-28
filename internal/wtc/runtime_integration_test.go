@@ -218,8 +218,11 @@ func TestDekitRuntimeIntegration(t *testing.T) {
   x-wtc: {url_env: RELAY_URL}
 `, python, python)
 		fixtureFile(t, filepath.Join(app, ".harness/dekit.tasks.yaml"), fragment, 0644)
-		if items := c.RuntimeStatus(); len(items) != 0 {
-			t.Fatal("status unexpectedly created runtime", items)
+		if items := c.RuntimeStatus(); len(items) != 2 || items[0].Path != "widget/web/server" || items[1].Path != "widget/web/tunnel" || items[0].State != "unconfigured" || items[1].State != "unconfigured" {
+			t.Fatal("missing pre-start declarations", items)
+		}
+		if _, err := os.Stat(c.runtimeRoot()); !os.IsNotExist(err) {
+			t.Fatal("status unexpectedly created runtime", err)
 		}
 		if _, err := c.RuntimeAction("up", "", 5*time.Second); err != nil {
 			t.Fatal(err)

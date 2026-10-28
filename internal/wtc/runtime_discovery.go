@@ -26,12 +26,13 @@ func (c *Context) runtimeWithDeclarations(observed []RuntimeItem) []RuntimeItem 
 }
 
 func (c *Context) runtimeDeclarations() []RuntimeItem {
-	repos, err := c.runtimeRepos()
+	_, repos, err := c.CatchUpInventory(CatchUpOptions{DryRun: true})
 	if err != nil {
 		return []RuntimeItem{c.runtimeDeclarationError("", err)}
 	}
 	var items []RuntimeItem
-	for _, repo := range repos {
+	for _, entry := range repos {
+		repo := runtimeRepo{dir: filepath.Base(entry.path), repo: entry.repo, path: entry.path}
 		declared, err := c.runtimeRepoDeclarations(repo)
 		if err != nil {
 			items = append(items, c.runtimeDeclarationError(repo.dir, err))

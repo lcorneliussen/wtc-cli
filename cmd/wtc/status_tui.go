@@ -1439,8 +1439,8 @@ func runStatusTUI(c *wtc.Context, all, procs, reposOnly, noFetch, noClick bool, 
 				model.lastRefresh = time.Now().Add(-time.Duration(age) * time.Second)
 			}
 		}
-		// What is enlisted comes from the runtime manifest, not the shared
-		// cache another wtc may have written; states follow from Init.
+		// Read runtime records plus current declarations rather than the shared
+		// cache another wtc may have written; live states follow from Init.
 		model.snapshot.Runtime = c.RuntimeEnlisted()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
