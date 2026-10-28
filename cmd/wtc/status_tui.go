@@ -1316,6 +1316,14 @@ func (m statusTUIModel) contentLines() []string {
 		header += statusTUIFitANSI(suffix, remaining)
 	}
 	lines := []string{header, ""}
+	if m.context != nil && !m.procs {
+		f, err := localHoursFacts(m.context, time.Now())
+		hint := "Working hours unavailable; run wtc hours facts"
+		if err == nil {
+			hint = f.Summary()
+		}
+		lines = append(lines, statusTUIStyle(statusTUIFit(statusTUISafe(hint), width), statusToneDim))
+	}
 	if m.refreshing && m.progressStep != "" {
 		elapsed := time.Since(m.startedAt).Truncate(time.Second)
 		if m.startedAt.IsZero() {
