@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -342,5 +343,51 @@ func TestRetirementRemovedTranscriptDirectoryPreservesScopeAndHintBound(t *testi
 		if r.Transcripts[0].MatchedNotes != 0 {
 			t.Fatalf("accepted %s link as local historical cwd", name)
 		}
+	}
+}
+
+func TestRetirementFailedGitIsUnknownNotPreservationWork(t *testing.T) {
+	for _, operation := range []string{"rev-parse", "status", "warning"} {
+		t.Run(operation, func(t *testing.T) {
+			c, _ := retirementFixture(t)
+			realGit, err := exec.LookPath("git")
+			if err != nil {
+				t.Fatal(err)
+			}
+			bin := t.TempDir()
+			fixtureFile(t, filepath.Join(bin, "git"), `#!/bin/sh
+case " $* " in
+ *" rev-parse --verify HEAD "*)
+  if [ "$RETIREMENT_TEST_OPERATION" = rev-parse ]; then printf 'fatal: synthetic unavailable HEAD\n' >&2; exit 1; fi
+  if [ "$RETIREMENT_TEST_OPERATION" = warning ]; then printf 'warning: synthetic warning\n' >&2; fi
+  ;;
+ *" status --porcelain "*)
+  if [ "$RETIREMENT_TEST_OPERATION" = status ]; then printf 'fatal: synthetic unavailable status\n' >&2; exit 1; fi
+  ;;
+esac
+exec "$RETIREMENT_REAL_GIT" "$@"
+`, 0755)
+			t.Setenv("RETIREMENT_REAL_GIT", realGit)
+			t.Setenv("RETIREMENT_TEST_OPERATION", operation)
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			r, err := c.InspectRetirement("finished", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Assessment.State != "unknown" || len(r.Assessment.Blockers) != 0 {
+				t.Fatalf("failed read manufactured preservation work: %+v", r.Assessment)
+			}
+			for _, repo := range r.Repos {
+				if repo.Dirty || strings.Contains(repo.Head, "fatal") || strings.Contains(repo.Head, "warning") {
+					t.Fatalf("stderr became Git evidence: %+v", repo)
+				}
+				if operation != "warning" && repo.Error == "" {
+					t.Fatal("failed read lost its unknown")
+				}
+				if operation == "warning" && (repo.Error != "" || repo.Head == "") {
+					t.Fatal("successful read lost its stdout")
+				}
+			}
+		})
 	}
 }

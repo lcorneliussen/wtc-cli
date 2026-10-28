@@ -194,7 +194,7 @@ func (s StatusSnapshot) markdown(includePRs bool) string {
 	if len(s.Retirement) > 0 {
 		b.WriteString("\n## Retirement\n\n")
 		for _, a := range s.Retirement {
-			fmt.Fprintf(&b, "- **%s** — %s (%d blockers, %d unknown checks); inspect with `wtc retire %s --dry-run`\n", runtimeTextSafe(a.Collection), a.State, len(a.Blockers), len(a.Unknowns), runtimeTextSafe(a.Collection))
+			fmt.Fprintf(&b, branding.Text("- **%s** — %s (%d blockers, %d unknown checks); inspect with `{{command}} retire %s --dry-run`\n"), runtimeTextSafe(a.Collection), a.State, len(a.Blockers), len(a.Unknowns), runtimeTextSafe(a.Collection))
 		}
 	}
 	if s.ShowCollectionColumn || !includePRs {

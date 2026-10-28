@@ -73,7 +73,7 @@ type RetirementTranscript struct {
 const retirementTranscriptLimit = 16 << 20
 
 // InspectRetirement inspects one explicitly selected collection, without status
-// refresh, hooks, runners, network requests, cache writes or branch changes.
+// refresh, hooks, service runners, network requests, cache writes or branch changes.
 // Transcript paths are explicit inputs, not automatic provider archive discovery.
 func (c *Context) InspectRetirement(name string, transcripts []string) (RetirementReport, error) {
 	observed := time.Now().UTC().Format(time.RFC3339Nano)
@@ -148,6 +148,7 @@ func (c *Context) InspectRetirement(name string, transcripts []string) (Retireme
 			out, e := retirementGit(path, args...)
 			if e != nil {
 				row.Error = "Git evidence unavailable"
+				return ""
 			}
 			return out
 		}
@@ -206,7 +207,7 @@ func retirementGit(path string, args ...string) (string, error) {
 	out, err := statusRun(30*time.Second, func(cmd *exec.Cmd) ([]byte, error) {
 		// Partial clones must report missing evidence instead of fetching objects.
 		cmd.Env = append(os.Environ(), "GIT_NO_LAZY_FETCH=1", "GIT_TERMINAL_PROMPT=0")
-		return cmd.CombinedOutput()
+		return cmd.Output()
 	}, "git", append(argv, args...)...)
 	return strings.TrimSpace(string(out)), err
 }
