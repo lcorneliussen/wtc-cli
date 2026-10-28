@@ -123,6 +123,9 @@ type StatusPRRow struct {
 	MergeSource     string        `json:"merge_source,omitempty"`
 	MergeHead       string        `json:"merge_head,omitempty"`
 	MergeBase       string        `json:"merge_base,omitempty"`
+	// worktreeDir carries a verified branch association during collection;
+	// cached snapshots already contain the resulting Next and Choices.
+	worktreeDir string
 }
 
 type StatusRetired struct {
@@ -277,7 +280,7 @@ func statusNext(snapshot *StatusSnapshot) {
 		f := statusFacts(*r)
 		if r.PR == nil && r.BranchKind == "branch" {
 			for _, pr := range snapshot.PRs {
-				if !pr.OnBranch || pr.State != "MERGED" || (pr.Repo != r.Repo && pr.Repo != r.Dir) {
+				if !pr.OnBranch || pr.State != "MERGED" || !statusPRMatchesRepo(pr, *r) {
 					continue
 				}
 				number, _ := strconv.Atoi(pr.Number)

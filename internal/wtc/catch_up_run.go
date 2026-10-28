@@ -122,8 +122,16 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 		return catchUpPR{state: "UNKNOWN"}
 	}
 	selected := []PRRecord{}
+	repos := target.prRepositories()
 	for _, record := range records {
-		if (record.Repo == t.repo || t.harness && record.Repo == "harness") && record.Branch == branch {
+		if record.Branch != branch {
+			continue
+		}
+		match, err := repos.matchesDir(record.Repo, filepath.Base(t.path))
+		if err != nil {
+			return catchUpPR{state: "UNKNOWN"}
+		}
+		if match {
 			selected = append(selected, record)
 		}
 	}
