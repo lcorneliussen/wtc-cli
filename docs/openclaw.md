@@ -143,7 +143,10 @@ request list. Follow-up commits must move to a new branch before returning
 to the tip; catch-up refuses to leave them behind.
 
 The collection card and panel keep repository/branch, changes, pull request
-and next step in stable groups. The **Next** affordance on a repository runs
+and next step in stable groups. Small outlined controls distinguish actions.
+At normal widths each repository uses one line, with its branch beside its name
+and progress inline. Narrow views fold facts only when needed; long names and
+branches retain their full text on hover. The **Next** affordance runs
 that step after rechecking status. Catch-up runs on the first click, including
 a clean merge into a live branch; active-author and conflict checks still apply.
 Judgment work asks the conversation's named skill. Push keeps the personal

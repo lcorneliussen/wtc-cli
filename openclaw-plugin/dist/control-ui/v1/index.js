@@ -556,6 +556,7 @@ const brand = (size, version) => css(el("span", {},
 // Actions stay on the relevant fact or in the row's next-step slot.
 // v supplies the view lifecycle, conversation and gateway operations.
 const NARROW_PX = 520;
+const REPO_NARROW_PX = 680;
 const pullRequestRows = (repos) => {
   const rows = new Map();
   for (const r of repos) for (const pr of [...(r.pullRequests ?? []), ...(r.pullRequest ? [r.pullRequest] : [])]) {
@@ -726,24 +727,34 @@ function collectionTables(v) {
     if (targets.every(({ step }) => step.approve !== "person" && step.step !== "push")) void runSelected(targets);
     else { choosing = true; selection = new Map(targets.map((t) => [t.repo.sessionKey, t])); batchPreview = targets; v.rerender(); }
   }
+  const nextControlStyle = "display:inline-block;vertical-align:middle;min-height:24px;min-width:24px;max-width:100%;box-sizing:border-box;border:1px solid var(--border-strong,rgba(128,128,128,.35));border-radius:6px;background:rgba(128,128,128,.08);color:var(--text,inherit);font:inherit;font-size:12px;line-height:18px;padding:2px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer";
+  const nextButton = (text, title, run, disabled = false) => {
+    const button = css(smallButton(text, title, run), nextControlStyle);
+    button.disabled = disabled;
+    if (disabled) { button.style.opacity = ".55"; button.style.cursor = "default"; }
+    return button;
+  };
   function nextCell(r) {
     if (!actionable(r)) return null;
-    if (!r.next && r.choices) return smallButton("Choose step…", "Inspect available actions and blocked reasons", () => { choosing = true; v.rerender(); });
+    if (!r.next && r.choices) return nextButton("Choose step…", "Inspect available actions and blocked reasons", () => { choosing = true; v.rerender(); });
     const step = r.next ?? { step: "commit", reason: "Review and commit intended changes locally" };
     const pending = dispatched.has(handoffKey(r, step));
     const result = batchResults.get(r.sessionKey);
     const running = reserved(r);
     const action = nextRoute(step) === "pr" && r.pullRequest?.url ? link(nextLabel(step), r.pullRequest.url)
-      : smallButton(pending ? "Sent to agent" : running ? "Working…" : nextLabel(step), step.reason, () => !r.next ? askCommit(r) : actNext(r));
-    action.style.cssText += ";font-size:12px;line-height:20px;color:var(--accent,inherit);padding:2px 0;text-align:left;white-space:normal";
+      : nextButton(pending ? "Sent to agent" : running ? "Working…" : nextLabel(step), step.reason, () => !r.next ? askCommit(r) : actNext(r));
+    // Opening the PR is a navigation link with the same visible affordance.
+    if (action.tagName === "A") {
+      action.style.cssText = nextControlStyle + ";text-decoration:none";
+    }
     if (action.tagName === "BUTTON") {
       action.disabled = pending || running || batchRunning || (!!r.next && !nextRoute(step));
       action.ariaLabel = `${nextLabel(step)}: ${step.reason}`;
       if (action.disabled) { action.style.color = "var(--muted,#888)"; action.style.cursor = "default"; }
     }
     return css(el("div", { className: "wtc-next-step" }, action,
-      choicesOf(r).length > 1 ? smallButton("⋯", `Choose another action for ${nameOf(r)}`, () => { choosing = !choosing; v.rerender(); }) : null,
-      result ? css(el("span", { textContent: result, role: "status" }), "flex-basis:100%;font-size:11px;color:var(--muted,#888);overflow-wrap:anywhere") : null), "display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0");
+      choicesOf(r).length > 1 ? nextButton("⋯", `Choose another action for ${nameOf(r)}`, () => { choosing = !choosing; v.rerender(); }) : null,
+      result ? css(el("span", { textContent: result, title: result, role: "status" }), "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted,#888)") : null), "display:flex;align-items:center;gap:6px;min-width:0;max-width:100%;white-space:nowrap");
   }
   function nextActions(repos) {
     const rows = repos.filter(actionable);
@@ -762,10 +773,10 @@ function collectionTables(v) {
       const same = targets.length && targets.every(({ step }) => step.step === targets[0].step.step);
       const label = selection.size ? `Run chosen (${targets.length}) →` : same ? `${nextLabel(targets[0].step)}${targets.length > 1 ? ` ${targets.length} repos` : ""} →` : `Do next (${targets.length}) →`;
       return css(el("div", { className: "wtc-next-actions" },
-        (targets.length > 1 || selection.size) ? smallButton(label, targets.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)} — ${step.reason}`).join("\n"), () => startTargets(targets)) : null,
-        smallButton("Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.rerender(); }),
-        dispatched.size ? smallButton("Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }) : null,
-        batchRunning ? smallButton("Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); }) : null,
+        (targets.length > 1 || selection.size) ? nextButton(label, targets.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)} — ${step.reason}`).join("\n"), () => startTargets(targets), batchRunning) : null,
+        nextButton("Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.rerender(); }),
+        dispatched.size ? nextButton("Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); v.rerender(); } }, batchRunning) : null,
+        batchRunning ? nextButton("Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); }) : null,
         ...[...batchResults].filter(([key]) => !rows.some((r) => r.sessionKey === key)).map(([key, result]) => muted(`${batchLabels.get(key) ?? "Repository"}: ${result}`))),
         "display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:11px;line-height:20px");
     }
@@ -1280,15 +1291,18 @@ function collectionTables(v) {
     repoTable: (repos, narrow, workers) => {
       syncConversation();
       const columns = narrow ? [{ head: "Repository", width: "minmax(0,1fr)" }, { head: "Next", width: "minmax(80px,120px)" }]
-        : [{ head: "Repository", width: "minmax(120px,1.2fr)" }, { head: "Changes", width: "100px" }, { head: "Pull request", width: "minmax(130px,1fr)" }, { head: "Next", width: "minmax(100px,.8fr)" }];
+        : [{ head: "Repository", width: "minmax(90px,1fr)" }, { head: "Changes", width: "106px" }, { head: "Pull request", width: "220px" }, { head: "Next", width: "180px" }];
       const rows = repoRows(repos, workers).map((row) => {
         if (row[1]?.style) row[1].style.fontFamily = "inherit";
         const changes = css(el("span", {}, ...[row[2] ? css(el("span", {}, muted("± "), row[2]), "") : null, row[3], row[4]].map((cell) => css(el("span", {}, cell), "min-width:24px;display:inline-block"))), "display:inline-flex;gap:6px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums");
         const pr = css(el("span", {}, row[5], row[6] ? css(el("span", { title: "Checks" }, row[6], " checks"), "font-size:11px") : null,
           row[7] ? css(el("span", { title: "Merge conflict" }, row[7], " conflict"), "font-size:11px") : null,
-          row[8] ? css(el("span", { title: "Review" }, row[8], " review"), "font-size:11px") : null), "display:flex;align-items:center;gap:6px;flex-wrap:wrap");
-        const identity = css(el("div", {}, row[0], css(el("div", {}, row[1]), "font-size:11px;line-height:18px;overflow:hidden;text-overflow:ellipsis"),
-          narrow ? css(el("div", {}, changes, pr), "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:2px") : null), "min-width:0;padding:5px 0");
+          row[8] ? css(el("span", { title: "Review" }, row[8], " review"), "font-size:11px") : null), `display:flex;align-items:center;gap:6px;${narrow ? "flex-wrap:wrap" : "white-space:nowrap"}`);
+        const nameAndBranch = css(el("div", { className: "wtc-repo-identity" },
+          css(el("span", {}, row[0]), "flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;max-width:65%"),
+          css(el("span", {}, row[1]), "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--muted,#888)")), "display:flex;align-items:center;gap:8px;min-width:0;white-space:nowrap");
+        const identity = css(el("div", {}, nameAndBranch,
+          narrow ? css(el("div", {}, changes, pr), "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:2px") : null), "min-width:0;padding:2px 0");
         return narrow ? [identity, row[9]] : [identity, changes, pr, row[9]];
       });
       return table(columns, rows, false, true);
@@ -1347,10 +1361,11 @@ function mountComposer(container, context) {
   let noteAction = null;
   const say = (text, failed = false, action = null) => { note = text; noteFailed = failed; noteAction = action; if (entry) render(entry); };
   // Narrow (a phone, a narrow window), rows wrap into two lines.
-  let narrow = false;
+  let narrow = false, repoNarrow = false;
   const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([e]) => {
     const now = e.contentRect.width > 0 && e.contentRect.width < NARROW_PX;
-    if (now !== narrow) { narrow = now; if (entry) render(entry); }
+    const compactRepos = e.contentRect.width > 0 && e.contentRect.width < REPO_NARROW_PX;
+    if (now !== narrow || compactRepos !== repoNarrow) { narrow = now; repoNarrow = compactRepos; if (entry) render(entry); }
   });
   sized?.observe(card);
   const svcBusy = new Set();
@@ -1499,7 +1514,7 @@ function mountComposer(container, context) {
       "flex:0 1 auto;min-width:0;margin-left:auto;display:inline-flex;align-items:center;gap:2px;white-space:nowrap"),
     );
     tables.checkAccount(repos);
-    detail.replaceChildren(...[tables.repoTable(repos, narrow, entry.data.subSessions),
+    detail.replaceChildren(...[tables.repoTable(repos, repoNarrow, entry.data.subSessions),
       note ? css(el("div", { className: "wtc-action-result", role: noteFailed ? "alert" : "status", ariaLive: "polite" },
         css(el("strong", { textContent: noteFailed ? "Action failed" : "Latest action" }), "font-size:12px"),
         noteNode(note, noteFailed, "white-space:normal;overflow-wrap:anywhere"),
@@ -1633,10 +1648,11 @@ function mountCollection(container, context) {
   });
   // The panel is often narrow, beside the conversation or on a phone: rows
   // then wrap into two lines.
-  let narrow = false;
+  let narrow = false, repoNarrow = false;
   const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([e]) => {
     const now = e.contentRect.width > 0 && e.contentRect.width < NARROW_PX;
-    if (now !== narrow) { narrow = now; render(); }
+    const compactRepos = e.contentRect.width > 0 && e.contentRect.width < REPO_NARROW_PX;
+    if (now !== narrow || compactRepos !== repoNarrow) { narrow = now; repoNarrow = compactRepos; render(); }
   });
   sized?.observe(root);
 
@@ -1870,7 +1886,7 @@ function mountCollection(container, context) {
 
     const repoSection = css(el("div", {}, heading("Repositories")), "display:grid;gap:10px");
     if (repos.length === 0 && !data.subSessions?.length) repoSection.append(muted("No repositories yet. Ask in the conversation, or add one below.", "font-size:13px"));
-    else repoSection.append(tables.repoTable(repos, narrow, data.subSessions));
+    else repoSection.append(tables.repoTable(repos, repoNarrow, data.subSessions));
     const nextActions = tables.nextActions(repos);
     if (nextActions) repoSection.append(nextActions);
     tables.checkAccount(repos);

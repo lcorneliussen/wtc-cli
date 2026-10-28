@@ -36,8 +36,10 @@ future grant for conditional publication would need its own bounded contract.
 
 ## Surface design and terminal delivery
 
-The browser keeps four stable groups: repository with branch below, changes,
-pull request with labelled status, and next step. Unused fact slots stay empty.
+The browser keeps four stable groups: repository with branch beside its name, changes,
+pull request with labelled status, and next step. Small outlined controls make actions visible. Normal-width rows
+use one line, including progress; long names and branches truncate with their
+full text available on hover. Unused fact slots stay empty.
 It does not copy the terminal's letter headings, monospaced branch column or
 empty-dot matrix. Narrow views fold facts beneath the repository and retain the
 next step at the right. No default duplicate checklist. Per-row action is the
