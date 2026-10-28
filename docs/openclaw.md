@@ -146,9 +146,10 @@ The collection card and panel keep repository/branch, changes, pull request
 and next step in stable positions without a visible header row. Small outlined
 controls distinguish actions, with clear hover and keyboard-focus feedback.
 The top bar keeps the next action available even when the card is collapsed.
-At normal widths each repository uses one line, with its branch beside its name
-and progress inline. Narrow views fold facts only when needed; long names and
-branches retain their full text on hover. The row action runs
+At normal widths each repository uses one line with separate fixed columns for
+its name, branch, changes, PR and next action. The top action aligns with the row
+actions; progress occupies the same next-action slot. Narrow views fold facts
+only when needed; long names and branches retain their full text on hover. The row action runs
 that step after rechecking status. Catch-up runs on the first click, including
 a clean merge into a live branch; active-author and conflict checks still apply.
 Judgment work asks the conversation's named skill. Push keeps the personal
@@ -161,9 +162,15 @@ personal-account confirmation. Catch-up alone does not publish it. In a local
 collection, `wtc catch-up` already pushes merges to open or draft PR branches.
 
 The repository row links its current PR and shows other active PRs as muted
-number links. A **(+3)** control represents completed PRs and opens the full
+number links. A **History 3** control represents completed PRs and opens the full
 collection PR list in the taba sidebar. The conversation card omits that full
 list, keeping its footprint small.
+
+During a batch, the top bar shows the handled count and each row shows one phase.
+Afterward, a **Caught up 2** or failure control opens the detailed **Action log**
+in the sidebar. The chooser closes when dispatch finishes. The log is shared
+between views of that collection for the current browser session; it is not a
+durable job history and reloading does not resume work.
 
 Uncommitted files offer **Commit changes**: the conversation reviews intended
 changes and saves them as **local commits**. This does not push them or create

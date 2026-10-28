@@ -41,11 +41,17 @@ PR/status and next step, without a visible header row. Dense single-line rows
 and a one-line collapsed card leave room for the conversation. Small outlined
 controls have clear hover and focus feedback; the top-bar action remains usable
 when collapsed. Names, branches and inline progress truncate with full text on
-hover. Narrow views fold facts only when needed.
+hover. Normal-width rows use separate fixed name, branch, changes, PR and next-action
+columns; the top action aligns above the row actions. Narrow views fold facts
+only when needed.
 
 The current PR is a link in its repository row. Other active PRs are muted
-number links; completed PRs use a compact count button that opens and focuses
+number links; completed PRs use a **History 3** button that opens and focuses
 the collection PR list in the taba sidebar. The card does not repeat that list.
+A batch shows one phase per row and a handled count in the header. Completion
+closes the chooser and offers a named result such as **Caught up 2**, opening
+the shared sidebar action log. This log is collection-scoped browser-session
+feedback, capped at 100 entries, not durable orchestration or a completion receipt.
 
 A single top-bar recommendation uses the same deterministic command or agent
 handoff as its repository button. A multi-run captures exact recommendations,
