@@ -143,15 +143,27 @@ request list. Follow-up commits must move to a new branch before returning
 to the tip; catch-up refuses to leave them behind.
 
 The collection card and panel keep repository/branch, changes, pull request
-and next step in stable groups. Small outlined controls distinguish actions.
+and next step in stable positions without a visible header row. Small outlined
+controls distinguish actions, with clear hover and keyboard-focus feedback.
+The top bar keeps the next action available even when the card is collapsed.
 At normal widths each repository uses one line, with its branch beside its name
 and progress inline. Narrow views fold facts only when needed; long names and
-branches retain their full text on hover. The **Next** affordance runs
+branches retain their full text on hover. The row action runs
 that step after rechecking status. Catch-up runs on the first click, including
 a clean merge into a live branch; active-author and conflict checks still apply.
 Judgment work asks the conversation's named skill. Push keeps the personal
 account and confirmation flow; merge opens the pull request for the person.
 Refreshing the card alone does not execute actions.
+
+Catch-up on the gateway merges locally, without rebasing. For an observed open
+PR, the next **Update PR** / **Push** action prepares the branch update with the
+personal-account confirmation. Catch-up alone does not publish it. In a local
+collection, `wtc catch-up` already pushes merges to open or draft PR branches.
+
+The repository row links its current PR and shows other active PRs as muted
+number links. A **(+3)** control represents completed PRs and opens the full
+collection PR list in the taba sidebar. The conversation card omits that full
+list, keeping its footprint small.
 
 Uncommitted files offer **Commit changes**: the conversation reviews intended
 changes and saves them as **local commits**. This does not push them or create
@@ -671,12 +683,14 @@ installed from a path, which is how `wtc openclaw install` installs.
 
 Development builds put the recommendation beside each repository instead of
 repeating the repository list in a checklist. Reasons are available on the
-affordance. When several repositories have a recommendation, a quiet shortcut
+affordance. The top-bar shortcut remains visible when collapsed. With one
+recommendation it runs that repository’s action directly; with several it captures
+the visible recommendations. A quiet shortcut
 such as **Catch up 2 repos →** or **Do next (2) →** captures those exact steps.
 Catch-up and local steps start directly. Publication selections show a preview
 and retain each repository's account/commit confirmation.
 
-**Choose steps…** reveals alternatives and mixed selection controls. Choose an
+**⋯** in the compact top bar (**Choose steps…** in the sidebar) reveals alternatives and mixed selection controls. Choose an
 action per repository, check its selection, or use **Select suggested**. Existing
 alternative choices are preserved. **Run selected** rechecks the exact targets.
 A changed head, base, worktree state or PR observation makes an old selection
@@ -685,7 +699,9 @@ returns to the compact view; **Run chosen** retains your exact selection there.
 Running, queued and pending results stay beside
 the repository in either view.
 
-Each batch dispatches one step per selected repository. Results stay per target;
+Each batch captures the selected step per repository. Catch-up runs the command
+first; a fetched merge conflict is rechecked and handed to the named catch-up
+skill for resolution. Other follow-ups remain separate selections. Results stay per target;
 a failure does not undo other targets. Selected author tasks are sent together
 as one sequential prompt to the conversation. “Sent to conversation” means the
 handoff was accepted; check the conversation for completion. **Cancel queued**
