@@ -24,8 +24,10 @@ including failure details, live URLs, resource states and tunnel choices. A new
 sibling's tasks appear beside these observations without replacing them.
 
 Malformed YAML, invalid task names, duplicate shared/local task names, and
-symlinked definition files or parent directories produce an `unknown`
-configuration diagnostic for that repository. Other repositories and recorded
+symlinked definition files or directories inside a checkout produce an `unknown`
+configuration diagnostic for that repository. Repository links used by gateway
+collections are supported: shared files are checked within the resolved checkout
+and local additions within the collection. Other repositories and recorded
 runtime items remain visible. Missing task files are normal. Discovery is an
 inventory, not full validation of runnable configuration: environment variables,
 working directories and runtime-specific options are resolved and validated by

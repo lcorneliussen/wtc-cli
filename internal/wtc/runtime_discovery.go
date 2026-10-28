@@ -51,26 +51,25 @@ func (c *Context) runtimeDeclarationError(dir string, err error) RuntimeItem {
 }
 
 func (c *Context) runtimeRepoDeclarations(repo runtimeRepo) ([]RuntimeItem, error) {
-	root, err := filepath.EvalSymlinks(c.Collection)
+	collectionRoot, err := filepath.EvalSymlinks(c.Collection)
 	if err != nil {
 		return nil, err
 	}
-	// Check every parent before reading, including the repository itself. A
-	// symlinked task directory must not import definitions from outside its root.
+	// Repository links are supported collection entries. Their shared files
+	// belong to the resolved checkout; local additions belong to the collection.
+	repoRoot, err := filepath.EvalSymlinks(repo.path)
+	if err != nil {
+		return nil, err
+	}
 	shared := runtimeSharedFragment(repo.path)
 	local := c.runtimeLocalFragment(repo.dir)
 	tasks := map[string]map[string]any{}
 	sources := map[string]string{}
 	for _, path := range []string{shared, local} {
-		base := c.Collection
-		if path == local {
-			base = root
+		root, safe := collectionRoot, path
+		if path == shared {
+			root, safe = repoRoot, runtimeSharedFragment(repoRoot)
 		}
-		rel, err := filepath.Rel(base, path)
-		if err != nil {
-			return nil, err
-		}
-		safe := filepath.Join(root, rel)
 		if err := runtimeSafeParents(root, safe); err != nil {
 			return nil, err
 		}

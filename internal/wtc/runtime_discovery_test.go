@@ -62,6 +62,11 @@ func discoverySnapshot(t *testing.T, root string) map[string]string {
 			out[path] = entry.Type().String()
 			return nil
 		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
+			out[path] = "symlink:" + target
+			return err
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
@@ -124,7 +129,7 @@ func TestRuntimeDiscoveryPreservesLiveItems(t *testing.T) {
 }
 
 func TestRuntimeDiscoveryUnsafeAndAmbiguousDefinitions(t *testing.T) {
-	for _, name := range []string{"malformed", "escaping name", "duplicate YAML", "duplicate local", "symlink file", "symlink parent", "symlink repo", "symlink local parent"} {
+	for _, name := range []string{"malformed", "escaping name", "duplicate YAML", "duplicate local", "symlink file", "symlink parent", "symlink local parent"} {
 		t.Run(name, func(t *testing.T) {
 			c := runtimeFixture(t)
 			shared := runtimeSharedFragment(filepath.Join(c.Collection, "widget"))
@@ -142,9 +147,6 @@ func TestRuntimeDiscoveryUnsafeAndAmbiguousDefinitions(t *testing.T) {
 				if name == "symlink parent" {
 					target = filepath.Dir(shared)
 				}
-				if name == "symlink repo" {
-					target = filepath.Join(c.Collection, "widget")
-				}
 				if name == "symlink local parent" {
 					target = filepath.Dir(c.runtimeLocalFragment("widget"))
 				}
@@ -161,10 +163,6 @@ func TestRuntimeDiscoveryUnsafeAndAmbiguousDefinitions(t *testing.T) {
 				}
 				if err := os.Symlink(outside, target); err != nil {
 					t.Fatal(err)
-				}
-				// A symlinked sibling must remain a Git repository to be in inventory.
-				if name == "symlink repo" {
-					fixtureGit(t, "-C", outside, "init", "-q", "-b", "main")
 				}
 			}
 			got := c.RuntimeEnlisted()
@@ -334,6 +332,86 @@ esac
 			}
 			if after := discoverySnapshot(t, c.Collection); !reflect.DeepEqual(before, after) {
 				t.Fatal("sweep executed foreign code or wrote collection files")
+			}
+		})
+	}
+}
+
+func TestRuntimeDiscoveryLinkedRepository(t *testing.T) {
+	for _, scenario := range []string{"shared", "local only", "absent", "existing manifest", "escaping definition directory"} {
+		t.Run(scenario, func(t *testing.T) {
+			c := runtimeFixture(t)
+			discoveryCommitShared(t, c)
+			link := filepath.Join(c.Collection, "widget")
+			checkout := filepath.Join(t.TempDir(), "checkout")
+			if err := os.Rename(link, checkout); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(checkout, link); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "local only" || scenario == "absent" {
+				if err := os.Remove(runtimeSharedFragment(checkout)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "local only" || scenario == "existing manifest" {
+				fixtureFile(t, c.runtimeLocalFragment("widget"), "tasks: {worker/main: {cmd: true}}\n", 0600)
+			}
+			if scenario == "escaping definition directory" {
+				target := filepath.Join(checkout, ".harness")
+				if err := os.RemoveAll(target); err != nil {
+					t.Fatal(err)
+				}
+				outside := t.TempDir()
+				fixtureFile(t, filepath.Join(outside, "dekit.tasks.yaml"), "tasks: {outside: {cmd: true}}\n", 0644)
+				if err := os.Symlink(outside, target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "existing manifest" {
+				fixtureFile(t, c.Config.Runtime.Binary, "#!/bin/sh\necho '{\"status\":\"absent\"}'\n", 0755)
+				task := runtimeTask{RuntimeItem: RuntimeItem{Collection: filepath.Base(c.Collection), Dir: "widget", Repo: "widget", Path: "widget/web/server", Group: "widget/web", Kind: "service", URL: "http://127.0.0.1:43100"}, Log: filepath.Join(c.runtimeRoot(), "logs/widget/web/server.log")}
+				m := runtimeManifest{Schema: 1, Root: c.runtimeRoot(), Binary: c.Config.Runtime.Binary, Tasks: []runtimeTask{task}}
+				data, err := json.Marshal(m)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fixtureFile(t, filepath.Join(c.runtimeRoot(), "manifest.json"), string(data), 0600)
+			}
+			beforeCollection, beforeCheckout := discoverySnapshot(t, c.Collection), discoverySnapshot(t, checkout)
+			for _, got := range [][]RuntimeItem{c.RuntimeEnlisted(), c.RuntimeStatus()} {
+				if scenario == "escaping definition directory" {
+					if len(got) != 1 || got[0].Kind != "configuration" || got[0].State != "unknown" {
+						t.Fatalf("accepted escaping definition: %+v", got)
+					}
+					continue
+				}
+				want := 2
+				if scenario == "local only" {
+					want = 1
+				}
+				if scenario == "absent" {
+					want = 0
+				}
+				if scenario == "existing manifest" {
+					want = 3
+				}
+				if len(got) != want {
+					t.Fatalf("linked repository discovery: %+v", got)
+				}
+				for _, item := range got {
+					if scenario == "existing manifest" && item.Path == "widget/web/server" {
+						if item.URL != "http://127.0.0.1:43100" {
+							t.Fatalf("lost recorded URL: %+v", item)
+						}
+					} else if item.State != "unconfigured" {
+						t.Fatalf("linked declaration: %+v", item)
+					}
+				}
+			}
+			if !reflect.DeepEqual(beforeCollection, discoverySnapshot(t, c.Collection)) || !reflect.DeepEqual(beforeCheckout, discoverySnapshot(t, checkout)) {
+				t.Fatal("linked discovery changed collection or checkout files")
 			}
 		})
 	}
