@@ -26,9 +26,10 @@ type PRRecord struct {
 	FinalChecks string `json:"final_checks,omitempty"`
 	MergeCommit string `json:"merge_commit,omitempty"`
 	MergeBase   string `json:"merge_base,omitempty"`
+	MergeHead   string `json:"merge_head,omitempty"`
 }
 
-const prHeader = "# Local PR enlistment for this collection (not committed; dies with retire).\n# Format: repo  number  [branch]  [url]  [title…]\n# Final merges: # merged-pr repo number merged-at checks\n# Merge commits: # merged-commit repo number sha [base]\n# Manage: wtc pr enlist|unlist|list\n"
+const prHeader = "# Local PR enlistment for this collection (not committed; dies with retire).\n# Format: repo  number  [branch]  [url]  [title…]\n# Final merges: # merged-pr repo number merged-at checks\n# Merge commits: # merged-commit repo number sha [base]\n# Merged heads: # merged-head repo number merge-sha head-sha\n# Manage: wtc pr enlist|unlist|list\n"
 
 var prNumber = regexp.MustCompile(`^[0-9]+$`)
 var prRepoName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -132,12 +133,15 @@ func (c *Context) ListPRs() ([]PRRecord, error) {
 	var records []PRRecord
 	merged := map[string]PRRecord{}
 	commits := map[string][2]string{}
+	heads := map[string][2]string{}
 	s := bufio.NewScanner(f)
 	for s.Scan() {
 		if record, ok := parsePR(s.Text()); ok {
 			records = append(records, record)
 		} else if repo, number, when, checks, ok := parseMergedPR(s.Text()); ok {
 			merged[prRecordKey(repo, number)] = PRRecord{MergedOn: when, FinalChecks: checks}
+		} else if repo, number, merge, head, ok := parseMergedHead(s.Text()); ok {
+			heads[prRecordKey(repo, number)] = [2]string{merge, head}
 		} else if repo, number, sha, base, ok := parseMergeCommit(s.Text()); ok {
 			commits[prRecordKey(repo, number)] = [2]string{sha, base}
 		}
@@ -150,6 +154,9 @@ func (c *Context) ListPRs() ([]PRRecord, error) {
 			records[i].MergedOn, records[i].FinalChecks = final.MergedOn, final.FinalChecks
 			commit := commits[prRecordKey(records[i].Repo, records[i].Number)]
 			records[i].MergeCommit, records[i].MergeBase = commit[0], commit[1]
+			if head := heads[prRecordKey(records[i].Repo, records[i].Number)]; head[0] == commit[0] {
+				records[i].MergeHead = head[1]
+			}
 		}
 	}
 	return records, nil
@@ -258,6 +265,9 @@ func (c *Context) rewritePRsLocked(removeRepo, removeNumber string, add *PRRecor
 		if record, ok := parsePR(line); ok && matching[record.Repo] && record.Number == removeNumber {
 			continue
 		}
+		if repo, number, _, _, ok := parseMergedHead(line); ok && matching[repo] && number == removeNumber && add == nil {
+			continue
+		}
 		if repo, number, _, _, ok := parseMergedPR(line); ok && matching[repo] && number == removeNumber && add == nil {
 			continue
 		}
@@ -292,9 +302,9 @@ func (c *Context) writePRFile(data []byte) error {
 	return os.Rename(tmp.Name(), filepath.Join(c.Collection, ".wtc-prs"))
 }
 
-// recordMergedPRs freezes facts that cannot change after a merge. The extra
-// comment rows keep the registry readable by older shell tools, which ignore
-// comments and continue to parse the ordinary PR rows.
+// recordMergedPRs records settled merge facts and an optional observed PR head.
+// The head observation is not guaranteed to be the immutable pre-merge head.
+// Extra comment rows keep older readers parsing the ordinary PR rows.
 func (c *Context) recordMergedPRs(records []PRRecord, details []statusPRDetail) (int, error) {
 	if len(records) != len(details) {
 		return 0, fmt.Errorf("PR records and details differ in length")
@@ -371,6 +381,9 @@ func (c *Context) recordMergedPRsLocked(records []PRRecord, updates map[string]s
 		if repo, number, _, _, ok := parseMergedPR(line); ok && updates[prRecordKey(repo, number)].State == "MERGED" {
 			continue
 		}
+		if repo, number, _, _, ok := parseMergedHead(line); ok && updates[prRecordKey(repo, number)].State == "MERGED" {
+			continue
+		}
 		if repo, number, _, _, ok := parseMergeCommit(line); ok && updates[prRecordKey(repo, number)].State == "MERGED" {
 			continue
 		}
@@ -387,6 +400,9 @@ func (c *Context) recordMergedPRsLocked(records []PRRecord, updates map[string]s
 					line += " " + detail.Base
 				}
 				fmt.Fprintln(&out, line)
+				if statusCommitHash.MatchString(detail.HeadCommit) {
+					fmt.Fprintf(&out, "# merged-head %s %s %s %s\n", record.Repo, record.Number, detail.MergeCommit, detail.HeadCommit)
+				}
 			}
 			count++
 		}

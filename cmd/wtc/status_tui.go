@@ -1147,6 +1147,14 @@ func statusTUIPRLines(snapshot wtc.StatusSnapshot, width int, showArchived, styl
 			state = "✗ conflict"
 		} else if row.OnBranch {
 			state = "⚠ catch-up"
+			if row.Landing != nil {
+				switch row.Landing.State {
+				case "follow-up":
+					state = "⚠ extra"
+				case "unknown":
+					state = "unknown"
+				}
+			}
 		} else if row.Draft {
 			state = "◇ draft"
 		} else if merged {
@@ -1368,6 +1376,7 @@ func (m statusTUIModel) contentLines() []string {
 	}
 	if !m.procs {
 		lines = append(lines, statusRetirementLines(m.snapshot, width)...)
+		lines = append(lines, statusSyncNotes(m.snapshot, width)...)
 	}
 	if m.errorText != "" {
 		lines = append(lines, "", statusTUIStyle("warning: "+statusTUISafe(m.errorText), statusToneWarning))

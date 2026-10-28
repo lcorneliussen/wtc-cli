@@ -30,6 +30,7 @@ func statusTable(snapshot wtc.StatusSnapshot, reposOnly bool, width int) string 
 		lines = append(lines, "", statusTUIFit(fmt.Sprintf("%d worktree(s) behind the development tip", snapshot.StaleCount), width))
 	}
 	lines = append(lines, statusRetirementLines(snapshot, width)...)
+	lines = append(lines, statusSyncNotes(snapshot, width)...)
 	return strings.Join(lines, "\n") + "\n"
 }
 

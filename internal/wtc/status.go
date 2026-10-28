@@ -43,6 +43,10 @@ type StatusRepo struct {
 	Branch        string         `json:"branch"`
 	BranchDisplay string         `json:"branch_display"`
 	Ahead         int            `json:"ahead"`
+	AheadRef      string         `json:"ahead_ref,omitempty"`
+	AheadBasis    string         `json:"ahead_basis,omitempty"`
+	UpstreamState string         `json:"upstream_state,omitempty"`
+	Landing       *StatusLanding `json:"landing,omitempty"`
 	Behind        int            `json:"behind"`
 	Tree          string         `json:"tree"`
 	Changed       int            `json:"changed"`
@@ -100,29 +104,31 @@ type StatusFollow struct {
 }
 
 type StatusPRRow struct {
-	Repo            string        `json:"repo"`
-	Number          string        `json:"number"`
-	State           string        `json:"state,omitempty"`
-	Checks          *string       `json:"checks"`
-	Merge           *string       `json:"merge"`
-	Review          *string       `json:"review"`
-	Title           string        `json:"title"`
-	DisplayTitle    string        `json:"display_title"`
-	Slug            string        `json:"slug"`
-	URL             *string       `json:"url"`
-	FollowTipBuild  *string       `json:"follow_tip_build"`
-	FollowProdBuild *string       `json:"follow_prod_build"`
-	Follow          *StatusFollow `json:"follow,omitempty"`
-	MergeCommit     string        `json:"merge_commit,omitempty"`
-	Base            string        `json:"base,omitempty"`
-	Archived        bool          `json:"archived"`
-	MergedOn        *string       `json:"merged_on"`
-	Draft           bool          `json:"draft"`
-	OnBranch        bool          `json:"on_branch"`
-	MergeConflicts  []string      `json:"merge_conflicts,omitempty"`
-	MergeSource     string        `json:"merge_source,omitempty"`
-	MergeHead       string        `json:"merge_head,omitempty"`
-	MergeBase       string        `json:"merge_base,omitempty"`
+	Repo            string         `json:"repo"`
+	Number          string         `json:"number"`
+	State           string         `json:"state,omitempty"`
+	Checks          *string        `json:"checks"`
+	Merge           *string        `json:"merge"`
+	Review          *string        `json:"review"`
+	Title           string         `json:"title"`
+	DisplayTitle    string         `json:"display_title"`
+	Slug            string         `json:"slug"`
+	URL             *string        `json:"url"`
+	FollowTipBuild  *string        `json:"follow_tip_build"`
+	FollowProdBuild *string        `json:"follow_prod_build"`
+	Follow          *StatusFollow  `json:"follow,omitempty"`
+	MergeCommit     string         `json:"merge_commit,omitempty"`
+	HeadCommit      string         `json:"head_commit,omitempty"`
+	Landing         *StatusLanding `json:"landing,omitempty"`
+	Base            string         `json:"base,omitempty"`
+	Archived        bool           `json:"archived"`
+	MergedOn        *string        `json:"merged_on"`
+	Draft           bool           `json:"draft"`
+	OnBranch        bool           `json:"on_branch"`
+	MergeConflicts  []string       `json:"merge_conflicts,omitempty"`
+	MergeSource     string         `json:"merge_source,omitempty"`
+	MergeHead       string         `json:"merge_head,omitempty"`
+	MergeBase       string         `json:"merge_base,omitempty"`
 	// worktreeDir carries a verified branch association during collection;
 	// cached snapshots already contain the resulting Next and Choices.
 	worktreeDir string
@@ -202,11 +208,17 @@ func statusLocalRepo(t catchUpTarget) (StatusRepo, error) {
 		row.BranchDisplay += " (review-only)"
 	}
 	upstream := t.ref
+	row.AheadBasis, row.UpstreamState = "development-tip", "none"
 	if row.BranchKind == "branch" {
 		if found, err := statusGit(t.path, "rev-parse", "--abbrev-ref", "@{u}"); err == nil {
 			upstream = found
+			row.AheadBasis, row.UpstreamState = "upstream", "tracking"
+		} else if tracking, err := statusGit(t.path, "for-each-ref", "--format=%(upstream:track)", "refs/heads/"+row.Branch); err == nil && tracking == "[gone]" {
+			row.UpstreamState = "gone"
+			row.BranchDisplay += " [gone]"
 		}
 	}
+	row.AheadRef = upstream
 	row.Ahead, err = statusCount(t.path, upstream+"..HEAD")
 	if err != nil {
 		return StatusRepo{}, fmt.Errorf("%s ahead count: %w", t.path, err)
@@ -301,7 +313,8 @@ func statusNext(snapshot *StatusSnapshot) {
 
 // statusFacts is what a local row tells about the next step. Ahead counts
 // against the branch's upstream (the development tip when it has none), so
-// it is what a push would send.
+// its development-tip fallback can include residual squash history.
+// Observational landing fields do not change next-action authority.
 func statusFacts(r StatusRepo) next.Facts {
 	f := next.Facts{Collection: r.Collection, Repo: r.Repo, Host: next.HostLocal, Base: r.baseRef,
 		Ahead: r.Ahead, Behind: r.Behind, Dirty: r.Changed, InProgress: r.Operation}
