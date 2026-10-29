@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lcorneliussen/wtc-cli/internal/wtc"
 	"github.com/spf13/cobra"
 )
@@ -102,6 +103,9 @@ func TestWorkingHoursTUIRefreshesPhaseWithoutForgeRefresh(t *testing.T) {
 	c := &wtc.Context{Collection: t.TempDir(), ConfigRoot: t.TempDir()}
 	m := statusTUIModel{context: c, width: 120}
 	m.refreshHours(time.Now())
+	if m.hoursHint != "Set working hours…" {
+		t.Fatal("setup affordance should stay compact", m.hoursHint)
+	}
 	if got := strings.Join(m.contentLines(), "\n"); !strings.Contains(got, "Set working hours") {
 		t.Fatal(got)
 	}
@@ -116,6 +120,9 @@ func TestWorkingHoursTUIRefreshesPhaseWithoutForgeRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.refreshHours(time.Now())
+	if m.hoursHint != "Working hours: extended" {
+		t.Fatal("phase affordance should stay compact", m.hoursHint)
+	}
 	if got := strings.Join(m.contentLines(), "\n"); !strings.Contains(got, "extended") {
 		t.Fatal(got)
 	}
@@ -161,6 +168,70 @@ func TestWorkingHoursHintPreservesTUIRowAndClickMapping(t *testing.T) {
 			t.Fatal("progress shifted table")
 		}
 		m.refreshing = false
+	}
+}
+
+func TestWorkingHoursSecondaryRowAlignmentAndProgressPriority(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+	hours := "Set working hours…"
+	for _, tc := range []struct {
+		name, progress, hours string
+		width                 int
+		visible               bool
+	}{
+		{"wide", "", hours, 80, true},
+		{"exact", "", hours, ansi.StringWidth(hours), true},
+		{"too narrow", "", hours, ansi.StringWidth(hours) - 1, false},
+		{"progress fits", "↻ Checking", hours, 80, true},
+		{"two cell gap", "↻ Checking", hours, ansi.StringWidth("↻ Checking") + ansi.StringWidth(hours) + 2, true},
+		{"one cell gap hides", "↻ Checking", hours, ansi.StringWidth("↻ Checking") + ansi.StringWidth(hours) + 1, false},
+		{"long progress", strings.Repeat("x", 80), hours, 80, false},
+		{"wide glyph and ANSI", "↻ 確認", "\x1b[31mHours: 確認\x1b[0m", 40, true},
+		{"no hours", "↻ Checking", "", 80, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			line := statusTUISecondaryLine(tc.progress, tc.hours, tc.width)
+			plain := ansi.Strip(line)
+			if !strings.HasPrefix(plain, tc.progress) {
+				t.Fatalf("progress changed: %q", plain)
+			}
+			if tc.visible {
+				if ansi.StringWidth(line) != tc.width || !strings.HasSuffix(plain, statusTUISafe(tc.hours)) {
+					t.Fatalf("hours not right aligned: %q (width %d)", line, ansi.StringWidth(line))
+				}
+				if !strings.HasSuffix(line, statusTUIStyle(statusTUISafe(tc.hours), statusToneDim)) {
+					t.Fatalf("hours not muted: %q", line)
+				}
+			} else if plain != tc.progress {
+				t.Fatalf("hours should yield: %q", plain)
+			}
+			if strings.ContainsAny(plain, "\n\r") {
+				t.Fatalf("row wrapped: %q", plain)
+			}
+		})
+	}
+}
+
+func TestWorkingHoursSecondaryRowKeepsPrimaryHeaderAndTable(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+	for _, width := range []int{16, 40, 80, 120} {
+		m := statusTUIModel{width: width, snapshot: wtc.StatusSnapshot{Collection: "synthetic"}}
+		before := m.contentLines()
+		m.hoursHint = "Set working hours…"
+		after := m.contentLines()
+		if before[0] != after[0] || len(before) != len(after) || strings.Join(before[2:], "\n") != strings.Join(after[2:], "\n") {
+			t.Fatalf("hours changed primary header or table at width %d", width)
+		}
+		m.refreshing, m.progressStep = true, "Checking remote refs"
+		withHours := m.contentLines()
+		m.hoursHint = ""
+		withoutHours := m.contentLines()
+		progress := ansi.Strip(withoutHours[1])
+		if !strings.HasPrefix(ansi.Strip(withHours[1]), progress) {
+			t.Fatalf("hours displaced progress at width %d", width)
+		}
 	}
 }
 

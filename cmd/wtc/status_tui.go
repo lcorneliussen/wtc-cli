@@ -1301,6 +1301,21 @@ func statusTUIProgressLine(step string, elapsed time.Duration, width int) string
 	return "↻ " + statusTUISafe(step)
 }
 
+// Hours share the existing second row and yield entirely when progress needs
+// the space. Measure display cells so styling and wide glyphs do not move it.
+func statusTUISecondaryLine(progress, hours string, width int) string {
+	left := statusTUIStyle(progress, statusToneWarning)
+	hours = statusTUISafe(hours)
+	if hours == "" {
+		return left
+	}
+	gap := width - ansi.StringWidth(progress) - ansi.StringWidth(hours)
+	if gap < 0 || (progress != "" && gap < 2) {
+		return left
+	}
+	return left + strings.Repeat(" ", gap) + statusTUIStyle(hours, statusToneDim)
+}
+
 func (m statusTUIModel) contentLines() []string {
 	width := m.width
 	if width <= 0 {
@@ -1317,17 +1332,15 @@ func (m statusTUIModel) contentLines() []string {
 		}
 		header += statusTUIFitANSI(suffix, remaining)
 	}
-	lines := []string{header, ""}
-	if m.hoursHint != "" {
-		lines[1] = statusTUIStyle(statusTUIFit(statusTUISafe(m.hoursHint), width), statusToneDim)
-	}
+	progress := ""
 	if m.refreshing && m.progressStep != "" {
 		elapsed := time.Since(m.startedAt).Truncate(time.Second)
 		if m.startedAt.IsZero() {
 			elapsed = 0
 		}
-		lines[1] = statusTUIStyle(statusTUIProgressLine(m.progressStep, elapsed, width), statusToneWarning)
+		progress = statusTUIProgressLine(m.progressStep, elapsed, width)
 	}
+	lines := []string{header, statusTUISecondaryLine(progress, m.hoursHint, width)}
 	if m.showHelp {
 		keys := "n next actions   r refresh   l log   a archived PRs   ? help   q quit"
 		if m.procs {
@@ -1483,8 +1496,11 @@ func (m *statusTUIModel) refreshHours(now time.Time) {
 		return
 	}
 	f, err := localHoursFacts(m.context, now)
-	m.hoursHint = "Working hours unavailable; run wtc hours facts"
-	if err == nil {
-		m.hoursHint = f.Summary()
+	m.hoursHint = "Working hours unavailable"
+	if err == nil && f.UnavailableReason == "" {
+		m.hoursHint = "Set working hours…"
+		if f.Configured {
+			m.hoursHint = "Working hours: " + f.Phase
+		}
 	}
 }
