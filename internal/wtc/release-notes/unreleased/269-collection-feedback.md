@@ -12,3 +12,5 @@
   Pre-publication status responses are discarded and a fresh status is read
   before the row stops showing work in progress. Uncommitted-only rows offer
   Commit changes instead of an unnumbered push arrow.
+
+Keep repository/service slots fixed during actions; temporary controls extend above the composer card or below sidebar Services.

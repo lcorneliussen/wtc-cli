@@ -747,3 +747,10 @@ and **Earlier activity**. Direct catch-up, publication, service and manual-refre
 feedback use this history. Accepted author handoffs remain pending rather than
 claiming completion. This history is browser-session feedback: reloading clears
 it. It is not a durable gateway audit log or a trusted completion receipt.
+
+
+The collection keeps its base layout in place while actions run. Bulk Push and
+Catch up controls retain their slots and become disabled when no repository is
+eligible. Temporary publication reviews, choices and connection help extend
+above the composer card and below Services in the sidebar. The repository and
+service rows remain visible in their original positions.

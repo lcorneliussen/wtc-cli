@@ -640,7 +640,7 @@ const actionFeedback = () => el("style", { textContent: `
 .wtc-action-control:focus-visible { outline:2px solid var(--accent,#75c8c1); outline-offset:-2px; }
 .wtc-collection-card summary:focus-visible { outline:2px solid var(--accent,#75c8c1); outline-offset:2px; border-radius:10px; }
 @media(max-width:520px) {
-  .wtc-collection-card, .wtc-collection { --wtc-control-height:32px; --wtc-control-width:24px; --wtc-icon-size:36px; --wtc-state-size:24px; }
+  .wtc-collection-card, .wtc-collection, .wtc-transient-actions { --wtc-control-height:32px; --wtc-control-width:24px; --wtc-icon-size:36px; --wtc-state-size:24px; }
   .wtc-header-controls { --wtc-control-height:36px; --wtc-control-width:36px; }
   .wtc-header-controls .wtc-toolbar-primary:not(.wtc-toolbar-primary-required) { display:none; }
   summary:has(.wtc-toolbar-primary-required) .wtc-header-feedback { display:none; }
@@ -1846,10 +1846,11 @@ function mountComposer(container, context) {
       groups.length ? css(el("div", { className: "wtc-base-services" }, tables.serviceTable(groups, entry.data, narrow)), "min-width:0") : null].filter(Boolean));
     const temporary = [tables.publicationConfirmations(repos), tables.nextActions(repos), tables.notice()].filter(Boolean);
     extra.replaceChildren(...temporary);
-    card.style.marginTop = temporary.length ? "0" : "4px";
-    card.style.borderTopLeftRadius = card.style.borderTopRightRadius = temporary.length ? "0" : "14px";
+    const showTemporary = temporary.length > 0 && card.open;
+    card.style.marginTop = showTemporary ? "0" : "4px";
+    card.style.borderTopLeftRadius = card.style.borderTopRightRadius = showTemporary ? "0" : "14px";
     if (card.parentNode !== container) container.prepend(card);
-    if (temporary.length) { if (extra.parentNode !== container) container.prepend(extra); } else extra.remove();
+    if (showTemporary) { if (extra.parentNode !== container) container.prepend(extra); } else extra.remove();
   }
   card.addEventListener("toggle", () => entry && render(entry));
 
