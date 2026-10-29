@@ -629,7 +629,7 @@ async function trackedRefresh(watch, sessionKey, say, currentSession = () => ses
 
 const repositoryColumns = (narrow) => narrow
   ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: "104px", align: "end", top: true }]
-  : [{ head: "Repository", width: "minmax(100px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "minmax(56px,max-content)" }, { head: "Next", width: "104px", align: "end", top: true }];
+  : [{ head: "Repository", width: "minmax(100px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "minmax(56px,1fr)" }, { head: "Next", width: "104px", align: "end", top: true }];
 const repositoryTemplate = (narrow) => repositoryColumns(narrow).map((c) => c.width).join(" ");
 const actionFeedback = () => el("style", { textContent: `
 .wtc-action-control:not(:disabled):hover { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 30%,transparent); --wtc-control-border:var(--accent,#75c8c1); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:inset 0 0 0 1px var(--accent,#75c8c1); }
@@ -970,7 +970,7 @@ function collectionTables(v) {
   }
   function actionToolbar(repos, compact = false, feedback = false) {
     const rows = actionRows(repos);
-    if (!rows.length && !batchResults.size && !(activityStore.get(v.collectionKey?.() ?? v.key())?.size)) return null;
+    if (!repos.length && !batchResults.size && !(activityStore.get(v.collectionKey?.() ?? v.key())?.size)) return null;
     const targets = selection.size ? [...selection.values()] : suggestedTargets(rows);
     const single = !selection.size && targets.length === 1 ? targets[0] : null;
     const same = targets.length && targets.every(({ step }) => step.step === targets[0].step.step);
@@ -979,7 +979,9 @@ function collectionTables(v) {
       : same ? `${nextLabel(targets[0].step)}${targets.length > 1 ? compact ? ` ${targets.length}` : ` ${targets.length} repos` : ""}${compact ? "" : " →"}` : `Do next (${targets.length}) →`;
     const title = (batchRunning ? `Running: ${processed} of ${batchResults.size} selected steps handled.\n` : "") + targets.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)} — ${step.reason}`).join("\n");
     let primary = null;
-    if (single && !batchRunning && !batchPreview) {
+    const prepared = repos.find(r => confirming.has(r.sessionKey));
+    if (prepared && !batchRunning && !batchPreview) primary = nextButton("Review push", `Review ${nameOf(prepared)}’s prepared publication`, () => { v.reveal?.(); v.rerender(); });
+    else if (single && !batchRunning && !batchPreview) {
       const { repo, step } = single;
       if (nextRoute(step) === "pr" && repo.pullRequest?.url) {
         primary = css(link(compact ? "Open PR" : nextLabel(step), repo.pullRequest.url), nextControlStyle + ";text-decoration:none");
@@ -1010,7 +1012,7 @@ function collectionTables(v) {
       if (last) primary = nextButton(last.status === "Completed" ? last.action === "catch-up" ? "✓ Caught up" : "✓ Done" : /^Failed/.test(last.status) ? "⚠ Failed" : "Action log", "Open details in the sidebar action log", openActivity);
     }
     return css(el("span", { className: "wtc-action-toolbar" }, feedback && !confirming.size && !batchRunning && !selection.size ? null : primary ? css(el("span", { className: `wtc-toolbar-primary${confirming.size || batchRunning || selection.size ? " wtc-toolbar-primary-required" : ""}` }, primary), "display:inline-flex;min-width:0") : null,
-      !batchRunning ? nextButton(compact ? "⋯" : "Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.reveal?.(); v.rerender(); }) : null,
+      !batchRunning ? nextButton(compact ? "⋯" : "Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.reveal?.(); v.rerender(); }, !rows.length) : null,
       dispatched.size && !batchRunning ? nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } }, batchRunning) : null,
       !compact && (activityStore.get(v.collectionKey?.() ?? v.key())?.size ?? 0) > 0 && (targets.length || batchRunning) ? nextButton("Action log", "Open next-action activity in the taba sidebar", openActivity) : null,
       batchRunning ? nextButton(compact ? "Stop" : "Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); }) : null), `display:inline-flex;align-items:center;gap:${compact ? 4 : 8}px;min-width:0;flex-wrap:${compact ? "nowrap" : "wrap"};white-space:${compact ? "nowrap" : "normal"}`);
@@ -1040,11 +1042,11 @@ function collectionTables(v) {
   function bulkActions(repos, narrow) {
     const pushes = repos.filter(r => pushable(r) && PUSHES.has(r.forge) && mine[r.forge] !== false);
     const catches = repos.filter(toCatchUp);
-    if (choosing || (!pushes.length && !catches.length)) return null;
+    if (!repos.length) return null;
     const busyPush = pushes.some(reserved), busyCatch = catches.some(reserved);
     const controls = css(el("span", { className: "wtc-bulk-actions" },
-      pushes.length ? nextButton(pushes.length === 1 ? "↑ Push 1" : `↑ Push all (${pushes.length})`, `Push all ${pushes.length} eligible repositories; prepare each personal confirmation`, () => pushAll([...pushes]), busyPush || batchRunning) : null,
-      catches.length ? nextButton(catches.length === 1 ? "↓ Catch up 1" : `↓ Catch up all (${catches.length})`, `Catch up all ${catches.length} eligible repositories`, () => catches.every(r => r.next && ["catch-up", "return-to-tip"].includes(r.next.step)) ? startTargets(catches.map(repo => ({ repo, step: repo.next }))) : catchUp([...catches]), busyCatch || batchRunning) : null), "display:flex;align-items:center;gap:6px;white-space:nowrap");
+      nextButton(pushes.length === 1 ? "↑ Push 1" : pushes.length ? `↑ Push all (${pushes.length})` : "↑ Push all", `Push all ${pushes.length} eligible repositories; prepare each personal confirmation`, () => pushAll([...pushes]), !pushes.length || busyPush || batchRunning || choosing),
+      nextButton(catches.length === 1 ? "↓ Catch up 1" : catches.length ? `↓ Catch up all (${catches.length})` : "↓ Catch up all", `Catch up all ${catches.length} eligible repositories`, () => catches.every(r => r.next && ["catch-up", "return-to-tip"].includes(r.next.step)) ? startTargets(catches.map(repo => ({ repo, step: repo.next }))) : catchUp([...catches]), !catches.length || busyCatch || batchRunning || choosing)), "display:flex;align-items:center;gap:6px;white-space:nowrap");
     if (!narrow) controls.style.gridColumn = "3 / -1";
     return css(el("div", {}, controls), narrow ? "display:flex;justify-content:flex-end;margin:2px 0 4px" : `display:grid;grid-template-columns:${repositoryTemplate(false)};column-gap:10px;margin:2px 0 4px`);
   }
@@ -1308,7 +1310,7 @@ function collectionTables(v) {
     const align = (c) => c.align ? `justify-self:${c.align};` : "";
     const shown = columns.map((c, i) => i).filter((i) => !(narrow && columns[i].under));
     const grid = css(el("div", { className: "wtc-table" }),
-      `display:grid;grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${blank ? 10 : narrow ? 8 : 14}px;row-gap:${blank ? 1 : narrow ? 6 : 4}px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums`);
+      `display:grid;${blank ? "grid-auto-rows:minmax(var(--wtc-control-height,20px),auto);" : ""}grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${blank ? 10 : narrow ? 8 : 14}px;row-gap:${blank ? 1 : narrow ? 6 : 4}px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums`);
     const empty = (value) => value == null || value === "" || value === 0;
     grid.setAttribute("data-columns", shown.length);
     // Repository field names remain accessible without occupying a visible row.
@@ -1428,10 +1430,10 @@ function collectionTables(v) {
       : v.svc.busy("*") ? busyMark() : "";
     const columns = [
       { head: all, width: groups.length > 1 ? "max-content" : "var(--wtc-state-size,14px)" },
-      { head: "Service", width: narrow ? "minmax(96px,1fr)" : "minmax(0,max-content)" },
+      { head: "Service", width: narrow ? "minmax(80px,1fr)" : "minmax(0,max-content)" },
       { head: "Repo", width: "minmax(0,max-content)", under: true },
-      { head: "State" },
-      { head: "URL", title: "Where it listens on the gateway" },
+      { head: "State", width: narrow ? "64px" : "78px" },
+      { head: "URL", width: narrow ? "64px" : "80px", title: "Where it listens on the gateway" },
       ...ways.map((w) => ({ head: w, title: w === "gateway" ? "OpenClaw portals" : `${w} tunnels` })),
       { head: "", width: "minmax(0,1fr)" },
     ];
@@ -1585,7 +1587,7 @@ function collectionTables(v) {
         const nameAndBranch = css(el("div", { className: "wtc-repo-identity" }, row[0]), "display:flex;align-items:center;min-width:0;min-height:24px;white-space:nowrap");
         const branch = css(el("span", {}, row[1]), "flex:1;max-width:120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted,#888)");
         const identity = css(el("div", {}, nameAndBranch,
-          narrow ? css(el("div", { className: "wtc-repo-facts" }, branch, changes, pr), "display:grid;grid-template-columns:56px 96px minmax(0,1fr);width:calc(100% + 114px);min-width:0;gap:8px;align-items:center;margin-top:2px;padding-left:19px;box-sizing:border-box") : null), "min-width:0;padding:0");
+          narrow ? css(el("div", { className: "wtc-repo-facts" }, branch, changes, pr), "display:grid;grid-template-columns:56px 96px minmax(0,1fr);width:calc(100% + 114px);min-width:0;gap:8px;align-items:center;margin-top:2px;padding-left:19px;box-sizing:border-box;min-height:var(--wtc-control-height,20px)") : null), "min-width:0;padding:0");
         return narrow ? [identity, row[9]] : [row[0], row[1], changes, pr, row[9]];
       });
       return css(el("div", { className: "wtc-repositories" }, bulkActions(repos, narrow), table(columns, rows, false, true)), "min-width:0");
@@ -1647,6 +1649,8 @@ function mountComposer(container, context) {
 
   const card = css(el("details", { className: "wtc-collection-card", open: remembered() }),
     "box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset, 36px));max-width:var(--chat-thread-max-width, 48rem);margin:4px auto 0;background:var(--card, #fff);color:var(--text, inherit);border:1px solid var(--border, rgba(0,0,0,.08));border-radius:14px;font:inherit;font-size:14px");
+  const extra = css(el("section", { className: "wtc-transient-actions", ariaLabel: "Collection action details" }),
+    "box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset,36px));max-width:var(--chat-thread-max-width,48rem);margin:4px auto 0;padding:10px 12px;display:grid;gap:6px;max-height:min(40dvh,360px);overflow:auto;background:var(--card,#fff);color:var(--text,inherit);border:1px solid var(--border,rgba(0,0,0,.08));border-bottom:0;border-radius:14px 14px 0 0;font:inherit;font-size:14px");
   const summary = css(el("summary"), "list-style:none;display:flex;align-items:center;gap:6px;padding:3px 12px;cursor:pointer;white-space:nowrap;overflow:hidden");
   const detail = css(el("div"), "padding:2px 12px 8px;display:grid;gap:6px");
   card.append(summary, detail, actionFeedback());
@@ -1763,6 +1767,7 @@ function mountComposer(container, context) {
     return b;
   };
   function renderSuggestion(s) {
+    extra.remove();
     summary.style.display = "flex";
     const main = isMainSession(key);
     const what = css(el("span", {}, main ? "Start a conversation in taba project " : "Work in taba project ", el("strong", { textContent: s.project }), ` with ${s.repos.join(", ")}?`),
@@ -1809,12 +1814,13 @@ function mountComposer(container, context) {
     entry = next;
     const repos = entry?.data?.repos ?? [];
     if (!ctx.presented || ctx.signal.aborted) {
-      card.remove();
+      card.remove(); extra.remove();
       return;
     }
     // Only a collection that loaded and has nothing yet: a failed load is
     // no reason to start another one.
     if (repos.length === 0 && !entry?.data?.subSessions?.length) {
+      extra.remove();
       if (entry?.data) void suggestFor(key);
       if (entry?.data && suggestion?.key === key && suggestion.result && !dismissed.has(key)) renderSuggestion(suggestion.result);
       else card.remove();
@@ -1836,10 +1842,14 @@ function mountComposer(container, context) {
         iconButton("⤢", "Open the taba Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
         css(el("span", { textContent: card.open ? "⌃" : "⌄", ariaHidden: "true" }), "color:var(--muted,#888);padding:0 2px")), "margin-left:auto;flex:none;display:flex;align-items:center;justify-content:flex-end;gap:4px;white-space:nowrap"));
     tables.checkAccount(repos);
-    detail.replaceChildren(...[tables.publicationConfirmations(repos), tables.nextActions(repos), tables.repoTable(repos, repoNarrow, entry.data.subSessions),
-      tables.notice(),
-      groups.length ? tables.serviceTable(groups, entry.data, narrow) : null].filter(Boolean));
+    detail.replaceChildren(...[tables.repoTable(repos, repoNarrow, entry.data.subSessions),
+      groups.length ? css(el("div", { className: "wtc-base-services" }, tables.serviceTable(groups, entry.data, narrow)), "min-width:0") : null].filter(Boolean));
+    const temporary = [tables.publicationConfirmations(repos), tables.nextActions(repos), tables.notice()].filter(Boolean);
+    extra.replaceChildren(...temporary);
+    card.style.marginTop = temporary.length ? "0" : "4px";
+    card.style.borderTopLeftRadius = card.style.borderTopRightRadius = temporary.length ? "0" : "14px";
     if (card.parentNode !== container) container.prepend(card);
+    if (temporary.length) { if (extra.parentNode !== container) container.prepend(extra); } else extra.remove();
   }
   card.addEventListener("toggle", () => entry && render(entry));
 
@@ -1856,7 +1866,7 @@ function mountComposer(container, context) {
     note = "";
     noteAction = null;
     noteFailed = false;
-    card.remove();
+    card.remove(); extra.remove();
     if (sessionKey) watch = watchCollection(next.host, sessionKey, agentOf(next), render);
   }
   follow(ctx);
@@ -1876,7 +1886,7 @@ function mountComposer(container, context) {
       clearTimeout(noteTimer);
       sized?.disconnect();
       watch?.dispose();
-      card.remove();
+      card.remove(); extra.remove();
       unmountDefault?.();
     },
   };
@@ -2209,24 +2219,23 @@ function mountCollection(container, context) {
     const repoSection = css(el("div", {}, heading("Repositories")), "display:grid;gap:10px");
     if (repos.length === 0 && !data.subSessions?.length) repoSection.append(muted("No repositories yet. Ask in the conversation, or add one below.", "font-size:13px"));
     const confirmations = tables.publicationConfirmations(repos);
-    if (confirmations) repoSection.append(confirmations);
     const nextActions = tables.nextActions(repos);
-    if (nextActions) repoSection.append(nextActions);
     if (repos.length || data.subSessions?.length) repoSection.append(tables.repoTable(repos, repoNarrow, data.subSessions));
     tables.checkAccount(repos);
     const howTo = tables.notice();
-    if (howTo) repoSection.append(howTo);
     repoSection.append(adder);
 
     const prSection = pullRequestRows(repos).length ? el("div", { className: "wtc-pr-history" }, heading("Pull requests"), tables.prTable(repos, narrow)) : null;
 
-    const serviceSection = el("div", {}, heading("Services"));
+    const serviceSection = el("div", { className: "wtc-base-services" }, heading("Services"));
     if (groups.length === 0) serviceSection.append(muted(data.servicesNote ?? "None running. Start them in the collection folder with wtc svc.", "font-size:13px"));
     else serviceSection.append(tables.serviceTable(groups, data, narrow));
 
     const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
     const activitySection = tables.activityLog();
-    body.replaceChildren(...[repoSection, serviceSection, activitySection, prSection, ...warnings, footer(data)].filter(Boolean));
+    const temporary = [confirmations, nextActions, howTo].filter(Boolean);
+    const actionSection = temporary.length ? css(el("section", { className: "wtc-transient-actions", ariaLabel: "Collection action details" }, ...temporary), "display:grid;gap:10px;min-width:0") : null;
+    body.replaceChildren(...[repoSection, serviceSection, actionSection, activitySection, prSection, ...warnings, footer(data)].filter(Boolean));
     const destination = focusSection === "activity" ? activitySection : focusSection === "pull-requests" ? prSection : null;
     if (focusSection) { focusSection = null; destination?.scrollIntoView?.({ block: "start" }); }
   }

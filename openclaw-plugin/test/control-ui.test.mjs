@@ -452,7 +452,7 @@ test("composer: Bitbucket is pushed by the Bitbucket plugin, with the person's o
   await push().onclick();
   await settle();
   // Not connected: the card says where to connect, and nothing is pushed.
-  const howTo = [...card().all()].find((n) => n.className === "wtc-connect");
+  const howTo = [...host.all()].find((n) => n.className === "wtc-connect");
   assert.match(howTo.textContent, /Pushing needs your own Bitbucket login/);
   assert.ok([...howTo.all()].some((n) => n.tagName === "A" && n.href === "/plugins/bitbucket/connect"));
   assert.equal(calls.some((c) => c.actionId === "publish-confirm"), false);
@@ -461,9 +461,9 @@ test("composer: Bitbucket is pushed by the Bitbucket plugin, with the person's o
   await push().onclick();
   await settle();
   assert.deepEqual(calls.at(-1).payload, { draft: true, dest: "main" });
-  const confirm = [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Confirm push");
+  const confirm = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Confirm push");
   assert.equal(confirm.title, "Confirm the captured push of hooks as Ada (ada@example.com)");
-  assert.match(readable(card()), /1 commit/);
+  assert.match(readable(host), /1 commit/);
   await confirm.onclick();
   await settle();
   assert.deepEqual(calls.at(-1), { method: "plugins.sessionAction", pluginId: "bitbucket", actionId: "publish-confirm", sessionKey: "agent:main:owner:hooks", agentId: "main", payload: { requestId: "bb-1", requestDigest: "bd1" } });
@@ -705,7 +705,7 @@ test("composer: a push is the person's, with their own account, after they confi
   await push().onclick();
   assert.equal(calls.some((c) => c.method === "sessions.github.publish"), false);
   // The card says how to connect it, linking to the profile page.
-  const howTo = [...card().all()].find((n) => n.className === "wtc-connect");
+  const howTo = [...host.all()].find((n) => n.className === "wtc-connect");
   assert.ok(howTo, "how to connect is shown");
   assert.ok([...howTo.all()].some((n) => n.tagName === "A" && n.href === "/settings/profile"));
   assert.match(howTo.textContent, /For me \(not For the system\)/);
@@ -714,9 +714,9 @@ test("composer: a push is the person's, with their own account, after they confi
   await push().onclick();
   await settle();
   assert.deepEqual(calls.find((c) => c.method === "sessions.github.publish").selection, { source: "personal", account: { id: 1, login: "octo" }, generation: "g1" });
-  const confirm = [...card().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Confirm push");
+  const confirm = [...host.all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Confirm push");
   assert.equal(confirm.title, "Confirm the captured push of api as @octo");
-  assert.match(readable(card()), /2 commits/);
+  assert.match(readable(host), /2 commits/);
   await confirm.onclick();
   await settle();
   assert.deepEqual(calls.find((c) => c.method === "sessions.github.confirm"),
@@ -965,7 +965,7 @@ test("completed rounds leave the repository row and remain in the PR list", asyn
     assert.equal(repos[1][3], "1 archived PR");
     if (kind === "panel") assert.deepEqual(prs[1].slice(0, 3), ["#2", "site", "merged"]);
     else assert.equal(prs, undefined, "the conversation card keeps history in the sidebar");
-    assert.ok(!buttons(host).some((b) => b.startsWith("↑") || b.startsWith("↓")));
+    assert.ok(![...host.all()].some(n => n.tagName === "BUTTON" && !n.disabled && /^[↑↓]/.test(n.textContent)), "finished repositories keep disabled bulk slots without an executable push/catch-up");
     view.dispose();
   }
   // A following round keeps the earlier one; the same PR recorded during a
@@ -2009,4 +2009,37 @@ test("direct catch-up is labelled Running in the action log until it completes",
     await pending;
     assert.match([...host.all()].find(n => n.className === "wtc-activity-log").textContent, /Done/);
   } finally { finish?.(previous); catchUpResult = previous; view.dispose(); }
+});
+
+
+test("temporary controls extend above the composer base and below sidebar services", async () => {
+  personal = { state: "connected", account: { login: "demo" }, generation: "g1" };
+  for (const kind of ["composer", "panel"]) {
+    const { host, view } = await mount(kind, collection([repo("api", { unpublished: 1 })]));
+    try {
+      await [...host.all()].find(n => n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+      const extra = [...host.all()].find(n => n.className === "wtc-transient-actions");
+      const base = [...host.all()].find(n => n.className === "wtc-collection-card");
+      assert.ok(extra);assert.match(extra.textContent, /Confirm push/);
+      if(kind === "composer") {
+        assert.ok(host.children.indexOf(extra) < host.children.indexOf(base));
+        assert.ok([...base.all()].some(n => n.className === "wtc-repositories"));
+        assert.equal([...base.all()].some(n => n.textContent === "Confirm push"), false);
+      } else {
+        const services = [...host.all()].find(n => n.tagName === "H3" && n.textContent === "Services").parentNode;
+        assert.ok(extra.parentNode.children.indexOf(extra) > extra.parentNode.children.indexOf(services));
+      }
+    } finally {view.dispose();}
+  }
+  personal = null;
+});
+
+test("bulk action slots remain present and disabled when no repository is eligible", async () => {
+  for(const kind of ["composer", "panel"]) {
+    const {host, view}=await mount(kind, collection([repo("api")]));
+    try {
+      const bulk=[...host.all()].find(n=>n.className === "wtc-bulk-actions");assert.ok(bulk);
+      const controls=[...bulk.all()].filter(n=>n.tagName === "BUTTON");assert.equal(controls.length,2);assert.ok(controls.every(n=>n.disabled));
+    } finally {view.dispose();}
+  }
 });
