@@ -1326,7 +1326,7 @@ function collectionTables(v) {
             css(el("span", {}, below), "display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px")),
           `${align(c)}min-width:0;display:grid;gap:1px`);
         }
-        return css(el("span", {}, value), `${align(c)}${c.top ? "align-self:start;" : ""}min-width:0;overflow:${c.overflow ? "visible" : "hidden"};text-overflow:ellipsis;white-space:nowrap`);
+        return css(el("span", {}, value), `${align(c)}${c.top ? "align-self:start;" : ""}${blank ? "min-height:var(--wtc-control-height,20px);display:flex;align-items:center;" : ""}min-width:0;overflow:${c.overflow ? "visible" : "hidden"};text-overflow:ellipsis;white-space:nowrap`);
       }));
     }
     return grid;
