@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,7 +18,8 @@ type catchUpPR struct {
 	state, mergeCommit, head, base string
 	// branch, when set, is the local branch these facts were read for.
 	// Reconciliation refuses a worktree that has moved to another branch.
-	branch string
+	branch        string
+	lookupFailure string
 }
 
 func catchUpGit(path string, args ...string) (string, error) {
@@ -112,14 +114,56 @@ func catchUpRefForPR(worktree, defaultRef string, pr catchUpPR) (string, error) 
 	return "origin/" + pr.base, nil
 }
 
+// Lookup diagnostics use fixed cause categories instead of echoing forge stderr,
+// response bodies or remote URLs: each can carry credentials or terminal controls.
+func catchUpLookupCause(err error) string {
+	if errors.Is(err, exec.ErrNotFound) {
+		return "forge CLI not installed; install it and retry"
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		detail := exit.Stderr
+		if len(detail) > 8192 {
+			detail = detail[:8192]
+		}
+		text := strings.ToLower(string(detail))
+		for _, marker := range []string{"401", "403", "unauthorized", "forbidden", "authentication", "not logged", "auth login"} {
+			if strings.Contains(text, marker) {
+				return "authentication or authorization failed; check CLI login and repository access, then retry"
+			}
+		}
+		for _, marker := range []string{"could not resolve", "no such host", "connection refused", "connection reset", "dial tcp", "tls", "timeout", "timed out", "network is unreachable"} {
+			if strings.Contains(text, marker) {
+				return "transport failure; check network connectivity and retry"
+			}
+		}
+		return fmt.Sprintf("forge CLI exited with status %d; inspect the operation locally and retry", exit.ExitCode())
+	}
+	if strings.Contains(err.Error(), "timed out after") {
+		return "forge lookup timed out; check connectivity and retry"
+	}
+	return "forge command could not run; check CLI installation and local configuration, then retry"
+}
+
+func catchUpLookupLabel(value string) string {
+	if len(value) > 160 {
+		value = value[:160] + "..."
+	}
+	return strconv.QuoteToASCII(value)
+}
+
+func catchUpLookupUnavailable(operation, cause string) catchUpPR {
+	return catchUpPR{state: "UNKNOWN", lookupFailure: operation + ": " + cause}
+}
+
 func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 	target, err := OpenCollection(filepath.Join(c.Workspace, t.collection))
 	if err != nil {
-		return catchUpPR{state: "UNKNOWN"}
+		return catchUpLookupUnavailable("open target collection", "collection unavailable; inspect its local configuration and retry")
 	}
 	records, err := target.ListPRs()
 	if err != nil {
-		return catchUpPR{state: "UNKNOWN"}
+		return catchUpLookupUnavailable("read enlisted PR records", "records unavailable; inspect local PR enlistment and retry")
 	}
 	selected := []PRRecord{}
 	repos := target.prRepositories()
@@ -129,7 +173,7 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 		}
 		match, err := repos.matchesDir(record.Repo, filepath.Base(t.path))
 		if err != nil {
-			return catchUpPR{state: "UNKNOWN"}
+			return catchUpLookupUnavailable("resolve enlisted PR repository", "repository identity unavailable; inspect local registry and PR enlistment, then retry")
 		}
 		if match {
 			selected = append(selected, record)
@@ -137,19 +181,31 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 	}
 	remote, err := catchUpGit(t.path, "remote", "get-url", "origin")
 	if err != nil {
-		return catchUpPR{state: "UNKNOWN"}
+		return catchUpLookupUnavailable("git remote get-url origin", "origin unavailable; inspect repository remote configuration and retry")
 	}
 	slug, forge := catchUpForge(remote)
 	if forge == "" {
-		return catchUpPR{state: "UNKNOWN"}
+		return catchUpLookupUnavailable("identify origin forge", "unsupported or invalid remote; configure a supported GitHub or Bitbucket origin and retry")
 	}
+	// Only validated forge repository identifiers are included in diagnostics.
+	identity := forge + "/" + slug
+	for _, ch := range slug {
+		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || strings.ContainsRune("_./-", ch)) {
+			identity = forge + "/[repository redacted]"
+			break
+		}
+	}
+	if len(identity) > 200 {
+		identity = forge + "/[repository redacted]"
+	}
+	operation := identity + " branch " + catchUpLookupLabel(branch) + ": gh pr list"
 	if len(selected) == 0 {
 		if forge != "github.com" {
-			return catchUpPR{state: "UNKNOWN"} // No bounded branch lookup on this forge.
+			return catchUpLookupUnavailable(identity+" branch "+catchUpLookupLabel(branch), "branch PR lookup unsupported; enlist the PR number with wtc pr enlist and retry")
 		}
 		out, err := catchUpJSON("gh", "pr", "list", "--repo", slug, "--head", branch, "--state", "all", "--json", "state,isDraft,baseRefName")
 		if err != nil {
-			return catchUpPR{state: "UNKNOWN"}
+			return catchUpLookupUnavailable(operation+" failed", catchUpLookupCause(err))
 		}
 		var rows []struct {
 			State       string `json:"state"`
@@ -157,7 +213,7 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 			BaseRefName string `json:"baseRefName"`
 		}
 		if json.Unmarshal(out, &rows) != nil {
-			return catchUpPR{state: "UNKNOWN"}
+			return catchUpLookupUnavailable(operation+" failed", "invalid JSON response; check forge CLI compatibility and retry")
 		}
 		if len(rows) == 0 {
 			return catchUpPR{state: "NONE"}
@@ -166,7 +222,7 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 		for _, row := range rows {
 			state := row.State
 			if !catchUpValidPRState(state) {
-				return catchUpPR{state: "UNKNOWN"}
+				return catchUpLookupUnavailable(operation+" failed", "unrecognized PR state; check forge CLI compatibility and retry")
 			}
 			if row.IsDraft && state == "OPEN" {
 				state = "DRAFT"
@@ -174,7 +230,7 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 			if state == "OPEN" || state == "DRAFT" {
 				if chosen.state == "OPEN" || chosen.state == "DRAFT" {
 					if chosen.base != row.BaseRefName {
-						return catchUpPR{state: "UNKNOWN"}
+						return catchUpLookupUnavailable(operation+" failed", "ambiguous open PR merge targets; inspect matching PRs and enlist the intended PR")
 					}
 				} else {
 					chosen = catchUpPR{state: state, base: row.BaseRefName}
@@ -189,11 +245,20 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 	liveState := ""
 	liveBase := ""
 	for _, record := range selected {
+		number := record.Number
+		if _, err := strconv.ParseUint(number, 10, 64); err != nil {
+			number = "[invalid number]"
+		}
+		cli := "gh"
+		if forge == "bitbucket.org" {
+			cli = "bb"
+		}
+		operation = identity + " PR #" + number + ": " + cli + " pr view"
 		if forge == "bitbucket.org" {
 			parts := strings.SplitN(slug, "/", 2)
 			out, err := catchUpJSON("bb", "pr", "view", record.Number, "--workspace", parts[0], "--repo", parts[1], "--json")
 			if err != nil {
-				return catchUpPR{state: "UNKNOWN"}
+				return catchUpLookupUnavailable(operation+" failed", catchUpLookupCause(err))
 			}
 			var facts struct {
 				State string `json:"state"`
@@ -213,19 +278,19 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 				} `json:"destination"`
 			}
 			if json.Unmarshal(out, &facts) != nil {
-				return catchUpPR{state: "UNKNOWN"}
+				return catchUpLookupUnavailable(operation+" failed", "invalid JSON response; check forge CLI compatibility and retry")
 			}
 			state := strings.ToUpper(facts.State)
 			if facts.Draft && state == "OPEN" {
 				state = "DRAFT"
 			}
 			if !catchUpValidPRState(state) {
-				return catchUpPR{state: "UNKNOWN"}
+				return catchUpLookupUnavailable(operation+" failed", "unrecognized PR state; check forge CLI compatibility and retry")
 			}
 			if state == "OPEN" || state == "DRAFT" {
 				base := facts.Destination.Branch.Name
 				if liveState != "" && liveBase != base {
-					return catchUpPR{state: "UNKNOWN"}
+					return catchUpLookupUnavailable(operation+" failed", "ambiguous open PR merge targets; inspect enlisted PRs and correct enlistment")
 				}
 				liveBase = base
 				if state == "DRAFT" || liveState == "" {
@@ -240,7 +305,7 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 		}
 		out, err := catchUpJSON("gh", "pr", "view", record.Number, "--repo", slug, "--json", "state,isDraft,headRefOid,mergeCommit,baseRefName")
 		if err != nil {
-			return catchUpPR{state: "UNKNOWN"}
+			return catchUpLookupUnavailable(operation+" failed", catchUpLookupCause(err))
 		}
 		var facts struct {
 			State       string `json:"state"`
@@ -251,8 +316,11 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 				OID string `json:"oid"`
 			} `json:"mergeCommit"`
 		}
-		if json.Unmarshal(out, &facts) != nil || !catchUpValidPRState(facts.State) {
-			return catchUpPR{state: "UNKNOWN"}
+		if json.Unmarshal(out, &facts) != nil {
+			return catchUpLookupUnavailable(operation+" failed", "invalid JSON response; check forge CLI compatibility and retry")
+		}
+		if !catchUpValidPRState(facts.State) {
+			return catchUpLookupUnavailable(operation+" failed", "unrecognized PR state; check forge CLI compatibility and retry")
 		}
 		state := facts.State
 		if facts.IsDraft && state == "OPEN" {
@@ -260,7 +328,7 @@ func (c *Context) catchUpPRState(t catchUpTarget, branch string) catchUpPR {
 		}
 		if state == "OPEN" || state == "DRAFT" {
 			if liveState != "" && liveBase != facts.BaseRefName {
-				return catchUpPR{state: "UNKNOWN"}
+				return catchUpLookupUnavailable(operation+" failed", "ambiguous open PR merge targets; inspect enlisted PRs and correct enlistment")
 			}
 			liveBase = facts.BaseRefName
 			if state == "DRAFT" || liveState == "" {
@@ -419,7 +487,11 @@ func (c *Context) catchUpReconcile(t catchUpTarget, ref, target string, pr catch
 	}
 	switch pr.state {
 	case "UNKNOWN":
-		return "needs-owner", "PR state unavailable; branch left untouched"
+		reason := "PR state unavailable; branch left untouched"
+		if pr.lookupFailure != "" {
+			reason += "; " + pr.lookupFailure
+		}
+		return "needs-owner", reason
 	case "CLOSED", "DECLINED", "SUPERSEDED":
 		return "needs-owner", "closed PR branch; owner must decide continuation"
 	case "MERGED":
