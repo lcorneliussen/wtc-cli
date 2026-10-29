@@ -628,11 +628,16 @@ async function trackedRefresh(watch, sessionKey, say, currentSession = () => ses
 }
 
 const repositoryColumns = (narrow) => narrow
-  ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: "104px", align: "end", top: true }]
-  : [{ head: "Repository", width: "minmax(100px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "minmax(56px,1fr)" }, { head: "Next", width: "104px", align: "end", top: true }];
+  ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: "128px", align: "end", top: true }]
+  : [{ head: "Repository", width: "minmax(100px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "minmax(56px,1fr)" }, { head: "Next", width: "128px", align: "end", top: true }];
 const repositoryTemplate = (narrow) => repositoryColumns(narrow).map((c) => c.width).join(" ");
 const actionFeedback = () => el("style", { textContent: `
+.wtc-next-step { width:128px;justify-content:flex-start !important; }
+.wtc-next-step>:first-child { width:104px;flex:0 0 104px; }
+.wtc-next-step>:not(:first-child) { width:20px;flex:0 0 20px; }
+.wtc-step-status { width:104px;text-align:center; }
 .wtc-action-control:not(:disabled):hover { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 30%,transparent); --wtc-control-border:var(--accent,#75c8c1); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:inset 0 0 0 1px var(--accent,#75c8c1); }
+.wtc-confirm-publication:not(:disabled) { background:var(--accent,#75c8c1) !important;color:var(--accent-foreground,#151a22) !important;border-color:var(--accent,#75c8c1) !important; }
 .wtc-action-control:not(:disabled):active { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 45%,transparent); }
 @keyframes wtc-refresh { to { transform:rotate(360deg); } }
 .wtc-refresh-control[aria-busy="true"] { animation:wtc-refresh 1s linear infinite; }
@@ -642,7 +647,6 @@ const actionFeedback = () => el("style", { textContent: `
 @media(max-width:520px) {
   .wtc-collection-card, .wtc-collection, .wtc-transient-actions { --wtc-control-height:32px; --wtc-control-width:24px; --wtc-icon-size:36px; --wtc-state-size:24px; }
   .wtc-header-controls { --wtc-control-height:36px; --wtc-control-width:36px; }
-  .wtc-header-controls .wtc-toolbar-primary:not(.wtc-toolbar-primary-required) { display:none; }
   summary:has(.wtc-toolbar-primary-required) .wtc-header-feedback { display:none; }
   .wtc-header-controls { gap:0 !important; }
   .wtc-next-step .wtc-action-control, .wtc-bulk-actions .wtc-action-control { min-height:32px !important; }
@@ -907,7 +911,7 @@ function collectionTables(v) {
       picker.onchange = () => { const chosen = available.find(a => a.available && a.key === picker.value); if (chosen) selection.set(r.sessionKey, { repo: r, step: chosen }); batchPreview = null; v.rerender(); };
     }
     return css(el("div", { className: "wtc-next-step" }, picker ?? action,
-      !choosing && choicesOf(r).length > 1 ? nextButton("⋯", `Choose another action for ${nameOf(r)}`, () => { choosing = !choosing; v.rerender(); }) : null), "display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0;max-width:100%;white-space:nowrap");
+      !choosing && choicesOf(r).length > 1 ? nextButton("⋯", `Choose another action for ${nameOf(r)}`, () => { choosing = !choosing; v.rerender(); }) : el("span", { ariaHidden: "true" })), "display:flex;align-items:center;justify-content:flex-start;gap:4px;min-width:0;max-width:100%;white-space:nowrap");
   }
   function actionRows(repos) {
     const rows = repos.filter(actionable);
@@ -968,7 +972,7 @@ function collectionTables(v) {
       return detail;
     }), records.length > 3 ? nextButton(showAllActivity ? "Show latest 3" : `Earlier activity (${records.length - 3})`, "Show or hide earlier activity", () => { showAllActivity = !showAllActivity; v.rerender(); }) : null), "display:grid;gap:4px;min-width:0");
   }
-  function actionToolbar(repos, compact = false, feedback = false) {
+  function actionToolbar(repos, compact = false) {
     const rows = actionRows(repos);
     if (!repos.length && !batchResults.size && !(activityStore.get(v.collectionKey?.() ?? v.key())?.size)) return null;
     const targets = selection.size ? [...selection.values()] : suggestedTargets(rows);
@@ -1011,11 +1015,15 @@ function collectionTables(v) {
       const last = [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].at(-1);
       if (last) primary = nextButton(last.status === "Completed" ? last.action === "catch-up" ? "✓ Caught up" : "✓ Done" : /^Failed/.test(last.status) ? "⚠ Failed" : "Action log", "Open details in the sidebar action log", openActivity);
     }
-    return css(el("span", { className: "wtc-action-toolbar" }, feedback && !confirming.size && !batchRunning && !selection.size ? null : primary ? css(el("span", { className: `wtc-toolbar-primary${confirming.size || batchRunning || selection.size ? " wtc-toolbar-primary-required" : ""}` }, primary), "display:inline-flex;min-width:0") : null,
-      !batchRunning ? nextButton(compact ? "⋯" : "Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.reveal?.(); v.rerender(); }, !rows.length) : null,
-      dispatched.size && !batchRunning ? nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } }, batchRunning) : null,
-      !compact && (activityStore.get(v.collectionKey?.() ?? v.key())?.size ?? 0) > 0 && (targets.length || batchRunning) ? nextButton("Action log", "Open next-action activity in the taba sidebar", openActivity) : null,
-      batchRunning ? nextButton(compact ? "Stop" : "Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); }) : null), `display:inline-flex;align-items:center;gap:${compact ? 4 : 8}px;min-width:0;flex-wrap:${compact ? "nowrap" : "wrap"};white-space:${compact ? "nowrap" : "normal"}`);
+    if (dispatched.size && !batchRunning && !selection.size && !prepared) primary = nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } });
+    if (primary) primary.style.width = "104px";
+    const slot = css(el("span", { className: `wtc-toolbar-primary${confirming.size || batchRunning || selection.size ? " wtc-toolbar-primary-required" : ""}` }, primary), "display:inline-flex;align-items:center;justify-content:flex-end;flex:0 0 104px;width:104px;min-width:104px");
+    const secondary = batchRunning
+      ? nextButton(compact ? "Stop" : "Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); })
+      : nextButton(compact ? "⋯" : "Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.reveal?.(); v.rerender(); }, !rows.length);
+    secondary.style.width = compact ? "36px" : "104px";
+    secondary.style.flexShrink = "0";
+    return css(el("span", { className: "wtc-action-toolbar" }, slot, secondary), `display:inline-flex;align-items:center;gap:${compact ? 4 : 8}px;min-width:0;flex-wrap:nowrap;white-space:nowrap`);
   }
   function publicationConfirmations(repos) {
     const pending = repos.filter(r => confirming.has(r.sessionKey));
@@ -1028,6 +1036,8 @@ function collectionTables(v) {
       const commits = Array.isArray(c.commits) ? c.commits : [], count = snapshot.unpublished ?? snapshot.ahead ?? 0;
       const branch = c.branch ?? snapshot.branch ?? "current branch", dest = c.dest ?? snapshot.base?.replace(/^origin\//, "") ?? "base";
       const proposal = proposalOf(snapshot);
+      const confirm = nextButton("Confirm push", `Confirm the captured push of ${nameOf(r)} as ${account}`, () => { if (confirming.get(r.sessionKey) === prepared) return publish(r, prepared.conversationKey, () => true, true); }, reserved(r) || !accountKnown);
+      confirm.className += " wtc-confirm-publication";
       return css(el("section", { ariaLabel: `Confirm publication of ${nameOf(r)}` },
         css(el("strong", { textContent: `Push ${nameOf(r)}` }), "font-size:12px"),
         css(el("div", { textContent: `${account} · ${snapshot.owner ?? ""}/${nameOf(r)}` }), "font-size:12px;overflow-wrap:anywhere"),
@@ -1035,7 +1045,7 @@ function collectionTables(v) {
         css(el("div", { textContent: `${plural(count, "commit")}${snapshot.forge !== BITBUCKET && snapshot.dirty ? ` + ${plural(snapshot.dirty, "file")} to commit` : ""}${c.uncommitted ? `; ${plural(c.uncommitted, "uncommitted file")} left behind` : ""}. The gateway rechecks the captured request before publishing.` }), "font-size:11px;overflow-wrap:anywhere;color:var(--muted,#888)"),
         commits.length ? css(el("details", {}, el("summary", { textContent: `Inspect ${commits.length} captured commits` }), ...commits.map(commit => el("div", { textContent: typeof commit === "string" ? commit : commit.subject ?? commit.title ?? commit.message ?? commit.sha ?? "Commit" }))), "font-size:11px;overflow-wrap:anywhere") : null,
         proposal?.title || proposal?.body ? css(el("details", {}, el("summary", { textContent: "Proposed PR text" }), el("strong", { textContent: proposal.title ?? "" }), el("div", { textContent: "For new PRs; existing PR text is kept." }), css(el("div", { textContent: proposal.body ?? "" }), "white-space:pre-wrap;overflow-wrap:anywhere")), "font-size:11px") : null,
-        css(el("div", {}, nextButton("Confirm push", `Confirm the captured push of ${nameOf(r)} as ${account}`, () => { if (confirming.get(r.sessionKey) === prepared) return publish(r, prepared.conversationKey, () => true, true); }, reserved(r) || !accountKnown),
+        css(el("div", {}, confirm,
           nextButton("Cancel", `Cancel preparation for ${nameOf(r)}; nothing will be pushed`, () => { if (!active(prepared.conversationKey) || confirming.get(r.sessionKey) !== prepared) return; confirming.delete(r.sessionKey); if (prepared.activityId) recordActivity(prepared.logKey, prepared.activityId, { state: "cancelled", status: `${nameOf(r)}: publication cancelled.` }); v.say(`${nameOf(r)}: publication cancelled.`); v.rerender(); }, reserved(r))), "display:flex;align-items:center;gap:8px;padding-top:4px")), "display:grid;gap:4px;padding:10px 12px;border:1px solid var(--border-strong,rgba(128,128,128,.35));border-radius:8px;background:var(--bg,transparent)");
     })), "display:grid;gap:8px;min-width:0");
   }
@@ -1047,6 +1057,7 @@ function collectionTables(v) {
     const controls = css(el("span", { className: "wtc-bulk-actions" },
       nextButton(pushes.length === 1 ? "↑ Push 1" : pushes.length ? `↑ Push all (${pushes.length})` : "↑ Push all", `Push all ${pushes.length} eligible repositories; prepare each personal confirmation`, () => pushAll([...pushes]), !pushes.length || busyPush || batchRunning || choosing),
       nextButton(catches.length === 1 ? "↓ Catch up 1" : catches.length ? `↓ Catch up all (${catches.length})` : "↓ Catch up all", `Catch up all ${catches.length} eligible repositories`, () => catches.every(r => r.next && ["catch-up", "return-to-tip"].includes(r.next.step)) ? startTargets(catches.map(repo => ({ repo, step: repo.next }))) : catchUp([...catches]), !catches.length || busyCatch || batchRunning || choosing)), "display:flex;align-items:center;gap:6px;white-space:nowrap");
+    for (const control of controls.children) { control.style.width = "112px"; control.style.flex = "0 0 112px"; }
     if (!narrow) controls.style.gridColumn = "3 / -1";
     return css(el("div", {}, controls), narrow ? "display:flex;justify-content:flex-end;margin:2px 0 4px" : `display:grid;grid-template-columns:${repositoryTemplate(false)};column-gap:10px;margin:2px 0 4px`);
   }
@@ -1326,7 +1337,7 @@ function collectionTables(v) {
             css(el("span", {}, below), "display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px")),
           `${align(c)}min-width:0;display:grid;gap:1px`);
         }
-        return css(el("span", {}, value), `${align(c)}${c.top ? "align-self:start;" : ""}${blank ? "min-height:var(--wtc-control-height,20px);display:flex;align-items:center;" : ""}min-width:0;overflow:${c.overflow ? "visible" : "hidden"};text-overflow:ellipsis;white-space:nowrap`);
+        return css(el("span", {}, value), `${align(c)}${c.top ? "align-self:start;" : ""}${blank ? "width:100%;box-sizing:border-box;min-height:var(--wtc-control-height,20px);display:flex;align-items:center;" : ""}min-width:0;overflow:${c.overflow ? "visible" : "hidden"};text-overflow:ellipsis;white-space:nowrap`);
       }));
     }
     return grid;
@@ -1587,7 +1598,7 @@ function collectionTables(v) {
         const nameAndBranch = css(el("div", { className: "wtc-repo-identity" }, row[0]), "display:flex;align-items:center;min-width:0;min-height:24px;white-space:nowrap");
         const branch = css(el("span", {}, row[1]), "flex:1;max-width:120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted,#888)");
         const identity = css(el("div", {}, nameAndBranch,
-          narrow ? css(el("div", { className: "wtc-repo-facts" }, branch, changes, pr), "display:grid;grid-template-columns:56px 96px minmax(0,1fr);width:calc(100% + 114px);min-width:0;gap:8px;align-items:center;margin-top:2px;padding-left:19px;box-sizing:border-box;min-height:var(--wtc-control-height,20px)") : null), "min-width:0;padding:0");
+          narrow ? css(el("div", { className: "wtc-repo-facts" }, branch, changes, pr), "display:grid;grid-template-columns:56px 96px minmax(0,1fr);width:calc(100% + 138px);min-width:0;gap:8px;align-items:center;margin-top:2px;padding-left:19px;box-sizing:border-box;min-height:var(--wtc-control-height,20px)") : null), "min-width:0;padding:0");
         return narrow ? [identity, row[9]] : [row[0], row[1], changes, pr, row[9]];
       });
       return css(el("div", { className: "wtc-repositories" }, bulkActions(repos, narrow), table(columns, rows, false, true)), "min-width:0");
@@ -1837,7 +1848,7 @@ function mountComposer(container, context) {
     summary.replaceChildren(
       css(el("span", {}, brand("12px", entry.data.version, repoNarrow)), "flex:none"),
       feedback ?? facts,
-      css(el("span", { className: "wtc-header-controls" }, tables.actionToolbar(repos, true, !!headerNote),
+      css(el("span", { className: "wtc-header-controls" }, tables.actionToolbar(repos, true),
         iconButton("↻", `${entry.inflight ? "Refreshing… " : ""}Updated ${ago(entry.at)}. Refresh`, () => trackedRefresh(watch, entry?.data?.collection?.sessionKey ?? key, say, () => entry?.data?.collection?.sessionKey ?? key, () => !disposed)),
         iconButton("⤢", "Open the taba Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
         css(el("span", { textContent: card.open ? "⌃" : "⌄", ariaHidden: "true" }), "color:var(--muted,#888);padding:0 2px")), "margin-left:auto;flex:none;display:flex;align-items:center;justify-content:flex-end;gap:4px;white-space:nowrap"));
