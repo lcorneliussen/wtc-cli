@@ -495,10 +495,10 @@ the task as a whole:
   asks the conversation to resolve the conflict, and a service's ▶, ■ or ↻
   starts, stops or restarts it. The same marks in the
   header of the services act on all of them, and collapsed, ↑, ↓ and the
-  services' mark act on the whole collection. Above the repository facts,
-  **Push all** and **Catch up all** capture eligible repositories; their counts
-  show the scope. A single eligible repository is labeled **Push 1** or
-  **Catch up 1**. Uncommitted-only rows offer **Commit changes** first.
+  services' mark act on the whole collection. An aligned **All repos** row
+  offers **↑ Push** and **↓ Catch up** for eligible repositories. Hover or focus
+  exposes the eligible scope; unavailable actions stay disabled in their slots.
+  Uncommitted-only rows offer **Commit changes** first.
 
   An open tunnel shows the first part of its address, links to it and closes
   with ✕; a closed one is a ▶ to open it again. **+** offers, in order, the
@@ -550,6 +550,10 @@ reserve a dedicated PR facts line. Service layout has its own
 520-pixel breakpoint. Long branches have a tap/keyboard expansion, and complete
 feedback is available from the header in the sidebar rather than clipped into
 an extra paragraph below the rows. Services precede the recent Action log.
+Text on a row shares a baseline; glyphs center independently. Status and history
+links use the host's quieter controls, while the separate personal confirmation
+uses its primary style. The collection-wide actions share the repository tracks
+rather than forming a floating stack of buttons.
 
 Both render what `wtc status <name> --json` prints and share a refresh every 30
 seconds while visible. Manual refresh shows its busy state. Publication pauses

@@ -295,14 +295,14 @@ const FORGE_PATHS = {
 const FORGE_COLORS = { github: "currentColor", bitbucket: "#2684FF" };
 function forgeIcon(forge, size = 14) {
   const d = FORGE_PATHS[forge];
-  if (!d) return css(el("span"), `flex:none;width:${size}px;height:${size}px;border-radius:3px;background:var(--muted, #888);opacity:.4`);
+  if (!d) return css(el("span"), `flex:none;align-self:center;width:${size}px;height:${size}px;border-radius:3px;background:var(--muted, #888);opacity:.4`);
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("width", String(size));
   svg.setAttribute("height", String(size));
   svg.setAttribute("aria-label", forge === "github" ? "GitHub" : "Bitbucket");
-  svg.style.cssText = "flex:none";
+  svg.style.cssText = "flex:none;align-self:center";
   const pathEl = document.createElementNS(NS, "path");
   pathEl.setAttribute("d", d);
   pathEl.setAttribute("fill", FORGE_COLORS[forge]);
@@ -321,7 +321,7 @@ function repoTitle(r, size = "14px") {
     css(el("span", { textContent: name }), "font-weight:600;color:var(--text-strong, inherit)"));
   if (href) Object.assign(label, { href, target: "_blank", rel: "noopener noreferrer" });
   label.style.cssText = `text-decoration:none;color:inherit;font-size:${size};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0`;
-  return css(el("span", {}, forgeIcon(r.forge), label), "display:inline-flex;align-items:center;gap:6px;min-width:0");
+  return css(el("span", {}, forgeIcon(r.forge), label), "display:inline-flex;align-items:baseline;gap:6px;min-width:0");
 }
 // A gateway worktree is on its own branch from the start; until something is
 // on it, it is its base, as a detached worktree is in a local collection.
@@ -569,7 +569,7 @@ const brand = (size, version, compact = false) => css(el("span", {},
 
 const sectionHeading = (text, ...extra) => css(el("div", {},
   css(el("h3", { textContent: text }), "margin:0;font-size:14px;font-weight:600;color:var(--text-strong,inherit)"), ...extra),
-  "display:flex;align-items:center;gap:8px;margin-bottom:6px");
+  "display:flex;align-items:baseline;gap:8px;margin-bottom:6px");
 
 // Browser surfaces share the CLI's facts and actions. Repository, branch,
 // changes, PR and next step keep fixed columns aligned with the header action;
@@ -629,8 +629,8 @@ async function trackedRefresh(watch, sessionKey, say, currentSession = () => ses
 }
 
 const repositoryColumns = (narrow) => narrow
-  ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: "128px", align: "end", top: true }]
-  : [{ head: "Repository", width: "minmax(100px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "140px" }, { head: "Next", width: "128px", align: "end", top: true }];
+  ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: "128px", align: "end" }]
+  : [{ head: "Repository", width: "minmax(100px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "140px" }, { head: "Next", width: "128px", align: "end" }];
 const actionFeedback = () => el("style", { textContent: `
 .wtc-next-step { width:128px;justify-content:flex-start !important; }
 .wtc-next-step>:first-child { width:104px;flex:0 0 104px; }
@@ -638,7 +638,10 @@ const actionFeedback = () => el("style", { textContent: `
 .wtc-step-status { width:104px;text-align:center; }
 .wtc-action-control:not(:disabled):hover { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 30%,transparent); --wtc-control-border:var(--accent,#75c8c1); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:inset 0 0 0 1px var(--accent,#75c8c1); }
 .wtc-next-actions button:disabled { background:transparent !important;border-color:var(--border-strong,rgba(128,128,128,.35)) !important;color:var(--muted,#888) !important; }
-.wtc-confirm-publication:not(:disabled) { background:var(--accent,#75c8c1) !important;color:var(--accent-foreground,#151a22) !important;border-color:var(--accent,#75c8c1) !important; }
+.wtc-confirm-publication:not(:disabled) { background:var(--primary,var(--accent,#75c8c1)) !important;color:var(--primary-foreground,var(--accent-foreground,#151a22)) !important;border-color:var(--primary,var(--accent,#75c8c1)) !important; }
+:is(.wtc-action-toolbar,.wtc-bulk-actions) .wtc-action-control,.wtc-pr-history { --wtc-control-bg:transparent;--wtc-control-border:transparent;--wtc-control-text:var(--muted,#888); }
+:is(.wtc-action-toolbar,.wtc-bulk-actions) .wtc-action-control:not(:disabled):hover,.wtc-pr-history:not(:disabled):hover { --wtc-control-bg:var(--bg-hover,rgba(128,128,128,.12));--wtc-control-border:transparent;--wtc-control-text:var(--text-strong,var(--text,inherit));box-shadow:none; }
+
 .wtc-action-control:not(:disabled):active { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 45%,transparent); }
 @keyframes wtc-refresh { to { transform:rotate(360deg); } }
 .wtc-refresh-control[aria-busy="true"] { animation:wtc-refresh 1s linear infinite; }
@@ -673,6 +676,7 @@ function collectionTables(v) {
   const acting = new Set();
   let authorSending = false;
   const active = (conversation) => v.alive?.() !== false && v.key() === conversation;
+  // Mirror browser-local publication progress; this is not a gateway lock.
   const sharedPushBusy = (r) => [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].some(item => item.action === "push" && item.repoSessionKey === r.sessionKey && item.inFlight);
   const reserved = (r) => acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey) || sharedPushBusy(r);
   async function sendToAuthor(conversation, skill, input) {
@@ -878,7 +882,7 @@ function collectionTables(v) {
     if (targets.every(({ step }) => step.approve !== "person" && step.step !== "push")) void runSelected(targets);
     else { choosing = true; selection = new Map(targets.map((t) => [t.repo.sessionKey, t])); batchPreview = targets; v.reveal?.(); v.showActions?.(); v.rerender(); }
   }
-  const nextControlStyle = "display:inline-block;vertical-align:middle;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);max-width:100%;box-sizing:border-box;border:1px solid var(--wtc-control-border,var(--border-strong,rgba(128,128,128,.35)));border-radius:4px;background:var(--wtc-control-bg,rgba(128,128,128,.08));color:var(--wtc-control-text,var(--text,inherit));font:inherit;font-size:11px;line-height:16px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer";
+  const nextControlStyle = "display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);max-width:100%;box-sizing:border-box;border:1px solid var(--wtc-control-border,var(--border-strong,rgba(128,128,128,.35)));border-radius:var(--radius-sm,6px);background:var(--wtc-control-bg,rgba(128,128,128,.08));color:var(--wtc-control-text,var(--text,inherit));font:inherit;font-size:11px;line-height:16px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer";
   const nextButton = (text, title, run, disabled = false) => {
     const button = css(smallButton(text, title, run), nextControlStyle);
     button.className = "wtc-action-control";
@@ -982,7 +986,7 @@ function collectionTables(v) {
         css(el("summary", { title: item.detail ?? item.status },
           css(el("span", { textContent: `${failed ? "⚠ " : label === "Done" ? "✓ " : ""}${item.repo}${item.action ? ` · ${nextLabel({ step: item.action })}` : ""}` }), "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"),
           css(el("span", { textContent: label }), `font-size:11px;color:${failed ? TONE.failure : "var(--muted,#888)"};white-space:nowrap`),
-          css(el("span", { textContent: ago(item.at) }), "font-size:11px;color:var(--muted,#888);white-space:nowrap"), el("span", { textContent: "⌄", ariaHidden: "true" })), "display:grid;grid-template-columns:minmax(0,1fr) 96px 48px 12px;gap:8px;align-items:center;cursor:pointer;min-height:28px;list-style:none"),
+          css(el("span", { textContent: ago(item.at) }), "font-size:11px;color:var(--muted,#888);white-space:nowrap"), el("span", { textContent: "⌄", ariaHidden: "true" })), "display:grid;grid-template-columns:minmax(0,1fr) 96px 48px 12px;gap:8px;align-items:baseline;cursor:pointer;min-height:28px;list-style:none"),
         css(el("div", {}, el("span", { textContent: item.detail ?? item.status }), resultAction(item.followUp, v.say)), "padding:6px 0 8px;white-space:normal;overflow-wrap:anywhere;font-size:12px;color:var(--muted,#888)")), "font-size:12px;min-width:0");
       return detail;
     }), records.length > 3 ? nextButton(showAllActivity ? "Show latest 3" : `Earlier activity (${records.length - 3})`, "Show or hide earlier activity", () => { showAllActivity = !showAllActivity; v.rerender(); }) : null), "display:grid;gap:4px;min-width:0");
@@ -1075,17 +1079,18 @@ function collectionTables(v) {
           nextButton("Cancel", `Cancel preparation for ${nameOf(r)}; nothing will be pushed`, () => { if (!active(prepared.conversationKey) || confirming.get(r.sessionKey) !== prepared) return; confirming.delete(r.sessionKey); if (prepared.activityId) recordActivity(prepared.logKey, prepared.activityId, { state: "cancelled", status: `${nameOf(r)}: publication cancelled.` }); v.say(`${nameOf(r)}: publication cancelled.`); v.rerender(); }, reserved(r))), "display:flex;align-items:center;gap:8px;padding-top:4px")), "display:grid;gap:4px;padding:10px 12px;border:1px solid var(--border-strong,rgba(128,128,128,.35));border-radius:8px;background:var(--bg,transparent)");
     })), "display:grid;gap:8px;min-width:0");
   }
-  function bulkActions(repos) {
+  function bulkActions(repos, narrow) {
+    if (!repos.length) return null;
     const pushes = repos.filter(r => pushable(r) && PUSHES.has(r.forge) && mine[r.forge] !== false);
     const catches = repos.filter(toCatchUp);
-    if (!repos.length) return null;
-    const busyPush = pushes.some(reserved), busyCatch = catches.some(reserved);
-    const controls = css(el("span", { className: "wtc-bulk-actions", role: "group", ariaLabel: "Collection-wide actions" },
-      css(el("span", { textContent: "All", ariaHidden: "true" }), "font-size:10px;color:var(--muted,#888);flex:none"),
-      nextButton(`↑ Push (${pushes.length})`, `Push all ${pushes.length} eligible repositories; prepare each personal confirmation`, () => pushAll([...pushes]), !pushes.length || busyPush || batchRunning || choosing),
-      nextButton(`↓ Catch up (${catches.length})`, `Catch up all ${catches.length} eligible repositories`, () => catches.every(r => r.next && ["catch-up", "return-to-tip"].includes(r.next.step)) ? startTargets(catches.map(repo => ({ repo, step: repo.next }))) : catchUp([...catches]), !catches.length || busyCatch || batchRunning || choosing)), "display:flex;align-items:center;gap:6px;white-space:nowrap");
-    for (const control of controls.children) if (control.tagName === "BUTTON") { control.style.width = "104px"; control.style.flex = "0 0 104px"; }
-    return css(el("div", {}, controls), "display:flex;justify-content:flex-end;margin:2px 0 4px;padding-right:24px;box-sizing:border-box;min-width:0");
+    const push = nextButton("↑ Push", `Push all ${pushes.length} eligible repositories; prepare each personal confirmation`, () => pushAll([...pushes]), !pushes.length || pushes.some(reserved) || batchRunning || choosing);
+    const catchAll = nextButton("↓ Catch up", `Catch up all ${catches.length} eligible repositories`, () => catches.every(r => r.next && ["catch-up", "return-to-tip"].includes(r.next.step)) ? startTargets(catches.map(repo => ({ repo, step: repo.next }))) : catchUp([...catches]), !catches.length || catches.some(reserved) || batchRunning || choosing);
+    for (const button of [push, catchAll]) button.style.cssText += ";width:104px;justify-self:start";
+    const label = css(el("span", { textContent: narrow ? "All" : "All repos" }), "color:var(--muted,#888);font-size:11px;white-space:nowrap;padding-left:19px");
+    const identity = narrow ? css(el("span", {}, label, push), "display:flex;align-items:baseline;justify-content:space-between;min-width:0") : label;
+    if (narrow) { label.style.paddingLeft = "0"; push.style.width = "56px"; }
+    const last = css(el("span", {}, catchAll), "display:flex;justify-content:flex-start;width:128px;justify-self:end");
+    return css(el("div", { className: "wtc-bulk-actions", role: "group", ariaLabel: "All repositories" }, ...(narrow ? [identity, last] : [identity, el("span"), push, el("span"), last])), `display:grid;grid-template-columns:${repositoryColumns(narrow).map(c => c.width).join(" ")};column-gap:10px;align-items:baseline;min-height:var(--wtc-control-height,20px);margin:2px 0 4px;min-width:0`);
   }
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
@@ -1352,7 +1357,7 @@ function collectionTables(v) {
     const align = (c) => c.align ? `justify-self:${c.align};` : "";
     const shown = columns.map((c, i) => i).filter((i) => !(narrow && columns[i].under));
     const grid = css(el("div", { className: "wtc-table" }),
-      `display:grid;${blank ? "grid-auto-rows:minmax(var(--wtc-control-height,20px),auto);" : ""}grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${blank ? 10 : narrow ? 8 : 14}px;row-gap:${blank ? 1 : narrow ? 6 : 4}px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums`);
+      `display:grid;${blank ? "grid-auto-rows:minmax(var(--wtc-control-height,20px),auto);" : ""}grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${blank ? 10 : narrow ? 8 : 14}px;row-gap:${blank ? 1 : narrow ? 6 : 4}px;align-items:baseline;font-size:12px;font-variant-numeric:tabular-nums`);
     const empty = (value) => value == null || value === "" || value === 0;
     grid.setAttribute("data-columns", shown.length);
     // Repository field names remain accessible without occupying a visible row.
@@ -1368,7 +1373,7 @@ function collectionTables(v) {
             css(el("span", {}, below), "display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px")),
           `${align(c)}min-width:0;display:grid;gap:1px`);
         }
-        return css(el("span", {}, value), `${align(c)}${c.top ? "align-self:start;" : ""}${blank ? "width:100%;box-sizing:border-box;min-height:var(--wtc-control-height,20px);display:flex;align-items:center;" : ""}min-width:0;overflow:${c.overflow ? "visible" : "hidden"};text-overflow:ellipsis;white-space:nowrap`);
+        return css(el("span", {}, value), `${align(c)}${c.top ? "align-self:start;" : ""}${blank ? "width:100%;box-sizing:border-box;min-height:var(--wtc-control-height,20px);display:flex;align-items:baseline;" : ""}min-width:0;overflow:${c.overflow ? "visible" : "hidden"};text-overflow:ellipsis;white-space:nowrap`);
       }));
     }
     return grid;
@@ -1381,12 +1386,12 @@ function collectionTables(v) {
     if (href) Object.assign(label, { href, target: "_blank", rel: "noopener noreferrer" });
     const check = choosing ? el("input", { type: "checkbox", checked: selection.has(r.sessionKey), disabled: batchRunning || reserved(r) || !r.next || !choicesOf(r).some(a => a.available), title: r.next ? "Select this repository’s action" : "No selectable next step", ariaLabel: `Select ${nameOf(r)}` }) : null;
     if (check) {
-      check.style.cssText = "width:15px;height:15px;margin:0;accent-color:var(--accent,#75c8c1);flex:none";
+      check.style.cssText = "align-self:center;width:15px;height:15px;margin:0;accent-color:var(--accent,#75c8c1);flex:none";
       check.onchange = () => { if (selection.has(r.sessionKey)) selection.delete(r.sessionKey); else selection.set(r.sessionKey, { repo: r, step: r.next }); batchPreview = null; v.rerender(); };
     }
     const last = lastActivity(r);
     const failure = activityFailed(last) ? nextButton("⚠", `${nameOf(r)}: ${last.status}. Open action details`, openActivity) : null;
-    return css(el("span", {}, check, forgeIcon(r.forge, 13), label, failure), "display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%");
+    return css(el("span", {}, check, forgeIcon(r.forge, 13), label, failure), "display:inline-flex;align-items:baseline;gap:6px;min-width:0;max-width:100%");
   };
   // ↑: the push, as a button only where the gateway pushes it (GitHub and,
   // with its plugin, Bitbucket, each with the person's own account); a
@@ -1410,15 +1415,16 @@ function collectionTables(v) {
   }
   const openPRHistory = () => v.host.ui.openPanel("collection", { sessionKey: v.key(), agentId: v.agent(), focus: "pull-requests" });
   const otherPRs = (r) => [...new Map((r.pullRequests ?? []).filter((pr) => String(pr.number) !== String(r.pullRequest?.number)).map((pr) => [String(pr.number), pr])).values()];
+  const historyButton = (...args) => { const button = nextButton(...args); button.className += " wtc-pr-history"; return button; };
   function prHints(r) {
     const others = otherPRs(r);
     const archived = others.filter((pr) => pr.state === "merged" || pr.state === "closed");
-    if (others.length && (r.pullRequest || others.length > 1 && others.some(pr => pr.state === "open"))) return nextButton(`+${plural(others.length, "PR")}`, `${plural(others.length, "other PR")}: ${others.length - archived.length} open, ${archived.length} archived. Open collection PR history in the taba sidebar`, openPRHistory);
+    if (others.length && (r.pullRequest || others.length > 1 && others.some(pr => pr.state === "open"))) return historyButton(`+${plural(others.length, "PR")}`, `${plural(others.length, "other PR")}: ${others.length - archived.length} open, ${archived.length} archived. Open collection PR history in the taba sidebar`, openPRHistory);
     const active = others.filter((pr) => pr.state === "open").map((pr) => {
       const hint = link(`#${pr.number}`, pr.url);
       return css(el("span", { title: `Other active PR #${pr.number}: ${pr.title ?? ""}` }, typeof hint === "object" ? css(hint, "color:var(--muted,#888);text-decoration:none") : hint), "color:var(--muted,#888)");
     });
-    const history = archived.length ? nextButton(plural(archived.length, "archived PR"), `${archived.length} completed pull requests for ${nameOf(r)}. Open collection PR history in the taba sidebar`, openPRHistory) : null;
+    const history = archived.length ? historyButton(plural(archived.length, "archived PR"), `${archived.length} completed pull requests for ${nameOf(r)}. Open collection PR history in the taba sidebar`, openPRHistory) : null;
     if (history) { history.style.flexShrink = "1"; history.style.whiteSpace = "normal"; }
     return active.length || history ? css(el("span", {}, css(el("span", {}, ...active), "display:inline-flex;gap:4px;min-width:0;overflow:hidden"), history), "display:inline-flex;align-items:center;gap:4px;min-width:0;overflow:hidden;white-space:nowrap") : null;
   }
@@ -1624,17 +1630,17 @@ function collectionTables(v) {
         const changes = css(el("span", { className: "wtc-change-slots" },
           css(el("span", {}, row[2] ? el("span", {}, muted("± "), row[2]) : null), "min-width:0"),
           css(el("span", {}, row[3]), "min-width:0"),
-          css(el("span", {}, row[4]), "min-width:0")), "display:grid;grid-template-columns:24px 32px 32px;gap:4px;align-items:center;font-size:12px;font-variant-numeric:tabular-nums");
+          css(el("span", {}, row[4]), "min-width:0")), "display:grid;grid-template-columns:24px 32px 32px;gap:4px;align-items:baseline;font-size:12px;font-variant-numeric:tabular-nums");
         const pr = css(el("span", {}, row[5],
           row[6] || row[7] || row[8] ? css(el("span", {}, ...[row[6], row[7], row[8]].map((mark) => css(el("span", {}, mark), "display:inline-flex;justify-content:center;width:16px;flex:none"))), "display:inline-flex;align-items:center;gap:2px;flex:none") : null,
-          row[10]), "display:inline-flex;align-items:center;gap:5px;white-space:nowrap;flex-wrap:wrap;min-width:0");
-        const nameAndBranch = css(el("div", { className: "wtc-repo-identity" }, row[0]), "display:flex;align-items:center;min-width:0;min-height:24px;white-space:nowrap");
+          row[10]), "display:inline-flex;align-items:center;gap:5px;align-items:baseline;white-space:nowrap;flex-wrap:wrap;min-width:0");
+        const nameAndBranch = css(el("div", { className: "wtc-repo-identity" }, row[0]), "display:flex;align-items:baseline;min-width:0;min-height:24px;white-space:nowrap");
         const branch = css(el("span", {}, row[1]), "flex:1;max-width:120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted,#888)");
         const identity = css(el("div", {}, nameAndBranch,
-          narrow ? css(el("div", { className: "wtc-repo-facts" }, branch, changes, pr), "display:grid;grid-template-columns:56px 96px minmax(0,1fr);width:calc(100% + 138px);min-width:0;gap:8px;align-items:center;margin-top:2px;padding-left:19px;box-sizing:border-box;min-height:var(--wtc-control-height,20px)") : null), "min-width:0;padding:0");
+          narrow ? css(el("div", { className: "wtc-repo-facts" }, branch, changes, pr), "display:grid;grid-template-columns:56px 96px minmax(0,1fr);width:calc(100% + 138px);min-width:0;gap:8px;align-items:baseline;margin-top:2px;padding-left:19px;box-sizing:border-box;min-height:var(--wtc-control-height,20px)") : null), "min-width:0;padding:0");
         return narrow ? [identity, row[9]] : [row[0], row[1], changes, pr, row[9]];
       });
-      return css(el("div", { className: "wtc-repositories" }, bulkActions(repos), table(columns, rows, false, true)), "min-width:0");
+      return css(el("div", { className: "wtc-repositories" }, bulkActions(repos, narrow), table(columns, rows, false, true)), "min-width:0");
     }, serviceTable, totals, prTable };
 }
 
@@ -1718,8 +1724,8 @@ function mountComposer(container, context) {
     note = text; noteFailed = failed; noteAction = action;
     if (text) feedbackStore.set(entry?.data?.collection?.sessionKey ?? key, { text, failed, action, activityId, at: Date.now() });
     if (entry) render(entry);
-    // Keep errors and follow-ups visible; settled informational feedback yields
-    // to live totals and next actions while its full result stays in the log.
+    // Errors and follow-ups stay. Other notes expire except the listed progress
+    // prefixes; row busy state and recorded outcomes remain available.
     if (text && !failed && !action && !/Preparing|Pushing|Catching up|Starting|Stopping|Restarting|Asking/.test(text)) noteTimer = setTimeout(() => {
       note = ""; if (!disposed && entry) render(entry);
     }, 8000);
@@ -1879,7 +1885,7 @@ function mountComposer(container, context) {
     const feedback = headerNote ? css(el("button", { type: "button", className: "wtc-header-feedback wtc-action-control", role: headerFailed ? "alert" : "status", ariaLive: "polite", textContent: `${headerFailed ? "⚠ " : ""}${entry.error ? "Refresh failed" : feedbackLabel(headerNote, headerFailed)}`, title: headerNote + " — Open full details", ariaLabel: headerNote + ". Open full details in the sidebar" }), `border:0;background:transparent;padding:0;text-align:left;font:inherit;font-size:12px;color:${headerFailed ? TONE.failure : "var(--muted,#888)"};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;flex:1`) : null;
     if (feedback) feedback.onclick = (e) => { e.preventDefault(); e.stopPropagation(); ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx), focus: "activity" }); };
     summary.replaceChildren(
-      css(el("span", {}, brand("12px", entry.data.version, repoNarrow)), "flex:none"),
+      css(el("span", {}, brand("12px", entry.data.version, repoNarrow)), "flex:none;display:inline-flex;align-items:baseline"),
       feedback ?? facts,
       css(el("span", { className: "wtc-header-controls" }, tables.actionToolbar(repos, true, { failed: headerFailed, text: headerNote }),
         iconButton("↻", `${entry.inflight ? "Refreshing… " : ""}Updated ${ago(entry.at)}. Refresh`, () => trackedRefresh(watch, entry?.data?.collection?.sessionKey ?? key, say, () => entry?.data?.collection?.sessionKey ?? key, () => !disposed)),
@@ -1954,7 +1960,7 @@ function mountCollection(container, context) {
   const mono = (text, title) => css(el("code", { textContent: text, title: title ?? text }),
     "font-family:var(--mono, ui-monospace, monospace);font-size:12px;color:var(--muted, #888);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0");
   const heading = sectionHeading;
-  const row = (...kids) => css(el("div", {}, ...kids), "display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap");
+  const row = (...kids) => css(el("div", {}, ...kids), "display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:wrap");
   const button = (text, title, run, primary) => {
     const b = css(el("button", { textContent: text, type: "button", title }),
       `border:1px solid ${primary ? "transparent" : "var(--border-strong, rgba(128,128,128,.4))"};background:${primary ? "var(--accent, #bd4531)" : "transparent"};color:${primary ? "var(--accent-foreground, #fff)" : "inherit"};` +
