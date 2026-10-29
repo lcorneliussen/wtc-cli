@@ -656,7 +656,7 @@ const actionFeedback = () => el("style", { textContent: `
 }
 @media(max-width:360px) {
   .wtc-collection-card summary .wtc-brand-word { display:none; }
-  .wtc-repo-facts { grid-template-columns:56px minmax(0,1fr) !important;row-gap:0 !important; }
+  .wtc-repo-facts { grid-template-columns:56px minmax(0,1fr) !important;grid-auto-rows:minmax(32px,auto);row-gap:0 !important; }
   .wtc-repo-facts>:last-child { grid-column:1 / -1;min-height:32px; }
 }
 
@@ -977,7 +977,7 @@ function collectionTables(v) {
       return detail;
     }), records.length > 3 ? nextButton(showAllActivity ? "Show latest 3" : `Earlier activity (${records.length - 3})`, "Show or hide earlier activity", () => { showAllActivity = !showAllActivity; v.rerender(); }) : null), "display:grid;gap:4px;min-width:0");
   }
-  function actionToolbar(repos, compact = false) {
+  function actionToolbar(repos, compact = false, feedback = null) {
     const rows = actionRows(repos);
     if (!repos.length && !batchResults.size && !(activityStore.get(v.collectionKey?.() ?? v.key())?.size)) return null;
     const targets = selection.size ? [...selection.values()] : suggestedTargets(rows);
@@ -1022,6 +1022,7 @@ function collectionTables(v) {
     }
     if (!batchRunning && !prepared && (catching.size || busy.size)) primary = nextButton(catching.size ? "Catching up…" : "Publishing…", "The current operation is still running or rechecking its result", () => {}, true);
     if (dispatched.size && !batchRunning && !selection.size && !prepared && !catching.size && !busy.size) primary = nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } });
+    if (feedback?.failed && !batchRunning) primary = nextButton("⚠ Failed", `${feedback.text}. Open full action details`, openActivity);
     if (primary) primary.style.width = "104px";
     const slot = css(el("span", { className: `wtc-toolbar-primary${confirming.size || batchRunning || selection.size ? " wtc-toolbar-primary-required" : ""}` }, primary), "display:inline-flex;align-items:center;justify-content:flex-end;flex:0 0 104px;width:104px;min-width:104px;min-height:var(--wtc-control-height,20px)");
     const secondary = batchRunning
@@ -1388,7 +1389,7 @@ function collectionTables(v) {
   function prHints(r) {
     const others = otherPRs(r);
     const archived = others.filter((pr) => pr.state === "merged" || pr.state === "closed");
-    if (others.length > 1 || others.length && r.pullRequest) return nextButton(`+${plural(others.length, "PR")}`, `${plural(others.length, "other PR")}: ${others.length - archived.length} open, ${archived.length} archived. Open collection PR history in the taba sidebar`, openPRHistory);
+    if (others.length && (r.pullRequest || others.length > 1 && others.some(pr => pr.state === "open"))) return nextButton(`+${plural(others.length, "PR")}`, `${plural(others.length, "other PR")}: ${others.length - archived.length} open, ${archived.length} archived. Open collection PR history in the taba sidebar`, openPRHistory);
     const active = others.filter((pr) => pr.state === "open").map((pr) => {
       const hint = link(`#${pr.number}`, pr.url);
       return css(el("span", { title: `Other active PR #${pr.number}: ${pr.title ?? ""}` }, typeof hint === "object" ? css(hint, "color:var(--muted,#888);text-decoration:none") : hint), "color:var(--muted,#888)");
@@ -1855,7 +1856,7 @@ function mountComposer(container, context) {
     summary.replaceChildren(
       css(el("span", {}, brand("12px", entry.data.version, repoNarrow)), "flex:none"),
       feedback ?? facts,
-      css(el("span", { className: "wtc-header-controls" }, tables.actionToolbar(repos, true),
+      css(el("span", { className: "wtc-header-controls" }, tables.actionToolbar(repos, true, { failed: headerFailed, text: headerNote }),
         iconButton("↻", `${entry.inflight ? "Refreshing… " : ""}Updated ${ago(entry.at)}. Refresh`, () => trackedRefresh(watch, entry?.data?.collection?.sessionKey ?? key, say, () => entry?.data?.collection?.sessionKey ?? key, () => !disposed)),
         iconButton("⤢", "Open the taba Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
         css(el("span", { textContent: card.open ? "⌃" : "⌄", ariaHidden: "true" }), "color:var(--muted,#888);padding:0 2px")), "margin-left:auto;flex:none;display:flex;align-items:center;justify-content:flex-end;gap:4px;white-space:nowrap"));

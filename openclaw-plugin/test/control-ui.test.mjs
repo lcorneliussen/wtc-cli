@@ -1287,6 +1287,7 @@ test("composer: a catch-up that fails reads as a failure, without wtc's prefix",
   assert.equal(note.role, "alert");
   assert.match(note.ariaLabel, /api: cannot fetch main from origin: exit status 128/);
   assert.match(note.style.cssText, /color:var\(--danger/);
+  assert.match([...host.all()].find(n => n.className?.startsWith("wtc-toolbar-primary")).textContent, /Failed/, "failure remains visible in the fixed primary slot at narrow widths");
   view.dispose();
 });
 
