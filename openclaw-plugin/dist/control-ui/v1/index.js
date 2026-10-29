@@ -630,7 +630,7 @@ async function trackedRefresh(watch, sessionKey, say, currentSession = () => ses
 
 const repositoryColumns = (narrow) => narrow
   ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: "128px", align: "end" }]
-  : [{ head: "Repository", width: "minmax(100px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "140px" }, { head: "Next", width: "128px", align: "end" }];
+  : [{ head: "Repository", width: "minmax(76px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "164px" }, { head: "Next", width: "128px", align: "end" }];
 const actionFeedback = () => el("style", { textContent: `
 .wtc-next-step { width:128px;justify-content:flex-start !important; }
 .wtc-next-step>:first-child { width:104px;flex:0 0 104px; }
@@ -1435,7 +1435,7 @@ function collectionTables(v) {
   }
   const openPRHistory = () => v.host.ui.openPanel("collection", { sessionKey: v.key(), agentId: v.agent(), focus: "pull-requests" });
   const otherPRs = (r) => [...new Map((r.pullRequests ?? []).filter((pr) => String(pr.number) !== String(r.pullRequest?.number)).map((pr) => [String(pr.number), pr])).values()];
-  const historyButton = (...args) => { const button = nextButton(...args); button.className += " wtc-pr-history"; button.style.cssText += ";width:64px;max-width:64px;min-width:0;font-size:10px;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; return button; };
+  const historyButton = (...args) => { const button = nextButton(...args); button.className += " wtc-pr-history"; button.style.cssText += ";width:80px;max-width:80px;min-width:0;font-size:11px;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; return button; };
   function prHints(r) {
     const others = otherPRs(r);
     const archived = others.filter((pr) => pr.state === "merged" || pr.state === "closed");
@@ -1654,8 +1654,8 @@ function collectionTables(v) {
         const currentPR = css(el("span", {}, row[5],
           row[6] || row[7] || row[8] ? css(el("span", {}, ...[row[6], row[7], row[8]].map((mark) => css(el("span", {}, mark), "display:inline-flex;justify-content:center;width:16px;flex:none"))), "display:inline-flex;align-items:baseline;gap:2px;flex:none") : null), "display:flex;gap:4px;align-items:baseline;min-width:0;overflow:hidden");
         const hint = row[10];
-        if (hint) hint.style.cssText += ";max-width:64px;min-width:0;font-size:10px;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-        const pr = css(el("span", { className: "wtc-repo-pr-slots" }, currentPR, css(el("span", { className: "wtc-repo-pr-history-slot" }, hint), "min-width:0;overflow:hidden")), "display:grid;grid-template-columns:72px 64px;gap:4px;align-items:baseline;white-space:nowrap;min-width:0");
+        if (hint) hint.style.cssText += ";max-width:80px;min-width:0;font-size:11px;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+        const pr = css(el("span", { className: "wtc-repo-pr-slots" }, currentPR, css(el("span", { className: "wtc-repo-pr-history-slot" }, hint), "min-width:0;overflow:hidden")), "display:grid;grid-template-columns:80px 80px;gap:4px;align-items:baseline;white-space:nowrap;min-width:0");
         const nameAndBranch = css(el("div", { className: "wtc-repo-identity" }, row[0]), "display:flex;align-items:center;min-width:0;min-height:24px;white-space:nowrap");
         const branch = css(el("span", {}, row[1]), "display:flex;align-items:baseline;flex:1;max-width:120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted,#888)");
         const identity = css(el("div", {}, nameAndBranch,
