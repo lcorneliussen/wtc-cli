@@ -1017,7 +1017,7 @@ function collectionTables(v) {
     }
     if (dispatched.size && !batchRunning && !selection.size && !prepared) primary = nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } });
     if (primary) primary.style.width = "104px";
-    const slot = css(el("span", { className: `wtc-toolbar-primary${confirming.size || batchRunning || selection.size ? " wtc-toolbar-primary-required" : ""}` }, primary), "display:inline-flex;align-items:center;justify-content:flex-end;flex:0 0 104px;width:104px;min-width:104px");
+    const slot = css(el("span", { className: `wtc-toolbar-primary${confirming.size || batchRunning || selection.size ? " wtc-toolbar-primary-required" : ""}` }, primary), "display:inline-flex;align-items:center;justify-content:flex-end;flex:0 0 104px;width:104px;min-width:104px;min-height:var(--wtc-control-height,20px)");
     const secondary = batchRunning
       ? nextButton(compact ? "Stop" : "Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); })
       : nextButton(compact ? "⋯" : "Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.reveal?.(); v.rerender(); }, !rows.length);
