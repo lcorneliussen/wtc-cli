@@ -663,6 +663,7 @@ const actionFeedback = () => el("style", { textContent: `
   .wtc-brand-word { font-size:11px; }
   .wtc-collection-card>summary { column-gap:4px !important; }
   .wtc-header-controls { gap:0 !important; }
+  .wtc-header-controls .wtc-toolbar-primary { width:96px !important;min-width:96px !important;flex-basis:96px !important; }
   .wtc-header-controls>button { min-width:min(32px,var(--wtc-icon-size,24px)) !important; }
   .wtc-header-controls .wtc-action-toolbar>button { width:28px !important;min-width:28px !important; }
 }
@@ -893,6 +894,8 @@ function collectionTables(v) {
   const nextControlStyle = "display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);max-width:100%;box-sizing:border-box;border:1px solid var(--wtc-control-border,var(--border-strong,rgba(128,128,128,.35)));border-radius:var(--radius-sm,6px);background:var(--wtc-control-bg,var(--bg-elevated,rgba(128,128,128,.08)));color:var(--wtc-control-text,var(--text,inherit));font:inherit;font-size:11px;line-height:16px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer";
   const nextButton = (text, title, run, disabled = false) => {
     const button = css(smallButton(text, title, run), nextControlStyle);
+    button.textContent = "";
+    button.append(css(el("span", { textContent: text }), "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"));
     button.className = "wtc-action-control";
     button.disabled = disabled;
     if (disabled) { button.style.opacity = ".55"; button.style.cursor = "default"; }
