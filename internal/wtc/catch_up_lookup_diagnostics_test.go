@@ -19,6 +19,13 @@ func TestCatchUpLookupDiagnostics(t *testing.T) {
 		{"unsupported", "https://user:secret-value@forge.invalid/example/repo.git?token=secret-value", "", "gh", "exit 99", "identify origin forge: unsupported or invalid remote"},
 		{"invalid-json", "git@github.com:example/agent-harness.git", "agent-harness 7 topic - fixture\n", "gh", "echo 'secret-value not-json'", "gh pr view failed: invalid JSON response"},
 		{"invalid-state", "git@github.com:example/agent-harness.git", "agent-harness 7 topic - fixture\n", "gh", "echo '{\"state\":\"secret-value\"}'", "gh pr view failed: unrecognized PR state"},
+		{"redacted-repository", "git@github.com:example/agent-harness?token=secret-value.git", "", "gh", "exit 17", "github.com/[repository redacted] branch \"topic\": gh pr list failed: forge CLI exited with status 17"},
+		{"oversized-number", "git@github.com:example/agent-harness.git", "agent-harness 999999999999999999999999999999 topic - fixture\n", "gh", "exit 17", "PR #[invalid number]: gh pr view failed"},
+		{"bitbucket-invalid-json", "git@bitbucket.org:example/agent-harness.git", "agent-harness 7 topic - fixture\n", "bb", "echo 'secret-value not-json'", "bb pr view failed: invalid JSON response"},
+		{"bitbucket-invalid-state", "git@bitbucket.org:example/agent-harness.git", "agent-harness 7 topic - fixture\n", "bb", "echo '{\"state\":\"secret-value\"}'", "bb pr view failed: unrecognized PR state"},
+		{"ambiguous-branch", "git@github.com:example/agent-harness.git", "", "gh", `echo '[{"state":"OPEN","baseRefName":"main"},{"state":"OPEN","baseRefName":"next"}]'`, "gh pr list failed: ambiguous open PR merge targets"},
+		{"ambiguous-enlisted", "git@github.com:example/agent-harness.git", "agent-harness 7 topic - fixture\nagent-harness 8 topic - fixture\n", "gh", `case "$3" in 7) echo '{"state":"OPEN","baseRefName":"main"}';; *) echo '{"state":"OPEN","baseRefName":"next"}';; esac`, "PR #8: gh pr view failed: ambiguous open PR merge targets"},
+		{"ambiguous-bitbucket", "git@bitbucket.org:example/agent-harness.git", "agent-harness 7 topic - fixture\nagent-harness 8 topic - fixture\n", "bb", `case "$3" in 7) echo '{"state":"OPEN","destination":{"branch":{"name":"main"}}}';; *) echo '{"state":"OPEN","destination":{"branch":{"name":"next"}}}';; esac`, "PR #8: bb pr view failed: ambiguous open PR merge targets"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newWorkspaceFixture(t)
@@ -87,6 +94,13 @@ func TestCatchUpLookupCauseDoesNotEchoUntrustedOutput(t *testing.T) {
 	for _, tc := range []struct{ stderr, want string }{
 		{"HTTP 401 token=secret-value\x1b[31m", "authentication or authorization failed"},
 		{"dial tcp private.invalid:443: secret-value", "transport failure"},
+		{"HTTP/2 403 forbidden secret-value", "authentication or authorization failed"},
+		{"status code: 401 secret-value", "authentication or authorization failed"},
+		{"PR #1401 could not be read secret-value", "forge CLI exited with status 17"},
+		{"PR #4030 could not be read secret-value", "forge CLI exited with status 17"},
+		{"HTTP 4010 secret-value", "forge CLI exited with status 17"},
+		{"Could not resolve to an object secret-value", "forge CLI exited with status 17"},
+		{"could not resolve host: private.invalid secret-value", "transport failure"},
 		{strings.Repeat("secret-value", 10000), "forge CLI exited with status 17"},
 	} {
 		err := &exec.ExitError{ProcessState: lookupExitState(t), Stderr: []byte(tc.stderr)}
@@ -120,7 +134,7 @@ func TestCatchUpLookupMissingCLIAndTimeout(t *testing.T) {
 
 func TestCatchUpLookupLabelsEscapeAndBound(t *testing.T) {
 	got := catchUpLookupLabel("topic\x1b[31m\n" + strings.Repeat("界", 200))
-	if len(got) > 1000 || strings.ContainsAny(got, "\x1b\n\r") || !strings.Contains(got, `\x1b`) || !strings.Contains(got, "...") {
+	if len(got) > 645 || strings.ContainsAny(got, "\x1b\n\r") || !strings.Contains(got, `\x1b`) || !strings.Contains(got, "...") {
 		t.Fatalf("unsafe label: %q", got)
 	}
 }

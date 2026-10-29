@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -114,6 +115,8 @@ func catchUpRefForPR(worktree, defaultRef string, pr catchUpPR) (string, error) 
 	return "origin/" + pr.base, nil
 }
 
+var catchUpLookupAuthStatus = regexp.MustCompile(`(?i)\b(?:HTTP(?:/[0-9.]+)?[ \t]+|status(?: code)?[ :=\t]+)(?:401|403)\b`)
+
 // Lookup diagnostics use fixed cause categories instead of echoing forge stderr,
 // response bodies or remote URLs: each can carry credentials or terminal controls.
 func catchUpLookupCause(err error) string {
@@ -127,12 +130,15 @@ func catchUpLookupCause(err error) string {
 			detail = detail[:8192]
 		}
 		text := strings.ToLower(string(detail))
-		for _, marker := range []string{"401", "403", "unauthorized", "forbidden", "authentication", "not logged", "auth login"} {
+		if catchUpLookupAuthStatus.MatchString(text) {
+			return "authentication or authorization failed; check CLI login and repository access, then retry"
+		}
+		for _, marker := range []string{"unauthorized", "forbidden", "authentication", "not logged", "auth login"} {
 			if strings.Contains(text, marker) {
 				return "authentication or authorization failed; check CLI login and repository access, then retry"
 			}
 		}
-		for _, marker := range []string{"could not resolve", "no such host", "connection refused", "connection reset", "dial tcp", "tls", "timeout", "timed out", "network is unreachable"} {
+		for _, marker := range []string{"could not resolve host", "no such host", "connection refused", "connection reset", "dial tcp", "tls handshake", "tls:", "timeout", "timed out", "network is unreachable"} {
 			if strings.Contains(text, marker) {
 				return "transport failure; check network connectivity and retry"
 			}

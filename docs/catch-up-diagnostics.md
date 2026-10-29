@@ -19,7 +19,7 @@ Bitbucket branches without an enlisted PR number need `wtc pr enlist` before
 catch-up can read their PR state. Unsupported or invalid origin remotes need
 local configuration inspection; the diagnostic does not print the remote URL.
 
-Diagnostics classify stderr into fixed causes. They never reproduce raw stderr,
+PR lookup diagnostics classify stderr into fixed causes. They never reproduce raw stderr,
 response bodies, or parse errors, which can contain credentials and private
 URLs. Branch labels are length-bounded and ASCII-escaped; invalid repository
 labels are redacted. Keep detailed local CLI output private when investigating.
@@ -29,5 +29,3 @@ SHA values and owner handoff fields. Lookup diagnostics add detail only to the
 reason. Dirty, busy, concurrent-branch, merge, landing and retirement decisions
 are unchanged. The separate catch-up conflict handoff sentence contract
 `conflicts in: … The merge was aborted` and its action JSON are unchanged.
-This is the PR lookup diagnostics slice of #242; rollout and agent handoff work
-remain outside this change.
