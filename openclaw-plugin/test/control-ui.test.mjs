@@ -2053,7 +2053,8 @@ test("sidebar Review push explicitly reveals the temporary section without autom
   personal = { state: "connected", account: { login: "demo" }, generation: "g1" };
   const previous = Node.prototype.scrollIntoView;
   const scrolled=[]; Node.prototype.scrollIntoView=function(options){scrolled.push({node:this,options});};
-  const {host,view}=await mount("panel",collection([repo("api",{unpublished:1})]));
+  const step={step:"push",by:"wtc",approve:"person",gateway:"github_publish",key:"api:push:h1",reason:"Push local commits"};
+  const {host,view}=await mount("panel",collection([repo("api",{unpublished:1,next:step,choices:{actions:[{...step,available:true}]}})]));
   try {
     await [...host.all()].find(n=>n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
     assert.equal(scrolled.length,0,"preparing does not move the fixed base out of view");
@@ -2061,5 +2062,22 @@ test("sidebar Review push explicitly reveals the temporary section without autom
     assert.equal(scrolled.length,1);
     assert.equal(scrolled[0].node.className,"wtc-transient-actions");
     assert.equal(scrolled[0].options.block,"nearest");
+    scrolled.length=0;
+    await [...host.all()].find(n=>n.tagName === "BUTTON" && n.textContent === "Choose steps…").onclick();
+    assert.equal(scrolled.length,1,"explicit selection also reveals its controls");
+    assert.equal(scrolled[0].node.className,"wtc-transient-actions");
   } finally {view.dispose();personal=null;if(previous)Node.prototype.scrollIntoView=previous;else delete Node.prototype.scrollIntoView;}
+});
+
+test("a settled single-repository push resolves the fixed header slot", async () => {
+  personal={state:"connected",account:{login:"demo"},generation:"g1"};
+  const {host,view,context}=await mount("composer",collection([repo("api",{unpublished:1})]));
+  try {
+    await [...host.all()].find(n=>n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+    collections.set(context.props.sessionKey,collection([repo("api",{unpublished:0,pullRequest:{number:7,state:"open",url:"https://github.com/octo/api/pull/7"}})]));
+    await [...host.all()].find(n=>n.tagName === "BUTTON" && n.textContent === "Confirm push").onclick();
+    const slot=[...host.all()].find(n=>n.className?.startsWith("wtc-toolbar-primary"));
+    assert.match(slot.textContent,/Pushed/);
+    assert.doesNotMatch(readable(host),/Publishing…/);
+  } finally {view.dispose();personal=null;}
 });

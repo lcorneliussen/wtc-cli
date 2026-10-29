@@ -630,7 +630,6 @@ async function trackedRefresh(watch, sessionKey, say, currentSession = () => ses
 const repositoryColumns = (narrow) => narrow
   ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: "128px", align: "end", top: true }]
   : [{ head: "Repository", width: "minmax(100px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "140px" }, { head: "Next", width: "128px", align: "end", top: true }];
-const repositoryTemplate = (narrow) => repositoryColumns(narrow).map((c) => c.width).join(" ");
 const actionFeedback = () => el("style", { textContent: `
 .wtc-next-step { width:128px;justify-content:flex-start !important; }
 .wtc-next-step>:first-child { width:104px;flex:0 0 104px; }
@@ -870,7 +869,7 @@ function collectionTables(v) {
   function startTargets(targets) {
     if (batchRunning || !targets.length) return;
     if (targets.every(({ step }) => step.approve !== "person" && step.step !== "push")) void runSelected(targets);
-    else { choosing = true; selection = new Map(targets.map((t) => [t.repo.sessionKey, t])); batchPreview = targets; v.reveal?.(); v.rerender(); }
+    else { choosing = true; selection = new Map(targets.map((t) => [t.repo.sessionKey, t])); batchPreview = targets; v.reveal?.(); v.showActions?.(); v.rerender(); }
   }
   const nextControlStyle = "display:inline-block;vertical-align:middle;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);max-width:100%;box-sizing:border-box;border:1px solid var(--wtc-control-border,var(--border-strong,rgba(128,128,128,.35)));border-radius:4px;background:var(--wtc-control-bg,rgba(128,128,128,.08));color:var(--wtc-control-text,var(--text,inherit));font:inherit;font-size:11px;line-height:16px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer";
   const nextButton = (text, title, run, disabled = false) => {
@@ -884,7 +883,7 @@ function collectionTables(v) {
   const activityFailed = item => item?.state === "failed" || /^(Failed|Handoff failed|Cannot )/.test(item?.status ?? "");
   function nextCell(r) {
     if (!actionable(r)) return null;
-    if (!r.next && r.choices && !r.dirty) return r.choices.actions?.length ? nextButton("Choose step…", "Inspect available actions and blocked reasons", () => { choosing = true; v.rerender(); }) : null;
+    if (!r.next && r.choices && !r.dirty) return r.choices.actions?.length ? nextButton("Choose step…", "Inspect available actions and blocked reasons", () => { choosing = true; v.showActions?.(); v.rerender(); }) : null;
     const step = selection.get(r.sessionKey)?.step ?? r.next ?? { step: "commit", reason: "Review and commit intended changes locally" };
     const phase = batchKeys.get(r.sessionKey) === step.key ? batchResults.get(r.sessionKey) : null;
     // Informational results belong in the log; after dispatch they must not
@@ -920,7 +919,7 @@ function collectionTables(v) {
       picker.onchange = () => { const chosen = available.find(a => a.available && a.key === picker.value); if (chosen) selection.set(r.sessionKey, { repo: r, step: chosen }); batchPreview = null; v.rerender(); };
     }
     return css(el("div", { className: "wtc-next-step" }, picker ?? action,
-      !choosing && choicesOf(r).length > 1 ? nextButton("⋯", `Choose another action for ${nameOf(r)}`, () => { choosing = !choosing; v.rerender(); }) : el("span", { ariaHidden: "true" })), "display:flex;align-items:center;justify-content:flex-start;gap:4px;min-width:0;max-width:100%;white-space:nowrap");
+      !choosing && choicesOf(r).length > 1 ? nextButton("⋯", `Choose another action for ${nameOf(r)}`, () => { choosing = !choosing; if (choosing) v.showActions?.(); v.rerender(); }) : el("span", { ariaHidden: "true" })), "display:flex;align-items:center;justify-content:flex-start;gap:4px;min-width:0;max-width:100%;white-space:nowrap");
   }
   function actionRows(repos) {
     const rows = repos.filter(actionable);
@@ -999,10 +998,10 @@ function collectionTables(v) {
       if (nextRoute(step) === "pr" && repo.pullRequest?.url) {
         primary = css(link(compact ? "Open PR" : nextLabel(step), repo.pullRequest.url), nextControlStyle + ";text-decoration:none");
         primary.className = "wtc-action-control";
-      } else if (nextRoute(step) === "publish" && confirming.has(repo.sessionKey)) primary = nextButton("Review push", `Review ${nameOf(repo)}’s prepared publication`, () => { v.reveal?.(); v.rerender(); });
+      } else if (nextRoute(step) === "publish" && confirming.has(repo.sessionKey)) primary = nextButton("Review push", `Review ${nameOf(repo)}’s prepared publication`, () => { v.reveal?.(); v.showActions?.(); v.rerender(); });
       else primary = nextButton(step.step === "push" && repo.pullRequest?.state === "open" ? "Update PR" : label, title, () => actNext({ ...repo, next: step }), reserved(repo) || !nextRoute(step));
     } else if (targets.length || batchRunning) primary = nextButton(label, title, () => {
-      if (batchPreview) { v.reveal?.(); v.rerender(); } else startTargets(targets);
+      if (batchPreview) { v.reveal?.(); v.showActions?.(); v.rerender(); } else startTargets(targets);
     }, batchRunning);
     else if (dispatched.size && !batchResults.size) primary = nextButton(compact ? "Sent" : "Sent to agent", "Handoff accepted; check the conversation for completion", () => {}, true);
     else if (batchResults.size) {
@@ -1021,8 +1020,8 @@ function collectionTables(v) {
       if (dirty) primary = nextButton("Commit changes", `Review and commit intended changes in ${nameOf(dirty)}`, () => askCommit(dirty), reserved(dirty));
     }
     if (!primary) {
-      const last = [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].at(-1);
-      if (last) primary = nextButton(last.status === "Completed" ? last.action === "catch-up" ? "✓ Caught up" : "✓ Done" : /^Failed/.test(last.status) ? "⚠ Failed" : "Action log", "Open details in the sidebar action log", openActivity);
+      const last = [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].reverse().sort((a,b) => b.at-a.at)[0];
+      if (last) primary = nextButton(last.state === "completed" && last.action === "push" ? "✓ Pushed" : last.state === "completed" && last.action === "refresh" ? "✓ Refreshed" : last.status === "Completed" ? last.action === "catch-up" ? "✓ Caught up" : "✓ Done" : /^Failed/.test(last.status) ? "⚠ Failed" : "Action log", "Open details in the sidebar action log", openActivity);
     }
     if (!batchRunning && !prepared && (catching.size || busy.size)) primary = nextButton(catching.size ? "Catching up…" : "Publishing…", "The current operation is still running or rechecking its result", () => {}, true);
     if (dispatched.size && !batchRunning && !selection.size && !prepared && !catching.size && !busy.size) primary = nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } });
@@ -1031,10 +1030,10 @@ function collectionTables(v) {
     const slot = css(el("span", { className: `wtc-toolbar-primary${confirming.size || batchRunning || selection.size ? " wtc-toolbar-primary-required" : ""}` }, primary), "display:inline-flex;align-items:center;justify-content:flex-end;flex:0 0 104px;width:104px;min-width:104px;min-height:var(--wtc-control-height,20px)");
     const secondary = batchRunning
       ? nextButton(compact ? "Stop" : "Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); })
-      : nextButton(compact ? "⋯" : "Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.reveal?.(); v.rerender(); }, !rows.length);
+      : nextButton(compact ? "⋯" : "Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.reveal?.(); v.showActions?.(); v.rerender(); }, !rows.length);
     secondary.style.width = compact ? "36px" : "104px";
     secondary.style.flexShrink = "0";
-    return css(el("span", { className: "wtc-action-toolbar" }, slot, secondary), `display:inline-flex;align-items:center;gap:${compact ? 4 : 8}px;min-width:0;flex-wrap:nowrap;white-space:nowrap`);
+    return css(el("span", { className: "wtc-action-toolbar" }, ...(compact ? [slot, secondary] : [secondary, slot])), `display:inline-flex;align-items:center;gap:${compact ? 4 : 8}px;min-width:0;flex-wrap:nowrap;white-space:nowrap`);
   }
   function publicationConfirmations(repos) {
     const pending = repos.filter(r => confirming.has(r.sessionKey));
@@ -1060,17 +1059,17 @@ function collectionTables(v) {
           nextButton("Cancel", `Cancel preparation for ${nameOf(r)}; nothing will be pushed`, () => { if (!active(prepared.conversationKey) || confirming.get(r.sessionKey) !== prepared) return; confirming.delete(r.sessionKey); if (prepared.activityId) recordActivity(prepared.logKey, prepared.activityId, { state: "cancelled", status: `${nameOf(r)}: publication cancelled.` }); v.say(`${nameOf(r)}: publication cancelled.`); v.rerender(); }, reserved(r))), "display:flex;align-items:center;gap:8px;padding-top:4px")), "display:grid;gap:4px;padding:10px 12px;border:1px solid var(--border-strong,rgba(128,128,128,.35));border-radius:8px;background:var(--bg,transparent)");
     })), "display:grid;gap:8px;min-width:0");
   }
-  function bulkActions(repos, narrow) {
+  function bulkActions(repos) {
     const pushes = repos.filter(r => pushable(r) && PUSHES.has(r.forge) && mine[r.forge] !== false);
     const catches = repos.filter(toCatchUp);
     if (!repos.length) return null;
     const busyPush = pushes.some(reserved), busyCatch = catches.some(reserved);
-    const controls = css(el("span", { className: "wtc-bulk-actions" },
+    const controls = css(el("span", { className: "wtc-bulk-actions", role: "group", ariaLabel: "Collection-wide actions" },
+      css(el("span", { textContent: "All", ariaHidden: "true" }), "font-size:10px;color:var(--muted,#888);flex:none"),
       nextButton(pushes.length === 1 ? "↑ Push 1" : pushes.length ? `↑ Push all (${pushes.length})` : "↑ Push all", `Push all ${pushes.length} eligible repositories; prepare each personal confirmation`, () => pushAll([...pushes]), !pushes.length || busyPush || batchRunning || choosing),
       nextButton(catches.length === 1 ? "↓ Catch up 1" : catches.length ? `↓ Catch up all (${catches.length})` : "↓ Catch up all", `Catch up all ${catches.length} eligible repositories`, () => catches.every(r => r.next && ["catch-up", "return-to-tip"].includes(r.next.step)) ? startTargets(catches.map(repo => ({ repo, step: repo.next }))) : catchUp([...catches]), !catches.length || busyCatch || batchRunning || choosing)), "display:flex;align-items:center;gap:6px;white-space:nowrap");
-    for (const control of controls.children) { control.style.width = "112px"; control.style.flex = "0 0 112px"; }
-    if (!narrow) controls.style.gridColumn = "3 / -1";
-    return css(el("div", {}, controls), narrow ? "display:flex;justify-content:flex-end;margin:2px 0 4px" : `display:grid;grid-template-columns:${repositoryTemplate(false)};column-gap:10px;margin:2px 0 4px`);
+    for (const control of controls.children) if (control.tagName === "BUTTON") { control.style.width = "112px"; control.style.flex = "0 0 112px"; }
+    return css(el("div", {}, controls), "display:flex;justify-content:flex-end;margin:2px 0 4px;min-width:0");
   }
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
@@ -1613,7 +1612,7 @@ function collectionTables(v) {
           narrow ? css(el("div", { className: "wtc-repo-facts" }, branch, changes, pr), "display:grid;grid-template-columns:56px 96px minmax(0,1fr);width:calc(100% + 138px);min-width:0;gap:8px;align-items:center;margin-top:2px;padding-left:19px;box-sizing:border-box;min-height:var(--wtc-control-height,20px)") : null), "min-width:0;padding:0");
         return narrow ? [identity, row[9]] : [row[0], row[1], changes, pr, row[9]];
       });
-      return css(el("div", { className: "wtc-repositories" }, bulkActions(repos, narrow), table(columns, rows, false, true)), "min-width:0");
+      return css(el("div", { className: "wtc-repositories" }, bulkActions(repos), table(columns, rows, false, true)), "min-width:0");
     }, serviceTable, totals, prTable };
 }
 

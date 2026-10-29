@@ -544,8 +544,9 @@ the task as a whole:
   tables with the same actions, wtc status's pull request table (**PR Repo
   State C M R Title**), and **Add repository**.
 
-Below 560 pixels of component width, a repository's name and action share the
-first line, with its branch and aligned facts below. Service layout has its own
+When the fixed columns no longer fit, a repository's name and action share the
+first line, with its branch and aligned facts below. The smallest components
+reserve a dedicated PR facts line. Service layout has its own
 520-pixel breakpoint. Long branches have a tap/keyboard expansion, and complete
 feedback is available from the header in the sidebar rather than clipped into
 an extra paragraph below the rows. Services precede the recent Action log.
