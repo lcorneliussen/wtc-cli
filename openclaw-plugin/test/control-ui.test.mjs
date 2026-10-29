@@ -1994,3 +1994,19 @@ test("a failed push offers Retry only for a matching next action", async () => {
     assert.equal([...host.all()].some(n => n.className === "wtc-next-step" && n.textContent === "Retry"), false);
   } finally { failing.delete("sessions.github.publish"); view.dispose(); personal = null; }
 });
+
+
+test("direct catch-up is labelled Running in the action log until it completes", async () => {
+  const previous = catchUpResult;
+  let finish;
+  catchUpResult = new Promise(resolve => { finish = resolve; });
+  const { host, view } = await mount("panel", collection([repo("api", { behind: 2 })]));
+  try {
+    const pending = [...host.all()].find(n => n.tagName === "BUTTON" && /^2 new on main/.test(n.title)).onclick();
+    const log = [...host.all()].find(n => n.className === "wtc-activity-log");
+    assert.ok(log); assert.match(log.textContent, /Running/);
+    finish({ ok: true, result: { code: 0, json: { summary: "merged" } } });
+    await pending;
+    assert.match([...host.all()].find(n => n.className === "wtc-activity-log").textContent, /Done/);
+  } finally { finish?.(previous); catchUpResult = previous; view.dispose(); }
+});

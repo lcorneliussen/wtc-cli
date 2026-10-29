@@ -956,7 +956,7 @@ function collectionTables(v) {
     if (feedback?.text && !records.some(item => item.status.includes(plain))) records.unshift({ repo: "Latest action", action: "", status: feedback.text, at: feedback.at, failed: feedback.failed, followUp: feedback.action });
     if (!records.length) return null;
     const shown = showAllActivity ? records : records.slice(0, 3);
-    const statusLabel = item => item.state ? ({ completed: "Done", failed: "Failed", running: "Running", confirmation: "Confirm push", cancelled: "Cancelled", blocked: "Needs attention" }[item.state] ?? "Details") : item.failed || /^(Failed|Handoff failed|Cannot )/.test(item.status) ? "Failed" : item.status === "Completed" ? "Done" : /confirmation/.test(item.status) ? "Confirm push" : /pending|Sent/.test(item.status) ? "Sent to agent" : /Queued/.test(item.status) ? "Queued" : /ing…/.test(item.status) ? "Running" : "Details";
+    const statusLabel = item => item.state ? ({ completed: "Done", failed: "Failed", running: "Running", confirmation: "Confirm push", cancelled: "Cancelled", blocked: "Needs attention" }[item.state] ?? "Details") : item.failed || /^(Failed|Handoff failed|Cannot )/.test(item.status) ? "Failed" : item.status === "Completed" ? "Done" : /confirmation/.test(item.status) ? "Confirm push" : /pending|Sent/.test(item.status) ? "Sent to agent" : /Queued/.test(item.status) ? "Queued" : /ing…|Catching up…/.test(item.status) ? "Running" : "Details";
     return css(el("div", { className: "wtc-activity-log" }, sectionHeading("Action log"), ...shown.map(item => {
       const label = statusLabel(item), failed = label === "Failed";
       const detail = css(el("details", { className: "wtc-activity-item", role: failed ? "alert" : "status", ariaLabel: item.status },
