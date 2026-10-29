@@ -12,6 +12,7 @@
 - **Publication has a separate confirmation preview.** Preparation shows the
   personal account, repository, branch and captured change count. Confirm push
   and Cancel are distinct controls; repeated taps on preparation cannot publish.
+  Preparation and confirmed publication have distinct progress labels.
   Pre-publication status responses are discarded and a fresh status is read
   before the row stops showing work in progress. Uncommitted-only rows offer
   Commit changes instead of an unnumbered push arrow.

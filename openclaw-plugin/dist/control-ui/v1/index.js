@@ -891,7 +891,7 @@ function collectionTables(v) {
     if (targets.every(({ step }) => step.approve !== "person" && step.step !== "push")) void runSelected(targets);
     else { choosing = true; selection = new Map(targets.map((t) => [t.repo.sessionKey, t])); batchPreview = targets; v.reveal?.(); v.showActions?.(); v.rerender(); }
   }
-  const nextControlStyle = "display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);max-width:100%;box-sizing:border-box;border:1px solid var(--wtc-control-border,var(--border-strong,rgba(128,128,128,.35)));border-radius:var(--radius-sm,6px);background:var(--wtc-control-bg,var(--bg-elevated,rgba(128,128,128,.08)));color:var(--wtc-control-text,var(--text,inherit));font:inherit;font-size:11px;line-height:16px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer";
+  const nextControlStyle = "display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);max-width:100%;box-sizing:border-box;border:1px solid var(--wtc-control-border,var(--border,rgba(128,128,128,.35)));border-radius:var(--radius-sm,6px);background:var(--wtc-control-bg,var(--bg-elevated,rgba(128,128,128,.08)));color:var(--wtc-control-text,var(--text,inherit));font:inherit;font-size:11px;line-height:16px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer";
   const nextButton = (text, title, run, disabled = false) => {
     const button = css(smallButton(text, title, run), nextControlStyle);
     button.textContent = "";
@@ -1352,7 +1352,7 @@ function collectionTables(v) {
   // A fact that is also an action: a count in a pill.
   const count = (text, title, tone, run) => {
     const b = css(el("button", { className: "wtc-action-control", type: "button", textContent: String(text), title, ariaLabel: title, disabled: batchRunning }),
-      `border:1px solid var(--wtc-control-border,var(--border-strong, rgba(128,128,128,.4)));background:var(--wtc-control-bg,transparent);color:var(--wtc-control-text,${tone});cursor:pointer;font:inherit;font-size:12px;line-height:16px;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);padding:0 6px;border-radius:var(--radius-sm,6px);white-space:nowrap;font-variant-numeric:tabular-nums`);
+      `border:1px solid var(--wtc-control-border,var(--border, rgba(128,128,128,.4)));background:var(--wtc-control-bg,transparent);color:var(--wtc-control-text,${tone});cursor:pointer;font:inherit;font-size:12px;line-height:16px;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);padding:0 6px;border-radius:var(--radius-sm,6px);white-space:nowrap;font-variant-numeric:tabular-nums`);
     b.onclick = async (e) => {
       e?.preventDefault();
       e?.stopPropagation();
