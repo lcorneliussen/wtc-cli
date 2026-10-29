@@ -640,8 +640,8 @@ const actionFeedback = () => el("style", { textContent: `
 .wtc-action-control:not(:disabled):hover { --wtc-control-bg:var(--bg-hover,rgba(128,128,128,.16)); --wtc-control-border:var(--border-strong,rgba(128,128,128,.5)); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:none; }
 .wtc-next-actions button:disabled { background:transparent !important;border-color:var(--border-strong,rgba(128,128,128,.35)) !important;color:var(--muted,#888) !important; }
 .wtc-confirm-publication:not(:disabled) { background:var(--primary,var(--accent,#75c8c1)) !important;color:var(--primary-foreground,var(--accent-foreground,#151a22)) !important;border-color:var(--primary,var(--accent,#75c8c1)) !important; }
-:is(.wtc-action-toolbar,.wtc-bulk-actions) .wtc-action-control,.wtc-pr-history { --wtc-control-bg:transparent;--wtc-control-border:transparent;--wtc-control-text:var(--muted,#888); }
-:is(.wtc-action-toolbar,.wtc-bulk-actions) .wtc-action-control:not(:disabled):hover,.wtc-pr-history:not(:disabled):hover { --wtc-control-bg:var(--bg-hover,rgba(128,128,128,.12));--wtc-control-border:transparent;--wtc-control-text:var(--text-strong,var(--text,inherit));box-shadow:none; }
+:is(.wtc-action-toolbar,.wtc-bulk-actions) .wtc-action-control,button.wtc-pr-history { --wtc-control-bg:transparent;--wtc-control-border:transparent;--wtc-control-text:var(--muted,#888); }
+:is(.wtc-action-toolbar,.wtc-bulk-actions) .wtc-action-control:not(:disabled):hover,button.wtc-pr-history:not(:disabled):hover { --wtc-control-bg:var(--bg-hover,rgba(128,128,128,.12));--wtc-control-border:transparent;--wtc-control-text:var(--text-strong,var(--text,inherit));box-shadow:none; }
 
 .wtc-action-control:not(:disabled):active { --wtc-control-bg:var(--secondary,rgba(128,128,128,.22)); }
 @keyframes wtc-refresh { to { transform:rotate(360deg); } }
@@ -1746,8 +1746,8 @@ function mountComposer(container, context) {
     note = text; noteFailed = failed; noteAction = action;
     if (text) feedbackStore.set(entry?.data?.collection?.sessionKey ?? key, { text, failed, action, activityId, at: Date.now() });
     if (entry) render(entry);
-    // Errors and follow-ups stay. Other notes expire except the listed progress
-    // prefixes; row busy state and recorded outcomes remain available.
+    // Errors, follow-ups and notes containing known progress words stay.
+    // Row busy state and recorded outcomes remain available.
     if (text && !failed && !action && !/Preparing|Pushing|Catching up|Starting|Stopping|Restarting|Asking/.test(text)) noteTimer = setTimeout(() => {
       note = ""; if (!disposed && entry) render(entry);
     }, 8000);

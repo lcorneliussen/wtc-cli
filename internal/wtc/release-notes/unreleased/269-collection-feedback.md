@@ -4,7 +4,8 @@
   summarizes progress and outcomes, with full details and recent results in the
   sidebar below Services. Selection augments the existing repository rows,
   an aligned All repos row offers bulk push/catch-up, and narrow layouts keep
-  action targets and fact positions stable. Text shares a baseline and secondary
+  action targets and fact positions stable. Bulk arrows share repository arrow
+  tracks; PR-history links and action-log result glyphs keep reserved slots. Text shares a baseline and secondary
   controls follow the host theme. Long branches can be expanded.
   Temporary controls extend above the composer card or below sidebar Services
   while the base slots stay in place.
@@ -16,6 +17,3 @@
   Pre-publication status responses are discarded and a fresh status is read
   before the row stops showing work in progress. Uncommitted-only rows offer
   Commit changes instead of an unnumbered push arrow.
-
-- Keep bulk arrows over their repository arrows, PR-history links in a fixed
-  slot, and action-log result markers separate from the repository label.
