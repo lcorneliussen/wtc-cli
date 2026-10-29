@@ -1904,7 +1904,9 @@ function mountComposer(container, context) {
     const headerFailed = !!entry.error || noteFailed;
     const latestFeedback = feedbackStore.get(entry.data.collection?.sessionKey ?? key);
     const latestActivity = activityStore.get(entry.data.collection?.sessionKey ?? key)?.get(latestFeedback?.activityId);
-    const headerLabel = !headerFailed && latestFeedback?.text === headerNote && latestActivity?.action === "push" && latestActivity.inFlight ? latestActivity.repo : entry.error ? "Refresh failed" : feedbackLabel(headerNote, headerFailed);
+    const publicationCount = [...(activityStore.get(entry.data.collection?.sessionKey ?? key)?.values() ?? [])].filter(item => item.action === "push" && item.inFlight).length;
+    const publicationContext = publicationCount > 1 ? `${publicationCount} repos` : latestActivity?.repo;
+    const headerLabel = !headerFailed && latestFeedback?.text === headerNote && latestActivity?.action === "push" && latestActivity.inFlight ? publicationContext : entry.error ? "Refresh failed" : feedbackLabel(headerNote, headerFailed);
     const feedback = headerNote ? css(el("button", { type: "button", className: "wtc-header-feedback wtc-action-control", role: headerFailed ? "alert" : "status", ariaLive: "polite", textContent: `${headerFailed ? "⚠ " : ""}${headerLabel}`, title: headerNote + " — Open full details", ariaLabel: headerNote + ". Open full details in the sidebar" }), `border:0;background:transparent;padding:0;text-align:left;font:inherit;font-size:12px;color:${headerFailed ? TONE.failure : "var(--muted,#888)"};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;flex:1`) : null;
     if (feedback) feedback.onclick = (e) => { e.preventDefault(); e.stopPropagation(); ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx), focus: "activity" }); };
     summary.replaceChildren(

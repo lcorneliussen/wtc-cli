@@ -2151,3 +2151,22 @@ test("publication headers distinguish preparation from a personally confirmed pu
     githubPublishResult=previous;githubConfirmResult=undefined;personal=null;first.view.dispose();second.view.dispose();
   }
 });
+
+test("a concurrent preparation is not named as the repository currently publishing", async () => {
+  const previous=githubPublishResult;personal={state:"connected",account:{login:"demo"},generation:"g1"};
+  let releasePreparation,releasePublication,preparation,publication;
+  githubPublishResult=params=>params.sessionKey.endsWith(":web")?new Promise(resolve=>{releasePreparation=resolve;}):{status:"needs_confirmation",requestId:"req-1"};
+  const {host,view}=await mount("composer",collection([repo("api",{unpublished:1}),repo("web",{unpublished:2})]));
+  try {
+    await [...host.all()].find(n=>n.tagName === "BUTTON"&&/^1 commit to push/.test(n.title)).onclick();
+    githubConfirmResult=()=>new Promise(resolve=>{releasePublication=resolve;});
+    publication=[...host.all()].find(n=>n.tagName === "BUTTON"&&n.textContent === "Confirm push").onclick();await settle();
+    preparation=[...host.all()].find(n=>n.tagName === "BUTTON"&&/^2 commits to push/.test(n.title)).onclick();await settle();
+    const context=[...host.all()].find(n=>n.className === "wtc-header-feedback wtc-action-control");
+    assert.ok(context);assert.doesNotMatch(context.textContent,/web/,"the unconfirmed repository must not be paired with the collection's Publishing label");
+    assert.match([...host.all()].find(n=>n.className === "wtc-action-toolbar").textContent,/Publishing…/);
+  } finally {
+    releasePreparation?.({status:"needs_confirmation",requestId:"req-web"});releasePublication?.({status:"published",url:"https://github.com/octo/api/pull/7"});
+    await Promise.allSettled([preparation,publication].filter(Boolean));githubPublishResult=previous;githubConfirmResult=undefined;personal=null;view.dispose();
+  }
+});
