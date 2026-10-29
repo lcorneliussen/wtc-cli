@@ -636,6 +636,7 @@ const actionFeedback = () => el("style", { textContent: `
 .wtc-next-step>:first-child { width:104px;flex:0 0 104px; }
 .wtc-next-step>:not(:first-child) { width:20px;flex:0 0 20px; }
 .wtc-step-status { width:104px;text-align:center; }
+.wtc-push-prepared { --wtc-control-bg:var(--accent-subtle,color-mix(in srgb,var(--accent,#75c8c1) 12%,transparent));--wtc-control-border:var(--accent,#75c8c1); }
 .wtc-action-control:not(:disabled):hover { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 30%,transparent); --wtc-control-border:var(--accent,#75c8c1); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:inset 0 0 0 1px var(--accent,#75c8c1); }
 .wtc-next-actions button:disabled { background:transparent !important;border-color:var(--border-strong,rgba(128,128,128,.35)) !important;color:var(--muted,#888) !important; }
 .wtc-confirm-publication:not(:disabled) { background:var(--primary,var(--accent,#75c8c1)) !important;color:var(--primary-foreground,var(--accent-foreground,#151a22)) !important;border-color:var(--primary,var(--accent,#75c8c1)) !important; }
@@ -1407,7 +1408,11 @@ function collectionTables(v) {
       return toned(label, TONE.pending, `${activity}. ${why}, and the card does not hand pushing to the agent.`);
     }
     const pending = confirming.get(r.sessionKey);
-    if (pending) return nextButton(label, `Review ${nameOf(r)}'s prepared publication before confirming`, () => { v.reveal?.(); v.showActions?.(); v.rerender(); });
+    if (pending) {
+      const button = count(label, `Review ${nameOf(r)}'s prepared publication before confirming`, TONE.pending, () => { v.reveal?.(); v.showActions?.(); v.rerender(); });
+      button.className += " wtc-push-prepared";
+      return button;
+    }
 
     const left = r.forge === BITBUCKET && r.dirty ? " Uncommitted files stay behind: ask the conversation to commit them first." : "";
     if (mine[r.forge] === null) return count(label, `${activity}. Pushing needs your own ${account}: click to push, or for how to connect it`, TONE.none, () => publish(r));
