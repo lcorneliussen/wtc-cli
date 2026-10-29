@@ -2,8 +2,10 @@
 
 When catch-up cannot establish PR state, it leaves the branch untouched and
 reports `needs-owner`. The reason retains `PR state unavailable; branch left
-untouched`, followed by the repository and forge operation that failed. Enlisted
-lookups name the PR number; a GitHub branch search names the branch instead.
+untouched`. Forge lookup failures identify the repository and attempted forge
+operation. Enlisted lookups name the PR number; a GitHub branch search names the
+branch instead. Failures reading local collection configuration, PR records or
+origin configuration identify the local operation and the input to inspect.
 
 For example, an enlisted lookup can report:
 
