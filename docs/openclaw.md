@@ -552,7 +552,8 @@ feedback is available from the header in the sidebar rather than clipped into
 an extra paragraph below the rows. Services precede the recent Action log.
 Text on a row shares a baseline; glyphs center independently. Status and history
 links use the host's quieter controls, while the separate personal confirmation
-uses its primary style. The collection-wide actions share the repository tracks
+uses its primary style. Preparing a preview is labeled **Preparing…**; only a
+personally confirmed push is labeled **Publishing…**. The collection-wide actions share the repository tracks
 rather than forming a floating stack of buttons.
 
 Both render what `wtc status <name> --json` prints and share a refresh every 30

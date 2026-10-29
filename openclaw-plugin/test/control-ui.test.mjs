@@ -2124,3 +2124,30 @@ test("an unreadable pending confirmation never reports a successful push", async
     assert.equal(calls.filter(c=>c.method === "sessions.github.confirm").length,0);
   } finally {failing.delete("sessions.github.status");personal=null;view.dispose();}
 });
+
+test("publication headers distinguish preparation from a personally confirmed push", async () => {
+  const previous=githubPublishResult;
+  personal={state:"connected",account:{login:"demo"},generation:"g1"};
+  let releasePreparation,releasePublication,preparation,publication;
+  githubPublishResult=()=>new Promise(resolve=>{releasePreparation=resolve;});
+  const data=collection([repo("api",{unpublished:1})]);
+  const first=await mount("composer",data),second=await mount("panel",data,undefined,first.context.props.sessionKey);
+  const header=host=>[...host.all()].find(n=>n.className === "wtc-action-toolbar").textContent;
+  try {
+    calls.length=0;
+    preparation=[...first.host.all()].find(n=>n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+    await settle();
+    for(const host of [first.host,second.host]) {assert.match(header(host),/Preparing…/);assert.doesNotMatch(header(host),/Publishing/);}
+    assert.equal(calls.filter(c=>c.method === "sessions.github.confirm").length,0);
+    releasePreparation({status:"needs_confirmation",requestId:"req-1"});await preparation;
+    githubConfirmResult=()=>new Promise(resolve=>{releasePublication=resolve;});
+    publication=[...first.host.all()].find(n=>n.tagName === "BUTTON" && n.textContent === "Confirm push").onclick();
+    await settle();
+    for(const host of [first.host,second.host])assert.match(header(host),/Publishing…/);
+    releasePublication({status:"published",url:"https://github.com/octo/api/pull/7"});await publication;
+  } finally {
+    releasePreparation?.({status:"needs_confirmation",requestId:"req-1"});releasePublication?.({status:"published",url:"https://github.com/octo/api/pull/7"});
+    await Promise.allSettled([preparation,publication].filter(Boolean));
+    githubPublishResult=previous;githubConfirmResult=undefined;personal=null;first.view.dispose();second.view.dispose();
+  }
+});

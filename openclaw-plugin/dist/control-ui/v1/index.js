@@ -637,7 +637,6 @@ const actionFeedback = () => el("style", { textContent: `
 .wtc-next-step>:not(:first-child) { width:20px;flex:0 0 20px; }
 .wtc-step-status { width:104px;text-align:center; }
 .wtc-toolbar-primary:empty,.wtc-summary-facts:empty,.wtc-header-controls>button,.wtc-header-controls>span:last-child { align-self:center; }
-.wtc-push-prepared { --wtc-control-bg:var(--accent-subtle,color-mix(in srgb,var(--accent,#75c8c1) 12%,transparent));--wtc-control-border:var(--accent,#75c8c1); }
 .wtc-action-control:not(:disabled):hover { --wtc-control-bg:var(--bg-hover,rgba(128,128,128,.16)); --wtc-control-border:var(--border-strong,rgba(128,128,128,.5)); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:none; }
 .wtc-next-actions button:disabled { background:transparent !important;border-color:var(--border-strong,rgba(128,128,128,.35)) !important;color:var(--muted,#888) !important; }
 .wtc-confirm-publication:not(:disabled) { background:var(--primary,var(--accent,#75c8c1)) !important;color:var(--primary-foreground,var(--accent-foreground,#151a22)) !important;border-color:var(--primary,var(--accent,#75c8c1)) !important; }
@@ -660,7 +659,14 @@ const actionFeedback = () => el("style", { textContent: `
   .wtc-repo-identity { min-height:32px !important; }
   .wtc-header-controls .wtc-toolbar-primary-required { max-width:104px; }
 }
-@container wtc-card (max-width:340px) { .wtc-brand-word { display:none; } .wtc-collection-card>summary>span:first-child { align-self:center; } }
+@container wtc-card (max-width:340px) {
+  .wtc-brand-word { font-size:11px; }
+  .wtc-collection-card>summary { column-gap:4px !important; }
+  .wtc-header-controls { gap:0 !important; }
+  .wtc-header-controls>button { min-width:min(32px,var(--wtc-icon-size,24px)) !important; }
+  .wtc-header-controls .wtc-action-toolbar>button { width:28px !important;min-width:28px !important; }
+}
+@container wtc-card (max-width:260px) { .wtc-brand-word { display:none; } .wtc-collection-card>summary>span:first-child { align-self:center; } }
 @container wtc-card (max-width:350px) {
   .wtc-repo-facts { grid-template-columns:56px minmax(0,1fr) !important;grid-auto-rows:minmax(var(--wtc-control-height,20px),auto);row-gap:0 !important; }
   .wtc-repo-facts>:last-child { grid-column:1 / -1;min-height:var(--wtc-control-height,20px); }
@@ -994,6 +1000,8 @@ function collectionTables(v) {
     }), records.length > 3 ? nextButton(showAllActivity ? "Show latest 3" : `Earlier activity (${records.length - 3})`, "Show or hide earlier activity", () => { showAllActivity = !showAllActivity; v.rerender(); }) : null), "display:grid;gap:4px;min-width:0");
   }
   function actionToolbar(repos, compact = false, feedback = null) {
+    const currentPublications = [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].filter(item => item.action === "push" && item.inFlight && item.state !== "confirmation");
+    const publicationProgress = currentPublications.some(item => item.phase === "publishing") ? "Publishing…" : "Preparing…";
     const rows = actionRows(repos);
     if (!repos.length && !batchResults.size && !(activityStore.get(v.collectionKey?.() ?? v.key())?.size)) return null;
     const targets = selection.size ? [...selection.values()] : suggestedTargets(rows);
@@ -1040,12 +1048,12 @@ function collectionTables(v) {
           : last.state === "confirmation" ? "Awaiting confirm"
           : last.state === "blocked" ? "Needs attention"
           : activityFailed(last) ? "⚠ Failed"
-          : last.state === "running" && last.action === "push" ? "Publishing…"
+          : last.state === "running" && last.action === "push" ? publicationProgress
           : last.status === "Completed" ? last.action === "catch-up" ? "✓ Caught up" : "✓ Done" : "Action log";
         primary = nextButton(label, "Open details in the sidebar action log", openActivity, last.state === "running" && last.action === "push");
       }
     }
-    if (!batchRunning && !prepared && (catching.size || busy.size)) primary = nextButton(catching.size ? "Catching up…" : "Publishing…", "The current operation is still running or rechecking its result", () => {}, true);
+    if (!batchRunning && !prepared && (catching.size || busy.size || currentPublications.length)) primary = nextButton(catching.size ? "Catching up…" : publicationProgress, "The current operation is still running or rechecking its result", () => {}, true);
     if (dispatched.size && !batchRunning && !selection.size && !prepared && !catching.size && !busy.size) primary = nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } });
     if (feedback?.failed && !batchRunning) primary = nextButton("⚠ Failed", `${feedback.text}. Open full action details`, openActivity);
     if (primary) primary.style.width = "104px";
@@ -1168,7 +1176,7 @@ function collectionTables(v) {
     let lastFailed = false, lastText = "Preparing publication…", lastAction = null;
     const log = (state) => {
       if (!active(conversationKey) && state !== "running") feedbackStore.set(logKey, { text: lastText, failed: lastFailed, action: lastAction, activityId, at: Date.now() });
-      recordActivity(logKey, activityId, { repo: nameOf(r), repoSessionKey: r.sessionKey, action: "push", inFlight: true, state, status: lastText, followUp: lastAction });
+      recordActivity(logKey, activityId, { repo: nameOf(r), repoSessionKey: r.sessionKey, action: "push", phase: confirmed ? "publishing" : "preparing", inFlight: true, state, status: lastText, followUp: lastAction });
     };
     const say = (text, failed = false, action = null) => {
       lastText = text; lastFailed = failed; lastAction = action;
@@ -1177,7 +1185,7 @@ function collectionTables(v) {
     };
     const review = (repo, url, action) => reviewPRText(repo, url, conversationKey, action);
     busy.add(r.sessionKey);
-    say(`Preparing to push ${nameOf(r)}…`);
+    say(confirmed ? `Pushing ${nameOf(r)}…` : `Preparing to push ${nameOf(r)}…`);
     const resume = v.pause();
     v.rerender();
     try {
@@ -1341,7 +1349,7 @@ function collectionTables(v) {
   // A fact that is also an action: a count in a pill.
   const count = (text, title, tone, run) => {
     const b = css(el("button", { className: "wtc-action-control", type: "button", textContent: String(text), title, ariaLabel: title, disabled: batchRunning }),
-      `border:1px solid var(--wtc-control-border,var(--border-strong, rgba(128,128,128,.4)));background:var(--wtc-control-bg,transparent);color:var(--wtc-control-text,${tone});cursor:pointer;font:inherit;font-size:12px;line-height:16px;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);padding:0 6px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums`);
+      `border:1px solid var(--wtc-control-border,var(--border-strong, rgba(128,128,128,.4)));background:var(--wtc-control-bg,transparent);color:var(--wtc-control-text,${tone});cursor:pointer;font:inherit;font-size:12px;line-height:16px;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);padding:0 6px;border-radius:var(--radius-sm,6px);white-space:nowrap;font-variant-numeric:tabular-nums`);
     b.onclick = async (e) => {
       e?.preventDefault();
       e?.stopPropagation();
@@ -1415,7 +1423,6 @@ function collectionTables(v) {
     const pending = confirming.get(r.sessionKey);
     if (pending) {
       const button = count(label, `Review ${nameOf(r)}'s prepared publication before confirming`, TONE.pending, () => { v.reveal?.(); v.showActions?.(); v.rerender(); });
-      button.className += " wtc-push-prepared";
       return button;
     }
 
@@ -1892,7 +1899,10 @@ function mountComposer(container, context) {
     const facts = css(el("span", { className: "wtc-summary-facts" }, ...(card.open || note ? [] : tables.totals(repos, groups))), "flex:1;min-width:0;height:24px;line-height:24px;overflow:hidden;display:flex;align-items:baseline;gap:8px");
     const headerNote = entry.error ? `Refresh failed: ${entry.error}` : note;
     const headerFailed = !!entry.error || noteFailed;
-    const feedback = headerNote ? css(el("button", { type: "button", className: "wtc-header-feedback wtc-action-control", role: headerFailed ? "alert" : "status", ariaLive: "polite", textContent: `${headerFailed ? "⚠ " : ""}${entry.error ? "Refresh failed" : feedbackLabel(headerNote, headerFailed)}`, title: headerNote + " — Open full details", ariaLabel: headerNote + ". Open full details in the sidebar" }), `border:0;background:transparent;padding:0;text-align:left;font:inherit;font-size:12px;color:${headerFailed ? TONE.failure : "var(--muted,#888)"};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;flex:1`) : null;
+    const latestFeedback = feedbackStore.get(entry.data.collection?.sessionKey ?? key);
+    const latestActivity = activityStore.get(entry.data.collection?.sessionKey ?? key)?.get(latestFeedback?.activityId);
+    const headerLabel = !headerFailed && latestFeedback?.text === headerNote && latestActivity?.action === "push" && latestActivity.inFlight ? latestActivity.repo : entry.error ? "Refresh failed" : feedbackLabel(headerNote, headerFailed);
+    const feedback = headerNote ? css(el("button", { type: "button", className: "wtc-header-feedback wtc-action-control", role: headerFailed ? "alert" : "status", ariaLive: "polite", textContent: `${headerFailed ? "⚠ " : ""}${headerLabel}`, title: headerNote + " — Open full details", ariaLabel: headerNote + ". Open full details in the sidebar" }), `border:0;background:transparent;padding:0;text-align:left;font:inherit;font-size:12px;color:${headerFailed ? TONE.failure : "var(--muted,#888)"};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;flex:1`) : null;
     if (feedback) feedback.onclick = (e) => { e.preventDefault(); e.stopPropagation(); ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx), focus: "activity" }); };
     summary.replaceChildren(
       css(el("span", {}, brand("12px", entry.data.version, repoNarrow)), "flex:none;display:inline-flex;align-items:baseline"),
