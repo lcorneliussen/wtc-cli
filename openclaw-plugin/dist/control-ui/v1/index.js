@@ -1374,7 +1374,10 @@ function collectionTables(v) {
             css(el("span", {}, below), "display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px")),
           `${align(c)}min-width:0;display:grid;gap:1px`);
         }
-        return css(el("span", {}, value), `${align(c)}${c.top ? "align-self:start;" : ""}${blank ? "width:100%;box-sizing:border-box;min-height:var(--wtc-control-height,20px);display:flex;align-items:baseline;" : ""}min-width:0;overflow:${c.overflow ? "visible" : "hidden"};text-overflow:ellipsis;white-space:nowrap`);
+        // Empty slots keep their dimensions without supplying a synthetic
+        // bottom-edge baseline that shifts the row when a fact disappears.
+        const noText = blank && !(typeof value === "string" ? value : value?.textContent ?? "").trim();
+        return css(el("span", {}, value), `${align(c)}${noText ? "align-self:center;" : ""}${blank ? "width:100%;box-sizing:border-box;min-height:var(--wtc-control-height,20px);display:flex;align-items:baseline;" : ""}min-width:0;overflow:${c.overflow ? "visible" : "hidden"};text-overflow:ellipsis;white-space:nowrap`);
       }));
     }
     return grid;
