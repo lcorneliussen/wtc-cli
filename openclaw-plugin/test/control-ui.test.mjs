@@ -2088,6 +2088,7 @@ test("a tracked push has one shared log row through confirmation, publication an
   const data=collection([repo("api",{unpublished:1})]);
   const first=await mount("composer",data),second=await mount("panel",data,undefined,first.context.props.sessionKey);
   let finish;
+  const observerPush=[...second.host.all()].find(n=>n.tagName === "BUTTON" && /^1 commit to push/.test(n.title));
   try {
     await [...first.host.all()].find(n=>n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
     const rows=()=>[...second.host.all()].filter(n=>n.className === "wtc-activity-item");
@@ -2098,8 +2099,14 @@ test("a tracked push has one shared log row through confirmation, publication an
     assert.equal(rows().length,1,"publishing must not add a generic Latest action duplicate");
     assert.doesNotMatch(rows()[0].textContent,/Latest action/);
     assert.match(rows()[0].textContent,/Running/);
+    assert.equal([...second.host.all()].filter(n=>n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).length,0,"observer arrow must show working while publishing");
+    assert.ok([...second.host.all()].find(n=>n.tagName === "BUTTON" && /^Push all/.test(n.title)).disabled,"observer bulk push must be disabled");
+    const prepares=calls.filter(c=>c.method === "sessions.github.publish").length;
+    await observerPush.onclick();
+    assert.equal(calls.filter(c=>c.method === "sessions.github.publish").length,prepares,"captured observer control cannot prepare another push");
     finish({status:"published",url:"https://github.com/octo/api/pull/7"});await pending;
     assert.equal(rows().length,1);assert.match(rows()[0].textContent,/Done/);
+    assert.equal([...second.host.all()].find(n=>n.tagName === "BUTTON" && /^Push all/.test(n.title)).disabled,false,"observer reservation releases after refresh");
   } finally {finish?.({status:"published",url:"https://github.com/octo/api/pull/7"});githubConfirmResult=undefined;personal=null;first.view.dispose();second.view.dispose();}
 });
 

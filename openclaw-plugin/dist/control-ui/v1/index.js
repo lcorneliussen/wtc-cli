@@ -673,7 +673,8 @@ function collectionTables(v) {
   const acting = new Set();
   let authorSending = false;
   const active = (conversation) => v.alive?.() !== false && v.key() === conversation;
-  const reserved = (r) => acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey);
+  const sharedPushBusy = (r) => [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].some(item => item.action === "push" && item.repoSessionKey === r.sessionKey && item.inFlight);
+  const reserved = (r) => acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey) || sharedPushBusy(r);
   async function sendToAuthor(conversation, skill, input) {
     if (!active(conversation)) throw Error("The view closed or changed before handoff");
     if (authorSending) throw Error("An author handoff is already pending; wait before dispatching another");
@@ -1151,6 +1152,7 @@ function collectionTables(v) {
   async function publish(r, conversationKey = v.key(), continueAllowed = () => true, confirmed = false) {
     const mayDispatch = () => active(conversationKey) && continueAllowed();
     if (!mayDispatch()) return { cancelled: true };
+    if (busy.has(r.sessionKey) || sharedPushBusy(r)) return { pending: true };
     if (!PUSHES.has(r.forge) || mine[r.forge] === false) return;
     if (confirming.has(r.sessionKey) && !confirmed) { v.reveal?.(); v.rerender(); return { pending: true }; }
     if (confirmed && !confirming.has(r.sessionKey)) { v.say("The publication preparation expired; prepare it again.", true); return; }
@@ -1159,7 +1161,7 @@ function collectionTables(v) {
     let lastFailed = false, lastText = "Preparing publication…", lastAction = null;
     const log = (state) => {
       if (!active(conversationKey) && state !== "running") feedbackStore.set(logKey, { text: lastText, failed: lastFailed, action: lastAction, activityId, at: Date.now() });
-      recordActivity(logKey, activityId, { repo: nameOf(r), action: "push", state, status: lastText, followUp: lastAction });
+      recordActivity(logKey, activityId, { repo: nameOf(r), repoSessionKey: r.sessionKey, action: "push", inFlight: true, state, status: lastText, followUp: lastAction });
     };
     const say = (text, failed = false, action = null) => {
       lastText = text; lastFailed = failed; lastAction = action;
@@ -1199,7 +1201,7 @@ function collectionTables(v) {
     } finally {
       resume?.();
       try { if (active(conversationKey)) await v.refresh(); }
-      finally { busy.delete(r.sessionKey); if (active(conversationKey)) v.rerender(); }
+      finally { busy.delete(r.sessionKey); recordActivity(logKey, activityId, { inFlight: false }); if (active(conversationKey)) v.rerender(); }
     }
   }
   async function catchUp(list) {
@@ -1448,7 +1450,7 @@ function collectionTables(v) {
     return [
       repoName(r), branch,
       r.dirty ? toned(String(r.dirty), TONE.pending, `${plural(r.dirty, "file")} changed, not committed yet`) : null,
-      busy.has(r.sessionKey) ? working() : pushCell(r, n),
+      busy.has(r.sessionKey) || sharedPushBusy(r) ? working() : pushCell(r, n),
       catching.has(r.sessionKey) ? working() : toCatchUp(r) ? catchUpCell(r) : null,
       pr ? css(el("span", { title: `${pr.draft && open ? "Draft PR. " : ""}${pr.title ?? ""}` }, link(`#${pr.number}`, pr.url), pr.draft && open && !otherPRs(r).length ? muted("draft") : pr.state !== "open" ? muted(pr.state) : null), "display:inline-flex;gap:4px") : null,
       ci, conflict, review, nextCell(r), prHints(r),
@@ -1516,7 +1518,7 @@ function collectionTables(v) {
     const archivedCount = repos.reduce((n, r) => n + otherPRs(r).filter((pr) => pr.state === "merged" || pr.state === "closed").length, 0);
     const out = [
       slot("±", files ? toned(String(files), TONE.pending) : null, "Changed files not committed yet"),
-      slot("↑", ready.some((r) => busy.has(r.sessionKey)) ? working() : ready.length
+      slot("↑", ready.some((r) => busy.has(r.sessionKey) || sharedPushBusy(r)) ? working() : ready.length
         ? count(commits ? `↑ ${commits}` : "↑", `Push ${ready.map(nameOf).join(", ")}, each to its pull request or a new draft one`, TONE.pending, () => pushAll(ready)) : null),
       slot("↓", behind.some((r) => catching.has(r.sessionKey)) ? working() : behind.length
         ? count(behind.some((r) => r.behind) ? `↓ ${behind.reduce((n, r) => n + (r.behind ?? 0), 0)}` : "↓", `Catch up ${behind.map((r) => `${nameOf(r)} (${r.behind || `#${r.pullRequest.number} merged`})`).join(", ")}: merge locally into live branches and return completed branches to the tip, without rebasing. For an open PR, Push publishes the updated branch afterward`, TONE.pending, () => catchUp(behind)) : null),
