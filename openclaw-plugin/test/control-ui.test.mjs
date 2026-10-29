@@ -2081,3 +2081,39 @@ test("a settled single-repository push resolves the fixed header slot", async ()
     assert.doesNotMatch(readable(host),/Publishing…/);
   } finally {view.dispose();personal=null;}
 });
+
+
+test("a tracked push has one shared log row through confirmation, publication and completion", async () => {
+  personal={state:"connected",account:{login:"demo"},generation:"g1"};
+  const data=collection([repo("api",{unpublished:1})]);
+  const first=await mount("composer",data),second=await mount("panel",data,undefined,first.context.props.sessionKey);
+  let finish;
+  try {
+    await [...first.host.all()].find(n=>n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+    const rows=()=>[...second.host.all()].filter(n=>n.className === "wtc-activity-item");
+    assert.equal(rows().length,1);
+    githubConfirmResult=new Promise(resolve=>{finish=resolve;});
+    const pending=[...first.host.all()].find(n=>n.tagName === "BUTTON" && n.textContent === "Confirm push").onclick();
+    await settle();
+    assert.equal(rows().length,1,"publishing must not add a generic Latest action duplicate");
+    assert.doesNotMatch(rows()[0].textContent,/Latest action/);
+    assert.match(rows()[0].textContent,/Running/);
+    finish({status:"published",url:"https://github.com/octo/api/pull/7"});await pending;
+    assert.equal(rows().length,1);assert.match(rows()[0].textContent,/Done/);
+  } finally {finish?.({status:"published",url:"https://github.com/octo/api/pull/7"});githubConfirmResult=undefined;personal=null;first.view.dispose();second.view.dispose();}
+});
+
+test("an unreadable pending confirmation never reports a successful push", async () => {
+  personal={state:"connected",account:{login:"demo"},generation:"g1"};
+  failing.add("sessions.github.status");
+  const {host,view}=await mount("panel",collection([repo("api",{unpublished:1})]));
+  try {
+    calls.length=0;
+    await [...host.all()].find(n=>n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+    const log=[...host.all()].find(n=>n.className === "wtc-activity-log");
+    assert.ok(log);assert.match(log.textContent,/Needs attention/);
+    assert.doesNotMatch(log.textContent,/Done|Pushed/);
+    assert.match(log.textContent,/gateway waits for a confirmation/);
+    assert.equal(calls.filter(c=>c.method === "sessions.github.confirm").length,0);
+  } finally {failing.delete("sessions.github.status");personal=null;view.dispose();}
+});

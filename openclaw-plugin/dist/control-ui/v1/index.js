@@ -92,11 +92,11 @@ async function settle(host, target, r, out, say, review, mayDispatch = () => tru
     const status = await host.request("sessions.github.status", { ...target, requestId: out.requestId }).catch(() => null);
     if (!mayDispatch()) return { cancelled: true };
     const c = status?.confirmation ?? out.confirmation ?? null;
-    if (!c) { say(`${name}: the gateway waits for a confirmation; confirm it under Publish in the owner session.`); return null; }
+    if (!c) { say(`${name}: the gateway waits for a confirmation; confirm it under Publish in the owner session.`); return { waiting: true }; }
     say(`${name}: confirm to push as @${c.account?.login ?? "you"}.`);
     return { requestId: out.requestId, preview: c, confirmation: { generation: c.generation, account: c.account, requestDigest: c.requestDigest } };
   }
-  if (out?.status === "published") publicationResult(r, out, say, review);
+  if (out?.status === "published") { publicationResult(r, out, say, review); return { published: true }; }
   else say(`${name}: ${out?.status ?? "no answer"}${out?.error ? ` — ${out.error.message ?? out.error}` : out?.message ? ` — ${wtcMessage(out.message)}` : ""}`, true);
   return null;
 }
@@ -173,7 +173,7 @@ async function confirmBitbucket(host, agentId, r, pending, say, review, mayDispa
     return null;
   }
   publicationResult(r, out, say, review);
-  return null;
+  return { published: true };
 }
 
 // The files a catch-up's merge stopped on, from wtc's message (Checkout.merge
@@ -601,12 +601,13 @@ function recordActivity(collection, id, item) {
 }
 async function trackedServiceRequest(host, sessionKey, agentId, payload, doing, say, logKey = sessionKey) {
   const id = uuid(), repo = payload.group ?? "Services";
+  feedbackStore.set(logKey, { text: doing, failed: false, action: null, activityId: id, at: Date.now() });
   recordActivity(logKey, id, { repo, action: `svc-${payload.op}`, state: "running", status: doing });
   try {
     const result = await svcRequest(host, sessionKey, agentId, payload);
     const message = result?.missing ? `Install ${result.missing} before retrying this service action.` : result?.message ?? `${payload.op} request completed; check the service state.`;
     recordActivity(logKey, id, { state: result?.missing ? "blocked" : "completed", status: message });
-    say(`${repo}: ${message}`);
+    say(`${repo}: ${message}`, false, null, id);
     return result;
   } catch (err) {
     recordActivity(logKey, id, { state: "failed", status: String(err?.message ?? err) });
@@ -620,10 +621,10 @@ async function trackedRefresh(watch, sessionKey, say, currentSession = () => ses
   const entry = await watch?.refresh();
   if (entry?.error) {
     recordActivity(sessionKey, id, { state: "failed", status: entry.error });
-    if (alive() && currentSession() === sessionKey) say(`Refresh failed: ${entry.error}`, true);
+    if (alive() && currentSession() === sessionKey) say(`Refresh failed: ${entry.error}`, true, null, id);
   } else {
     recordActivity(sessionKey, id, { state: "completed", status: "Collection status refreshed." });
-    if (alive() && currentSession() === sessionKey) say("Collection status refreshed.");
+    if (alive() && currentSession() === sessionKey) say("Collection status refreshed.", false, null, id);
   }
 }
 
@@ -636,6 +637,7 @@ const actionFeedback = () => el("style", { textContent: `
 .wtc-next-step>:not(:first-child) { width:20px;flex:0 0 20px; }
 .wtc-step-status { width:104px;text-align:center; }
 .wtc-action-control:not(:disabled):hover { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 30%,transparent); --wtc-control-border:var(--accent,#75c8c1); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:inset 0 0 0 1px var(--accent,#75c8c1); }
+.wtc-next-actions button:disabled { background:transparent !important;border-color:var(--border-strong,rgba(128,128,128,.35)) !important;color:var(--muted,#888) !important; }
 .wtc-confirm-publication:not(:disabled) { background:var(--accent,#75c8c1) !important;color:var(--accent-foreground,#151a22) !important;border-color:var(--accent,#75c8c1) !important; }
 .wtc-action-control:not(:disabled):active { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 45%,transparent); }
 @keyframes wtc-refresh { to { transform:rotate(360deg); } }
@@ -720,11 +722,15 @@ function collectionTables(v) {
     if (acting.has(r.sessionKey)) return;
     const sent = dispatched;
     const conversationKey = v.key();
-    const say = (...args) => { if (active(conversationKey)) v.say(...args); };
     const logKey = v.collectionKey?.() ?? conversationKey, logId = uuid();
+    const say = (text, failed = false, action = null) => {
+      const previous = activityStore.get(logKey)?.get(logId);
+      recordActivity(logKey, logId, { repo: nameOf(r), action: r.next.step, status: previous?.status ?? text, ...(failed ? { state: "failed" } : {}), detail: text, followUp: action });
+      if (active(conversationKey)) v.say(text, failed, action, logId);
+    };
     const log = (status) => recordActivity(logKey, logId, { repo: nameOf(r), action: r.next.step, status });
     acting.add(r.sessionKey);
-    v.say(`${nameOf(r)}: ${r.next.step === "catch-up" ? "Catching up" : nextLabel(r.next)}…`);
+    say(`${nameOf(r)}: ${r.next.step === "catch-up" ? "Catching up" : nextLabel(r.next)}…`);
     log("Rechecking…");
     v.rerender();
     try {
@@ -965,18 +971,18 @@ function collectionTables(v) {
     const records = [...(activityStore.get(key)?.values() ?? [])].sort((a, b) => b.at - a.at);
     const feedback = feedbackStore.get(key);
     const plain = feedback?.text.replace(/^[\w.-]+:\s*/, "");
-    if (feedback?.text && !records.some(item => item.status.includes(plain))) records.unshift({ repo: "Latest action", action: "", status: feedback.text, at: feedback.at, failed: feedback.failed, followUp: feedback.action });
+    if (feedback?.text && !feedback.activityId && !records.some(item => item.status.includes(plain))) records.unshift({ repo: "Latest action", action: "", status: feedback.text, at: feedback.at, failed: feedback.failed, followUp: feedback.action });
     if (!records.length) return null;
     const shown = showAllActivity ? records : records.slice(0, 3);
-    const statusLabel = item => item.state ? ({ completed: "Done", failed: "Failed", running: "Running", confirmation: "Confirm push", cancelled: "Cancelled", blocked: "Needs attention" }[item.state] ?? "Details") : item.failed || /^(Failed|Handoff failed|Cannot )/.test(item.status) ? "Failed" : item.status === "Completed" ? "Done" : /confirmation/.test(item.status) ? "Confirm push" : /pending|Sent/.test(item.status) ? "Sent to agent" : /Queued/.test(item.status) ? "Queued" : /ing…|Catching up…/.test(item.status) ? "Running" : "Details";
+    const statusLabel = item => item.state ? ({ completed: "Done", published: "Done", failed: "Failed", running: "Running", confirmation: "Awaiting confirm", cancelled: "Cancelled", blocked: "Needs attention" }[item.state] ?? "Details") : item.failed || /^(Failed|Handoff failed|Cannot )/.test(item.status) ? "Failed" : item.status === "Completed" ? "Done" : /confirmation/.test(item.status) ? "Awaiting confirm" : /pending|Sent/.test(item.status) ? "Sent to agent" : /Queued/.test(item.status) ? "Queued" : /ing…|Catching up…/.test(item.status) ? "Running" : "Details";
     return css(el("div", { className: "wtc-activity-log" }, sectionHeading("Action log"), ...shown.map(item => {
       const label = statusLabel(item), failed = label === "Failed";
-      const detail = css(el("details", { className: "wtc-activity-item", role: failed ? "alert" : "status", ariaLabel: item.status },
-        css(el("summary", { title: item.status },
+      const detail = css(el("details", { className: "wtc-activity-item", role: failed ? "alert" : "status", ariaLabel: item.detail ?? item.status },
+        css(el("summary", { title: item.detail ?? item.status },
           css(el("span", { textContent: `${failed ? "⚠ " : label === "Done" ? "✓ " : ""}${item.repo}${item.action ? ` · ${nextLabel({ step: item.action })}` : ""}` }), "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"),
-          css(el("span", { textContent: label }), `color:${failed ? TONE.failure : "var(--muted,#888)"};white-space:nowrap`),
-          css(el("span", { textContent: ago(item.at) }), "font-size:11px;color:var(--muted,#888);white-space:nowrap"), el("span", { textContent: "⌄", ariaHidden: "true" })), "display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:10px;align-items:center;cursor:pointer;min-height:28px;list-style:none"),
-        css(el("div", {}, el("span", { textContent: item.status }), resultAction(item.followUp, v.say)), "padding:6px 0 8px;white-space:normal;overflow-wrap:anywhere;font-size:12px;color:var(--muted,#888)")), "font-size:12px;min-width:0");
+          css(el("span", { textContent: label }), `font-size:11px;color:${failed ? TONE.failure : "var(--muted,#888)"};white-space:nowrap`),
+          css(el("span", { textContent: ago(item.at) }), "font-size:11px;color:var(--muted,#888);white-space:nowrap"), el("span", { textContent: "⌄", ariaHidden: "true" })), "display:grid;grid-template-columns:minmax(0,1fr) 96px 48px 12px;gap:8px;align-items:center;cursor:pointer;min-height:28px;list-style:none"),
+        css(el("div", {}, el("span", { textContent: item.detail ?? item.status }), resultAction(item.followUp, v.say)), "padding:6px 0 8px;white-space:normal;overflow-wrap:anywhere;font-size:12px;color:var(--muted,#888)")), "font-size:12px;min-width:0");
       return detail;
     }), records.length > 3 ? nextButton(showAllActivity ? "Show latest 3" : `Earlier activity (${records.length - 3})`, "Show or hide earlier activity", () => { showAllActivity = !showAllActivity; v.rerender(); }) : null), "display:grid;gap:4px;min-width:0");
   }
@@ -1021,7 +1027,16 @@ function collectionTables(v) {
     }
     if (!primary) {
       const last = [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].reverse().sort((a,b) => b.at-a.at)[0];
-      if (last) primary = nextButton(last.state === "completed" && last.action === "push" ? "✓ Pushed" : last.state === "completed" && last.action === "refresh" ? "✓ Refreshed" : last.status === "Completed" ? last.action === "catch-up" ? "✓ Caught up" : "✓ Done" : /^Failed/.test(last.status) ? "⚠ Failed" : "Action log", "Open details in the sidebar action log", openActivity);
+      if (last) {
+        const label = last.state === "published" && last.action === "push" ? "✓ Pushed"
+          : last.state === "completed" && last.action === "refresh" ? "✓ Refreshed"
+          : last.state === "confirmation" ? "Awaiting confirm"
+          : last.state === "blocked" ? "Needs attention"
+          : activityFailed(last) ? "⚠ Failed"
+          : last.state === "running" && last.action === "push" ? "Publishing…"
+          : last.status === "Completed" ? last.action === "catch-up" ? "✓ Caught up" : "✓ Done" : "Action log";
+        primary = nextButton(label, "Open details in the sidebar action log", openActivity, last.state === "running" && last.action === "push");
+      }
     }
     if (!batchRunning && !prepared && (catching.size || busy.size)) primary = nextButton(catching.size ? "Catching up…" : "Publishing…", "The current operation is still running or rechecking its result", () => {}, true);
     if (dispatched.size && !batchRunning && !selection.size && !prepared && !catching.size && !busy.size) primary = nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } });
@@ -1066,10 +1081,10 @@ function collectionTables(v) {
     const busyPush = pushes.some(reserved), busyCatch = catches.some(reserved);
     const controls = css(el("span", { className: "wtc-bulk-actions", role: "group", ariaLabel: "Collection-wide actions" },
       css(el("span", { textContent: "All", ariaHidden: "true" }), "font-size:10px;color:var(--muted,#888);flex:none"),
-      nextButton(pushes.length === 1 ? "↑ Push 1" : pushes.length ? `↑ Push all (${pushes.length})` : "↑ Push all", `Push all ${pushes.length} eligible repositories; prepare each personal confirmation`, () => pushAll([...pushes]), !pushes.length || busyPush || batchRunning || choosing),
-      nextButton(catches.length === 1 ? "↓ Catch up 1" : catches.length ? `↓ Catch up all (${catches.length})` : "↓ Catch up all", `Catch up all ${catches.length} eligible repositories`, () => catches.every(r => r.next && ["catch-up", "return-to-tip"].includes(r.next.step)) ? startTargets(catches.map(repo => ({ repo, step: repo.next }))) : catchUp([...catches]), !catches.length || busyCatch || batchRunning || choosing)), "display:flex;align-items:center;gap:6px;white-space:nowrap");
-    for (const control of controls.children) if (control.tagName === "BUTTON") { control.style.width = "112px"; control.style.flex = "0 0 112px"; }
-    return css(el("div", {}, controls), "display:flex;justify-content:flex-end;margin:2px 0 4px;min-width:0");
+      nextButton(`↑ Push (${pushes.length})`, `Push all ${pushes.length} eligible repositories; prepare each personal confirmation`, () => pushAll([...pushes]), !pushes.length || busyPush || batchRunning || choosing),
+      nextButton(`↓ Catch up (${catches.length})`, `Catch up all ${catches.length} eligible repositories`, () => catches.every(r => r.next && ["catch-up", "return-to-tip"].includes(r.next.step)) ? startTargets(catches.map(repo => ({ repo, step: repo.next }))) : catchUp([...catches]), !catches.length || busyCatch || batchRunning || choosing)), "display:flex;align-items:center;gap:6px;white-space:nowrap");
+    for (const control of controls.children) if (control.tagName === "BUTTON") { control.style.width = "104px"; control.style.flex = "0 0 104px"; }
+    return css(el("div", {}, controls), "display:flex;justify-content:flex-end;margin:2px 0 4px;padding-right:24px;box-sizing:border-box;min-width:0");
   }
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
@@ -1143,13 +1158,13 @@ function collectionTables(v) {
     const logKey = v.collectionKey?.() ?? conversationKey;
     let lastFailed = false, lastText = "Preparing publication…", lastAction = null;
     const log = (state) => {
-      if (!active(conversationKey) && state !== "running") feedbackStore.set(logKey, { text: lastText, failed: lastFailed, action: lastAction, at: Date.now() });
+      if (!active(conversationKey) && state !== "running") feedbackStore.set(logKey, { text: lastText, failed: lastFailed, action: lastAction, activityId, at: Date.now() });
       recordActivity(logKey, activityId, { repo: nameOf(r), action: "push", state, status: lastText, followUp: lastAction });
     };
     const say = (text, failed = false, action = null) => {
       lastText = text; lastFailed = failed; lastAction = action;
       log(failed ? "failed" : "running");
-      if (active(conversationKey)) v.say(text, failed, action);
+      if (active(conversationKey)) v.say(text, failed, action, activityId);
     };
     const review = (repo, url, action) => reviewPRText(repo, url, conversationKey, action);
     busy.add(r.sessionKey);
@@ -1168,16 +1183,16 @@ function collectionTables(v) {
       if (next?.cancelled) { say(`${nameOf(r)}: Cancelled before publication dispatch; nothing was pushed.`); log("cancelled"); return next; }
       if (!active(conversationKey)) {
         if (next?.requestId) { lastText = `${nameOf(r)}: preparation discarded after conversation switch; nothing was pushed.`; log("cancelled"); }
-        else log(next?.connect ? "blocked" : lastFailed ? "failed" : "completed");
+        else log(next?.connect || next?.waiting ? "blocked" : lastFailed ? "failed" : next?.published ? "published" : "completed");
         return;
       }
       if (next?.connect) { log("blocked"); mine[r.forge] = null; showConnect = r.forge; v.reveal?.(); }
       else {
         // It is connected: look again rather than keep "not connected".
         if (mine[r.forge] === null) { mine[r.forge] = undefined; askedAt[r.forge] = 0; if (showConnect === r.forge) showConnect = null; }
-        if (next) { confirming.set(r.sessionKey, { ...next, activityId, conversationKey, logKey, repository: structuredClone(r) }); log("confirmation"); v.reveal?.(); }
+        if (next?.requestId) { confirming.set(r.sessionKey, { ...next, activityId, conversationKey, logKey, repository: structuredClone(r) }); log("confirmation"); v.reveal?.(); }
       }
-      if (!next?.connect && !next?.requestId) log(lastFailed ? "failed" : "completed");
+      if (!next?.connect && !next?.requestId) log(lastFailed ? "failed" : next?.waiting ? "blocked" : next?.published ? "published" : "completed");
       return next;
     } catch (err) {
       say(`${nameOf(r)}: ${String(err?.message ?? err)}`, true);
@@ -1198,7 +1213,11 @@ function collectionTables(v) {
         if (!active(conversation)) break;
         const id = uuid(), logKey = v.collectionKey?.() ?? conversation;
         let failed = false;
-        const say = (text, error = false, action = null) => { failed ||= error; if (active(conversation)) v.say(text, error, action); };
+        const say = (text, error = false, action = null) => {
+          failed ||= error;
+          recordActivity(logKey, id, { detail: text, followUp: action });
+          if (active(conversation)) v.say(text, error, action, id);
+        };
         recordActivity(logKey, id, { repo: nameOf(r), action: "catch-up", status: "Catching up…" });
         try {
           const outcome = await catchUpRepo(v.host, v.agent(), r, say, input => sendToAuthor(conversation, "wtc-catch-up", input));
@@ -1417,7 +1436,8 @@ function collectionTables(v) {
         : untouched(r)
           ? css(el("code", { textContent: `at ${baseOf(r)}`, title: `Checked out on branch ${r.branch}; no task commits ahead of ${baseOf(r)}` }), "font-size:12px;color:var(--muted, #888)")
           : css(el("code", { textContent: r.branch ?? `at ${baseOf(r)}`, title: r.branch ? `${r.branch}, ${r.ahead ?? 0} ahead of ${baseOf(r)}` : `Detached HEAD at ${baseOf(r)}; no branch is checked out` }), "font-size:12px;color:var(--muted, #888)");
-    if (r.branch?.length > 20 && !untouched(r) && !r.error) {
+    branch.style.cssText += ";display:block;width:100%;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+    if (r.branch?.length > 8 && !untouched(r) && !r.error) {
       const expanded = expandedBranches.has(r.sessionKey);
       Object.assign(branch, { role: "button", tabIndex: 0, ariaExpanded: expanded, ariaLabel: `${r.branch}. ${expanded ? "Collapse" : "Show"} complete branch name` });
       branch.style.cssText += `;display:block;white-space:${expanded ? "normal" : "nowrap"};overflow:hidden;text-overflow:ellipsis;overflow-wrap:anywhere;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px`;
@@ -1691,10 +1711,10 @@ function mountComposer(container, context) {
   let noteFailed = false;
   let noteAction = null;
   let noteTimer;
-  const say = (text, failed = false, action = null) => {
+  const say = (text, failed = false, action = null, activityId = null) => {
     clearTimeout(noteTimer);
     note = text; noteFailed = failed; noteAction = action;
-    if (text) feedbackStore.set(entry?.data?.collection?.sessionKey ?? key, { text, failed, action, at: Date.now() });
+    if (text) feedbackStore.set(entry?.data?.collection?.sessionKey ?? key, { text, failed, action, activityId, at: Date.now() });
     if (entry) render(entry);
     // Keep errors and follow-ups visible; settled informational feedback yields
     // to live totals and next actions while its full result stays in the log.
@@ -1959,11 +1979,11 @@ function mountCollection(container, context) {
   let note = "";
   let noteFailed = false;
   let noteAction = null;
-  const say = (text, failed = false, action = null) => {
+  const say = (text, failed = false, action = null, activityId = null) => {
     note = text;
     noteFailed = failed;
     noteAction = action;
-    if (text) feedbackStore.set(entry?.data?.collection?.sessionKey ?? ctx.props.sessionKey, { text, failed, action, at: Date.now() });
+    if (text) feedbackStore.set(entry?.data?.collection?.sessionKey ?? ctx.props.sessionKey, { text, failed, action, activityId, at: Date.now() });
     log.replaceChildren(...[noteNode(text, failed, "white-space:normal;overflow-wrap:anywhere"), resultAction(action, say)].filter(Boolean));
     log.setAttribute("role", failed ? "alert" : "status");
     log.setAttribute("aria-live", "polite");
