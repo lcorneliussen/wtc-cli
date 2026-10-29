@@ -43,6 +43,20 @@ func TestCatchUpLookupDiagnostics(t *testing.T) {
 				if row.Outcome != "needs-owner" || !strings.Contains(row.Reason, tc.want) || !strings.Contains(row.Reason, "branch left untouched") || row.NextAction == "" {
 					t.Errorf("missing diagnostic: %+v; want %q", row, tc.want)
 				}
+				var shape map[string]json.RawMessage
+				rowJSON, _ := json.Marshal(row)
+				if json.Unmarshal(rowJSON, &shape) != nil {
+					t.Fatal("invalid row JSON")
+				}
+				expected := []string{"kind", "collection", "repo", "outcome", "reason", "source_sha", "target_sha", "target_ref", "result_sha", "next_actor", "handoff", "collection_path", "next_action"}
+				if report.SchemaVersion != 1 || len(shape) != len(expected) {
+					t.Fatalf("failure JSON shape changed: %s", rowJSON)
+				}
+				for _, key := range expected {
+					if _, ok := shape[key]; !ok {
+						t.Errorf("missing failure field %s", key)
+					}
+				}
 				if row.SourceSHA == nil || row.ResultSHA == nil || *row.SourceSHA != before || *row.ResultSHA != before {
 					t.Errorf("failure SHA contract changed: %+v", row)
 				}
@@ -51,20 +65,6 @@ func TestCatchUpLookupDiagnostics(t *testing.T) {
 				t.Fatal("missing repo outcome")
 			}
 			data, _ := json.Marshal(report)
-			var shape map[string]json.RawMessage
-			rowJSON, _ := json.Marshal(report.Outcomes[0])
-			if json.Unmarshal(rowJSON, &shape) != nil {
-				t.Fatal("invalid row JSON")
-			}
-			expected := []string{"kind", "collection", "repo", "outcome", "reason", "source_sha", "target_sha", "target_ref", "result_sha", "next_actor", "handoff", "collection_path", "next_action"}
-			if report.SchemaVersion != 1 || len(shape) != len(expected) {
-				t.Fatalf("failure JSON shape changed: %s", rowJSON)
-			}
-			for _, key := range expected {
-				if _, ok := shape[key]; !ok {
-					t.Errorf("missing failure field %s", key)
-				}
-			}
 			for _, forbidden := range []string{"secret-value", "private.invalid", "user:", "Bearer"} {
 				if strings.Contains(string(data), forbidden) || strings.Contains(report.Markdown(), forbidden) {
 					t.Errorf("unsafe diagnostic contains %q", forbidden)
