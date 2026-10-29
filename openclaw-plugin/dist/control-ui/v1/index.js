@@ -2176,8 +2176,8 @@ function mountCollection(container, context) {
       row(brand("14px", data.version), css(el("span", {}, muted(`Updated ${ago(entry.at)}`),
         iconButton("↻", "Refresh", () => trackedRefresh(watch, sessionKeyOf(), say, sessionKeyOf, () => !disposed))), "margin-left:auto;display:flex;align-items:center;gap:2px")),
       css(el("div", { textContent: data.collection.label ?? data.collection.sessionKey }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit);overflow-wrap:anywhere"),
-      row(data.collection.project ? muted(data.collection.project === "ad-hoc" ? "ad-hoc taba project" : `taba project ${data.collection.project}`) : null, 
-        branch ? mono(branch, "The collection's branch; a repository on another one shows its own") : null, 
+      row(data.collection.project ? muted(data.collection.project === "ad-hoc" ? "ad-hoc taba project" : `taba project ${data.collection.project}`) : null,
+        branch ? mono(branch, "The collection's branch; a repository on another one shows its own") : null,
         muted(`${repos.length} ${repos.length === 1 ? "repository" : "repositories"}${groups.length ? ` · ${groups.filter((g) => g.running).length}/${plural(groups.length, "service")} running` : ""}`)),
       // Not when there is no folder: replaceChildren writes a null as "null".
       ...(data.collection.folder ? [css(el("div", {}, mono(data.collection.folder, "The collection's folder: one link per repository to its worktree")), "display:flex;margin-top:2px")] : []),
