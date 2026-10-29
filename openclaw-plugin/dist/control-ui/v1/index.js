@@ -580,7 +580,7 @@ const sectionHeading = (text, ...extra) => css(el("div", {},
 const NARROW_PX = 520;
 // Single-line repository groups need more width; keep their fold separate
 // from PR/service tables so denser repository rows do not change those layouts.
-const REPO_NARROW_PX = 608;
+const REPO_NARROW_PX = 604;
 const pullRequestRows = (repos) => {
   const rows = new Map();
   for (const r of repos) for (const pr of [...(r.pullRequests ?? []), ...(r.pullRequest ? [r.pullRequest] : [])]) {
