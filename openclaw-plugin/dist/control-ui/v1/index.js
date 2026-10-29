@@ -1426,7 +1426,7 @@ function collectionTables(v) {
     });
     const history = archived.length ? historyButton(plural(archived.length, "archived PR"), `${archived.length} completed pull requests for ${nameOf(r)}. Open collection PR history in the taba sidebar`, openPRHistory) : null;
     if (history) { history.style.flexShrink = "1"; history.style.whiteSpace = "normal"; }
-    return active.length || history ? css(el("span", {}, css(el("span", {}, ...active), "display:inline-flex;gap:4px;min-width:0;overflow:hidden"), history), "display:inline-flex;align-items:center;gap:4px;min-width:0;overflow:hidden;white-space:nowrap") : null;
+    return active.length || history ? css(el("span", {}, active.length ? css(el("span", {}, ...active), "display:inline-flex;gap:4px;min-width:0;overflow:hidden") : null, history), "display:inline-flex;align-items:baseline;gap:4px;min-width:0;overflow:hidden;white-space:nowrap") : null;
   }
   function repoRow(r) {
     const pr = r.pullRequest;
