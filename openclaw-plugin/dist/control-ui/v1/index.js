@@ -995,7 +995,7 @@ function collectionTables(v) {
       const label = statusLabel(item), failed = label === "Failed";
       const detail = css(el("details", { className: "wtc-activity-item", role: failed ? "alert" : "status", ariaLabel: item.detail ?? item.status },
         css(el("summary", { title: item.detail ?? item.status },
-          css(el("span", { textContent: `${failed ? "⚠ " : label === "Done" ? "✓ " : ""}${item.repo}${item.action ? ` · ${nextLabel({ step: item.action })}` : ""}` }), "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"),
+          css(el("span", {}, css(el("span", { textContent: failed ? "⚠" : label === "Done" ? "✓" : "", ariaHidden: "true" }), "display:inline-block;width:14px;flex:none"), css(el("span", { textContent: `${item.repo}${item.action ? ` · ${nextLabel({ step: item.action })}` : ""}` }), "overflow:hidden;text-overflow:ellipsis;min-width:0")), "display:flex;align-items:baseline;min-width:0;overflow:hidden;white-space:nowrap"),
           css(el("span", { textContent: label }), `font-size:11px;color:${failed ? TONE.failure : "var(--muted,#888)"};white-space:nowrap`),
           css(el("span", { textContent: ago(item.at) }), "font-size:11px;color:var(--muted,#888);white-space:nowrap"), el("span", { textContent: "⌄", ariaHidden: "true" })), "display:grid;grid-template-columns:minmax(0,1fr) 96px 48px 12px;gap:8px;align-items:baseline;cursor:pointer;min-height:28px;list-style:none"),
         css(el("div", {}, el("span", { textContent: item.detail ?? item.status }), resultAction(item.followUp, v.say)), "padding:6px 0 8px;white-space:normal;overflow-wrap:anywhere;font-size:12px;color:var(--muted,#888)")), "font-size:12px;min-width:0");
@@ -1096,14 +1096,14 @@ function collectionTables(v) {
     if (!repos.length) return null;
     const pushes = repos.filter(r => pushable(r) && PUSHES.has(r.forge) && mine[r.forge] !== false);
     const catches = repos.filter(toCatchUp);
-    const push = nextButton("↑ Push", `Push all ${pushes.length} eligible repositories; prepare each personal confirmation`, () => pushAll([...pushes]), !pushes.length || pushes.some(reserved) || batchRunning || choosing);
-    const catchAll = nextButton("↓ Catch up", `Catch up all ${catches.length} eligible repositories`, () => catches.every(r => r.next && ["catch-up", "return-to-tip"].includes(r.next.step)) ? startTargets(catches.map(repo => ({ repo, step: repo.next }))) : catchUp([...catches]), !catches.length || catches.some(reserved) || batchRunning || choosing);
-    for (const button of [push, catchAll]) button.style.cssText += ";width:104px;justify-self:start";
-    const label = css(el("span", { textContent: narrow ? "All" : "All repos" }), "color:var(--muted,#888);font-size:11px;white-space:nowrap;padding-left:19px");
-    const identity = narrow ? css(el("span", {}, label, push), "display:flex;align-items:baseline;justify-content:space-between;min-width:0") : label;
-    if (narrow) { label.style.paddingLeft = "0"; push.style.width = "56px"; }
-    const last = css(el("span", {}, catchAll), "display:flex;justify-content:flex-start;width:128px;justify-self:end");
-    return css(el("div", { className: "wtc-bulk-actions", role: "group", ariaLabel: "All repositories" }, ...(narrow ? [identity, last] : [identity, el("span"), push, el("span"), last])), `display:grid;grid-template-columns:${repositoryColumns(narrow).map(c => c.width).join(" ")};column-gap:10px;align-items:baseline;min-height:var(--wtc-control-height,20px);margin:2px 0 4px;min-width:0`);
+    const push = nextButton("↑", `Push all ${pushes.length} eligible repositories; prepare each personal confirmation`, () => pushAll([...pushes]), !pushes.length || pushes.some(reserved) || batchRunning || choosing);
+    const catchAll = nextButton("↓", `Catch up all ${catches.length} eligible repositories`, () => catches.every(r => r.next && ["catch-up", "return-to-tip"].includes(r.next.step)) ? startTargets(catches.map(repo => ({ repo, step: repo.next }))) : catchUp([...catches]), !catches.length || catches.some(reserved) || batchRunning || choosing);
+    for (const button of [push, catchAll]) button.style.cssText += ";width:32px;min-width:0;padding:0;justify-self:start";
+    const label = css(el("span", { textContent: narrow ? "All" : "All repos" }), "color:var(--muted,#888);font-size:11px;white-space:nowrap;" + (narrow ? "" : "padding-left:19px"));
+    const arrows = css(el("span", {}, el("span"), push, catchAll), "display:grid;grid-template-columns:24px 32px 32px;gap:4px;align-items:baseline");
+    return css(el("div", { className: "wtc-bulk-actions", role: "group", ariaLabel: "All repositories" }, ...(narrow ? [label, arrows, el("span")] : [label, el("span"), arrows, el("span"), el("span")])), narrow
+      ? "display:grid;grid-template-columns:56px 96px minmax(0,1fr);gap:8px;align-items:baseline;min-height:var(--wtc-control-height,20px);margin:2px 0 4px;padding-left:19px;min-width:0"
+      : `display:grid;grid-template-columns:${repositoryColumns(false).map(c => c.width).join(" ")};column-gap:10px;align-items:baseline;min-height:var(--wtc-control-height,20px);margin:2px 0 4px;min-width:0`);
   }
   // What a repository's push would send: its commits not on the forge yet,
   // or, before its first pull request, everything ahead of the base.
@@ -1435,7 +1435,7 @@ function collectionTables(v) {
   }
   const openPRHistory = () => v.host.ui.openPanel("collection", { sessionKey: v.key(), agentId: v.agent(), focus: "pull-requests" });
   const otherPRs = (r) => [...new Map((r.pullRequests ?? []).filter((pr) => String(pr.number) !== String(r.pullRequest?.number)).map((pr) => [String(pr.number), pr])).values()];
-  const historyButton = (...args) => { const button = nextButton(...args); button.className += " wtc-pr-history"; return button; };
+  const historyButton = (...args) => { const button = nextButton(...args); button.className += " wtc-pr-history"; button.style.cssText += ";width:64px;max-width:64px;min-width:0;font-size:10px;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; return button; };
   function prHints(r) {
     const others = otherPRs(r);
     const archived = others.filter((pr) => pr.state === "merged" || pr.state === "closed");
@@ -1445,7 +1445,7 @@ function collectionTables(v) {
       return css(el("span", { title: `Other active PR #${pr.number}: ${pr.title ?? ""}` }, typeof hint === "object" ? css(hint, "color:var(--muted,#888);text-decoration:none") : hint), "color:var(--muted,#888)");
     });
     const history = archived.length ? historyButton(plural(archived.length, "archived PR"), `${archived.length} completed pull requests for ${nameOf(r)}. Open collection PR history in the taba sidebar`, openPRHistory) : null;
-    if (history) { history.style.flexShrink = "1"; history.style.whiteSpace = "normal"; }
+    if (history) { history.style.flexShrink = "1"; history.style.whiteSpace = "nowrap"; }
     return active.length || history ? css(el("span", {}, active.length ? css(el("span", {}, ...active), "display:inline-flex;gap:4px;min-width:0;overflow:hidden") : null, history), "display:inline-flex;align-items:baseline;gap:4px;min-width:0;overflow:hidden;white-space:nowrap") : null;
   }
   function repoRow(r) {
@@ -1614,12 +1614,12 @@ function collectionTables(v) {
   function prTable(repos, narrow = false) {
     const open = pullRequestRows(repos);
     const columns = [
-      { head: "PR" },
-      { head: "Repo", width: "minmax(0,max-content)" },
-      { head: "State" },
-      { head: "C", title: "CI", align: "center" },
-      { head: "M", title: "Merges with its base", align: "center" },
-      { head: "R", title: "Review", align: "center" },
+      { head: "PR", width: "28px" },
+      { head: "Repo", width: "44px" },
+      { head: "State", width: "44px" },
+      { head: "C", width: "14px", title: "CI", align: "center" },
+      { head: "M", width: "14px", title: "Merges with its base", align: "center" },
+      { head: "R", width: "14px", title: "Review", align: "center" },
       { head: "Title", width: "minmax(0,1fr)" },
     ];
     return table(columns, open.map((r) => {
@@ -1651,9 +1651,11 @@ function collectionTables(v) {
           css(el("span", {}, row[2] ? el("span", {}, muted("± "), row[2]) : null), "min-width:0"),
           css(el("span", {}, row[3]), "min-width:0"),
           css(el("span", {}, row[4]), "min-width:0")), "display:grid;grid-template-columns:24px 32px 32px;gap:4px;align-items:baseline;font-size:12px;font-variant-numeric:tabular-nums");
-        const pr = css(el("span", {}, row[5],
-          row[6] || row[7] || row[8] ? css(el("span", {}, ...[row[6], row[7], row[8]].map((mark) => css(el("span", {}, mark), "display:inline-flex;justify-content:center;width:16px;flex:none"))), "display:inline-flex;align-items:center;gap:2px;flex:none") : null,
-          row[10]), "display:inline-flex;align-items:center;gap:5px;align-items:baseline;white-space:nowrap;flex-wrap:wrap;min-width:0");
+        const currentPR = css(el("span", {}, row[5],
+          row[6] || row[7] || row[8] ? css(el("span", {}, ...[row[6], row[7], row[8]].map((mark) => css(el("span", {}, mark), "display:inline-flex;justify-content:center;width:16px;flex:none"))), "display:inline-flex;align-items:baseline;gap:2px;flex:none") : null), "display:flex;gap:4px;align-items:baseline;min-width:0;overflow:hidden");
+        const hint = row[10];
+        if (hint) hint.style.cssText += ";max-width:64px;min-width:0;font-size:10px;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+        const pr = css(el("span", { className: "wtc-repo-pr-slots" }, currentPR, css(el("span", { className: "wtc-repo-pr-history-slot" }, hint), "min-width:0;overflow:hidden")), "display:grid;grid-template-columns:72px 64px;gap:4px;align-items:baseline;white-space:nowrap;min-width:0");
         const nameAndBranch = css(el("div", { className: "wtc-repo-identity" }, row[0]), "display:flex;align-items:center;min-width:0;min-height:24px;white-space:nowrap");
         const branch = css(el("span", {}, row[1]), "display:flex;align-items:baseline;flex:1;max-width:120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted,#888)");
         const identity = css(el("div", {}, nameAndBranch,

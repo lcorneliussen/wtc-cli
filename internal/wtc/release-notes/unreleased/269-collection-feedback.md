@@ -16,3 +16,6 @@
   Pre-publication status responses are discarded and a fresh status is read
   before the row stops showing work in progress. Uncommitted-only rows offer
   Commit changes instead of an unnumbered push arrow.
+
+- Keep bulk arrows over their repository arrows, PR-history links in a fixed
+  slot, and action-log result markers separate from the repository label.

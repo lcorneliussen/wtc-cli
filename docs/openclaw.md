@@ -496,8 +496,10 @@ the task as a whole:
   starts, stops or restarts it. The same marks in the
   header of the services act on all of them, and collapsed, ↑, ↓ and the
   services' mark act on the whole collection. An aligned **All repos** row
-  offers **↑ Push** and **↓ Catch up** for eligible repositories. Hover or focus
+  offers **↑** (push) and **↓** (catch up) over their per-repository arrow tracks. Hover or focus
   exposes the eligible scope; unavailable actions stay disabled in their slots.
+  Current PR facts and history links keep separate fixed slots, including narrow
+  views. Action-log result markers also have a reserved glyph slot.
   Uncommitted-only rows offer **Commit changes** first.
 
   An open tunnel shows the first part of its address, links to it and closes
