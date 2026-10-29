@@ -599,17 +599,17 @@ function recordActivity(collection, id, item) {
   activityStore.set(collection, records);
   for (const [key, entry] of store) if (key === collection || entry.data?.collection?.sessionKey === collection) for (const notify of entry.listeners) notify(entry);
 }
-async function trackedServiceRequest(host, sessionKey, agentId, payload, doing, say) {
+async function trackedServiceRequest(host, sessionKey, agentId, payload, doing, say, logKey = sessionKey) {
   const id = uuid(), repo = payload.group ?? "Services";
-  recordActivity(sessionKey, id, { repo, action: `svc-${payload.op}`, state: "running", status: doing });
+  recordActivity(logKey, id, { repo, action: `svc-${payload.op}`, state: "running", status: doing });
   try {
     const result = await svcRequest(host, sessionKey, agentId, payload);
     const message = result?.missing ? `Install ${result.missing} before retrying this service action.` : result?.message ?? `${payload.op} request completed; check the service state.`;
-    recordActivity(sessionKey, id, { state: result?.missing ? "blocked" : "completed", status: message });
+    recordActivity(logKey, id, { state: result?.missing ? "blocked" : "completed", status: message });
     say(`${repo}: ${message}`);
     return result;
   } catch (err) {
-    recordActivity(sessionKey, id, { state: "failed", status: String(err?.message ?? err) });
+    recordActivity(logKey, id, { state: "failed", status: String(err?.message ?? err) });
     throw err;
   }
 }
@@ -1119,7 +1119,10 @@ function collectionTables(v) {
     const activityId = confirming.get(r.sessionKey)?.activityId ?? uuid();
     const logKey = v.collectionKey?.() ?? conversationKey;
     let lastFailed = false, lastText = "Preparing publication…", lastAction = null;
-    const log = (state) => recordActivity(logKey, activityId, { repo: nameOf(r), action: "push", state, status: lastText, followUp: lastAction });
+    const log = (state) => {
+      if (!active(conversationKey) && state !== "running") feedbackStore.set(logKey, { text: lastText, failed: lastFailed, action: lastAction, at: Date.now() });
+      recordActivity(logKey, activityId, { repo: nameOf(r), action: "push", state, status: lastText, followUp: lastAction });
+    };
     const say = (text, failed = false, action = null) => {
       lastText = text; lastFailed = failed; lastAction = action;
       log(failed ? "failed" : "running");
@@ -1139,7 +1142,7 @@ function collectionTables(v) {
         : bitbucket
           ? await publishBitbucket(v.host, v.agent(), r, say, r.base ? baseOf(r) : undefined, mayDispatch)
           : await publishRepo(v.host, v.agent(), r, say, review, mayDispatch);
-      if (next?.cancelled) { say(`${nameOf(r)}: Cancelled before publication dispatch.`); log("cancelled"); return next; }
+      if (next?.cancelled) { say(`${nameOf(r)}: Cancelled before publication dispatch; nothing was pushed.`); log("cancelled"); return next; }
       if (!active(conversationKey)) {
         if (next?.requestId) { lastText = `${nameOf(r)}: preparation discarded after conversation switch; nothing was pushed.`; log("cancelled"); }
         else log(next?.connect ? "blocked" : lastFailed ? "failed" : "completed");
@@ -1690,7 +1693,7 @@ function mountComposer(container, context) {
       svcBusy.add(k);
       report(doing);
       try {
-        const r = await trackedServiceRequest(ctx.host, conversation, agentOf(ctx), payload, doing, report);
+        const r = await trackedServiceRequest(ctx.host, conversation, agentOf(ctx), payload, doing, report, entry?.data?.collection?.sessionKey ?? conversation);
         return r;
       } catch (err) {
         report(String(err?.message ?? err), true);
@@ -2187,7 +2190,7 @@ function mountCollection(container, context) {
         muted("A collection is this conversation's worktrees of a taba project's repositories, for one task. Ask the conversation to work on a repository, or add one below.", "font-size:13px;display:block;margin-top:4px"),
       );
       const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
-      body.replaceChildren(...[css(el("div", {}, heading("Add a repository"), adder), "display:grid;gap:10px"), ...warnings, footer(data)].filter(Boolean));
+      body.replaceChildren(...[css(el("div", {}, heading("Add a repository"), adder, note ? log : null), "display:grid;gap:10px"), ...warnings, footer(data)].filter(Boolean));
       return;
     }
     const toolbar = tables.actionToolbar(repos);

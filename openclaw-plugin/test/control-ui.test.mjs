@@ -1920,3 +1920,77 @@ test("settled header feedback yields to the next action while its result remains
     try { assert.match(readable(panel.host), /Collection status refreshed/); } finally { panel.view.dispose(); }
   } finally { t.mock.timers.reset(); view.dispose(); }
 });
+
+
+test("panel: failed repository addition remains visible before a collection exists", async () => {
+  const { host, view } = await mount("panel", collection([]));
+  try {
+    const input = [...host.all()].find(n => n.tagName === "INPUT" && n.placeholder === "Find or add a repository");
+    input.value = "https://github.com/example/demo";
+    input.onkeydown({ key: "Enter", preventDefault() {} });
+    await settle();
+    failing.add("projects.add");
+    await [...host.all()].find(n => n.tagName === "BUTTON" && n.textContent === "Add").onclick();
+    const alert = [...host.all()].find(n => n.attributes?.role === "alert" || n.role === "alert");
+    assert.ok(alert, "failed addition exposes an alert in the empty panel");
+    assert.match(alert.textContent, /projects.add failed/);
+  } finally { failing.delete("projects.add"); view.dispose(); }
+});
+
+test("composer: repository-session service results appear in the owning collection history", async () => {
+  const collectionKey = `agent:main:collection:${++sessions}`;
+  const data = { ...collection([repo("api")], [{ group: "api/web", path: "api/web/main", repo: "api", kind: "service", label: "preview", state: "absent" }]), collection: { sessionKey: collectionKey, label: "Demo" } };
+  const { host, view, context } = await mount("composer", data);
+  try {
+    calls.length = 0;
+    await titled(host, "preview: absent. Start it").onclick({ preventDefault() {}, stopPropagation() {} });
+    const rpc = calls.find(c => c.actionId === "svc");
+    assert.equal(rpc.sessionKey, context.props.sessionKey, "service dispatch retains its original conversation");
+    const panel = await mount("panel", data, undefined, collectionKey);
+    try {
+      const log = [...panel.host.all()].find(n => n.className === "wtc-activity-log");
+      assert.ok(log); assert.match(log.textContent, /api\/web/); assert.match(log.textContent, /Start/);
+    } finally { panel.view.dispose(); }
+  } finally { view.dispose(); }
+});
+
+test("a preparation returned after navigation is cancelled in its original history", async () => {
+  personal = { state: "connected", account: { login: "demo" }, generation: "g1" };
+  const previous = githubPublishResult;
+  let finish;
+  githubPublishResult = new Promise(resolve => { finish = resolve; });
+  const data = collection([repo("api", { unpublished: 1 })]);
+  const { host, view, context } = await mount("composer", data);
+  try {
+    const pending = [...host.all()].find(n => n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+    await settle();
+    const nextKey = `agent:main:other:${++sessions}`;
+    collections.set(nextKey, collection([repo("other")]));
+    view.update({ ...context, props: { sessionKey: nextKey, agentId: "main" } });
+    finish({ status: "needs_confirmation", requestId: "delayed" });
+    await pending;
+    const panel = await mount("panel", data, undefined, context.props.sessionKey);
+    try {
+      assert.match(readable(panel.host), /Cancelled/);
+      assert.match(readable(panel.host), /nothing was pushed/);
+    } finally { panel.view.dispose(); }
+  } finally { finish?.({ status: "needs_confirmation", requestId: "delayed" }); view.dispose(); personal = null; githubPublishResult = previous; }
+});
+
+test("a failed push offers Retry only for a matching next action", async () => {
+  const step = { step: "push", by: "wtc", approve: "person", gateway: "github_publish", key: "api:push:h1", reason: "Send local commits" };
+  const r = repo("api", { unpublished: 1, next: step, choices: { actions: [{ ...step, available: true }] } });
+  personal = { state: "connected", account: { login: "demo" }, generation: "g1" };
+  const { host, view, context } = await mount("composer", collection([r]));
+  try {
+    failing.add("sessions.github.publish");
+    await [...host.all()].find(n => n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+    assert.ok([...host.all()].some(n => n.tagName === "BUTTON" && n.textContent === "Retry"));
+    assert.ok([...host.all()].some(n => n.tagName === "BUTTON" && n.textContent === "⚠"));
+    const next = { step: "catch-up", by: "wtc", command: ["wtc", "catch-up"], key: "api:catchup:h2", reason: "Behind main" };
+    collections.set(context.props.sessionKey, collection([repo("api", { behind: 1, next, choices: { actions: [{ ...next, available: true }] } })]));
+    failing.delete("sessions.github.publish");
+    await [...host.all()].find(n => n.tagName === "BUTTON" && /Updated .*Refresh/.test(n.title)).onclick({ preventDefault() {}, stopPropagation() {} });
+    assert.equal([...host.all()].some(n => n.className === "wtc-next-step" && n.textContent === "Retry"), false);
+  } finally { failing.delete("sessions.github.publish"); view.dispose(); personal = null; }
+});
