@@ -1355,6 +1355,10 @@ function collectionTables(v) {
   // (the service's repository) folds below its preceding cell. Repository
   // grouping is composed by repoTable. blank leaves unused cells empty, hides
   // visual headings (retaining accessible names), and tightens the row gaps.
+  // A fixed first-line reference keeps an empty fact from changing the row's
+  // baseline when a count or action appears or disappears.
+  const baselineStrut = () => css(el("span", { ariaHidden: "true" }), "display:inline-block;flex:0 0 0;width:0;height:calc(var(--wtc-control-height,20px) / 2 + 5px)");
+  const factSlot = value => css(el("span", {}, baselineStrut(), value), "display:flex;align-items:baseline;min-width:0;min-height:calc(var(--wtc-control-height,20px) + 2px)");
   const table = (columns, rows, narrow = false, blank = false) => {
     const align = (c) => c.align ? `justify-self:${c.align};` : "";
     const shown = columns.map((c, i) => i).filter((i) => !(narrow && columns[i].under));
@@ -1375,10 +1379,7 @@ function collectionTables(v) {
             css(el("span", {}, below), "display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px")),
           `${align(c)}min-width:0;display:grid;gap:1px`);
         }
-        // Empty slots keep their dimensions without supplying a synthetic
-        // bottom-edge baseline that shifts the row when a fact disappears.
-        const noText = blank && !(typeof value === "string" ? value : value?.textContent ?? "").trim();
-        return css(el("span", {}, value), `${align(c)}${noText ? "align-self:center;" : ""}${blank ? "width:100%;box-sizing:border-box;min-height:var(--wtc-control-height,20px);display:flex;align-items:baseline;" : ""}min-width:0;overflow:${c.overflow ? "visible" : "hidden"};text-overflow:ellipsis;white-space:nowrap`);
+        return css(el("span", {}, blank ? baselineStrut() : null, value), `${align(c)}${blank ? "width:100%;box-sizing:border-box;min-height:calc(var(--wtc-control-height,20px) + 2px);display:flex;align-items:baseline;" : ""}min-width:0;overflow:${c.overflow ? "visible" : "hidden"};text-overflow:ellipsis;white-space:nowrap`);
       }));
     }
     return grid;
@@ -1643,10 +1644,10 @@ function collectionTables(v) {
         const pr = css(el("span", {}, row[5],
           row[6] || row[7] || row[8] ? css(el("span", {}, ...[row[6], row[7], row[8]].map((mark) => css(el("span", {}, mark), "display:inline-flex;justify-content:center;width:16px;flex:none"))), "display:inline-flex;align-items:center;gap:2px;flex:none") : null,
           row[10]), "display:inline-flex;align-items:center;gap:5px;align-items:baseline;white-space:nowrap;flex-wrap:wrap;min-width:0");
-        const nameAndBranch = css(el("div", { className: "wtc-repo-identity" }, row[0]), "display:flex;align-items:baseline;min-width:0;min-height:24px;white-space:nowrap");
+        const nameAndBranch = css(el("div", { className: "wtc-repo-identity" }, row[0]), "display:flex;align-items:center;min-width:0;min-height:24px;white-space:nowrap");
         const branch = css(el("span", {}, row[1]), "display:flex;align-items:baseline;flex:1;max-width:120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted,#888)");
         const identity = css(el("div", {}, nameAndBranch,
-          narrow ? css(el("div", { className: "wtc-repo-facts" }, branch, changes, pr), "display:grid;grid-template-columns:56px 96px minmax(0,1fr);width:calc(100% + 138px);min-width:0;gap:8px;align-items:baseline;margin-top:2px;padding-left:19px;box-sizing:border-box;min-height:var(--wtc-control-height,20px)") : null), "min-width:0;padding:0");
+          narrow ? css(el("div", { className: "wtc-repo-facts" }, factSlot(branch), factSlot(changes), factSlot(pr)), "display:grid;grid-template-columns:56px 96px minmax(0,1fr);width:calc(100% + 138px);min-width:0;gap:8px;align-items:baseline;margin-top:2px;padding-left:19px;box-sizing:border-box;min-height:var(--wtc-control-height,20px)") : null), "min-width:0;padding:0");
         return narrow ? [identity, row[9]] : [row[0], row[1], changes, pr, row[9]];
       });
       return css(el("div", { className: "wtc-repositories" }, bulkActions(repos, narrow), table(columns, rows, false, true)), "min-width:0");
