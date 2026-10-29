@@ -479,10 +479,10 @@ them. The plugin in [`openclaw-plugin/`](../openclaw-plugin) adds the view of
 the task as a whole:
 
 - a card above the message box, where OpenClaw shows a task's progress. It
-  is `wtc status`'s tables: every fact has its column, always in the same
-  place, and `·` where there is none. **Repo Branch ± ↑ ↓ PR C M R** is a row
-  per repository: files changed, commits to push, commits behind the base,
-  the pull request, its CI, whether it merges and its review. **Service Repo
+  groups the repository, branch, changes, PR and next action in fixed columns
+  when space permits, without visible repository headers. **±**, **↑** and **↓**
+  mean changed files, commits to push and commits behind the base. The PR link
+  includes its check, merge and review facts. **Service Repo
   State URL** is a row per service, then a column per way in (an OpenClaw
   portal or a tunnel provider) and a **+** that opens a new one. Collapsed, the
   card shows the same facts summed, in the same order: **± ↑ ↓ PR svc**.
@@ -494,7 +494,10 @@ the task as a whole:
   asks the conversation to resolve the conflict, and a service's ▶, ■ or ↻
   starts, stops or restarts it. The same marks in the
   header of the services act on all of them, and collapsed, ↑, ↓ and the
-  services' mark act on the whole collection.
+  services' mark act on the whole collection. Above the repository facts,
+  **Push all** and **Catch up all** capture eligible repositories; their counts
+  show the scope. A single eligible repository is labeled **Push 1** or
+  **Catch up 1**. Uncommitted-only rows offer **Commit changes** first.
 
   An open tunnel shows the first part of its address, links to it and closes
   with ✕; a closed one is a ▶ to open it again. **+** offers, in order, the
@@ -518,8 +521,12 @@ the task as a whole:
   Pushing is the person's, never the agent's. The gateway publishes the
   repository's worktree with the person's own GitHub connection
   (**Settings → Profile → GitHub connections → For me**), which only the
-  gateway holds, and only once they confirm: the first click on ↑ asks the
-  gateway, which then waits, and ↑ becomes **confirm ↑** naming the account.
+  gateway holds, and only once they confirm: the first click on ↑ prepares a
+  separate preview with the personal account, repository, branch and captured
+  change count. **Review push** reopens that preview; it does not publish.
+  Only its distinct **Confirm push** control sends the captured request.
+  **Cancel** discards the preparation. Bulk preparation retains these separate
+  personal confirmations and never consumes an earlier one.
   The gateway's shared GitHub account, often the `gh` login its agents use
   too, is never used for it; without a personal connection ↑ says where to
   connect one. A Bitbucket repository is pushed the same way by the
@@ -536,14 +543,18 @@ the task as a whole:
   tables with the same actions, wtc status's pull request table (**PR Repo
   State C M R Title**), and **Add repository**.
 
-Narrow, as beside a conversation, in a narrow window or on a phone (under
-520 pixels), every row wraps into two lines: first what it is (the repository
-and its branch, the service and its repository), then its facts, still in
-their columns under the header, which wraps the same way.
+Below 560 pixels of component width, a repository's name and action share the
+first line, with its branch and aligned facts below. Service layout has its own
+520-pixel breakpoint. Long branches have a tap/keyboard expansion, and complete
+feedback is available from the header in the sidebar rather than clipped into
+an extra paragraph below the rows. Services precede the recent Action log.
 
-Both render what `wtc status <name> --json` prints and refresh every 30
-seconds while they are open. `node --test openclaw-plugin/test/*.test.mjs`
-renders them against a minimal DOM.
+Both render what `wtc status <name> --json` prints and share a refresh every 30
+seconds while visible. Manual refresh shows its busy state. Publication pauses
+periodic refresh, discards responses begun before the operation, and waits for
+a fresh status before clearing the row's busy state. A refresh failure is
+distinct from a successful publication. `node --test openclaw-plugin/test/`
+exercises rendering and interaction contracts against a minimal DOM.
 
 ## Install
 
@@ -705,7 +716,7 @@ and retain each repository's account/commit confirmation.
 action per repository, check its selection, or use **Select suggested**. Existing
 alternative choices are preserved. **Run selected** rechecks the exact targets.
 A changed head, base, worktree state or PR observation makes an old selection
-stale. New repositories do not join a captured selection. **Done choosing**
+stale. New repositories do not join a captured selection. **Done**
 returns to the compact view; **Run chosen** retains your exact selection there.
 Running, queued and pending results stay beside
 the repository in either view.
@@ -730,3 +741,9 @@ Unchanged handoffs stay disabled in that view while completion is pending.
 After checking the conversation, **Allow retry** enables explicit reselection.
 There is no automatic continuation, durable job queue or cross-runner claim in
 this phase. Reloading a view does not restart its unfinished batch.
+
+The sidebar Action log shows the latest three results, with expandable detail
+and **Earlier activity**. Direct catch-up, publication, service and manual-refresh
+feedback use this history. Accepted author handoffs remain pending rather than
+claiming completion. This history is browser-session feedback: reloading clears
+it. It is not a durable gateway audit log or a trusted completion receipt.
