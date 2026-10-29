@@ -1605,7 +1605,7 @@ test("repository folding has its own breakpoint on both surfaces", async () => {
     for (const width of [560, 660, 360]) {
      for (const o of observers.slice(start)) o.fn([{ contentRect: { width } }]);
      const rows = tables(host), repos = rows[0], services = rows[1];
-     assert.deepEqual(repos[0], width < 560 ? ["Repository", "Next"] : ["Repository", "Branch", "Changes", "Pull request", "Next"]);
+     assert.deepEqual(repos[0], width < 608 ? ["Repository", "Next"] : ["Repository", "Branch", "Changes", "Pull request", "Next"]);
      assert.equal(services[0].includes("Repo"), width >= 520, `${kind}/${width}: service layout follows its own breakpoint`);
     }
    } finally { view.dispose(); }
@@ -1691,12 +1691,12 @@ test("PR hints distinguish current, other active and completed PRs and open side
  const { host, view } = await mount("composer", collection([r]));
  try {
   assert.equal(tables(host).length, 1, "no second PR list occupies the conversation");
-  assert.equal(tables(host)[0][1][3], "#7#83 archived PRs");
+  assert.equal(tables(host)[0][1][3], "#7+4 PRs");
   const active = [...host.all()].find(n => n.tagName === "A" && n.textContent === "#8");
-  assert.equal(active.href, "https://github.com/octo/api/pull/8");
-  assert.match(active.style.cssText, /--muted/);
+  assert.equal(active, undefined, "the fixed row summarizes additional PRs rather than growing another inline list");
   const before = openedPanels.length;
-  const history = [...host.all()].find(n => n.tagName === "BUTTON" && n.textContent === "3 archived PRs" && /for api/.test(n.title));
+  const history = [...host.all()].find(n => n.tagName === "BUTTON" && n.textContent === "+4 PRs" && /1 open, 3 archived/.test(n.title));
+  assert.ok(history, "the summary names open and archived counts accessibly");
   history.onclick({ preventDefault() {}, stopPropagation() {} });
   assert.equal(openedPanels.length, before + 1);
   assert.equal(openedPanels.at(-1)[0], "collection");
@@ -1707,6 +1707,7 @@ test("PR hints distinguish current, other active and completed PRs and open side
    sidebar.update({ ...context, props: { ...context.props, focus: "pull-requests" } });
    assert.equal([...panel.all()].find(n => n.className === "wtc-pr-history").scrolled, true);
    assert.equal(tables(panel)[1].length, 6, "sidebar retains all five distinct PRs");
+   assert.equal([...panel.all()].find(n => n.tagName === "A" && n.textContent === "#8").href, "https://github.com/octo/api/pull/8");
   } finally { sidebar.dispose(); }
  } finally { view.dispose(); }
 });
@@ -2026,8 +2027,10 @@ test("temporary controls extend above the composer base and below sidebar servic
         assert.ok([...base.all()].some(n => n.className === "wtc-repositories"));
         assert.equal([...base.all()].some(n => n.textContent === "Confirm push"), false);
       } else {
-        const services = [...host.all()].find(n => n.tagName === "H3" && n.textContent === "Services").parentNode;
-        assert.ok(extra.parentNode.children.indexOf(extra) > extra.parentNode.children.indexOf(services));
+        const services = [...host.all()].find(n => n.className === "wtc-base-services");
+        const extraIndex = extra.parentNode.children.indexOf(extra), serviceIndex = extra.parentNode.children.indexOf(services);
+        assert.ok(extraIndex >= 0 && serviceIndex >= 0);
+        assert.ok(extraIndex > serviceIndex);
       }
     } finally {view.dispose();}
   }
@@ -2042,4 +2045,20 @@ test("bulk action slots remain present and disabled when no repository is eligib
       const controls=[...bulk.all()].filter(n=>n.tagName === "BUTTON");assert.equal(controls.length,2);assert.ok(controls.every(n=>n.disabled));
     } finally {view.dispose();}
   }
+});
+
+
+test("sidebar Review push explicitly reveals the temporary section without automatic scrolling", async () => {
+  personal = { state: "connected", account: { login: "demo" }, generation: "g1" };
+  const previous = Node.prototype.scrollIntoView;
+  const scrolled=[]; Node.prototype.scrollIntoView=function(options){scrolled.push({node:this,options});};
+  const {host,view}=await mount("panel",collection([repo("api",{unpublished:1})]));
+  try {
+    await [...host.all()].find(n=>n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+    assert.equal(scrolled.length,0,"preparing does not move the fixed base out of view");
+    await [...host.all()].find(n=>n.tagName === "BUTTON" && n.textContent === "Review push").onclick();
+    assert.equal(scrolled.length,1);
+    assert.equal(scrolled[0].node.className,"wtc-transient-actions");
+    assert.equal(scrolled[0].options.block,"nearest");
+  } finally {view.dispose();personal=null;if(previous)Node.prototype.scrollIntoView=previous;else delete Node.prototype.scrollIntoView;}
 });

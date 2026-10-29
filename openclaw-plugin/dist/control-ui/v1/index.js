@@ -580,7 +580,7 @@ const sectionHeading = (text, ...extra) => css(el("div", {},
 const NARROW_PX = 520;
 // Single-line repository groups need more width; keep their fold separate
 // from PR/service tables so denser repository rows do not change those layouts.
-const REPO_NARROW_PX = 560;
+const REPO_NARROW_PX = 608;
 const pullRequestRows = (repos) => {
   const rows = new Map();
   for (const r of repos) for (const pr of [...(r.pullRequests ?? []), ...(r.pullRequest ? [r.pullRequest] : [])]) {
@@ -629,7 +629,7 @@ async function trackedRefresh(watch, sessionKey, say, currentSession = () => ses
 
 const repositoryColumns = (narrow) => narrow
   ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: "128px", align: "end", top: true }]
-  : [{ head: "Repository", width: "minmax(100px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "minmax(56px,1fr)" }, { head: "Next", width: "128px", align: "end", top: true }];
+  : [{ head: "Repository", width: "minmax(100px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "140px" }, { head: "Next", width: "128px", align: "end", top: true }];
 const repositoryTemplate = (narrow) => repositoryColumns(narrow).map((c) => c.width).join(" ");
 const actionFeedback = () => el("style", { textContent: `
 .wtc-next-step { width:128px;justify-content:flex-start !important; }
@@ -647,13 +647,17 @@ const actionFeedback = () => el("style", { textContent: `
 @media(max-width:520px) {
   .wtc-collection-card, .wtc-collection, .wtc-transient-actions { --wtc-control-height:32px; --wtc-control-width:24px; --wtc-icon-size:36px; --wtc-state-size:24px; }
   .wtc-header-controls { --wtc-control-height:36px; --wtc-control-width:36px; }
-  summary:has(.wtc-toolbar-primary-required) .wtc-header-feedback { display:none; }
+  .wtc-header-feedback { display:none; }
   .wtc-header-controls { gap:0 !important; }
   .wtc-next-step .wtc-action-control, .wtc-bulk-actions .wtc-action-control { min-height:32px !important; }
   .wtc-repo-identity { min-height:32px !important; }
   .wtc-header-controls .wtc-toolbar-primary-required { max-width:104px; }
 }
-@media(max-width:360px) { .wtc-collection-card summary .wtc-brand-word { display:none; } }
+@media(max-width:360px) {
+  .wtc-collection-card summary .wtc-brand-word { display:none; }
+  .wtc-repo-facts { grid-template-columns:56px minmax(0,1fr) !important;row-gap:0 !important; }
+  .wtc-repo-facts>:last-child { grid-column:1 / -1;min-height:32px; }
+}
 
 ` });
 function collectionTables(v) {
@@ -902,7 +906,7 @@ function collectionTables(v) {
       action.ariaLabel = `${retry ? "Retry " : ""}${nextLabel(step)}: ${step.reason}`;
       if (action.disabled) { action.style.color = "var(--muted,#888)"; action.style.cursor = "default"; }
     }
-    if (confirming.has(r.sessionKey)) return css(el("div", { className: "wtc-next-step" }, nextButton("Review push", `Review ${nameOf(r)}'s prepared publication`, () => { v.reveal?.(); v.rerender(); })), "display:flex;justify-content:flex-end");
+    if (confirming.has(r.sessionKey)) return css(el("div", { className: "wtc-next-step" }, nextButton("Review push", `Review ${nameOf(r)}'s prepared publication`, () => { v.reveal?.(); v.showActions?.(); v.rerender(); })), "display:flex;justify-content:flex-end");
     const available = choicesOf(r);
     let picker = null;
     if (choosing && available.length > 1) {
@@ -984,7 +988,7 @@ function collectionTables(v) {
     const title = (batchRunning ? `Running: ${processed} of ${batchResults.size} selected steps handled.\n` : "") + targets.map(({ repo, step }) => `${nameOf(repo)}: ${nextLabel(step)} — ${step.reason}`).join("\n");
     let primary = null;
     const prepared = repos.find(r => confirming.has(r.sessionKey));
-    if (prepared && !batchRunning && !batchPreview) primary = nextButton("Review push", `Review ${nameOf(prepared)}’s prepared publication`, () => { v.reveal?.(); v.rerender(); });
+    if (prepared && !batchRunning && !batchPreview) primary = nextButton("Review push", `Review ${nameOf(prepared)}’s prepared publication`, () => { v.reveal?.(); v.showActions?.(); v.rerender(); });
     else if (single && !batchRunning && !batchPreview) {
       const { repo, step } = single;
       if (nextRoute(step) === "pr" && repo.pullRequest?.url) {
@@ -1015,7 +1019,8 @@ function collectionTables(v) {
       const last = [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].at(-1);
       if (last) primary = nextButton(last.status === "Completed" ? last.action === "catch-up" ? "✓ Caught up" : "✓ Done" : /^Failed/.test(last.status) ? "⚠ Failed" : "Action log", "Open details in the sidebar action log", openActivity);
     }
-    if (dispatched.size && !batchRunning && !selection.size && !prepared) primary = nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } });
+    if (!batchRunning && !prepared && (catching.size || busy.size)) primary = nextButton(catching.size ? "Catching up…" : "Publishing…", "The current operation is still running or rechecking its result", () => {}, true);
+    if (dispatched.size && !batchRunning && !selection.size && !prepared && !catching.size && !busy.size) primary = nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } });
     if (primary) primary.style.width = "104px";
     const slot = css(el("span", { className: `wtc-toolbar-primary${confirming.size || batchRunning || selection.size ? " wtc-toolbar-primary-required" : ""}` }, primary), "display:inline-flex;align-items:center;justify-content:flex-end;flex:0 0 104px;width:104px;min-width:104px;min-height:var(--wtc-control-height,20px)");
     const secondary = batchRunning
@@ -1371,7 +1376,7 @@ function collectionTables(v) {
       return toned(label, TONE.pending, `${activity}. ${why}, and the card does not hand pushing to the agent.`);
     }
     const pending = confirming.get(r.sessionKey);
-    if (pending) return nextButton(label, `Review ${nameOf(r)}'s prepared publication before confirming`, () => { v.reveal?.(); v.rerender(); });
+    if (pending) return nextButton(label, `Review ${nameOf(r)}'s prepared publication before confirming`, () => { v.reveal?.(); v.showActions?.(); v.rerender(); });
 
     const left = r.forge === BITBUCKET && r.dirty ? " Uncommitted files stay behind: ask the conversation to commit them first." : "";
     if (mine[r.forge] === null) return count(label, `${activity}. Pushing needs your own ${account}: click to push, or for how to connect it`, TONE.none, () => publish(r));
@@ -1382,6 +1387,7 @@ function collectionTables(v) {
   function prHints(r) {
     const others = otherPRs(r);
     const archived = others.filter((pr) => pr.state === "merged" || pr.state === "closed");
+    if (others.length > 1 || others.length && r.pullRequest) return nextButton(`+${plural(others.length, "PR")}`, `${plural(others.length, "other PR")}: ${others.length - archived.length} open, ${archived.length} archived. Open collection PR history in the taba sidebar`, openPRHistory);
     const active = others.filter((pr) => pr.state === "open").map((pr) => {
       const hint = link(`#${pr.number}`, pr.url);
       return css(el("span", { title: `Other active PR #${pr.number}: ${pr.title ?? ""}` }, typeof hint === "object" ? css(hint, "color:var(--muted,#888);text-decoration:none") : hint), "color:var(--muted,#888)");
@@ -1419,7 +1425,7 @@ function collectionTables(v) {
       r.dirty ? toned(String(r.dirty), TONE.pending, `${plural(r.dirty, "file")} changed, not committed yet`) : null,
       busy.has(r.sessionKey) ? working() : pushCell(r, n),
       catching.has(r.sessionKey) ? working() : toCatchUp(r) ? catchUpCell(r) : null,
-      pr ? css(el("span", { title: pr.title ?? "" }, link(`#${pr.number}`, pr.url), pr.draft && open ? muted("draft") : pr.state !== "open" ? muted(pr.state) : null), "display:inline-flex;gap:4px") : null,
+      pr ? css(el("span", { title: `${pr.draft && open ? "Draft PR. " : ""}${pr.title ?? ""}` }, link(`#${pr.number}`, pr.url), pr.draft && open && !otherPRs(r).length ? muted("draft") : pr.state !== "open" ? muted(pr.state) : null), "display:inline-flex;gap:4px") : null,
       ci, conflict, review, nextCell(r), prHints(r),
     ];
   }
@@ -1987,6 +1993,7 @@ function mountCollection(container, context) {
 
   const tables = collectionTables({
     collectionKey: sessionKeyOf,
+    showActions: () => { focusSection = "actions"; render(); },
     get host() { return ctx.host; }, alive: () => !disposed && !ctx.signal?.aborted, key: sessionKeyOf, agent: () => ctx.props.agentId, svc, say,
     refresh: () => watch?.refresh(), pause: () => pauseCollection(watch), rerender: () => render(),
   });
@@ -2248,8 +2255,8 @@ function mountCollection(container, context) {
     const temporary = [confirmations, nextActions, howTo].filter(Boolean);
     const actionSection = temporary.length ? css(el("section", { className: "wtc-transient-actions", ariaLabel: "Collection action details" }, ...temporary), "display:grid;gap:10px;min-width:0") : null;
     body.replaceChildren(...[repoSection, serviceSection, actionSection, activitySection, prSection, ...warnings, footer(data)].filter(Boolean));
-    const destination = focusSection === "activity" ? activitySection : focusSection === "pull-requests" ? prSection : null;
-    if (focusSection) { focusSection = null; destination?.scrollIntoView?.({ block: "start" }); }
+    const destination = focusSection === "activity" ? activitySection : focusSection === "pull-requests" ? prSection : focusSection === "actions" ? actionSection : null;
+    if (focusSection) { const block = focusSection === "actions" ? "nearest" : "start"; focusSection = null; destination?.scrollIntoView?.({ block }); }
   }
 
   const show = (next) => { if (!ctx.signal.aborted) { entry = next; render(); } };

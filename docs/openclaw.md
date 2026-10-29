@@ -165,8 +165,9 @@ A baseline row consistently says **at main** (or its configured base). Hover
 text distinguishes an untouched task branch from detached HEAD; it does not
 imply that the checkout owns the main branch.
 
-The repository row links its current PR and shows other active PRs as muted
-number links. A **3 archived PRs** control represents completed PRs and opens the full
+The repository row links its current PR. Additional PRs share a compact
+**+4 PRs** control, whose accessible label separates open and archived counts.
+With one completed PR and no current PR, **1 archived PR** opens the full
 collection PR list in the taba sidebar. The conversation card omits that full
 list, keeping its footprint small.
 
@@ -747,7 +748,6 @@ and **Earlier activity**. Direct catch-up, publication, service and manual-refre
 feedback use this history. Accepted author handoffs remain pending rather than
 claiming completion. This history is browser-session feedback: reloading clears
 it. It is not a durable gateway audit log or a trusted completion receipt.
-
 
 The collection keeps its base layout in place while actions run. Bulk Push and
 Catch up controls retain their slots and become disabled when no repository is
