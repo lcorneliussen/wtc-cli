@@ -716,7 +716,7 @@ and retain each repository's account/commit confirmation.
 action per repository, check its selection, or use **Select suggested**. Existing
 alternative choices are preserved. **Run selected** rechecks the exact targets.
 A changed head, base, worktree state or PR observation makes an old selection
-stale. New repositories do not join a captured selection. **Done**
+stale. New repositories do not join a captured selection. **Exit selection**
 returns to the compact view; **Run chosen** retains your exact selection there.
 Running, queued and pending results stay beside
 the repository in either view.

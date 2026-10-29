@@ -1360,7 +1360,7 @@ const clickText = async (host, text) => {
 };
 
 const chooseSteps = async (host) => {
-  if (!buttons(host).includes("Done")) await clickText(host, "Choose steps…");
+  if (!buttons(host).includes("Exit selection")) await clickText(host, "Choose steps…");
 };
 
 test("selected mixed actions retain alternatives and combine author handoffs", async () => {
@@ -1465,7 +1465,7 @@ test("a captured batch cannot duplicate an in-flight individual author handoff",
    nextResult={ok:true,result:{performed:false,repo:r}};
    await chooseSteps(host); await clickText(host,"Select suggested");
    controlledSend=new Promise(resolve=>{finish=resolve});calls.length=0;
-   await clickText(host,"Done"); await clickText(host,"Fix checks");
+   await clickText(host,"Exit selection"); await clickText(host,"Fix checks");
    assert.equal(calls.filter(c=>c.method==="sessions.send").length,1);
    await clickText(host,"Run chosen (1) →");
    assert.equal(calls.filter(c=>c.method==="sessions.send").length,1,"batch reused an in-flight reservation");
@@ -1587,7 +1587,7 @@ test("compact mixed recommendations preserve publication preview and exact captu
    await clickText(host, "↻");
    assert.ok(buttons(host).includes("Confirm 2 actions"));
    await clickText(host, "Back");
-   await clickText(host, "Done");
+   await clickText(host, "Exit selection");
    assert.ok(buttons(host).includes("Run chosen (2) →"), "closing the chooser retains the captured selection and excludes new repositories");
   } finally { view.dispose(); }
  }
@@ -1625,7 +1625,7 @@ test("running compact batch controls show disabled state while cancellation stay
   try {
    nextResult = { ok: true, result: { performed: false, repo: api } };
    await clickText(host, "Fix checks");
-   await chooseSteps(host); await clickText(host, "Select suggested"); await clickText(host, "Done");
+   await chooseSteps(host); await clickText(host, "Select suggested"); await clickText(host, "Exit selection");
    nextResult = () => new Promise(resolve => { release = resolve; });
    await clickText(host, "Run chosen (2) →");
    const button = text => [...host.all()].find(n => n.tagName === "BUTTON" && (n.textContent === text || text === "Allow retry" && n.title === "Check the conversation before retrying unchanged work" || text === "Cancel queued" && n.title === "Stop queued dispatches; active work continues"));

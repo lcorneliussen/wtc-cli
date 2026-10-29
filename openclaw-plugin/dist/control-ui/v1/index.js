@@ -925,10 +925,10 @@ function collectionTables(v) {
     };
     if (!choosing) return null;
     const controls = rows.some((r) => r.choices) ? css(el("div", {},
-      control("Select suggested", "Select current recommendations without replacing chosen alternatives", () => {
+      !batchPreview ? control("Select suggested", "Select current recommendations without replacing chosen alternatives", () => {
         for (const r of rows) if (!selection.has(r.sessionKey) && r.next && !reserved(r) && !dispatched.has(handoffKey(r, r.next)) && choicesOf(r).some((a) => a.available && a.key === r.next.key)) selection.set(r.sessionKey, { repo: r, step: r.next });
         batchPreview = null; v.rerender();
-      }, { disabled: batchRunning }),
+      }, { disabled: batchRunning }) : null,
       control(batchRunning ? "Running…" : batchPreview ? `Confirm ${batchPreview.length} actions` : (selection.size ? `Run selected (${selection.size})` : "Run selected"), "Run selected actions; publication keeps its confirmation", () => {
         if (batchRunning || !selection.size) return;
         if (batchPreview) void runSelected(batchPreview);
@@ -941,7 +941,7 @@ function collectionTables(v) {
       dispatched.size ? control("Allow retry", "Check the conversation first; allow explicit reselection of unchanged handoffs", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } }) : null,
       batchRunning ? control("Cancel queued", "Stop remaining dispatches; active work is not undone", () => { batchCancelled = true; v.rerender(); }) : null,
       batchPreview ? control("Back", "Change the selection", () => { batchPreview = null; v.rerender(); }) : null), "display:flex;flex-wrap:wrap;gap:6px;align-items:center") : null;
-    const header = css(el("div", {}, control("Done", "Close action selection", () => { choosing = false; batchPreview = null; v.rerender(); }), controls), "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap");
+    const header = css(el("div", {}, !batchPreview ? control("Exit selection", "Close action selection", () => { choosing = false; batchPreview = null; v.rerender(); }) : null, controls), "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap");
     return css(el("div", { className: "wtc-next-actions" }, header, batchPreview ? css(el("div", { textContent: "Each publication keeps its account and commit confirmation." }), "font-size:12px;color:var(--muted,#888)") : null), "display:grid;gap:6px;padding:6px 0");
   }
 
@@ -1350,7 +1350,7 @@ function collectionTables(v) {
       return toned(label, TONE.pending, `${activity}. ${why}, and the card does not hand pushing to the agent.`);
     }
     const pending = confirming.get(r.sessionKey);
-    if (pending) return nextButton("✓", `Review ${nameOf(r)}'s prepared publication before confirming`, () => { v.reveal?.(); v.rerender(); });
+    if (pending) return nextButton(label, `Review ${nameOf(r)}'s prepared publication before confirming`, () => { v.reveal?.(); v.rerender(); });
 
     const left = r.forge === BITBUCKET && r.dirty ? " Uncommitted files stay behind: ask the conversation to commit them first." : "";
     if (mine[r.forge] === null) return count(label, `${activity}. Pushing needs your own ${account}: click to push, or for how to connect it`, TONE.none, () => publish(r));
@@ -2176,8 +2176,8 @@ function mountCollection(container, context) {
       row(brand("14px", data.version), css(el("span", {}, muted(`Updated ${ago(entry.at)}`),
         iconButton("↻", "Refresh", () => trackedRefresh(watch, sessionKeyOf(), say, sessionKeyOf, () => !disposed))), "margin-left:auto;display:flex;align-items:center;gap:2px")),
       css(el("div", { textContent: data.collection.label ?? data.collection.sessionKey }), "font-size:16px;font-weight:600;color:var(--text-strong, inherit);overflow-wrap:anywhere"),
-      row(data.collection.project ? muted(data.collection.project === "ad-hoc" ? "ad-hoc taba project" : `taba project ${data.collection.project}`) : null, data.collection.project ? muted("·") : null,
-        branch ? mono(branch, "The collection's branch; a repository on another one shows its own") : null, branch ? muted("·") : null,
+      row(data.collection.project ? muted(data.collection.project === "ad-hoc" ? "ad-hoc taba project" : `taba project ${data.collection.project}`) : null, 
+        branch ? mono(branch, "The collection's branch; a repository on another one shows its own") : null, 
         muted(`${repos.length} ${repos.length === 1 ? "repository" : "repositories"}${groups.length ? ` · ${groups.filter((g) => g.running).length}/${plural(groups.length, "service")} running` : ""}`)),
       // Not when there is no folder: replaceChildren writes a null as "null".
       ...(data.collection.folder ? [css(el("div", {}, mono(data.collection.folder, "The collection's folder: one link per repository to its worktree")), "display:flex;margin-top:2px")] : []),
