@@ -559,12 +559,12 @@ function newTunnel(g, svc, data = {}, { compact = false } = {}) {
 // Visible branding can change while the plugin and CLI keep their legacy IDs.
 // version is what the collection reports: the plugin's and the gateway's wtc.
 const versionText = (v) => (v?.plugin || v?.wtc ? `plugin ${v.plugin ?? "?"}, wtc ${v.wtc ?? "?"}` : "");
-// Use the word's baseline for the link; the centered logo must not supply it.
+// Keep the centered logo out of text flow so it cannot supply the link baseline.
 const brand = (size, version, compact = false) => css(el("span", {},
   css(el("a", { href: HOME, target: "_blank", rel: "noopener noreferrer", ariaLabel: "taba home", title: `taba — Make room for the whole task. (opens taba.sh)${version ? `\n${versionText(version)}` : ""}` },
-    css(el("span", { textContent: "束", lang: "ja", ariaHidden: "true" }), "display:inline-grid;place-items:center;align-self:center;flex:none;width:1.3em;height:1.3em;border-radius:.35em;background:#234e42;color:#f7f7ed;font-family:'Hiragino Kaku Gothic ProN','Yu Gothic','Noto Sans CJK JP',sans-serif;font-size:1.15em;font-weight:500;letter-spacing:0;line-height:1"),
+    css(el("span", { textContent: "束", lang: "ja", ariaHidden: "true" }), "position:absolute;left:0;top:50%;transform:translateY(-50%);display:inline-grid;place-items:center;width:1.3em;height:1.3em;border-radius:.35em;background:#234e42;color:#f7f7ed;font-family:'Hiragino Kaku Gothic ProN','Yu Gothic','Noto Sans CJK JP',sans-serif;font-size:1.15em;font-weight:500;letter-spacing:0;line-height:1"),
     " ", el("span", { className: "wtc-brand-word", textContent: "taba" })),
-    "display:inline-flex;align-items:baseline;gap:.3em;color:var(--text-strong, inherit);text-decoration:none;font-weight:700"),
+    "position:relative;display:inline-flex;align-items:baseline;padding-left:1.795em;min-height:1.5em;color:var(--text-strong, inherit);text-decoration:none;font-weight:700"),
   compact ? null : el("span", { textContent: "Collection" })), `display:inline-flex;align-items:baseline;gap:.3em;flex:none;white-space:nowrap;font-weight:600;font-size:${size}`);
 
 const sectionHeading = (text, ...extra) => css(el("div", {},
@@ -636,14 +636,15 @@ const actionFeedback = () => el("style", { textContent: `
 .wtc-next-step>:first-child { width:104px;flex:0 0 104px; }
 .wtc-next-step>:not(:first-child) { width:20px;flex:0 0 20px; }
 .wtc-step-status { width:104px;text-align:center; }
+.wtc-toolbar-primary:empty,.wtc-summary-facts:empty,.wtc-header-controls>button,.wtc-header-controls>span:last-child { align-self:center; }
 .wtc-push-prepared { --wtc-control-bg:var(--accent-subtle,color-mix(in srgb,var(--accent,#75c8c1) 12%,transparent));--wtc-control-border:var(--accent,#75c8c1); }
-.wtc-action-control:not(:disabled):hover { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 30%,transparent); --wtc-control-border:var(--accent,#75c8c1); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:inset 0 0 0 1px var(--accent,#75c8c1); }
+.wtc-action-control:not(:disabled):hover { --wtc-control-bg:var(--bg-hover,rgba(128,128,128,.16)); --wtc-control-border:var(--border-strong,rgba(128,128,128,.5)); --wtc-control-text:var(--text-strong,var(--text,inherit)); box-shadow:none; }
 .wtc-next-actions button:disabled { background:transparent !important;border-color:var(--border-strong,rgba(128,128,128,.35)) !important;color:var(--muted,#888) !important; }
 .wtc-confirm-publication:not(:disabled) { background:var(--primary,var(--accent,#75c8c1)) !important;color:var(--primary-foreground,var(--accent-foreground,#151a22)) !important;border-color:var(--primary,var(--accent,#75c8c1)) !important; }
 :is(.wtc-action-toolbar,.wtc-bulk-actions) .wtc-action-control,.wtc-pr-history { --wtc-control-bg:transparent;--wtc-control-border:transparent;--wtc-control-text:var(--muted,#888); }
 :is(.wtc-action-toolbar,.wtc-bulk-actions) .wtc-action-control:not(:disabled):hover,.wtc-pr-history:not(:disabled):hover { --wtc-control-bg:var(--bg-hover,rgba(128,128,128,.12));--wtc-control-border:transparent;--wtc-control-text:var(--text-strong,var(--text,inherit));box-shadow:none; }
 
-.wtc-action-control:not(:disabled):active { --wtc-control-bg:color-mix(in srgb,var(--accent,#75c8c1) 45%,transparent); }
+.wtc-action-control:not(:disabled):active { --wtc-control-bg:var(--secondary,rgba(128,128,128,.22)); }
 @keyframes wtc-refresh { to { transform:rotate(360deg); } }
 .wtc-refresh-control[aria-busy="true"] { animation:wtc-refresh 1s linear infinite; }
 @media(prefers-reduced-motion:reduce) { .wtc-refresh-control[aria-busy="true"] { animation:none; opacity:.6; } }
@@ -659,7 +660,7 @@ const actionFeedback = () => el("style", { textContent: `
   .wtc-repo-identity { min-height:32px !important; }
   .wtc-header-controls .wtc-toolbar-primary-required { max-width:104px; }
 }
-@container wtc-card (max-width:340px) { .wtc-brand-word { display:none; } }
+@container wtc-card (max-width:340px) { .wtc-brand-word { display:none; } .wtc-collection-card>summary>span:first-child { align-self:center; } }
 @container wtc-card (max-width:350px) {
   .wtc-repo-facts { grid-template-columns:56px minmax(0,1fr) !important;grid-auto-rows:minmax(var(--wtc-control-height,20px),auto);row-gap:0 !important; }
   .wtc-repo-facts>:last-child { grid-column:1 / -1;min-height:var(--wtc-control-height,20px); }
@@ -883,7 +884,7 @@ function collectionTables(v) {
     if (targets.every(({ step }) => step.approve !== "person" && step.step !== "push")) void runSelected(targets);
     else { choosing = true; selection = new Map(targets.map((t) => [t.repo.sessionKey, t])); batchPreview = targets; v.reveal?.(); v.showActions?.(); v.rerender(); }
   }
-  const nextControlStyle = "display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);max-width:100%;box-sizing:border-box;border:1px solid var(--wtc-control-border,var(--border-strong,rgba(128,128,128,.35)));border-radius:var(--radius-sm,6px);background:var(--wtc-control-bg,rgba(128,128,128,.08));color:var(--wtc-control-text,var(--text,inherit));font:inherit;font-size:11px;line-height:16px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer";
+  const nextControlStyle = "display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;min-height:var(--wtc-control-height,20px);min-width:var(--wtc-control-width,20px);max-width:100%;box-sizing:border-box;border:1px solid var(--wtc-control-border,var(--border-strong,rgba(128,128,128,.35)));border-radius:var(--radius-sm,6px);background:var(--wtc-control-bg,var(--bg-elevated,rgba(128,128,128,.08)));color:var(--wtc-control-text,var(--text,inherit));font:inherit;font-size:11px;line-height:16px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer";
   const nextButton = (text, title, run, disabled = false) => {
     const button = css(smallButton(text, title, run), nextControlStyle);
     button.className = "wtc-action-control";
@@ -1048,13 +1049,13 @@ function collectionTables(v) {
     if (dispatched.size && !batchRunning && !selection.size && !prepared && !catching.size && !busy.size) primary = nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } });
     if (feedback?.failed && !batchRunning) primary = nextButton("⚠ Failed", `${feedback.text}. Open full action details`, openActivity);
     if (primary) primary.style.width = "104px";
-    const slot = css(el("span", { className: `wtc-toolbar-primary${confirming.size || batchRunning || selection.size ? " wtc-toolbar-primary-required" : ""}` }, primary), "display:inline-flex;align-items:center;justify-content:flex-end;flex:0 0 104px;width:104px;min-width:104px;min-height:var(--wtc-control-height,20px)");
+    const slot = css(el("span", { className: `wtc-toolbar-primary${confirming.size || batchRunning || selection.size ? " wtc-toolbar-primary-required" : ""}` }, primary), "display:inline-flex;align-items:baseline;justify-content:flex-end;flex:0 0 104px;width:104px;min-width:104px;min-height:var(--wtc-control-height,20px)");
     const secondary = batchRunning
       ? nextButton(compact ? "Stop" : "Cancel queued", "Stop queued dispatches; active work continues", () => { batchCancelled = true; v.rerender(); })
       : nextButton(compact ? "⋯" : "Choose steps…", "Choose alternatives or combine steps across repositories", () => { choosing = true; v.reveal?.(); v.showActions?.(); v.rerender(); }, !rows.length);
     secondary.style.width = compact ? "36px" : "104px";
     secondary.style.flexShrink = "0";
-    return css(el("span", { className: "wtc-action-toolbar" }, ...(compact ? [slot, secondary] : [secondary, slot])), `display:inline-flex;align-items:center;gap:${compact ? 4 : 8}px;min-width:0;flex-wrap:nowrap;white-space:nowrap`);
+    return css(el("span", { className: "wtc-action-toolbar" }, ...(compact ? [slot, secondary] : [secondary, slot])), `display:inline-flex;align-items:baseline;gap:${compact ? 4 : 8}px;min-width:0;flex-wrap:nowrap;white-space:nowrap`);
   }
   function publicationConfirmations(repos) {
     const pending = repos.filter(r => confirming.has(r.sessionKey));
@@ -1370,7 +1371,7 @@ function collectionTables(v) {
         const below = narrow && columns[i + 1]?.under && !empty(row[i + 1]) ? row[i + 1] : null;
         const value = empty(row[i]) ? blank ? "" : DOT() : row[i];
         if (below) {
-          return css(el("span", {}, css(el("span", {}, value), "display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;white-space:nowrap"),
+          return css(el("span", {}, css(el("span", {}, value), "display:flex;align-items:baseline;gap:6px;min-width:0;overflow:hidden;white-space:nowrap"),
             css(el("span", {}, below), "display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px")),
           `${align(c)}min-width:0;display:grid;gap:1px`);
         }
@@ -1456,7 +1457,7 @@ function collectionTables(v) {
     if (r.branch?.length > 8 && !untouched(r) && !r.error) {
       const expanded = expandedBranches.has(r.sessionKey);
       Object.assign(branch, { role: "button", tabIndex: 0, ariaExpanded: expanded, ariaLabel: `${r.branch}. ${expanded ? "Collapse" : "Show"} complete branch name` });
-      branch.style.cssText += `;display:block;white-space:${expanded ? "normal" : "nowrap"};overflow:hidden;text-overflow:ellipsis;overflow-wrap:anywhere;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px`;
+      branch.style.cssText += `;display:${expanded ? "flex" : "block"};align-items:baseline;white-space:${expanded ? "normal" : "nowrap"};overflow:hidden;text-overflow:ellipsis;overflow-wrap:anywhere;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px`;
       const toggle = e => { e?.preventDefault(); e?.stopPropagation(); if (expanded) expandedBranches.delete(r.sessionKey); else expandedBranches.add(r.sessionKey); v.rerender(); };
       branch.onclick = toggle;
       branch.onkeydown = e => { if (e.key === "Enter" || e.key === " ") toggle(e); };
@@ -1497,7 +1498,7 @@ function collectionTables(v) {
     ];
     const rows = groups.map((g) => [
       stateButton(g, v.svc),
-      css(el("span", { textContent: g.label, title: g.label + (g.group ? ` · ${g.group}` : "") }), "display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:normal;overflow-wrap:normal;font-weight:600;color:var(--text-strong, inherit)"),
+      css(el("span", { textContent: g.label, title: g.label + (g.group ? ` · ${g.group}` : "") }), "display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--text-strong, inherit)"),
       g.repo ? muted(g.repo) : null,
       g.loose ? toned("separate tunnel", TONE.pending, "Started apart from the service it exposes")
         : toned(g.state === "absent" || g.state === "idle" ? "stopped" : g.state, g.failed ? TONE.failure : g.running ? TONE.success : TONE.none),
@@ -1643,7 +1644,7 @@ function collectionTables(v) {
           row[6] || row[7] || row[8] ? css(el("span", {}, ...[row[6], row[7], row[8]].map((mark) => css(el("span", {}, mark), "display:inline-flex;justify-content:center;width:16px;flex:none"))), "display:inline-flex;align-items:center;gap:2px;flex:none") : null,
           row[10]), "display:inline-flex;align-items:center;gap:5px;align-items:baseline;white-space:nowrap;flex-wrap:wrap;min-width:0");
         const nameAndBranch = css(el("div", { className: "wtc-repo-identity" }, row[0]), "display:flex;align-items:baseline;min-width:0;min-height:24px;white-space:nowrap");
-        const branch = css(el("span", {}, row[1]), "flex:1;max-width:120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted,#888)");
+        const branch = css(el("span", {}, row[1]), "display:flex;align-items:baseline;flex:1;max-width:120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted,#888)");
         const identity = css(el("div", {}, nameAndBranch,
           narrow ? css(el("div", { className: "wtc-repo-facts" }, branch, changes, pr), "display:grid;grid-template-columns:56px 96px minmax(0,1fr);width:calc(100% + 138px);min-width:0;gap:8px;align-items:baseline;margin-top:2px;padding-left:19px;box-sizing:border-box;min-height:var(--wtc-control-height,20px)") : null), "min-width:0;padding:0");
         return narrow ? [identity, row[9]] : [row[0], row[1], changes, pr, row[9]];
@@ -1709,7 +1710,7 @@ function mountComposer(container, context) {
     "container-type:inline-size;container-name:wtc-card;box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset, 36px));max-width:var(--chat-thread-max-width, 48rem);margin:4px auto 0;background:var(--card, #fff);color:var(--text, inherit);border:1px solid var(--border, rgba(0,0,0,.08));border-radius:14px;font:inherit;font-size:14px");
   const extra = css(el("section", { className: "wtc-transient-actions", ariaLabel: "Collection action details" }),
     "box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset,36px));max-width:var(--chat-thread-max-width,48rem);margin:4px auto 0;padding:10px 12px;display:grid;gap:6px;max-height:min(40dvh,360px);overflow:auto;background:var(--card,#fff);color:var(--text,inherit);border:1px solid var(--border,rgba(0,0,0,.08));border-bottom:0;border-radius:14px 14px 0 0;font:inherit;font-size:14px");
-  const summary = css(el("summary"), "list-style:none;display:flex;align-items:center;gap:6px;padding:3px 12px;cursor:pointer;white-space:nowrap;overflow:hidden");
+  const summary = css(el("summary"), "list-style:none;display:flex;align-items:baseline;height:calc(var(--wtc-icon-size,24px) + 8px);box-sizing:border-box;gap:6px;padding:3px 12px;cursor:pointer;white-space:nowrap;overflow:hidden");
   const detail = css(el("div"), "padding:2px 12px 8px;display:grid;gap:6px");
   card.append(summary, detail, actionFeedback());
   card.addEventListener("toggle", () => remember(card.open));
@@ -1887,7 +1888,7 @@ function mountComposer(container, context) {
     const groups = serviceGroups(entry.data.services ?? []);
     summary.style.display = "flex";
     summary.style.columnGap = "8px";
-    const facts = css(el("span", { className: "wtc-summary-facts" }, ...(card.open || note ? [] : tables.totals(repos, groups))), "flex:1;min-width:0;height:24px;line-height:24px;overflow:hidden;display:flex;align-items:center;gap:8px");
+    const facts = css(el("span", { className: "wtc-summary-facts" }, ...(card.open || note ? [] : tables.totals(repos, groups))), "flex:1;min-width:0;height:24px;line-height:24px;overflow:hidden;display:flex;align-items:baseline;gap:8px");
     const headerNote = entry.error ? `Refresh failed: ${entry.error}` : note;
     const headerFailed = !!entry.error || noteFailed;
     const feedback = headerNote ? css(el("button", { type: "button", className: "wtc-header-feedback wtc-action-control", role: headerFailed ? "alert" : "status", ariaLive: "polite", textContent: `${headerFailed ? "⚠ " : ""}${entry.error ? "Refresh failed" : feedbackLabel(headerNote, headerFailed)}`, title: headerNote + " — Open full details", ariaLabel: headerNote + ". Open full details in the sidebar" }), `border:0;background:transparent;padding:0;text-align:left;font:inherit;font-size:12px;color:${headerFailed ? TONE.failure : "var(--muted,#888)"};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;flex:1`) : null;
@@ -1898,7 +1899,7 @@ function mountComposer(container, context) {
       css(el("span", { className: "wtc-header-controls" }, tables.actionToolbar(repos, true, { failed: headerFailed, text: headerNote }),
         iconButton("↻", `${entry.inflight ? "Refreshing… " : ""}Updated ${ago(entry.at)}. Refresh`, () => trackedRefresh(watch, entry?.data?.collection?.sessionKey ?? key, say, () => entry?.data?.collection?.sessionKey ?? key, () => !disposed)),
         iconButton("⤢", "Open the taba Collection panel", () => ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) })),
-        css(el("span", { textContent: card.open ? "⌃" : "⌄", ariaHidden: "true" }), "color:var(--muted,#888);padding:0 2px")), "margin-left:auto;flex:none;display:flex;align-items:center;justify-content:flex-end;gap:4px;white-space:nowrap"));
+        css(el("span", { textContent: card.open ? "⌃" : "⌄", ariaHidden: "true" }), "color:var(--muted,#888);padding:0 2px")), "margin-left:auto;flex:none;display:flex;align-items:baseline;justify-content:flex-end;gap:4px;white-space:nowrap"));
     tables.checkAccount(repos);
     detail.replaceChildren(...[tables.repoTable(repos, repoNarrow, entry.data.subSessions),
       groups.length ? css(el("div", { className: "wtc-base-services" }, tables.serviceTable(groups, entry.data, narrow)), "min-width:0") : null].filter(Boolean));
