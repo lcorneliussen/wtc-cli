@@ -160,7 +160,7 @@ const openedPanels = [];
 const contexts = new WeakMap();
 const detailViews = [];
 afterEach(() => { for (const view of detailViews.splice(0)) view.dispose(); });
-// Complete feedback moved from the card body to its accessible status/details action.
+// Include full outcome text from accessible status/details labels in feedback assertions.
 const readable = node => [node.textContent, ...[...node.all()].filter(n => n.className?.includes("wtc-header-feedback") || n.className?.includes("wtc-batch-result") || n.className === "wtc-step-status").map(n => n.ariaLabel ?? n.title ?? "")].join("\n");
 async function reviewAction(host) {
   let action = [...host.all()].find(n => n.tagName === "BUTTON" && n.textContent === "Review PR text");
@@ -1886,5 +1886,37 @@ for (const kind of ["composer", "panel"]) test(`${kind}: repeated preparation ta
     assert.equal([...host.all()].some(n => n.tagName === "BUTTON" && n.textContent === "Confirm push"), false);
     await confirm.onclick();
     assert.equal(calls.filter(c => c.method === "sessions.github.confirm").length, 0, "a stale confirmation cannot execute after cancellation");
+    await [...host.all()].find(n => n.tagName === "BUTTON" && /^1 commit to push/.test(n.title)).onclick();
+    await confirm.onclick();
+    assert.equal(calls.filter(c => c.method === "sessions.github.confirm").length, 0, "a stale button cannot confirm a newly prepared request");
   } finally { view.dispose(); personal = null; }
+});
+
+for (const kind of ["composer", "panel"]) test(`${kind}: old confirmation cannot publish after navigation to another conversation`, async () => {
+ personal={state:"connected",account:{login:"demo"},generation:"g1"};
+ const {host,view}=await mount(kind,collection([repo("api",{unpublished:1})]));
+ try{
+  await [...host.all()].find(n=>n.tagName==="BUTTON"&&/^1 commit to push/.test(n.title)).onclick();
+  const confirm=[...host.all()].find(n=>n.tagName==="BUTTON"&&n.textContent==="Confirm push");assert.ok(confirm);
+  const nextKey=`agent:main:other:${++sessions}`;collections.set(nextKey,collection([repo("other")]));
+  view.update({props:{sessionKey:nextKey,agentId:"main"},host:{request:hostRequest,ui:{openPanel(){}}},signal:new AbortController().signal,presented:true,mountDefault:()=>()=>{}});
+  await settle();calls.length=0;await confirm.onclick();
+  assert.equal(calls.filter(c=>c.method==="sessions.github.confirm").length,0);
+ }finally{view.dispose();personal=null;}
+});
+
+test("settled header feedback yields to the next action while its result remains in history", async t => {
+  const next = { step: "catch-up", by: "wtc", command: ["wtc", "catch-up"], key: "api:catchup:h1", reason: "Behind main" };
+  const { host, view } = await mount("composer", collection([repo("api", { behind: 2, next, choices: { recommended: next.key, actions: [{ ...next, available: true }] } })]));
+  try {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    await [...host.all()].find(n => n.tagName === "BUTTON" && /Updated .*Refresh/.test(n.title)).onclick({ preventDefault() {}, stopPropagation() {} });
+    assert.ok([...host.all()].some(n => n.className?.includes("wtc-header-feedback") && n.textContent === "Refreshed"));
+    t.mock.timers.tick(8001);
+    assert.equal([...host.all()].some(n => n.className?.includes("wtc-header-feedback")), false);
+    assert.ok([...host.all()].some(n => n.tagName === "BUTTON" && n.textContent === "Catch up" && n.title.includes("api:")), "the primary next action returns");
+    t.mock.timers.reset();
+    const panel = await mount("panel", collection([repo("api")]), undefined, contexts.get(host).props.sessionKey);
+    try { assert.match(readable(panel.host), /Collection status refreshed/); } finally { panel.view.dispose(); }
+  } finally { t.mock.timers.reset(); view.dispose(); }
 });

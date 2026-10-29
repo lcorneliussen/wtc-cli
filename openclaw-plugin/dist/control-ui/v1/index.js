@@ -849,7 +849,7 @@ function collectionTables(v) {
     }
   }
   function syncConversation() {
-    if (batchKey !== v.key()) { batchKey = v.key(); choosing = false; selection = new Map(); batchResults = new Map(); batchLabels = new Map(); batchKeys = new Map(); batchKinds = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true; }
+    if (batchKey !== v.key()) { confirming.clear(); batchKey = v.key(); choosing = false; selection = new Map(); batchResults = new Map(); batchLabels = new Map(); batchKeys = new Map(); batchKinds = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true; }
   }
   function suggestedTargets(repos) {
     return repos.filter((r) => actionable(r) && r.next && !reserved(r) && !dispatched.has(handoffKey(r, r.next)) && choicesOf(r).some((a) => a.available && a.key === r.next.key)).map((repo) => ({ repo, step: repo.next }));
@@ -867,6 +867,8 @@ function collectionTables(v) {
     if (disabled) { button.style.opacity = ".55"; button.style.cursor = "default"; }
     return button;
   };
+  const lastActivity = (r) => [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].reverse().filter(item => item.repo === nameOf(r)).sort((a, b) => b.at - a.at)[0];
+  const activityFailed = item => item?.state === "failed" || /^(Failed|Handoff failed|Cannot )/.test(item?.status ?? "");
   function nextCell(r) {
     if (!actionable(r)) return null;
     if (!r.next && r.choices && !r.dirty) return r.choices.actions?.length ? nextButton("Choose step…", "Inspect available actions and blocked reasons", () => { choosing = true; v.rerender(); }) : null;
@@ -882,8 +884,8 @@ function collectionTables(v) {
     }
     const pending = !!step.key && dispatched.has(handoffKey(r, step));
     const running = reserved(r);
-    const last = [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].reverse().find(item => item.repo === nameOf(r));
-    const retry = last && /^(Failed|Handoff failed|Cannot )/.test(last.status);
+    const last = lastActivity(r);
+    const retry = activityFailed(last) && (last.action === step.step || last.action === "push" && nextRoute(step) === "publish");
     const action = nextRoute(step) === "pr" && r.pullRequest?.url ? link(nextLabel(step), r.pullRequest.url)
       : nextButton(pending ? "Sent to agent" : running ? "Working…" : retry ? "Retry" : nextLabel(step), step.reason, () => !r.next ? askCommit(r) : actNext({ ...r, next: step }));
     // Opening the PR is a navigation link with the same visible affordance.
@@ -1031,8 +1033,8 @@ function collectionTables(v) {
         css(el("div", { textContent: `${plural(count, "commit")}${snapshot.forge !== BITBUCKET && snapshot.dirty ? ` + ${plural(snapshot.dirty, "file")} to commit` : ""}${c.uncommitted ? `; ${plural(c.uncommitted, "uncommitted file")} left behind` : ""}. The gateway rechecks the captured request before publishing.` }), "font-size:11px;overflow-wrap:anywhere;color:var(--muted,#888)"),
         commits.length ? css(el("details", {}, el("summary", { textContent: `Inspect ${commits.length} captured commits` }), ...commits.map(commit => el("div", { textContent: typeof commit === "string" ? commit : commit.subject ?? commit.title ?? commit.message ?? commit.sha ?? "Commit" }))), "font-size:11px;overflow-wrap:anywhere") : null,
         proposal?.title || proposal?.body ? css(el("details", {}, el("summary", { textContent: "Proposed PR text" }), el("strong", { textContent: proposal.title ?? "" }), el("div", { textContent: "For new PRs; existing PR text is kept." }), css(el("div", { textContent: proposal.body ?? "" }), "white-space:pre-wrap;overflow-wrap:anywhere")), "font-size:11px") : null,
-        css(el("div", {}, nextButton("Confirm push", `Confirm the captured push of ${nameOf(r)} as ${account}`, () => publish(r, v.key(), () => true, true), reserved(r) || !accountKnown),
-          nextButton("Cancel", `Cancel preparation for ${nameOf(r)}; nothing will be pushed`, () => { confirming.delete(r.sessionKey); if (prepared.activityId) recordActivity(v.collectionKey?.() ?? v.key(), prepared.activityId, { state: "cancelled", status: `${nameOf(r)}: publication cancelled.` }); v.say(`${nameOf(r)}: publication cancelled.`); v.rerender(); }, reserved(r))), "display:flex;align-items:center;gap:8px;padding-top:4px")), "display:grid;gap:4px;padding:10px 12px;border:1px solid var(--border-strong,rgba(128,128,128,.35));border-radius:8px;background:var(--bg,transparent)");
+        css(el("div", {}, nextButton("Confirm push", `Confirm the captured push of ${nameOf(r)} as ${account}`, () => { if (confirming.get(r.sessionKey) === prepared) return publish(r, prepared.conversationKey, () => true, true); }, reserved(r) || !accountKnown),
+          nextButton("Cancel", `Cancel preparation for ${nameOf(r)}; nothing will be pushed`, () => { if (!active(prepared.conversationKey) || confirming.get(r.sessionKey) !== prepared) return; confirming.delete(r.sessionKey); if (prepared.activityId) recordActivity(prepared.logKey, prepared.activityId, { state: "cancelled", status: `${nameOf(r)}: publication cancelled.` }); v.say(`${nameOf(r)}: publication cancelled.`); v.rerender(); }, reserved(r))), "display:flex;align-items:center;gap:8px;padding-top:4px")), "display:grid;gap:4px;padding:10px 12px;border:1px solid var(--border-strong,rgba(128,128,128,.35));border-radius:8px;background:var(--bg,transparent)");
     })), "display:grid;gap:8px;min-width:0");
   }
   function bulkActions(repos, narrow) {
@@ -1138,12 +1140,16 @@ function collectionTables(v) {
           ? await publishBitbucket(v.host, v.agent(), r, say, r.base ? baseOf(r) : undefined, mayDispatch)
           : await publishRepo(v.host, v.agent(), r, say, review, mayDispatch);
       if (next?.cancelled) { say(`${nameOf(r)}: Cancelled before publication dispatch.`); log("cancelled"); return next; }
-      if (!active(conversationKey)) { log(next?.connect ? "blocked" : lastFailed ? "failed" : "completed"); return; }
+      if (!active(conversationKey)) {
+        if (next?.requestId) { lastText = `${nameOf(r)}: preparation discarded after conversation switch; nothing was pushed.`; log("cancelled"); }
+        else log(next?.connect ? "blocked" : lastFailed ? "failed" : "completed");
+        return;
+      }
       if (next?.connect) { log("blocked"); mine[r.forge] = null; showConnect = r.forge; v.reveal?.(); }
       else {
         // It is connected: look again rather than keep "not connected".
         if (mine[r.forge] === null) { mine[r.forge] = undefined; askedAt[r.forge] = 0; if (showConnect === r.forge) showConnect = null; }
-        if (next) { confirming.set(r.sessionKey, { ...next, activityId, repository: structuredClone(r) }); log("confirmation"); v.reveal?.(); }
+        if (next) { confirming.set(r.sessionKey, { ...next, activityId, conversationKey, logKey, repository: structuredClone(r) }); log("confirmation"); v.reveal?.(); }
       }
       if (!next?.connect && !next?.requestId) log(lastFailed ? "failed" : "completed");
       return next;
@@ -1331,14 +1337,13 @@ function collectionTables(v) {
       check.style.cssText = "width:15px;height:15px;margin:0;accent-color:var(--accent,#75c8c1);flex:none";
       check.onchange = () => { if (selection.has(r.sessionKey)) selection.delete(r.sessionKey); else selection.set(r.sessionKey, { repo: r, step: r.next }); batchPreview = null; v.rerender(); };
     }
-    const records = [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])];
-    const last = records.reverse().find(item => item.repo === nameOf(r));
-    const failure = last && /^(Failed|Handoff failed|Cannot )/.test(last.status) ? nextButton("⚠", `${nameOf(r)}: ${last.status}. Open action details`, openActivity) : null;
+    const last = lastActivity(r);
+    const failure = activityFailed(last) ? nextButton("⚠", `${nameOf(r)}: ${last.status}. Open action details`, openActivity) : null;
     return css(el("span", {}, check, forgeIcon(r.forge, 13), label, failure), "display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%");
   };
   // ↑: the push, as a button only where the gateway pushes it (GitHub and,
   // with its plugin, Bitbucket, each with the person's own account); a
-  // confirmation waiting is "confirm ↑".
+  // prepared arrow opens its review; Confirm push is a separate control.
   function pushCell(r, n) {
     if (!pushable(r)) return null;
     const label = n ? `↑ ${n}` : "↑";
@@ -1611,6 +1616,7 @@ export const startMessage = (s, main = false) => main
 function feedbackLabel(text, failed) {
   const name = String(text).match(/^([\w.-]+):/)?.[1];
   const prefix = name ? `${name}: ` : "";
+  if (/Collection status refreshed/.test(text)) return "Refreshed";
   if (/cancelled/i.test(text)) return "Cancelled";
   if (failed) return "Failed" + (name ? ` · ${name}` : "");
   if (/confirm to push|confirm to publish/.test(text)) return prefix + "confirm push";
@@ -1655,7 +1661,18 @@ function mountComposer(container, context) {
   };
   let noteFailed = false;
   let noteAction = null;
-  const say = (text, failed = false, action = null) => { note = text; noteFailed = failed; noteAction = action; if (text) feedbackStore.set(entry?.data?.collection?.sessionKey ?? key, { text, failed, action, at: Date.now() }); if (entry) render(entry); };
+  let noteTimer;
+  const say = (text, failed = false, action = null) => {
+    clearTimeout(noteTimer);
+    note = text; noteFailed = failed; noteAction = action;
+    if (text) feedbackStore.set(entry?.data?.collection?.sessionKey ?? key, { text, failed, action, at: Date.now() });
+    if (entry) render(entry);
+    // Keep errors and follow-ups visible; settled informational feedback yields
+    // to live totals and next actions while its full result stays in the log.
+    if (text && !failed && !action && !/Preparing|Pushing|Catching up|Starting|Stopping|Restarting|Asking/.test(text)) noteTimer = setTimeout(() => {
+      note = ""; if (!disposed && entry) render(entry);
+    }, 8000);
+  };
   let narrow = false, repoNarrow = false;
   const sized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([e]) => {
     const now = e.contentRect.width > 0 && e.contentRect.width < NARROW_PX;
@@ -1832,6 +1849,7 @@ function mountComposer(container, context) {
     watch = null;
     key = sessionKey;
     entry = null;
+    clearTimeout(noteTimer);
     note = "";
     noteAction = null;
     noteFailed = false;
@@ -1852,6 +1870,7 @@ function mountComposer(container, context) {
       disposed = true;
       clearInterval(tick);
       clearTimeout(draftTimer);
+      clearTimeout(noteTimer);
       sized?.disconnect();
       watch?.dispose();
       card.remove();
