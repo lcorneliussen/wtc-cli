@@ -7,7 +7,9 @@
 
 - **Service names open recent logs.** A read-only pane below sidebar Services
   shows recent output, including startup failures; the composer card opens it too,
-  with Refresh and Close controls. Reading logs does not start the service;
+  with Refresh and Close controls. The latest output opens first; status refreshes
+  preserve the reading position. Multi-process services offer task buttons.
+  Reading logs does not start the service;
   changing conversations clears the pane and discards late responses.
   ([#269](https://github.com/lcorneliussen/wtc-cli/issues/269)).
 

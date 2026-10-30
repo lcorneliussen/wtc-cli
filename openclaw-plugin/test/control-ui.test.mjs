@@ -32,6 +32,7 @@ class Node {
     });
   }
   append(...kids) { this.children.push(...this.#adopt(kids)); }
+  insertBefore(node, next) { node.remove(); const at = next ? this.children.indexOf(next) : this.children.length; node.parentNode = this; this.children.splice(at, 0, node); return node; }
   prepend(...kids) { this.children.unshift(...this.#adopt(kids)); }
   replaceChildren(...kids) {
     for (const c of this.children) if (typeof c === "object") c.parentNode = null;
@@ -303,7 +304,7 @@ test("service names open read-only logs with refresh, empty, error and close sta
     calls.length=0;await titled(host,"View logs for Preview").onclick();
     const log=[...host.all()].find(n=>n.className==="wtc-service-log");assert.ok(log);
     assert.ok(log.textContent.includes('<script>untrusted</script>'));assert.equal([...log.all()].some(n=>n.tagName==="SCRIPT"),false);
-    assert.ok(log.textContent.includes("Showing recent output only"));
+    assert.ok(log.textContent.includes("showing recent output only"));
     assert.deepEqual(calls.filter(c=>c.actionId==="svc-logs").map(c=>c.payload),[{group:"api/web"}]);
     assert.equal(calls.some(c=>c.actionId==="svc"),false);
     const services=[...host.all()].find(n=>n.className==="wtc-base-services");
@@ -312,6 +313,26 @@ test("service names open read-only logs with refresh, empty, error and close sta
     assert.match(host.textContent,/Could not read logs: read refused/);
     serviceLogsResult={ok:true,result:{logs:""}};await titled(host,"Refresh service logs").onclick();assert.match(host.textContent,/No logs recorded yet/);
     titled(host,"Close service logs").onclick();assert.equal([...host.all()].some(n=>n.className==="wtc-service-log"),false);
+  } finally {view.dispose();serviceLogsResult=previous;}
+});
+
+test("service logs retain the same connected reading node across status rerenders and can select tasks", async () => {
+  const previous=serviceLogsResult;serviceLogsResult={ok:true,result:{logs:"older\nlatest startup failure"}};
+  const {host,view,context}=await mount("panel",collection([repo("api")],[
+    {group:"api/web",path:"api/web/server",label:"Preview",kind:"service",state:"exited"},
+    {group:"api/web",path:"api/web/job",label:"Prepare",kind:"job",state:"exited"},
+    {group:"api/web",path:"api/web/tunnel",kind:"endpoint",state:"ready"},
+  ]));
+  try {
+    await titled(host,"View logs for Preview").onclick();await settle();
+    const pane=[...host.all()].find(n=>n.className==="wtc-service-log"),pre=[...pane.all()].find(n=>n.tagName==="PRE");
+    assert.equal(calls.at(-1).payload.group,"api/web/server");
+    pre.scrollTop=78;let detached=false;const remove=pre.parentNode.remove.bind(pre.parentNode);pre.parentNode.remove=()=>{detached=true;remove();};
+    view.update(context);
+    assert.equal([...host.all()].find(n=>n.className==="wtc-service-log"),pane);assert.equal(pre.scrollTop,78);assert.equal(detached,false);
+    assert.match(pane.textContent,/last 100 lines/);
+    await titled(host,"Read logs for api/web/job").onclick();assert.equal(calls.at(-1).payload.group,"api/web/job");
+    assert.equal(titled(host,"Read logs for api/web/tunnel"),undefined);
   } finally {view.dispose();serviceLogsResult=previous;}
 });
 

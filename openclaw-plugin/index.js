@@ -394,6 +394,26 @@ export default {
       return { parentKey, parent: entryOf.get(parentKey), children };
     };
 
+    const collectionIdentity = (children) => {
+      const collectionName = (entry) => String(entry.worktree?.branch ?? "").replace(/^openclaw\//, "");
+      const names = [...new Set(children.map((c) => collectionName(c.entry)).filter(Boolean))];
+      // The collection is the one wtc made for this conversation: wtc labels
+      // the owners it spawns "<collection> <repo>". A child whose worktree is
+      // another one's is a sub-session (a wtc worker, <collection>--<worker>,
+      // or a session OpenClaw or the agent spawned with a worktree of its
+      // own, named for its change). Its checkouts are shown under the
+      // collection's, not as more of its repositories, and ✕ may delete it:
+      // so a name another one extends with "--" is never taken for the
+      // collection.
+      const count = (n) => children.filter((c) => collectionName(c.entry) === n).length;
+      const madeByWtc = (c, n) => c.entry.projectId ? c.entry.label === `${n} ${c.entry.projectId}` : String(c.entry.label ?? "").startsWith(n + " ");
+      const made = names.filter((n) => children.some((c) => collectionName(c.entry) === n && madeByWtc(c, n)));
+      const pool = made.length ? made : names;
+      const extendsAnother = (n) => pool.some((m) => m !== n && n.startsWith(m + WORKER_SEPARATOR));
+      const task = pool.filter((n) => !extendsAnother(n)).sort((a, b) => count(b) - count(a) || a.length - b.length)[0] ?? pool[0];
+      return { collectionName, names, task };
+    };
+
     // wtc --version, asked at most once a minute: requests that overlap
     // share the one that is running.
     let wtcVersion = { at: 0, output: null };
@@ -561,22 +581,7 @@ export default {
       if (children.length === 0) return result;
       // The collection's name is its worktrees' name. wtc status reads
       // them, keeps the collection's folder and reports its services.
-      const collectionName = (entry) => String(entry.worktree?.branch ?? "").replace(/^openclaw\//, "");
-      const names = [...new Set(children.map((c) => collectionName(c.entry)).filter(Boolean))];
-      // The collection is the one wtc made for this conversation: wtc labels
-      // the owners it spawns "<collection> <repo>". A child whose worktree is
-      // another one's is a sub-session (a wtc worker, <collection>--<worker>,
-      // or a session OpenClaw or the agent spawned with a worktree of its
-      // own, named for its change). Its checkouts are shown under the
-      // collection's, not as more of its repositories, and ✕ may delete it:
-      // so a name another one extends with "--" is never taken for the
-      // collection.
-      const count = (n) => children.filter((c) => collectionName(c.entry) === n).length;
-      const madeByWtc = (c, n) => c.entry.projectId ? c.entry.label === `${n} ${c.entry.projectId}` : String(c.entry.label ?? "").startsWith(n + " ");
-      const made = names.filter((n) => children.some((c) => collectionName(c.entry) === n && madeByWtc(c, n)));
-      const pool = made.length ? made : names;
-      const extendsAnother = (n) => pool.some((m) => m !== n && n.startsWith(m + WORKER_SEPARATOR));
-      const task = pool.filter((n) => !extendsAnother(n)).sort((a, b) => count(b) - count(a) || a.length - b.length)[0] ?? pool[0];
+      const { collectionName, names, task } = collectionIdentity(children);
       const subName = (name) => (name.startsWith(task + WORKER_SEPARATOR) ? name.slice(task.length + WORKER_SEPARATOR.length) : name);
       const subDirs = children.filter((c) => collectionName(c.entry) && collectionName(c.entry) !== task).map((c) => worktreeOf(c.entry)).filter(Boolean);
       const compared = new Map();
@@ -721,13 +726,13 @@ export default {
       const group = String(payload.group ?? "");
       const provider = String(payload.provider ?? "");
       if (!["up", "down", "restart", "tunnel", "logs"].includes(op)) return { ok: false, error: "op is up, down, restart, tunnel or logs" };
-      if (group && (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(group) || group.split("/").some(part => part === "." || part === ".."))) return { ok: false, error: "name a service as <repo>/<service>" };
+      if (group && (!(op === "logs" ? /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/ : /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/).test(group) || group.length > 512 || group.split("/").some(part => part === "." || part === ".."))) return { ok: false, error: "name a service as <repo>/<service>" };
       if (op === "logs" && !group) return { ok: false, error: "name the service whose logs to read" };
       if (op === "tunnel" && !group) return { ok: false, error: "name the service to tunnel to" };
       if (op === "tunnel" && !TUNNEL_PROGRAMS[provider]) return { ok: false, error: `the provider is one of ${Object.keys(TUNNEL_PROGRAMS).join(", ")}` };
       if (!action.sessionKey || !action.agentId) return { ok: false, error: "sessionKey and agentId are required" };
       const { children } = collectionOf(action.agentId, action.sessionKey);
-      const name = children.map((c) => String(c.entry.worktree?.branch ?? "").replace(/^openclaw\//, "")).find(Boolean);
+      const name = op === "logs" ? collectionIdentity(children).task : children.map((c) => String(c.entry.worktree?.branch ?? "").replace(/^openclaw\//, "")).find(Boolean);
       if (!name) return { ok: false, error: "this session has no collection" };
       const argv = ["wtc", "svc", op, ...(group ? [group] : [])];
       if (op === "tunnel") {
@@ -742,6 +747,7 @@ export default {
       const cwd = collectionFolder(stateDir, name);
       if (!cwd) return { ok: false, error: `collection ${name} has no folder yet: wtc status ${name} makes it` };
       const r = await run(argv, { cwd, timeoutMs: op === "logs" ? 30000 : 180000, env: { OPENCLAW_SHELL: "exec" } });
+      if (op === "logs" && r.code !== 0 && /(?:^|\n)(?:wtc: )?(?:runtime is not configured|(?:lstat|stat) [^\n]+: no such file or directory)\s*$/.test((r.stderr || r.stdout).trim())) return { ok: true, result: { logs: "", truncated: false } };
       if (op === "logs" && r.code === 0) {
         const text = String(r.stdout ?? "");
         return { ok: true, result: { logs: text.slice(-65536), truncated: text.length > 65536 } };
