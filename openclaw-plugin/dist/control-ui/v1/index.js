@@ -1690,7 +1690,7 @@ function collectionTables(v) {
     return table(columns, open.map((r) => {
       const pr = r.pullRequest;
       const [, , , , , , ci, conflict, review] = repoRow(r);
-      return [link(`#${pr.number}`, pr.url), muted(nameOf(r)), muted(pr.draft && pr.state === "open" ? "draft" : pr.state), ci, conflict, review,
+      return [el("span", { title: `Pull request #${pr.number}` }, link(`#${pr.number}`, pr.url)), muted(nameOf(r), nameOf(r)), muted(pr.draft && pr.state === "open" ? "draft" : pr.state), ci, conflict, review,
         css(el("span", { textContent: pr.title ?? "", title: pr.title ?? "" }), "overflow:hidden;text-overflow:ellipsis")];
     }), narrow);
   }

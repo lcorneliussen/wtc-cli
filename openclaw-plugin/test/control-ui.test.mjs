@@ -282,6 +282,17 @@ test("panel: a busy collection", async () => {
   view.dispose();
 });
 
+test("panel: compact PR columns retain full names and numbers as hover text", async () => {
+  const current={number:12345,state:"open",url:"https://example.invalid/pull/12345",title:"Preview changes"};
+  const {host,view}=await mount("panel",collection([repo("extended-api-service",{pullRequest:current,pullRequests:[current]})]));
+  try {
+    const number=[...host.all()].find(n=>n.title === "Pull request #12345");
+    assert.ok(number);
+    assert.ok([...number.all()].some(n=>n.tagName === "A" && n.href === current.url));
+    assert.ok([...host.all()].some(n=>n.tagName === "SPAN" && n.textContent === "extended-api-service" && n.title === "extended-api-service"));
+  } finally {view.dispose();}
+});
+
 test("panel: repositories on different branches", async () => {
   const { host, view } = await mount("panel", collection([
     repo("api", { ahead: 1 }), repo("web", { ahead: 1 }), repo("docs", { branch: "release", ahead: 1 }), repo("site"),
