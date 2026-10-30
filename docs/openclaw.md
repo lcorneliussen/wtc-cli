@@ -496,7 +496,13 @@ the task as a whole:
   asks the conversation to resolve the conflict, and a service's ▶, ■ or ↻
   starts, stops or restarts it. The same marks in the
   header of the services act on all of them, and collapsed, ↑, ↓ and the
-  services' mark act on the whole collection. An aligned **All repos** row
+  services' mark act on the whole collection. Click a service name to read its
+  recent logs without starting or restarting it. The log pane has Refresh and
+  Close controls, opens at the latest of up to 100 lines, and stays in place
+  while status refreshes. It appears below Services in the sidebar and clears
+  on conversation changes. Services with several processes offer task buttons.
+  Resource-only and unconfigured rows have no process logs to open. A click in the composer card opens that sidebar pane. Logs require read access; service
+  lifecycle controls still require write access. An aligned **All repos** row
   offers **↑** (push) and **↓** (catch up) over their per-repository arrow tracks. Hover or focus
   exposes the eligible scope; unavailable actions stay disabled in their slots.
   When PR facts or history are present, they keep separate fixed tracks. Narrow

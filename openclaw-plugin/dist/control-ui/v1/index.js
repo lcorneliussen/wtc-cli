@@ -606,6 +606,9 @@ const pullRequestRows = (repos) => {
 // It is UI feedback, not an executable plan or a durable completion receipt.
 const activityStore = new Map();
 const feedbackStore = new Map();
+// Hand off the requested service locally, independently of optional host panel
+// props; log output stays in the panel that fetched it.
+const serviceLogIntents = new Map(), serviceLogListeners = new Set();
 function recordActivity(collection, id, item) {
   const records = activityStore.get(collection) ?? new Map();
   records.set(id, { ...records.get(id), ...item, at: Date.now() });
@@ -647,6 +650,7 @@ const repositoryColumns = (narrow) => narrow
   ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: `${REPO_NEXT_WIDTH}px`, align: "end" }]
   : [{ head: "Repository", width: "minmax(76px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "164px" }, { head: "Next", width: `${REPO_NEXT_WIDTH}px`, align: "end" }];
 const actionFeedback = () => el("style", { textContent: `
+.wtc-service-label:disabled { cursor:default !important;text-decoration:none !important; }
 .wtc-next-step { width:${REPO_NEXT_WIDTH}px;justify-content:flex-start !important; }
 .wtc-next-step>:first-child { width:104px;flex:0 0 104px; }
 .wtc-next-step>:not(:first-child) { width:20px;flex:0 0 20px; }
@@ -673,6 +677,7 @@ const actionFeedback = () => el("style", { textContent: `
 .wtc-action-control:focus-visible { outline:2px solid var(--accent,#75c8c1); outline-offset:-2px; }
 .wtc-collection-card summary:focus-visible { outline:2px solid var(--accent,#75c8c1); outline-offset:2px; border-radius:10px; }
 @media(max-width:520px) {
+  .wtc-collection-card { --wtc-header-top-extra:0px; }
   .wtc-collection-card>summary { column-gap:4px !important; }
   .wtc-collection-card, .wtc-collection, .wtc-transient-actions { --wtc-control-height:32px; --wtc-control-width:24px; --wtc-icon-size:36px; --wtc-state-size:24px; }
   .wtc-header-controls { --wtc-control-height:36px; --wtc-control-width:36px; }
@@ -711,6 +716,42 @@ function collectionTables(v) {
     return node;
   };
   const active = (conversation) => v.alive?.() !== false && v.key() === conversation;
+  let serviceLog = null, serviceLogRequest = 0;
+  const clearServiceLogs = () => { serviceLog = null; serviceLogRequest++; };
+  async function loadServiceLogs(group, label, targets = []) {
+    if (v.alive?.() === false) return;
+    if (v.openServiceLogs) return v.openServiceLogs(group, label, targets);
+    const key = v.key(), request = ++serviceLogRequest;
+    serviceLog = { key, group, label, targets, loading: true };
+    v.showServiceLogs?.();
+    v.rerender();
+    try {
+      const result = await call(v.host, "svc-logs", key, v.agent(), { group });
+      if (active(key) && request === serviceLogRequest) serviceLog = { key, group, label, targets, text: String(result?.logs ?? ""), truncated: !!result?.truncated };
+    } catch (error) {
+      if (active(key) && request === serviceLogRequest) serviceLog = { key, group, label, targets, error: String(error?.message ?? error) };
+    }
+    if (active(key) && request === serviceLogRequest) v.rerender();
+  }
+  function serviceLogs() {
+    const current = serviceLog;
+    if (!current || current.key !== v.key()) return null;
+    if (current.node) return current.node;
+    const refresh = nextButton("Refresh", "Refresh service logs", () => loadServiceLogs(current.group, current.label, current.targets), current.loading);
+    const close = nextButton("Close", "Close service logs", () => { clearServiceLogs(); v.rerender(); });
+    const text = current.loading ? "Loading logs…" : current.error ? `Could not read logs: ${current.error}` : current.text || "No logs recorded yet.";
+    const pre = css(el("pre", { textContent: text, tabIndex: 0, ...(current.error ? { role: "alert" } : current.loading ? { role: "status" } : {}) }),
+      "margin:0;min-width:0;max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 var(--mono,ui-monospace,monospace)");
+    if (!current.loading && !current.error) queueMicrotask(() => { if (pre.isConnected && serviceLog === current) pre.scrollTop = pre.scrollHeight; });
+    current.node = css(el("section", { className: "wtc-service-log", ariaLabel: `${current.label} logs` },
+      css(el("div", {}, css(el("strong", { textContent: `Logs · ${current.label}` }), "min-width:0;overflow-wrap:anywhere"),
+        css(el("span", {}, refresh, close), "margin-left:auto;display:flex;gap:4px;flex:none")), "display:flex;align-items:baseline;gap:8px"),
+      current.targets.length > 1 ? css(el("div", { ariaLabel: "Service log tasks" }, ...current.targets.map(target =>
+        nextButton(target.split("/").slice(2).join("/") || "main", `Read logs for ${target}`, () => loadServiceLogs(target, current.label, current.targets), current.loading || target === current.group))), "display:flex;flex-wrap:wrap;gap:4px") : null,
+      el("span", { textContent: `Recent output · last 100 lines${current.truncated ? " · showing recent output only (text limit)" : ""}` }), pre),
+      "min-width:0;display:grid;gap:8px;padding:10px 12px;border:1px solid var(--border,rgba(128,128,128,.3));border-radius:8px;font-size:12px;color:var(--text,inherit)");
+    return current.node;
+  }
   // Mirror browser-local publication progress; this is not a gateway lock.
   const sharedPushBusy = (r) => [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].some(item => item.action === "push" && item.repoSessionKey === r.sessionKey && item.inFlight);
   const reserved = (r) => acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey) || sharedPushBusy(r);
@@ -1572,25 +1613,31 @@ function collectionTables(v) {
       ...ways.map((w) => ({ head: w, title: w === "gateway" ? "OpenClaw portals" : `${w} tunnels` })),
       { head: "", width: narrow ? "var(--wtc-control-width,20px)" : "minmax(0,1fr)", align: "end" },
     ];
-    const rows = groups.map((g) => [
-      leadSlot(stateButton(g, v.svc)),
-      css(el("span", { className: "wtc-service-label", textContent: g.label, title: g.label + (g.group ? ` · ${g.group}` : "") }), "display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--text-strong, inherit)"),
-      g.repo ? muted(g.repo) : null,
-      g.loose ? toned("separate tunnel", TONE.pending, "Started apart from the service it exposes")
-        : toned(g.state === "absent" || g.state === "idle" ? "stopped" : g.state, g.failed ? TONE.failure : g.running ? TONE.success : TONE.none),
-      g.url && !g.loose ? address(g.url) : null,
-      ...ways.map((w) => {
-        if (w === "gateway") {
-          const ps = portalsOf(g, data);
-          return ps.length ? portalNode(g, ps[0], v.svc, "open") : null;
-        }
-        const t = g.tunnels.find((x) => tunnelName(x) === w);
-        return t ? tunnelNode(g, t, v.svc, { label: t.url ? slug(t.url) : "open", opener: (title, run) => stateGlyph("▶", title, TONE.none, run) }) : null;
-      }),
-      css(el("span", {}, g.loose
-        ? count("Consolidate", "Ask the conversation to open it with wtc svc tunnel instead", "inherit", () => askConversation(v.host, v.key(), consolidate(g)))
-        : newTunnel(g, v.svc, data, { compact: true }) ?? ""), "justify-self:end"),
-    ]);
+    const rows = groups.map((g) => {
+      const logMembers = g.members.filter(s => !["endpoint", "resources", "configuration"].includes(s.kind) && s.state !== "unconfigured");
+      const targets = logMembers.filter(s => s.path === g.group || s.path?.startsWith(g.group + "/")).map(s => s.path);
+      const canReadLogs = !!g.group && (logMembers.length > 0 || g.members.some(s => s.kind === "endpoint" && s.state !== "unconfigured"));
+      const logTitle = canReadLogs ? `View logs for ${g.label}` : "No process logs available yet";
+      return [
+        leadSlot(stateButton(g, v.svc)),
+        Object.assign(css(el("button", { type: "button", className: "wtc-service-label", textContent: g.label, title: logTitle, ariaLabel: logTitle, disabled: !canReadLogs }), "display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;line-height:inherit;font-weight:600;color:var(--text-strong, inherit);border:0;padding:0;background:transparent;text-align:left;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px"), { onclick: () => { if (canReadLogs) return loadServiceLogs(targets[0] ?? g.group, g.label, targets); } }),
+        g.repo ? muted(g.repo) : null,
+        g.loose ? toned("separate tunnel", TONE.pending, "Started apart from the service it exposes")
+          : toned(g.state === "absent" || g.state === "idle" ? "stopped" : g.state, g.failed ? TONE.failure : g.running ? TONE.success : TONE.none),
+        g.url && !g.loose ? address(g.url) : null,
+        ...ways.map((w) => {
+          if (w === "gateway") {
+            const ps = portalsOf(g, data);
+            return ps.length ? portalNode(g, ps[0], v.svc, "open") : null;
+          }
+          const t = g.tunnels.find((x) => tunnelName(x) === w);
+          return t ? tunnelNode(g, t, v.svc, { label: t.url ? slug(t.url) : "open", opener: (title, run) => stateGlyph("▶", title, TONE.none, run) }) : null;
+        }),
+        css(el("span", {}, g.loose
+          ? count("Consolidate", "Ask the conversation to open it with wtc svc tunnel instead", "inherit", () => askConversation(v.host, v.key(), consolidate(g)))
+          : newTunnel(g, v.svc, data, { compact: true }) ?? ""), "justify-self:end"),
+    ];
+    });
     return table(columns, rows, narrow);
   }
 
@@ -1706,8 +1753,8 @@ function collectionTables(v) {
     for (const s of sub.filter((s) => !repos.some((r) => r.repo && r.repo === s.r.repo))) rows.push(subRow(s.w, s.r));
     return rows;
   }
-  return { table, checkAccount, notice, nextActions, actionToolbar, activityLog, publicationConfirmations,
-    dispose: () => cancelPreparations("Preparation discarded when the view closed; nothing was pushed."),
+  return { table, checkAccount, notice, nextActions, actionToolbar, activityLog, publicationConfirmations, serviceLogs, clearServiceLogs, loadServiceLogs,
+    dispose: () => { clearServiceLogs(); cancelPreparations("Preparation discarded when the view closed; nothing was pushed."); },
     repoTable: (repos, narrow, workers) => {
       syncConversation();
       const columns = repositoryColumns(narrow);
@@ -1791,7 +1838,7 @@ function mountComposer(container, context) {
     "container-type:inline-size;container-name:wtc-card;box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset, 36px));max-width:var(--chat-thread-max-width, 48rem);margin:4px auto 0;background:var(--card, #fff);color:var(--text, inherit);border:1px solid var(--border, rgba(0,0,0,.08));border-radius:14px;font:inherit;font-size:14px");
   const extra = css(el("section", { className: "wtc-transient-actions", ariaLabel: "Collection action details" }),
     "box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset,36px));max-width:var(--chat-thread-max-width,48rem);margin:4px auto 0;padding:10px 12px;display:grid;gap:6px;max-height:min(40dvh,360px);overflow:auto;background:var(--card,#fff);color:var(--text,inherit);border:1px solid var(--border,rgba(0,0,0,.08));border-bottom:0;border-radius:14px 14px 0 0;font:inherit;font-size:14px");
-  const summary = css(el("summary"), "list-style:none;display:flex;align-items:baseline;height:calc(var(--wtc-icon-size,24px) + 8px);box-sizing:border-box;gap:6px;padding:3px 12px;cursor:pointer;white-space:nowrap;overflow:hidden");
+  const summary = css(el("summary"), "list-style:none;display:flex;align-items:baseline;height:calc(var(--wtc-icon-size,24px) + 8px + var(--wtc-header-top-extra,6px));box-sizing:border-box;gap:6px;padding:calc(3px + var(--wtc-header-top-extra,6px)) 12px 3px;cursor:pointer;white-space:nowrap;overflow:hidden");
   const detail = css(el("div"), "padding:2px 12px 8px;display:grid;gap:6px");
   card.append(summary, detail, actionFeedback());
   card.addEventListener("toggle", () => remember(card.open));
@@ -1849,6 +1896,12 @@ function mountComposer(container, context) {
   };
   const tables = collectionTables({
     collectionKey: () => entry?.data?.collection?.sessionKey ?? key,
+    openServiceLogs: (group, label, targets) => {
+      serviceLogIntents.set(entry?.data?.collection?.sessionKey ?? key, { group, label, targets });
+      if (serviceLogIntents.size > 128) serviceLogIntents.delete(serviceLogIntents.keys().next().value);
+      ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) });
+      for (const notify of serviceLogListeners) notify();
+    },
     publicationBesideCollapsedBar: true,
     get host() { return ctx.host; }, alive: () => !disposed && !ctx.signal?.aborted, key: () => key, agent: () => agentOf(ctx), svc, say,
     // What a push needs (the how-to of connecting GitHub) shows open.
@@ -2005,6 +2058,8 @@ function mountComposer(container, context) {
   function follow(next) {
     const sessionKey = keyOf(next);
     if (sessionKey === key) return;
+    serviceLogIntents.delete(entry?.data?.collection?.sessionKey ?? key);
+    tables.clearServiceLogs();
     watch?.dispose();
     watch = null;
     key = sessionKey;
@@ -2049,7 +2104,7 @@ function mountCollection(container, context) {
   let watch = null;
 
   const root = css(el("section", { className: "wtc-collection" }),
-    "container-type:inline-size;container-name:wtc-panel;position:relative;padding:14px 16px;font:inherit;font-size:14px;color:var(--text, inherit);overflow:auto;height:100%;box-sizing:border-box;display:grid;gap:14px;align-content:start");
+    "container-type:inline-size;container-name:wtc-panel;position:relative;width:100%;min-width:0;padding:14px 16px;font:inherit;font-size:14px;color:var(--text, inherit);overflow:auto;height:100%;box-sizing:border-box;display:grid;gap:14px;align-content:start");
   container.append(root);
 
   const muted = (text, extra = "") => css(el("span", { textContent: text }), `color:var(--muted, #888);font-size:12px;${extra}`);
@@ -2122,6 +2177,7 @@ function mountCollection(container, context) {
 
   const tables = collectionTables({
     collectionKey: sessionKeyOf,
+    showServiceLogs: () => { focusSection = "service-logs"; },
     showActions: () => { focusSection = "actions"; render(); },
     get host() { return ctx.host; }, alive: () => !disposed && !ctx.signal?.aborted, key: sessionKeyOf, agent: () => ctx.props.agentId, svc, say,
     refresh: () => watch?.refresh(), pause: () => pauseCollection(watch), rerender: () => render(),
@@ -2381,15 +2437,29 @@ function mountCollection(container, context) {
 
     const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
     const activitySection = tables.activityLog();
+    const serviceLogSection = tables.serviceLogs();
     const temporary = [confirmations, nextActions, howTo].filter(Boolean);
     const actionSection = temporary.length ? css(el("section", { className: "wtc-transient-actions", ariaLabel: "Collection action details" }, ...temporary), "display:grid;gap:10px;min-width:0") : null;
-    body.replaceChildren(...[repoSection, serviceSection, actionSection, activitySection, prSection, ...warnings, footer(data)].filter(Boolean));
-    const destination = focusSection === "activity" ? activitySection : focusSection === "pull-requests" ? prSection : focusSection === "actions" ? actionSection : null;
-    if (focusSection) { const block = focusSection === "actions" ? "nearest" : "start"; focusSection = null; destination?.scrollIntoView?.({ block }); }
+    const sections = [repoSection, serviceSection, serviceLogSection, actionSection, activitySection, prSection, ...warnings, footer(data)].filter(Boolean);
+    // Keep the unchanged log node connected: routine status ticks must preserve
+    // its scroll position, keyboard focus and selection while the person reads.
+    for (const child of [...body.children]) if (!sections.includes(child)) child.remove();
+    sections.forEach((section, index) => { if (body.children[index] !== section) body.insertBefore(section, body.children[index] ?? null); });
+    const destination = focusSection === "activity" ? activitySection : focusSection === "pull-requests" ? prSection : focusSection === "actions" ? actionSection : focusSection === "service-logs" ? serviceLogSection : null;
+    if (focusSection) { const block = focusSection === "actions" || focusSection === "service-logs" ? "nearest" : "start"; focusSection = null; destination?.scrollIntoView?.({ block }); }
   }
 
-  const show = (next) => { if (!ctx.signal.aborted) { entry = next; render(); } };
+  const consumeServiceLogIntent = () => {
+    if (disposed || !entry?.data) return;
+    const key = sessionKeyOf(), intent = serviceLogIntents.get(key);
+    if (!intent) return;
+    serviceLogIntents.delete(key);
+    void tables.loadServiceLogs(intent.group, intent.label, intent.targets);
+  };
+  serviceLogListeners.add(consumeServiceLogIntent);
+  const show = (next) => { if (!ctx.signal.aborted) { entry = next; render(); consumeServiceLogIntent(); } };
   function follow() {
+    tables.clearServiceLogs();
     watch?.dispose();
     watch = null;
     entry = null;
@@ -2409,10 +2479,11 @@ function mountCollection(container, context) {
       const changed = next.props?.sessionKey !== ctx.props?.sessionKey;
       ctx = next;
       if (changed || next.props?.focus) focusSection = next.props?.focus;
-      if (changed) follow(); else render();
+      if (changed) follow(); else { render(); consumeServiceLogIntent(); }
     },
     dispose() {
       disposed = true;
+      serviceLogListeners.delete(consumeServiceLogIntent);
       tables.dispose();
       clearInterval(tick);
       sized?.disconnect();

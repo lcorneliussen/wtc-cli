@@ -227,6 +227,34 @@ test("a service action runs in the collection's folder, and says when there is n
   assert.equal(cwds.at(-1), path.join(state, "wtc/platform/9-x"));
 });
 
+test("service logs are read-only, collection-scoped, bounded and require an explicit group", async () => {
+  const state=mkdtempSync(path.join(os.tmpdir(),"wtc-log-read-"));
+  mkdirSync(path.join(state,"wtc/platform/log-test"),{recursive:true});
+  const actions=new Map(),commands=[];
+  const entries=[{sessionKey:"agent:main:repo:api",entry:{parentSessionKey:"agent:main:c",projectId:"api",worktree:{branch:"openclaw/log-test"},workspaceDir:"/worktrees/api"}}];
+  // Put a worker first: log reads must use the collection shown in Services.
+  entries[0].entry.label="log-test api";
+  entries.unshift({sessionKey:"agent:main:worker:api",entry:{parentSessionKey:"agent:main:c",projectId:"api",worktree:{branch:"openclaw/log-test--worker"},workspaceDir:"/worktrees/worker"}});
+  mkdirSync(path.join(state,"wtc/platform/log-test--worker"),{recursive:true});
+  let result={code:0,stdout:"x".repeat(70000)+"recent output",stderr:""};
+  plugin.register({pluginConfig:{},runtime:{state:{resolveStateDir:()=>state},agent:{session:{listSessionEntries:()=>entries,getSessionEntry:async()=>undefined}},system:{runCommandWithTimeout:async(argv,options)=>{commands.push({argv,options});return result;}}},session:{controls:{registerSessionAction:a=>actions.set(a.id,a),registerControlUiDescriptor(){}}},registerHttpRoute(){},on(){},logger:{}});
+  const action=actions.get("svc-logs");assert.deepEqual(action.requiredScopes,["operator.read"]);
+  const request=(group,more={})=>action.handler({sessionKey:"agent:main:c",agentId:"main",payload:{group,op:"up"},...more});
+  assert.equal((await request("")).ok,false);
+  assert.equal((await request("../web")).ok,false);
+  assert.equal((await request("api/web;touch marker")).ok,false);
+  assert.equal((await request("api/web",{sessionKey:"agent:main:other"})).ok,false);
+  assert.equal(commands.length,0);
+  const out=await request("api/web");assert.equal(out.ok,true);assert.equal(out.result.logs.length,65536);assert.ok(out.result.logs.endsWith("recent output"));assert.equal(out.result.truncated,true);
+  assert.deepEqual(commands[0].argv,["wtc","svc","logs","api/web"]);assert.equal(commands[0].options.cwd,path.join(state,"wtc/platform/log-test"));
+  await request("api/web/server");assert.deepEqual(commands.at(-1).argv,["wtc","svc","logs","api/web/server"]);
+  assert.equal((await request("api/web/..")).ok,false);
+  for (const error of ["wtc: runtime is not configured", "wtc: lstat /synthetic/logs/web.log: no such file or directory"]) {
+    result={code:1,stdout:"",stderr:error};assert.deepEqual((await request("api/web")).result,{logs:"",truncated:false});
+  }
+  result={code:1,stdout:"",stderr:"Logs are unavailable"};assert.match((await request("api/web")).error,/Logs are unavailable/);
+});
+
 test("what changed on a pull request, one line each", () => {
   const pr = { number: 2, url: "https://github.com/o/site/pull/2", state: "open", draft: true, checks: "pending", failed: 0, review: "", mergeable: "mergeable" };
   const changes = (prev, cur) => pullRequestChanges("site", prev, cur);
