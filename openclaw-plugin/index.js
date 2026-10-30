@@ -714,14 +714,15 @@ export default {
       },
     });
 
-    // Starts, stops or restarts the collection's services (one, or all without
-    // a group) and opens or closes a service's tunnel, from its folder.
+    // Lifecycle actions and log reads run in the collection's folder.
+    // Logs have a separate read-scoped action that cannot select a write op.
     const svcAction = async (action, op) => {
       const payload = action.payload ?? {};
       const group = String(payload.group ?? "");
       const provider = String(payload.provider ?? "");
-      if (!["up", "down", "restart", "tunnel"].includes(op)) return { ok: false, error: "op is up, down, restart or tunnel" };
-      if (group && !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(group)) return { ok: false, error: "name a service as <repo>/<service>" };
+      if (!["up", "down", "restart", "tunnel", "logs"].includes(op)) return { ok: false, error: "op is up, down, restart, tunnel or logs" };
+      if (group && (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(group) || group.split("/").some(part => part === "." || part === ".."))) return { ok: false, error: "name a service as <repo>/<service>" };
+      if (op === "logs" && !group) return { ok: false, error: "name the service whose logs to read" };
       if (op === "tunnel" && !group) return { ok: false, error: "name the service to tunnel to" };
       if (op === "tunnel" && !TUNNEL_PROGRAMS[provider]) return { ok: false, error: `the provider is one of ${Object.keys(TUNNEL_PROGRAMS).join(", ")}` };
       if (!action.sessionKey || !action.agentId) return { ok: false, error: "sessionKey and agentId are required" };
@@ -740,9 +741,19 @@ export default {
       }
       const cwd = collectionFolder(stateDir, name);
       if (!cwd) return { ok: false, error: `collection ${name} has no folder yet: wtc status ${name} makes it` };
-      const r = await run(argv, { cwd, timeoutMs: 180000, env: { OPENCLAW_SHELL: "exec" } });
+      const r = await run(argv, { cwd, timeoutMs: op === "logs" ? 30000 : 180000, env: { OPENCLAW_SHELL: "exec" } });
+      if (op === "logs" && r.code === 0) {
+        const text = String(r.stdout ?? "");
+        return { ok: true, result: { logs: text.slice(-65536), truncated: text.length > 65536 } };
+      }
       return r.code === 0 ? { ok: true, result: { message: `${argv.slice(2).join(" ")}: done` } } : { ok: false, error: (r.stderr || r.stdout).trim().slice(-400) || `exit ${r.code}` };
     };
+    api.session.controls.registerSessionAction({
+      id: "svc-logs",
+      description: "Read recent output from one service in this session's collection (wtc svc logs).",
+      requiredScopes: ["operator.read"],
+      handler: (action) => svcAction(action, "logs"),
+    });
     api.session.controls.registerSessionAction({
       id: "svc",
       description: "Start, stop or restart this session's collection's services, all or one, or open or close a service's tunnel (wtc svc up|down|restart|tunnel).",

@@ -391,7 +391,7 @@ const proposalTitle = (r) => {
 };
 
 // Services. wtc svc starts, stops and restarts them (one, or all without a
-// group) and opens or closes their tunnels; the gateway runs it in the
+// group), reads their logs, and opens or closes tunnels; the gateway runs it in the
 // collection's folder.
 async function svcRequest(host, sessionKey, agentId, payload) {
   // A gateway portal is OpenClaw's own: the Control UI opens and closes it.
@@ -712,6 +712,35 @@ function collectionTables(v) {
     return node;
   };
   const active = (conversation) => v.alive?.() !== false && v.key() === conversation;
+  let serviceLog = null, serviceLogRequest = 0;
+  const clearServiceLogs = () => { serviceLog = null; serviceLogRequest++; };
+  async function loadServiceLogs(group, label) {
+    const key = v.key(), request = ++serviceLogRequest;
+    serviceLog = { key, group, label, loading: true };
+    v.showServiceLogs?.();
+    v.rerender();
+    try {
+      const result = await call(v.host, "svc-logs", key, v.agent(), { group });
+      if (active(key) && request === serviceLogRequest) serviceLog = { key, group, label, text: String(result?.logs ?? ""), truncated: !!result?.truncated };
+    } catch (error) {
+      if (active(key) && request === serviceLogRequest) serviceLog = { key, group, label, error: String(error?.message ?? error) };
+    }
+    if (active(key) && request === serviceLogRequest) v.rerender();
+  }
+  function serviceLogs() {
+    const current = serviceLog;
+    if (!current || current.key !== v.key()) return null;
+    const refresh = nextButton("Refresh", "Refresh service logs", () => loadServiceLogs(current.group, current.label), current.loading);
+    const close = nextButton("Close", "Close service logs", () => { clearServiceLogs(); v.rerender(); });
+    const text = current.loading ? "Loading logs…" : current.error ? `Could not read logs: ${current.error}` : current.text || "No logs recorded yet.";
+    return css(el("section", { className: "wtc-service-log", ariaLabel: `${current.label} logs` },
+      css(el("div", {}, css(el("strong", { textContent: `Logs · ${current.label}` }), "min-width:0;overflow-wrap:anywhere"),
+        css(el("span", {}, refresh, close), "margin-left:auto;display:flex;gap:4px;flex:none")), "display:flex;align-items:baseline;gap:8px"),
+      current.truncated ? el("span", { textContent: "Showing recent output only." }) : null,
+      css(el("pre", { textContent: text, tabIndex: 0, ...(current.error ? { role: "alert" } : current.loading ? { role: "status" } : {}) }),
+        "margin:0;min-width:0;max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 var(--mono,ui-monospace,monospace)")),
+      `min-width:0;display:grid;gap:8px;padding:10px 12px;border:1px solid var(--border,rgba(128,128,128,.3));border-radius:8px;font-size:12px;color:${current.error ? TONE.failure : "var(--text,inherit)"}`);
+  }
   // Mirror browser-local publication progress; this is not a gateway lock.
   const sharedPushBusy = (r) => [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].some(item => item.action === "push" && item.repoSessionKey === r.sessionKey && item.inFlight);
   const reserved = (r) => acting.has(r.sessionKey) || busy.has(r.sessionKey) || catching.has(r.sessionKey) || sharedPushBusy(r);
@@ -1575,7 +1604,7 @@ function collectionTables(v) {
     ];
     const rows = groups.map((g) => [
       leadSlot(stateButton(g, v.svc)),
-      css(el("span", { className: "wtc-service-label", textContent: g.label, title: g.label + (g.group ? ` · ${g.group}` : "") }), "display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--text-strong, inherit)"),
+      Object.assign(css(el("button", { type: "button", className: "wtc-service-label", textContent: g.label, title: `View logs for ${g.label}`, ariaLabel: `View logs for ${g.label}`, disabled: !g.group }), "display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;line-height:inherit;font-weight:600;color:var(--text-strong, inherit);border:0;padding:0;background:transparent;text-align:left;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px"), { onclick: () => loadServiceLogs(g.group, g.label) }),
       g.repo ? muted(g.repo) : null,
       g.loose ? toned("separate tunnel", TONE.pending, "Started apart from the service it exposes")
         : toned(g.state === "absent" || g.state === "idle" ? "stopped" : g.state, g.failed ? TONE.failure : g.running ? TONE.success : TONE.none),
@@ -1707,8 +1736,8 @@ function collectionTables(v) {
     for (const s of sub.filter((s) => !repos.some((r) => r.repo && r.repo === s.r.repo))) rows.push(subRow(s.w, s.r));
     return rows;
   }
-  return { table, checkAccount, notice, nextActions, actionToolbar, activityLog, publicationConfirmations,
-    dispose: () => cancelPreparations("Preparation discarded when the view closed; nothing was pushed."),
+  return { table, checkAccount, notice, nextActions, actionToolbar, activityLog, publicationConfirmations, serviceLogs, clearServiceLogs,
+    dispose: () => { clearServiceLogs(); cancelPreparations("Preparation discarded when the view closed; nothing was pushed."); },
     repoTable: (repos, narrow, workers) => {
       syncConversation();
       const columns = repositoryColumns(narrow);
@@ -1991,7 +2020,7 @@ function mountComposer(container, context) {
     detail.replaceChildren(...[tables.repoTable(repos, repoNarrow, entry.data.subSessions),
       groups.length ? css(el("section", { className: "wtc-base-services", ariaLabel: "Collection services" }, css(el("h3", { textContent: "Services" }), "margin:0 0 4px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-strong,inherit)"), tables.serviceTable(groups, entry.data, narrow)), "min-width:0;border-top:1px solid var(--border,rgba(128,128,128,.2));margin-top:4px;padding-top:8px") : null].filter(Boolean));
     const confirmations = tables.publicationConfirmations(repos);
-    const temporary = [confirmations, tables.nextActions(repos), tables.notice()].filter(Boolean);
+    const temporary = [tables.serviceLogs(), confirmations, tables.nextActions(repos), tables.notice()].filter(Boolean);
     extra.replaceChildren(...temporary);
     const showTemporary = temporary.length > 0 && (card.open || !!confirmations);
     card.style.marginTop = showTemporary ? "0" : "4px";
@@ -2006,6 +2035,7 @@ function mountComposer(container, context) {
   function follow(next) {
     const sessionKey = keyOf(next);
     if (sessionKey === key) return;
+    tables.clearServiceLogs();
     watch?.dispose();
     watch = null;
     key = sessionKey;
@@ -2123,6 +2153,7 @@ function mountCollection(container, context) {
 
   const tables = collectionTables({
     collectionKey: sessionKeyOf,
+    showServiceLogs: () => { focusSection = "service-logs"; },
     showActions: () => { focusSection = "actions"; render(); },
     get host() { return ctx.host; }, alive: () => !disposed && !ctx.signal?.aborted, key: sessionKeyOf, agent: () => ctx.props.agentId, svc, say,
     refresh: () => watch?.refresh(), pause: () => pauseCollection(watch), rerender: () => render(),
@@ -2382,15 +2413,17 @@ function mountCollection(container, context) {
 
     const warnings = (data.warnings ?? []).map((w) => css(el("div", { textContent: w }), "font-size:12px;color:var(--warn, #bf8700)"));
     const activitySection = tables.activityLog();
+    const serviceLogSection = tables.serviceLogs();
     const temporary = [confirmations, nextActions, howTo].filter(Boolean);
     const actionSection = temporary.length ? css(el("section", { className: "wtc-transient-actions", ariaLabel: "Collection action details" }, ...temporary), "display:grid;gap:10px;min-width:0") : null;
-    body.replaceChildren(...[repoSection, serviceSection, actionSection, activitySection, prSection, ...warnings, footer(data)].filter(Boolean));
-    const destination = focusSection === "activity" ? activitySection : focusSection === "pull-requests" ? prSection : focusSection === "actions" ? actionSection : null;
-    if (focusSection) { const block = focusSection === "actions" ? "nearest" : "start"; focusSection = null; destination?.scrollIntoView?.({ block }); }
+    body.replaceChildren(...[repoSection, serviceSection, serviceLogSection, actionSection, activitySection, prSection, ...warnings, footer(data)].filter(Boolean));
+    const destination = focusSection === "activity" ? activitySection : focusSection === "pull-requests" ? prSection : focusSection === "actions" ? actionSection : focusSection === "service-logs" ? serviceLogSection : null;
+    if (focusSection) { const block = focusSection === "actions" || focusSection === "service-logs" ? "nearest" : "start"; focusSection = null; destination?.scrollIntoView?.({ block }); }
   }
 
   const show = (next) => { if (!ctx.signal.aborted) { entry = next; render(); } };
   function follow() {
+    tables.clearServiceLogs();
     watch?.dispose();
     watch = null;
     entry = null;

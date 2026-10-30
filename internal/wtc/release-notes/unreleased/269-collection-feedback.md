@@ -5,6 +5,12 @@
   top space while retaining their bottom inset and shared text baselines.
   ([#269](https://github.com/lcorneliussen/wtc-cli/issues/269)).
 
+- **Service names open recent logs.** A read-only pane above the composer card
+  or below sidebar Services shows recent output, including startup failures,
+  with Refresh and Close controls. Reading logs does not start the service;
+  changing conversations clears the pane and discards late responses.
+  ([#269](https://github.com/lcorneliussen/wtc-cli/issues/269)).
+
 - **Collection actions keep their feedback in place.** The compact header
   summarizes progress and outcomes, with full details and recent results in the
   sidebar below Services. Selection augments the existing repository rows,
