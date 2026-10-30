@@ -39,7 +39,7 @@ func (c *Context) statusReadOnlyPRForge(repos prRepositories, record PRRecord) (
 	if err != nil {
 		return "", "", err
 	}
-	if identity != statusPRForgeIdentity("https://"+forge+"/"+slug) {
+	if identity != forge+"/"+slug {
 		return "", "", fmt.Errorf("PR URL does not match repository identity")
 	}
 	slug, forge = repos.forge(record.Repo)

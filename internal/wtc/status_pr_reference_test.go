@@ -166,6 +166,7 @@ func TestStatusPRReferencePreservesCanonicalIdentity(t *testing.T) {
 		{"matching-registry", prRepositories{"widget": {good}}, "https://github.com/example/widget/pull/7", true},
 		{"different-owner", prRepositories{"widget": {good}}, "https://github.com/other/widget/pull/7", false},
 		{"different-repo", prRepositories{"widget": {good}}, "https://github.com/example/other/pull/7", false},
+		{"remote-suffix-is-not-url-identity", prRepositories{"widget": {good}}, "https://github.com/example/widget.git/pull/7", false},
 		{"different-forge", prRepositories{"widget": {good}}, "https://bitbucket.org/Example/Widget/pull-requests/7", false},
 		{"unsupported-registry", prRepositories{"widget": {&prRepository{remote: "https://example.invalid/widget.git"}}}, "https://github.com/example/widget/pull/7", false},
 		{"ambiguous-alias", prRepositories{"widget": {good, &prRepository{remote: "https://github.com/other/widget.git"}}}, "https://github.com/example/widget/pull/7", false},
