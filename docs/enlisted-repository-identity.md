@@ -58,14 +58,15 @@ checkout. Supply its HTTPS GitHub `/owner/repo/pull/<number>` or Bitbucket
 `/workspace/repo/pull-requests/<number>` URL with `wtc pr enlist --url`. The
 number must match the row; credentials, unsupported hosts and conflicting or
 ambiguous local identities are refused. Terminal progress explains lookup
-refusals; JSON, Markdown and silent output retain UNKNOWN without that progress
-message. Status uses the normal authenticated forge/cache path and displays a
-canonical URL without query or fragment text. This does not register a repository, attach a branch or
-grant catch-up, checkout, landing or retirement authority. Closed references
-follow the existing omission rules; settled merged facts can still be recorded.
+refusals; JSON, Markdown and silent output retain UNKNOWN without that
+progress message. Status uses the normal authenticated forge/cache path and
+displays a canonical URL without query or fragment text. This does not
+register a repository, attach a branch or grant catch-up, checkout, landing or
+retirement authority. Closed references follow the existing omission rules;
+settled merged facts can still be recorded.
 
 A verified local repository can also retain its matching browser-view URL
-(such as a PR’s `/files` view or an HTTP link): status still reads its canonical
-forge and displays an HTTPS PR link. Conflicting identities remain refused.
-Already recorded merge facts stay available even if a URL can no longer be
-resolved; that does not restore a refused worktree association.
+(such as a PR’s `/files` view or an HTTP link): status still reads its
+canonical forge and displays an HTTPS PR link. Conflicting identities remain
+refused. Already recorded merge facts stay available even if a URL can no
+longer be resolved; that does not restore a refused worktree association.

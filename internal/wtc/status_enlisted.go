@@ -480,6 +480,9 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 		}
 	}
 	for i, record := range records {
+		if _, _, err := statusReadOnlyPRForge(repos, record); err != nil {
+			continue
+		}
 		dir := worktreeDir(record.Repo)
 		if details[i].State != "MERGED" || record.Branch == "" || live[dir+"\x00"+record.Branch] {
 			continue

@@ -313,3 +313,49 @@ if [ "$2" = list ]; then printf '[]\n'; else printf '%s\n' '{"number":7,"state":
 		})
 	}
 }
+
+func TestStatusPRReferenceRecordedRefusalCannotReturnWorktree(t *testing.T) {
+	for _, mode := range []string{"matching", "conflicting", "invalid", "other-refused-live"} {
+		t.Run(mode, func(t *testing.T) {
+			c := newWorkspaceFixture(t)
+			t.Setenv("WTC_STATUS_RETURN_MERGED", "on")
+			fixtureGit(t, "-C", c.Harness, "switch", "-qc", "topic")
+			head := fixtureGit(t, "-C", c.Harness, "rev-parse", "HEAD")
+			c.Registry.Repos[0].Remote = "https://github.com/example/agent-harness.git"
+			raw := "https://github.com/example/agent-harness/pull/7"
+			if mode == "conflicting" {
+				raw = "https://github.com/other/agent-harness/pull/7"
+			}
+			if mode == "invalid" {
+				raw = "https://fixture:synthetic-secret@github.com/example/agent-harness/pull/7"
+			}
+			record := PRRecord{Repo: "agent-harness", Number: "7", Branch: "topic", URL: raw}
+			text := formatPR(record) + "\n# merged-pr agent-harness 7 2026-10-29T12:00:00Z SUCCESS\n# merged-commit agent-harness 7 " + head + " main\n"
+			if mode == "other-refused-live" {
+				text += formatPR(PRRecord{Repo: "agent-harness", Number: "8", Branch: "topic", URL: "https://example.invalid/other"}) + "\n"
+			}
+			fixtureFile(t, c.PRFile(), text, 0644)
+			bin := t.TempDir()
+			fixtureFile(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '[]\\n'\n", 0755)
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			snapshot, err := c.statusForgePreview(false, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(snapshot.PRs) == 0 || snapshot.PRs[0].State != "MERGED" {
+				t.Fatalf("recorded facts missing: %+v", snapshot.PRs)
+			}
+			branch := fixtureGit(t, "-C", c.Harness, "branch", "--show-current")
+			if mode == "matching" {
+				if branch != "" {
+					t.Fatal("verified landed merge did not return to tip")
+				}
+			} else if branch != "topic" {
+				t.Fatalf("%s moved a refused/blocked branch", mode)
+			}
+			if fixtureGit(t, "-C", c.Harness, "rev-parse", "HEAD") != head {
+				t.Fatal("status changed commit")
+			}
+		})
+	}
+}
