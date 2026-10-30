@@ -166,8 +166,9 @@ text distinguishes an untouched task branch from detached HEAD; it does not
 imply that the checkout owns the main branch.
 
 The repository row links its current PR. Additional PRs share a compact
-**+4 PRs** control, whose accessible label separates open and archived counts.
-With one completed PR and no current PR, **1 archived PR** opens the full
+**4 other PRs** control, whose accessible label separates open and archived counts.
+When all additional PRs are archived, it keeps the **N archived PRs** wording,
+including when a new current PR appears. **1 archived PR** opens the full
 collection PR list in the taba sidebar. The conversation card omits that full
 list, keeping its footprint small.
 

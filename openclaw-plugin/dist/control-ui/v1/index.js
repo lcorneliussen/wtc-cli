@@ -784,7 +784,11 @@ function collectionTables(v) {
       } else if (fresh?.next) {
         const step = fresh.next;
         switch (nextRoute(step)) {
-          case "publish": await publish(fresh, conversationKey); log("Publication response received; inspect its confirmation or error"); break;
+          case "publish": {
+            const outcome = await publish(fresh, conversationKey, () => true, false, logId);
+            if (outcome?.pending) recordActivity(logKey, logId, { state: "blocked", status: "Another publication is active or already prepared; inspect its result." });
+            break;
+          }
           case "run": throw Error("The gateway did not execute this deterministic catch-up. Refresh or update its wtc plugin; no agent prompt was sent.");
           case "agent":
             await sendToAuthor(conversationKey, step.skill ?? "wtc-catch-up", `${nameOf(fresh)}: ${step.reason}. Work on this repository only; recheck its state before acting. Carry out only this selected step; report follow-up actions for separate selection.`);
@@ -852,10 +856,11 @@ function collectionTables(v) {
                 // A batch never consumes an earlier per-repository confirmation.
                 // Each gateway confirmation still shows its exact commits/account.
                 if (!confirming.has(r.sessionKey)) {
-                  const outcome = await publish(fresh, conversation, () => !batchCancelled);
-                  if (outcome?.cancelled) { setResult(r.sessionKey, "Cancelled before publication dispatch"); break; }
-                }
-                setResult(r.sessionKey, "Use the repository's publication result or confirmation above"); break;
+                  const outcome = await publish(fresh, conversation, () => !batchCancelled, false, `${runId}:${r.sessionKey}`);
+                  if (outcome?.cancelled) { setResult(r.sessionKey, "Cancelled before publication dispatch"); recordActivity(logKey, `${runId}:${r.sessionKey}`, { state: "cancelled" }); break; }
+                  if (outcome?.pending) recordActivity(logKey, `${runId}:${r.sessionKey}`, { state: "blocked", status: "Another publication is active; inspect its result." });
+                } else recordActivity(logKey, `${runId}:${r.sessionKey}`, { state: "blocked", status: "A publication is already prepared; review its existing personal confirmation." });
+                results.set(r.sessionKey, "Use the repository's publication result or confirmation above"); break;
               case "run": throw Error("The gateway did not execute this deterministic catch-up. Refresh or update its wtc plugin; no agent prompt was sent.");
               case "pr": setResult(r.sessionKey, "Open the PR link; inspect its current requirements"); break;
               default: throw Error("This action is unavailable on this host");
@@ -907,14 +912,17 @@ function collectionTables(v) {
       if (active(conversation)) { selection.clear(); await v.refresh(); update(); }
     }
   }
-  function syncConversation() {
-    if (batchKey === v.key()) return;
+  function cancelPreparations(status) {
     const abandoned = [...confirming.values()];
     confirming.clear();
-    batchKey = v.key();
     for (const prepared of abandoned) if (prepared.activityId) recordActivity(prepared.logKey, prepared.activityId, {
-      state: "cancelled", status: "Preparation discarded after conversation switch; nothing was pushed.", inFlight: false,
+      state: "cancelled", status, inFlight: false,
     });
+  }
+  function syncConversation() {
+    if (batchKey === v.key()) return;
+    batchKey = v.key();
+    cancelPreparations("Preparation discarded after conversation switch; nothing was pushed.");
     choosing = false; selection = new Map(); batchResults = new Map(); batchLabels = new Map(); batchKeys = new Map(); batchKinds = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true;
   }
   function suggestedTargets(repos) {
@@ -1095,7 +1103,6 @@ function collectionTables(v) {
       }
     }
     if (!batchRunning && !prepared && (catching.size || busy.size || currentPublications.length)) primary = nextButton(catching.size ? "Catching up…" : publicationProgress, "The current operation is still running or rechecking its result", () => {}, true);
-    if (dispatched.size && !batchRunning && !selection.size && !prepared && !catching.size && !busy.size) primary = nextButton(compact ? "Retry" : "Allow retry", "Check the conversation before retrying unchanged work", () => { if (!batchRunning) { dispatched.clear(); batchKeys.clear(); v.rerender(); } });
     if (feedback?.failed && !batchRunning) primary = nextButton("⚠ Failed", `${feedback.text}. Open full action details`, openActivity);
     if (primary) primary.style.width = "104px";
     const slot = css(el("span", { className: `wtc-toolbar-primary${confirming.size || batchRunning || selection.size ? " wtc-toolbar-primary-required" : ""}` }, primary), "display:inline-flex;align-items:baseline;justify-content:flex-end;flex:0 0 104px;width:104px;min-width:104px;min-height:var(--wtc-control-height,20px)");
@@ -1209,14 +1216,14 @@ function collectionTables(v) {
       bitbucket ? null : css(el("div", { textContent: "A GitHub identity under Agents → Tools is the agent's own; it is not used for pushing." }), "color:var(--muted, #888)")),
     "font-size:12px;line-height:1.45;display:grid;gap:4px;padding:8px 10px;border:1px solid var(--border-strong, rgba(128,128,128,.4));border-radius:12px");
   }
-  async function publish(r, conversationKey = v.key(), continueAllowed = () => true, confirmed = false) {
+  async function publish(r, conversationKey = v.key(), continueAllowed = () => true, confirmed = false, requestedActivityId = null) {
     const mayDispatch = () => active(conversationKey) && continueAllowed();
     if (!mayDispatch()) return { cancelled: true };
     if (busy.has(r.sessionKey) || sharedPushBusy(r)) return { pending: true };
     if (!PUSHES.has(r.forge) || mine[r.forge] === false) return;
     if (confirming.has(r.sessionKey) && !confirmed) { revealPublication(); v.rerender(); return { pending: true }; }
     if (confirmed && !confirming.has(r.sessionKey)) { v.say("The publication preparation expired; prepare it again.", true); return; }
-    const activityId = confirming.get(r.sessionKey)?.activityId ?? uuid();
+    const activityId = confirming.get(r.sessionKey)?.activityId ?? requestedActivityId ?? uuid();
     const logKey = v.collectionKey?.() ?? conversationKey;
     let lastFailed = false, lastText = "Preparing publication…", lastAction = null;
     const log = (state) => {
@@ -1699,6 +1706,7 @@ function collectionTables(v) {
     return rows;
   }
   return { table, checkAccount, notice, nextActions, actionToolbar, activityLog, publicationConfirmations,
+    dispose: () => cancelPreparations("Preparation discarded when the view closed; nothing was pushed."),
     repoTable: (repos, narrow, workers) => {
       syncConversation();
       const columns = repositoryColumns(narrow);
@@ -1798,11 +1806,10 @@ function mountComposer(container, context) {
     return b;
   };
   let noteFailed = false;
-  let noteAction = null;
   let noteTimer;
   const say = (text, failed = false, action = null, activityId = null) => {
     clearTimeout(noteTimer);
-    note = text; noteFailed = failed; noteAction = action;
+    note = text; noteFailed = failed;
     if (text) feedbackStore.set(entry?.data?.collection?.sessionKey ?? key, { text, failed, action, activityId, at: Date.now() });
     if (entry) render(entry);
     // Errors, follow-ups and notes containing known progress words stay.
@@ -2003,7 +2010,6 @@ function mountComposer(container, context) {
     entry = null;
     clearTimeout(noteTimer);
     note = "";
-    noteAction = null;
     noteFailed = false;
     card.remove(); extra.remove();
     if (sessionKey) watch = watchCollection(next.host, sessionKey, agentOf(next), render);
@@ -2020,6 +2026,7 @@ function mountComposer(container, context) {
     },
     dispose() {
       disposed = true;
+      tables.dispose();
       clearInterval(tick);
       clearTimeout(draftTimer);
       clearTimeout(noteTimer);
@@ -2405,6 +2412,7 @@ function mountCollection(container, context) {
     },
     dispose() {
       disposed = true;
+      tables.dispose();
       clearInterval(tick);
       sized?.disconnect();
       watch?.dispose();

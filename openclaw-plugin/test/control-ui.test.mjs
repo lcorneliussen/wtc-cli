@@ -2255,3 +2255,74 @@ test("a new current PR keeps the archived-history wording and its trailing rail"
     finally {view.dispose();}
   }
 });
+
+for (const kind of ["composer", "panel"]) test(`${kind}: Next publication has one outcome record through failure and Cancel`, async () => {
+ const step={step:"push",by:"wtc",approve:"person",gateway:"github_publish",key:"api:push:owner-test",reason:"Publish the captured commits"};
+ const r=repo("api",{unpublished:1,next:step,choices:{recommended:step.key,actions:[{...step,available:true}]}}),data=collection([r]);
+ personal={state:"connected",account:{login:"demo"},generation:"g1"};
+ nextResult={ok:true,result:{performed:false,repo:r}};
+ const {host,view,context}=await mount(kind,data);
+ let panel;
+ try {
+  failing.add("sessions.github.publish");
+  await clickText(host,"Push");
+  assert.ok([...host.all()].some(n=>n.tagName==="BUTTON"&&n.textContent==="Retry"),"failed Next preparation must leave a retry affordance");
+  failing.delete("sessions.github.publish");
+  await clickText(host,"Retry");
+  await clickText(host,"Cancel");
+  panel=await mount("panel",data,undefined,context.props.sessionKey);
+  const records=[...panel.host.all()].filter(n=>n.className==="wtc-activity-item");
+  assert.equal(records.length,2,"one record for each of the failed and cancelled attempts");
+  assert.match(readable(panel.host),/Failed/);assert.match(readable(panel.host),/Cancelled/);
+  assert.doesNotMatch(readable(panel.host),/Awaiting confirm|Publication response received/);
+ } finally {failing.delete("sessions.github.publish");panel?.view.dispose();view.dispose();personal=null;nextResult=undefined;}
+});
+
+for(const kind of ["composer","panel"]) test(`${kind}: closing a prepared view cancels its original confirmation record`,async()=>{
+ personal={state:"connected",account:{login:"demo"},generation:"g1"};
+ const data=collection([repo("api",{unpublished:1})]);
+ const {host,view,context}=await mount(kind,data);
+ let panel;
+ try {
+  await [...host.all()].find(n=>n.tagName==="BUTTON"&&/^1 commit to push/.test(n.title)).onclick();
+  assert.ok([...host.all()].some(n=>n.className?.includes("wtc-confirm-publication")));
+  view.dispose();
+  panel=await mount("panel",data,undefined,context.props.sessionKey);
+  assert.match(readable(panel.host),/Cancelled/);assert.match(readable(panel.host),/view closed/);
+  assert.doesNotMatch(readable(panel.host),/Awaiting confirm/);
+ }finally{panel?.view.dispose();view.dispose();personal=null;}
+});
+
+test("a pending individual handoff keeps Sent and does not replace another repository's action",async()=>{
+ const a={step:"fix-checks",by:"agent",skill:"wtc",key:"api:fix:h1",reason:"Repair failing checks"};
+ const b={step:"push",by:"wtc",approve:"person",gateway:"github_publish",key:"web:push:h1",reason:"Publish web commits"};
+ const api=repo("api",{next:a,choices:{actions:[{...a,available:true}]}}),web=repo("web",{unpublished:1,next:b,choices:{actions:[{...b,available:true}]}});
+ const {host,view,context}=await mount("composer",collection([api]));
+ const primary=()=>[...host.all()].find(n=>n.className?.startsWith("wtc-toolbar-primary"));
+ try {
+  nextResult={ok:true,result:{performed:false,repo:api}};
+  await clickText(host,"Fix checks");
+  assert.match(primary().textContent,/Sent/);assert.doesNotMatch(primary().textContent,/Retry/);
+  collections.set(context.props.sessionKey,collection([api,web]));
+  await [...host.all()].find(n=>n.tagName==="BUTTON"&&/Updated .*Refresh/.test(n.title)).onclick({preventDefault(){},stopPropagation(){}});
+  assert.equal(primary().textContent,"Push","a real target keeps priority over a retry escape hatch");
+  assert.equal([...host.all()].some(n=>n.tagName==="BUTTON"&&n.textContent==="Allow retry"),false);
+  await clickText(host,"Choose steps…");assert.ok([...host.all()].some(n=>n.tagName==="BUTTON"&&n.textContent==="Allow retry"));
+ }finally{view.dispose();nextResult=undefined;}
+});
+
+
+test("a selected publication shares its outcome record rather than leaving a batch confirmation duplicate",async()=>{
+ const step={step:"push",by:"wtc",approve:"person",gateway:"github_publish",key:"api:push:batch-owner",reason:"Publish captured commits"};
+ const r=repo("api",{unpublished:1,next:step,choices:{recommended:step.key,actions:[{...step,available:true}]}}),data=collection([r]);
+ personal={state:"connected",account:{login:"demo"},generation:"g1"};nextResult={ok:true,result:{performed:false,repo:r}};
+ const {host,view,context}=await mount("composer",data);let panel;
+ try{
+  await chooseSteps(host);await clickText(host,"Select suggested");await clickText(host,"Run selected (1)");await clickText(host,"Confirm 1 actions");
+  for(let i=0;i<12;i++)await settle();
+  await clickText(host,"Cancel");
+  panel=await mount("panel",data,undefined,context.props.sessionKey);
+  assert.equal([...panel.host.all()].filter(n=>n.className==="wtc-activity-item").length,1);
+  assert.match(readable(panel.host),/Cancelled/);assert.doesNotMatch(readable(panel.host),/Awaiting confirm/);
+ }finally{panel?.view.dispose();view.dispose();personal=null;nextResult=undefined;}
+});
