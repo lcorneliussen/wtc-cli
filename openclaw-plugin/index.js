@@ -719,8 +719,8 @@ export default {
       },
     });
 
-    // Lifecycle actions and log reads run in the collection's folder.
-    // Logs have a separate read-scoped action that cannot select a write op.
+    // Log reads resolve the collection shown in Services and have a separate
+    // read-scoped action that cannot select a write op.
     const svcAction = async (action, op) => {
       const payload = action.payload ?? {};
       const group = String(payload.group ?? "");

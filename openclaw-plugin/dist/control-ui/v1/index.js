@@ -650,6 +650,7 @@ const repositoryColumns = (narrow) => narrow
   ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: `${REPO_NEXT_WIDTH}px`, align: "end" }]
   : [{ head: "Repository", width: "minmax(76px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "164px" }, { head: "Next", width: `${REPO_NEXT_WIDTH}px`, align: "end" }];
 const actionFeedback = () => el("style", { textContent: `
+.wtc-service-label:disabled { cursor:default !important;text-decoration:none !important; }
 .wtc-next-step { width:${REPO_NEXT_WIDTH}px;justify-content:flex-start !important; }
 .wtc-next-step>:first-child { width:104px;flex:0 0 104px; }
 .wtc-next-step>:not(:first-child) { width:20px;flex:0 0 20px; }
@@ -746,7 +747,7 @@ function collectionTables(v) {
       css(el("div", {}, css(el("strong", { textContent: `Logs · ${current.label}` }), "min-width:0;overflow-wrap:anywhere"),
         css(el("span", {}, refresh, close), "margin-left:auto;display:flex;gap:4px;flex:none")), "display:flex;align-items:baseline;gap:8px"),
       current.targets.length > 1 ? css(el("div", { ariaLabel: "Service log tasks" }, ...current.targets.map(target =>
-        nextButton(target.split("/").slice(2).join("/"), `Read logs for ${target}`, () => loadServiceLogs(target, current.label, current.targets), current.loading || target === current.group))), "display:flex;flex-wrap:wrap;gap:4px") : null,
+        nextButton(target.split("/").slice(2).join("/") || "main", `Read logs for ${target}`, () => loadServiceLogs(target, current.label, current.targets), current.loading || target === current.group))), "display:flex;flex-wrap:wrap;gap:4px") : null,
       el("span", { textContent: `Recent output · last 100 lines${current.truncated ? " · showing recent output only (text limit)" : ""}` }), pre),
       "min-width:0;display:grid;gap:8px;padding:10px 12px;border:1px solid var(--border,rgba(128,128,128,.3));border-radius:8px;font-size:12px;color:var(--text,inherit)");
     return current.node;
@@ -1612,25 +1613,31 @@ function collectionTables(v) {
       ...ways.map((w) => ({ head: w, title: w === "gateway" ? "OpenClaw portals" : `${w} tunnels` })),
       { head: "", width: narrow ? "var(--wtc-control-width,20px)" : "minmax(0,1fr)", align: "end" },
     ];
-    const rows = groups.map((g) => [
-      leadSlot(stateButton(g, v.svc)),
-      Object.assign(css(el("button", { type: "button", className: "wtc-service-label", textContent: g.label, title: `View logs for ${g.label}`, ariaLabel: `View logs for ${g.label}`, disabled: !g.group }), "display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;line-height:inherit;font-weight:600;color:var(--text-strong, inherit);border:0;padding:0;background:transparent;text-align:left;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px"), { onclick: () => { const targets = g.members.filter(s => s.kind !== "endpoint" && s.path?.startsWith(g.group + "/")).map(s => s.path); return loadServiceLogs(targets[0] ?? g.group, g.label, targets); } }),
-      g.repo ? muted(g.repo) : null,
-      g.loose ? toned("separate tunnel", TONE.pending, "Started apart from the service it exposes")
-        : toned(g.state === "absent" || g.state === "idle" ? "stopped" : g.state, g.failed ? TONE.failure : g.running ? TONE.success : TONE.none),
-      g.url && !g.loose ? address(g.url) : null,
-      ...ways.map((w) => {
-        if (w === "gateway") {
-          const ps = portalsOf(g, data);
-          return ps.length ? portalNode(g, ps[0], v.svc, "open") : null;
-        }
-        const t = g.tunnels.find((x) => tunnelName(x) === w);
-        return t ? tunnelNode(g, t, v.svc, { label: t.url ? slug(t.url) : "open", opener: (title, run) => stateGlyph("▶", title, TONE.none, run) }) : null;
-      }),
-      css(el("span", {}, g.loose
-        ? count("Consolidate", "Ask the conversation to open it with wtc svc tunnel instead", "inherit", () => askConversation(v.host, v.key(), consolidate(g)))
-        : newTunnel(g, v.svc, data, { compact: true }) ?? ""), "justify-self:end"),
-    ]);
+    const rows = groups.map((g) => {
+      const logMembers = g.members.filter(s => !["endpoint", "resources", "configuration"].includes(s.kind) && s.state !== "unconfigured");
+      const targets = logMembers.filter(s => s.path === g.group || s.path?.startsWith(g.group + "/")).map(s => s.path);
+      const canReadLogs = !!g.group && (logMembers.length > 0 || g.members.some(s => s.kind === "endpoint" && s.state !== "unconfigured"));
+      const logTitle = canReadLogs ? `View logs for ${g.label}` : "No process logs available yet";
+      return [
+        leadSlot(stateButton(g, v.svc)),
+        Object.assign(css(el("button", { type: "button", className: "wtc-service-label", textContent: g.label, title: logTitle, ariaLabel: logTitle, disabled: !canReadLogs }), "display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;line-height:inherit;font-weight:600;color:var(--text-strong, inherit);border:0;padding:0;background:transparent;text-align:left;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px"), { onclick: () => { if (canReadLogs) return loadServiceLogs(targets[0] ?? g.group, g.label, targets); } }),
+        g.repo ? muted(g.repo) : null,
+        g.loose ? toned("separate tunnel", TONE.pending, "Started apart from the service it exposes")
+          : toned(g.state === "absent" || g.state === "idle" ? "stopped" : g.state, g.failed ? TONE.failure : g.running ? TONE.success : TONE.none),
+        g.url && !g.loose ? address(g.url) : null,
+        ...ways.map((w) => {
+          if (w === "gateway") {
+            const ps = portalsOf(g, data);
+            return ps.length ? portalNode(g, ps[0], v.svc, "open") : null;
+          }
+          const t = g.tunnels.find((x) => tunnelName(x) === w);
+          return t ? tunnelNode(g, t, v.svc, { label: t.url ? slug(t.url) : "open", opener: (title, run) => stateGlyph("▶", title, TONE.none, run) }) : null;
+        }),
+        css(el("span", {}, g.loose
+          ? count("Consolidate", "Ask the conversation to open it with wtc svc tunnel instead", "inherit", () => askConversation(v.host, v.key(), consolidate(g)))
+          : newTunnel(g, v.svc, data, { compact: true }) ?? ""), "justify-self:end"),
+    ];
+    });
     return table(columns, rows, narrow);
   }
 

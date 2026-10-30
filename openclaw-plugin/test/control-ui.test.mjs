@@ -16,6 +16,7 @@ class Node {
     this.listeners = {};
   }
   get childNodes() { return this.children; }
+  get scrollHeight() { return this.tagName === "PRE" ? 360 : 0; }
   get textContent() { return this.children.map((c) => (typeof c === "string" ? c : c.textContent)).join(""); }
   set textContent(text) { this.replaceChildren(String(text ?? "")); }
   get isConnected() {
@@ -327,12 +328,33 @@ test("service logs retain the same connected reading node across status rerender
     await titled(host,"View logs for Preview").onclick();await settle();
     const pane=[...host.all()].find(n=>n.className==="wtc-service-log"),pre=[...pane.all()].find(n=>n.tagName==="PRE");
     assert.equal(calls.at(-1).payload.group,"api/web/server");
+    assert.equal(pre.scrollTop,360,"new output opens at the tail");
     pre.scrollTop=78;let detached=false;const remove=pre.parentNode.remove.bind(pre.parentNode);pre.parentNode.remove=()=>{detached=true;remove();};
     view.update(context);
     assert.equal([...host.all()].find(n=>n.className==="wtc-service-log"),pane);assert.equal(pre.scrollTop,78);assert.equal(detached,false);
     assert.match(pane.textContent,/last 100 lines/);
-    await titled(host,"Read logs for api/web/job").onclick();assert.equal(calls.at(-1).payload.group,"api/web/job");
+    await titled(host,"Read logs for api/web/job").onclick();assert.equal(calls.at(-1).payload.group,"api/web/job");await settle();
+    let latest=[...host.all()].find(n=>n.tagName==="PRE");assert.equal(latest.scrollTop,360);
+    await titled(host,"Refresh service logs").onclick();await settle();latest=[...host.all()].find(n=>n.tagName==="PRE");assert.equal(latest.scrollTop,360,"Refresh opens new output at the tail");
     assert.equal(titled(host,"Read logs for api/web/tunnel"),undefined);
+  } finally {view.dispose();serviceLogsResult=previous;}
+});
+
+test("flat service logs remain reachable and rows without a configured process do not offer log reads", async () => {
+  const previous=serviceLogsResult;serviceLogsResult={ok:true,result:{logs:"main process output"}};
+  const {host,view}=await mount("panel",collection([repo("api")],[
+    {group:"api/web",path:"api/web",label:"Preview",kind:"service",state:"ready"},
+    {group:"api/web",path:"api/web/migrate",label:"Migrate",kind:"job",state:"exited"},
+    {group:"api/db",path:"api/@resources/db",label:"Database",kind:"resources",state:"ready"},
+    {group:"api/new",path:"api/new/server",label:"New service",kind:"service",state:"unconfigured"},
+    {group:"api",path:"api/@declarations",kind:"configuration",state:"unknown"},
+  ]));
+  try {
+    await titled(host,"View logs for Preview").onclick();assert.equal(calls.at(-1).payload.group,"api/web");
+    const main=titled(host,"Read logs for api/web");assert.ok(main);assert.equal(main.textContent,"main");
+    await titled(host,"Read logs for api/web/migrate").onclick();await titled(host,"Read logs for api/web").onclick();assert.equal(calls.at(-1).payload.group,"api/web");
+    const unavailable=[...host.all()].filter(n=>n.tagName==="BUTTON"&&n.title==="No process logs available yet");assert.equal(unavailable.length,3);
+    const before=calls.length;for(const button of unavailable){assert.equal(button.disabled,true);await button.onclick();}assert.equal(calls.length,before);
   } finally {view.dispose();serviceLogsResult=previous;}
 });
 
