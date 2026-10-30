@@ -11,6 +11,9 @@
   controls follow the host theme. Long branches can be expanded.
   Temporary controls extend above the composer card or below sidebar Services
   while the base slots stay in place.
+  The browser card separates collection Services with an outer-margin heading
+  and divider. Browser table labels use normal capitalization; terminal headings
+  keep their uppercase style.
   ([#269](https://github.com/lcorneliussen/wtc-cli/issues/269)).
 - **Publication has a separate confirmation preview.** Preparation shows the
   personal account, repository, branch and captured change count. Confirm push
@@ -19,7 +22,3 @@
   Pre-publication status responses are discarded and a fresh status is read
   before the row stops showing work in progress. Uncommitted-only rows offer
   Commit changes instead of an unnumbered push arrow.
-
-The browser card separates collection Services from repository rows with an
-outer-margin heading and divider. Browser table labels use normal capitalization;
-terminal headings keep their uppercase style.
