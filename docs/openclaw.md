@@ -768,7 +768,9 @@ service rows remain visible in their original positions.
 The brand, repository names and service names share an icon rail and a text rail.
 Icons follow the adjacent text's cap-height middle; text of different sizes keeps
 its baseline. Bulk arrows use the same arrow slot as their counts, with tabular
-numbers aligned at the other edge. Narrow rows combine name and branch and use
+numbers aligned at the other edge. A captured push count stays visible but
+disabled during publication, and archived-PR hints keep their wording and trailing
+rail when a new current PR appears. Narrow rows combine name and branch and use
 one fact line only when it has facts or a recorded result; catch-up rows do not
 reserve an empty PR lane. Repeated row actions use quiet surfaces.
 

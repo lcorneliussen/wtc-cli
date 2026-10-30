@@ -1714,11 +1714,11 @@ test("PR hints distinguish current, other active and completed PRs and open side
  const { host, view } = await mount("composer", collection([r]));
  try {
   assert.equal(tables(host).length, 1, "no second PR list occupies the conversation");
-  assert.equal(tables(host)[0][1][3], "#7+4 PRs");
+  assert.equal(tables(host)[0][1][3], "#74 other PRs");
   const active = [...host.all()].find(n => n.tagName === "A" && n.textContent === "#8");
   assert.equal(active, undefined, "the fixed row summarizes additional PRs rather than growing another inline list");
   const before = openedPanels.length;
-  const history = [...host.all()].find(n => n.tagName === "BUTTON" && n.textContent === "+4 PRs" && /1 open, 3 archived/.test(n.title));
+  const history = [...host.all()].find(n => n.tagName === "BUTTON" && n.textContent === "4 other PRs" && /1 open, 3 archived/.test(n.title));
   assert.ok(history, "the summary names open and archived counts accessibly");
   history.onclick({ preventDefault() {}, stopPropagation() {} });
   assert.equal(openedPanels.length, before + 1);
@@ -1883,7 +1883,9 @@ test("publication discards a pre-action refresh and stays busy until a fresh sta
     for (let i = 0; i < 4; i++) await settle();
     assert.equal(reads, 2, "a fresh request follows the invalidated one");
     assert.doesNotMatch(readable(host), /stale-response/, "the pre-action response was never applied");
-    assert.equal([...host.all()].some(n => n.tagName === "BUTTON" && n.textContent === "↑ 1"), false, "old push counts stay hidden while awaiting fresh status");
+    const counts = [...host.all()].filter(n => n.tagName === "BUTTON" && n.textContent === "↑ 1");
+    assert.ok(counts.length, "the captured count remains visible during the fresh-status check");
+    assert.ok(counts.every(n=>n.disabled), "retaining a count must not offer another publication");
     const fresh = collection([repo("api", { unpublished: 0, branch: "after-push", pullRequest: { number: 7, state: "open", url: "https://github.com/octo/api/pull/7" } })]);
     collections.set(context.props.sessionKey, fresh);
     freshResponse({ ok: true, result: fresh });
@@ -2242,4 +2244,14 @@ test("publication disclosures survive rerender and navigation cancels their prep
     try {assert.match(readable(panel.host),/Cancelled/);assert.doesNotMatch(readable(panel.host),/Awaiting confirm/);assert.match(readable(panel.host),/nothing was pushed/);}
     finally {panel.view.dispose();}
   } finally {view.dispose();githubPublishResult=previous;githubStatusResult=undefined;personal=null;}
+});
+
+
+test("a new current PR keeps the archived-history wording and its trailing rail", async () => {
+  const archived={number:2,state:"merged",title:"Earlier task",url:"https://example.invalid/pr/2"};
+  for(const current of [null,{number:8,state:"open",url:"https://example.invalid/pr/8"}]) {
+    const {host,view}=await mount("panel",collection([repo("web",{pullRequest:current,pullRequests:[archived]})]));
+    try {const hint=[...host.all()].find(n=>n.tagName==="BUTTON"&&n.textContent==="1 archived PR");assert.ok(hint);assert.match(hint.style.cssText,/justify-content:flex-end/);}
+    finally {view.dispose();}
+  }
 });

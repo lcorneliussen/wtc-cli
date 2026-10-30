@@ -1407,6 +1407,12 @@ function collectionTables(v) {
     return b;
   };
   const working = () => muted("…", "Working");
+  const pendingPushCount = (n) => {
+    const button = count(n ? `↑ ${n}` : "↑", "Publication in progress; the captured commit count stays visible", TONE.pending, () => {});
+    button.disabled = true;
+    button.style.opacity = ".65";
+    return button;
+  };
   // A fixed first-line reference keeps an empty fact from changing the row's
   // baseline when a count or action appears or disappears.
   const baselineStrut = () => css(el("span", { ariaHidden: "true" }), "display:inline-block;flex:0 0 0;width:0;height:calc(var(--wtc-control-height,20px) / 2 + 5px)");
@@ -1481,11 +1487,11 @@ function collectionTables(v) {
   }
   const openPRHistory = () => v.host.ui.openPanel("collection", { sessionKey: v.key(), agentId: v.agent(), focus: "pull-requests" });
   const otherPRs = (r) => [...new Map((r.pullRequests ?? []).filter((pr) => String(pr.number) !== String(r.pullRequest?.number)).map((pr) => [String(pr.number), pr])).values()];
-  const historyButton = (...args) => { const button = nextButton(...args); button.className += " wtc-pr-history"; button.style.cssText += ";width:80px;max-width:80px;min-width:0;font-size:11px;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; return button; };
+  const historyButton = (...args) => { const button = nextButton(...args); button.className += " wtc-pr-history"; button.style.cssText += ";width:80px;max-width:80px;min-width:0;font-size:11px;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;justify-content:flex-end;text-align:right"; return button; };
   function prHints(r) {
     const others = otherPRs(r);
     const archived = others.filter((pr) => pr.state === "merged" || pr.state === "closed");
-    if (others.length && (r.pullRequest || others.length > 1 && others.some(pr => pr.state === "open"))) return historyButton(`+${plural(others.length, "PR")}`, `${plural(others.length, "other PR")}: ${others.length - archived.length} open, ${archived.length} archived. Open collection PR history in the taba sidebar`, openPRHistory);
+    if (others.length && (r.pullRequest || others.length > 1 && others.some(pr => pr.state === "open"))) return historyButton(archived.length === others.length ? plural(archived.length, "archived PR") : plural(others.length, "other PR"), `${plural(others.length, "other PR")}: ${others.length - archived.length} open, ${archived.length} archived. Open collection PR history in the taba sidebar`, openPRHistory);
     const active = others.filter((pr) => pr.state === "open").map((pr) => {
       const hint = link(`#${pr.number}`, pr.url);
       return css(el("span", { title: `Other active PR #${pr.number}: ${pr.title ?? ""}` }, typeof hint === "object" ? css(hint, "color:var(--muted,#888);text-decoration:none") : hint), "color:var(--muted,#888)");
@@ -1525,7 +1531,7 @@ function collectionTables(v) {
     return [
       repoName(r), branch,
       r.dirty ? toned(String(r.dirty), TONE.pending, `${plural(r.dirty, "file")} changed, not committed yet`) : null,
-      busy.has(r.sessionKey) || sharedPushBusy(r) ? working() : pushCell(r, n),
+      busy.has(r.sessionKey) || sharedPushBusy(r) ? pendingPushCount(n) : pushCell(r, n),
       catching.has(r.sessionKey) ? working() : toCatchUp(r) ? catchUpCell(r) : caughtUp ? toned("✓", TONE.success, "Caught up; no base changes remain in this snapshot") : null,
       pr ? css(el("span", { title: `${pr.draft && open ? "Draft PR. " : ""}${pr.title ?? ""}` }, link(`#${pr.number}`, pr.url), pr.draft && open && !otherPRs(r).length ? muted("draft") : pr.state !== "open" ? muted(pr.state) : null), "display:inline-flex;gap:4px") : null,
       ci, conflict, review, nextCell(r), prHints(r),
