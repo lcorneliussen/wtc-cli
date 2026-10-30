@@ -772,7 +772,9 @@ numbers aligned at the other edge. A captured push count stays visible but
 disabled during publication, and archived-PR hints keep their wording and trailing
 rail when a new current PR appears. Narrow rows combine name and branch and use
 one fact line only when it has facts or a recorded result; catch-up rows do not
-reserve an empty PR lane. Repeated row actions use quiet surfaces.
+reserve an empty PR lane. Repeated row actions use quiet surfaces. Actionable header controls retain a
+quiet outline at rest; progress stays muted. Completed results also open their
+action log, so they retain that button affordance.
 
 A publication started from the collapsed bar shows its personal preview above
 the bar, without opening the repository/service details. Confirm and Cancel remain
