@@ -69,8 +69,3 @@ Real commands against synthetic local repositories:
 | Prepare for the taba rename | [Environment compatibility](docs/rename-compatibility.md), [configuration inputs](docs/rename-config-inputs.md), [command names](docs/rename-invocation.md), [rename announcement](https://taba.sh/wtc-is-now-taba/) |
 | Build, test, or contribute | [Development and validation](docs/development.md) |
 | Report a bug | [Issues](https://github.com/lcorneliussen/wtc-cli/issues) — include version, host mode, and a redacted reproduction |
-
-The website teaches workflows; this repository owns the detailed, versioned
-contracts and canonical release notes. Embedded guidance matches the installed
-binary. See [documentation ownership](docs/documentation-policy.md) for how
-changes are reconciled across these surfaces.
