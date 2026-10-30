@@ -2326,3 +2326,21 @@ test("a selected publication shares its outcome record rather than leaving a bat
   assert.match(readable(panel.host),/Cancelled/);assert.doesNotMatch(readable(panel.host),/Awaiting confirm/);
  }finally{panel?.view.dispose();view.dispose();personal=null;nextResult=undefined;}
 });
+
+test("a Next publication keeps its single activity through a personally confirmed success",async()=>{
+ const step={step:"push",by:"wtc",approve:"person",gateway:"github_publish",key:"api:push:confirm-owner",reason:"Publish captured commits"};
+ const r=repo("api",{unpublished:1,next:step,choices:{actions:[{...step,available:true}]}}),data=collection([r]);
+ const previous=githubConfirmResult;
+ personal={state:"connected",account:{login:"demo"},generation:"g1"};nextResult={ok:true,result:{performed:false,repo:r}};
+ const {host,view,context}=await mount("composer",data);let panel;
+ try{
+  githubConfirmResult=()=>{
+   collections.set(context.props.sessionKey,collection([repo("api",{unpublished:0,pullRequest:{number:7,state:"open",url:"https://example.invalid/pr/7"}})]));
+   return {status:"published",created:true,url:"https://example.invalid/pr/7"};
+  };
+  await clickText(host,"Push");await clickText(host,"Confirm push");
+  panel=await mount("panel",collections.get(context.props.sessionKey),undefined,context.props.sessionKey);
+  assert.equal([...panel.host.all()].filter(n=>n.className==="wtc-activity-item").length,1);
+  assert.match(readable(panel.host),/Done/);assert.doesNotMatch(readable(panel.host),/Awaiting confirm|Publication response received/);
+ }finally{panel?.view.dispose();view.dispose();githubConfirmResult=previous;personal=null;nextResult=undefined;}
+});
