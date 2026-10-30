@@ -744,7 +744,7 @@ function collectionTables(v) {
       current.truncated ? el("span", { textContent: "Showing recent output only." }) : null,
       css(el("pre", { textContent: text, tabIndex: 0, ...(current.error ? { role: "alert" } : current.loading ? { role: "status" } : {}) }),
         "margin:0;min-width:0;max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 var(--mono,ui-monospace,monospace)")),
-      `min-width:0;display:grid;gap:8px;padding:10px 12px;border:1px solid var(--border,rgba(128,128,128,.3));border-radius:8px;font-size:12px;color:${current.error ? TONE.failure : "var(--text,inherit)"}`);
+      "min-width:0;display:grid;gap:8px;padding:10px 12px;border:1px solid var(--border,rgba(128,128,128,.3));border-radius:8px;font-size:12px;color:var(--text,inherit)");
   }
   // Mirror browser-local publication progress; this is not a gateway lock.
   const sharedPushBusy = (r) => [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].some(item => item.action === "push" && item.repoSessionKey === r.sessionKey && item.inFlight);
