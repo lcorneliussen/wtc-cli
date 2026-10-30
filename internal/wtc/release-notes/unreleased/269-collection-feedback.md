@@ -1,5 +1,10 @@
 ## OpenClaw
 
+- **Collection panels fill their sidebar host.** Inline-size containment no
+  longer shrinks the panel inside a flex layout. Desktop chat-card headers gain
+  top space while retaining their bottom inset and shared text baselines.
+  ([#269](https://github.com/lcorneliussen/wtc-cli/issues/269)).
+
 - **Collection actions keep their feedback in place.** The compact header
   summarizes progress and outcomes, with full details and recent results in the
   sidebar below Services. Selection augments the existing repository rows,

@@ -673,6 +673,7 @@ const actionFeedback = () => el("style", { textContent: `
 .wtc-action-control:focus-visible { outline:2px solid var(--accent,#75c8c1); outline-offset:-2px; }
 .wtc-collection-card summary:focus-visible { outline:2px solid var(--accent,#75c8c1); outline-offset:2px; border-radius:10px; }
 @media(max-width:520px) {
+  .wtc-collection-card { --wtc-header-top-extra:0px; }
   .wtc-collection-card>summary { column-gap:4px !important; }
   .wtc-collection-card, .wtc-collection, .wtc-transient-actions { --wtc-control-height:32px; --wtc-control-width:24px; --wtc-icon-size:36px; --wtc-state-size:24px; }
   .wtc-header-controls { --wtc-control-height:36px; --wtc-control-width:36px; }
@@ -1791,7 +1792,7 @@ function mountComposer(container, context) {
     "container-type:inline-size;container-name:wtc-card;box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset, 36px));max-width:var(--chat-thread-max-width, 48rem);margin:4px auto 0;background:var(--card, #fff);color:var(--text, inherit);border:1px solid var(--border, rgba(0,0,0,.08));border-radius:14px;font:inherit;font-size:14px");
   const extra = css(el("section", { className: "wtc-transient-actions", ariaLabel: "Collection action details" }),
     "box-sizing:border-box;width:calc(100% - var(--chat-composer-side-inset,36px));max-width:var(--chat-thread-max-width,48rem);margin:4px auto 0;padding:10px 12px;display:grid;gap:6px;max-height:min(40dvh,360px);overflow:auto;background:var(--card,#fff);color:var(--text,inherit);border:1px solid var(--border,rgba(0,0,0,.08));border-bottom:0;border-radius:14px 14px 0 0;font:inherit;font-size:14px");
-  const summary = css(el("summary"), "list-style:none;display:flex;align-items:baseline;height:calc(var(--wtc-icon-size,24px) + 8px);box-sizing:border-box;gap:6px;padding:3px 12px;cursor:pointer;white-space:nowrap;overflow:hidden");
+  const summary = css(el("summary"), "list-style:none;display:flex;align-items:baseline;height:calc(var(--wtc-icon-size,24px) + 8px + var(--wtc-header-top-extra,6px));box-sizing:border-box;gap:6px;padding:calc(3px + var(--wtc-header-top-extra,6px)) 12px 3px;cursor:pointer;white-space:nowrap;overflow:hidden");
   const detail = css(el("div"), "padding:2px 12px 8px;display:grid;gap:6px");
   card.append(summary, detail, actionFeedback());
   card.addEventListener("toggle", () => remember(card.open));
@@ -2049,7 +2050,7 @@ function mountCollection(container, context) {
   let watch = null;
 
   const root = css(el("section", { className: "wtc-collection" }),
-    "container-type:inline-size;container-name:wtc-panel;position:relative;padding:14px 16px;font:inherit;font-size:14px;color:var(--text, inherit);overflow:auto;height:100%;box-sizing:border-box;display:grid;gap:14px;align-content:start");
+    "container-type:inline-size;container-name:wtc-panel;position:relative;width:100%;min-width:0;padding:14px 16px;font:inherit;font-size:14px;color:var(--text, inherit);overflow:auto;height:100%;box-sizing:border-box;display:grid;gap:14px;align-content:start");
   container.append(root);
 
   const muted = (text, extra = "") => css(el("span", { textContent: text }), `color:var(--muted, #888);font-size:12px;${extra}`);
