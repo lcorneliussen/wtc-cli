@@ -52,3 +52,13 @@ Retained merged PRs use the verified directory association when computing the
 existing next action, including `new-branch` for follow-up work. This internal
 association adds no JSON fields. Cached snapshots retain their computed next
 actions; older observations use exact-name matching without guessing aliases.
+
+An enlisted PR can also be a read-only reference without a registry entry or
+checkout. Supply its HTTPS GitHub `/owner/repo/pull/<number>` or Bitbucket
+`/workspace/repo/pull-requests/<number>` URL with `wtc pr enlist --url`. The
+number must match the row; credentials, unsupported hosts and conflicting or
+ambiguous local identities are refused with a lookup diagnostic. Status uses
+the normal authenticated forge/cache path and displays a canonical URL without
+query or fragment text. This does not register a repository, attach a branch or
+grant catch-up, checkout, landing or retirement authority. Closed references
+follow the existing omission rules; settled merged facts can still be recorded.
