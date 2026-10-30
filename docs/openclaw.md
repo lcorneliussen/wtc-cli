@@ -165,8 +165,10 @@ A baseline row consistently says **at main** (or its configured base). Hover
 text distinguishes an untouched task branch from detached HEAD; it does not
 imply that the checkout owns the main branch.
 
-The repository row links its current PR and shows other active PRs as muted
-number links. A **3 archived PRs** control represents completed PRs and opens the full
+The repository row links its current PR. Additional PRs share a compact
+**4 other PRs** control, whose accessible label separates open and archived counts.
+When all additional PRs are archived, it keeps the **N archived PRs** wording,
+including when a new current PR appears. **1 archived PR** opens the full
 collection PR list in the taba sidebar. The conversation card omits that full
 list, keeping its footprint small.
 
@@ -479,10 +481,10 @@ them. The plugin in [`openclaw-plugin/`](../openclaw-plugin) adds the view of
 the task as a whole:
 
 - a card above the message box, where OpenClaw shows a task's progress. It
-  is `wtc status`'s tables: every fact has its column, always in the same
-  place, and `·` where there is none. **Repo Branch ± ↑ ↓ PR C M R** is a row
-  per repository: files changed, commits to push, commits behind the base,
-  the pull request, its CI, whether it merges and its review. **Service Repo
+  groups the repository, branch, changes, PR and next action in fixed columns
+  when space permits, without visible repository headers. **±**, **↑** and **↓**
+  mean changed files, commits to push and commits behind the base. The PR link
+  includes its check, merge and review facts. **Service Repo
   State URL** is a row per service, then a column per way in (an OpenClaw
   portal or a tunnel provider) and a **+** that opens a new one. Collapsed, the
   card shows the same facts summed, in the same order: **± ↑ ↓ PR svc**.
@@ -494,7 +496,12 @@ the task as a whole:
   asks the conversation to resolve the conflict, and a service's ▶, ■ or ↻
   starts, stops or restarts it. The same marks in the
   header of the services act on all of them, and collapsed, ↑, ↓ and the
-  services' mark act on the whole collection.
+  services' mark act on the whole collection. An aligned **All repos** row
+  offers **↑** (push) and **↓** (catch up) over their per-repository arrow tracks. Hover or focus
+  exposes the eligible scope; unavailable actions stay disabled in their slots.
+  When PR facts or history are present, they keep separate fixed tracks. Narrow
+  rows omit empty fact bands. Action-log result markers also have a reserved glyph slot.
+  Uncommitted-only rows offer **Commit changes** first.
 
   An open tunnel shows the first part of its address, links to it and closes
   with ✕; a closed one is a ▶ to open it again. **+** offers, in order, the
@@ -518,8 +525,12 @@ the task as a whole:
   Pushing is the person's, never the agent's. The gateway publishes the
   repository's worktree with the person's own GitHub connection
   (**Settings → Profile → GitHub connections → For me**), which only the
-  gateway holds, and only once they confirm: the first click on ↑ asks the
-  gateway, which then waits, and ↑ becomes **confirm ↑** naming the account.
+  gateway holds, and only once they confirm: the first click on ↑ prepares a
+  separate preview with the personal account, repository, branch and captured
+  change count. **Review push** reopens that preview; it does not publish.
+  Only its distinct **Confirm push** control sends the captured request.
+  **Cancel** discards the preparation. Bulk preparation retains these separate
+  personal confirmations and never consumes an earlier one.
   The gateway's shared GitHub account, often the `gh` login its agents use
   too, is never used for it; without a personal connection ↑ says where to
   connect one. A Bitbucket repository is pushed the same way by the
@@ -536,14 +547,24 @@ the task as a whole:
   tables with the same actions, wtc status's pull request table (**PR Repo
   State C M R Title**), and **Add repository**.
 
-Narrow, as beside a conversation, in a narrow window or on a phone (under
-520 pixels), every row wraps into two lines: first what it is (the repository
-and its branch, the service and its repository), then its facts, still in
-their columns under the header, which wraps the same way.
+When the fixed columns no longer fit, name and branch share the first line,
+with the action alongside. Counts and any PR facts share one aligned second
+line; facts-free rows omit it. Service layout has its own
+520-pixel breakpoint. Long branches have a tap/keyboard expansion, and complete
+feedback is available from the header in the sidebar rather than clipped into
+an extra paragraph below the rows. Services precede the recent Action log.
+Text on a row shares a baseline; glyphs center independently. Status and history
+links use the host's quieter controls, while the separate personal confirmation
+uses its primary style. Preparing a preview is labeled **Preparing…**; only a
+personally confirmed push is labeled **Publishing…**. The collection-wide actions share the repository tracks
+rather than forming a floating stack of buttons.
 
-Both render what `wtc status <name> --json` prints and refresh every 30
-seconds while they are open. `node --test openclaw-plugin/test/*.test.mjs`
-renders them against a minimal DOM.
+Both render what `wtc status <name> --json` prints and share a refresh every 30
+seconds while visible. Manual refresh shows its busy state. Publication pauses
+periodic refresh, discards responses begun before the operation, and waits for
+a fresh status before clearing the row's busy state. A refresh failure is
+distinct from a successful publication. `node --test openclaw-plugin/test/`
+exercises rendering and interaction contracts against a minimal DOM.
 
 ## Install
 
@@ -705,7 +726,7 @@ and retain each repository's account/commit confirmation.
 action per repository, check its selection, or use **Select suggested**. Existing
 alternative choices are preserved. **Run selected** rechecks the exact targets.
 A changed head, base, worktree state or PR observation makes an old selection
-stale. New repositories do not join a captured selection. **Done choosing**
+stale. New repositories do not join a captured selection. **Exit selection**
 returns to the compact view; **Run chosen** retains your exact selection there.
 Running, queued and pending results stay beside
 the repository in either view.
@@ -730,3 +751,75 @@ Unchanged handoffs stay disabled in that view while completion is pending.
 After checking the conversation, **Allow retry** enables explicit reselection.
 There is no automatic continuation, durable job queue or cross-runner claim in
 this phase. Reloading a view does not restart its unfinished batch.
+
+The sidebar Action log shows the latest three results, with expandable detail
+and **Earlier activity**. Direct catch-up, publication, service and manual-refresh
+feedback use this history. Accepted author handoffs remain pending rather than
+claiming completion. This history is browser-session feedback: reloading clears
+it. It is not a durable gateway audit log or a trusted completion receipt.
+
+The collection keeps its base layout in place while actions run. Bulk Push and
+Catch up controls retain their slots and become disabled when no repository is
+eligible. Temporary publication reviews, choices and connection help extend
+above the composer card and below Services in the sidebar. The repository and
+service rows remain visible in their original positions.
+
+### Alignment and compact views
+
+The brand, repository names and service names share an icon rail and a text rail.
+Icons follow the adjacent text's cap-height middle; text of different sizes keeps
+its baseline. Bulk arrows use the same arrow slot as their counts, with tabular
+numbers aligned at the other edge. A captured push count stays visible but
+disabled during publication, and archived-PR hints keep their wording and trailing
+rail when a new current PR appears. Narrow rows combine name and branch and use
+one fact line only when it has facts or a recorded result; catch-up rows do not
+reserve an empty PR lane. Repeated row actions use quiet surfaces. Actionable header controls retain a
+quiet outline at rest; progress stays muted. Completed results also open their
+action log, so they retain that button affordance.
+
+A publication started from the collapsed bar shows its personal preview above
+the bar, without opening the repository/service details. Confirm and Cancel remain
+separate controls. Local catch-up also retains the collapsed bar throughout.
+
+The recording workflow can emit separate alignment guides, hierarchy measurements,
+cropped action clips and a synchronized native-TUI renderer replay. The TUI already
+offers keyboard Next actions with `n`; direct table mouse actions are separate.
+
+The reusable recorder lives in the public
+[site recording workflow](https://github.com/lcorneliussen/wtc-site/blob/setup/openclaw-interaction-recordings/docs/recording-openclaw-interactions.md).
+Its recording-only adapter here accepts a JSON input with `columns`, `rows` and
+`frames`. Each frame contains `at`, `phase`, a `StatusSnapshot` in `snapshot`,
+one local-host `next.Facts` value per repository in `facts`, and optional
+selection-only `keys`. For example, an empty initialized view is:
+
+```json
+{"columns":96,"rows":24,"frames":[{"at":0,"phase":"idle","snapshot":{"schema":1,"collection":"demo","repos":[],"prs":[],"runtime":[]},"facts":[],"keys":[]}]}
+```
+
+Save this as `/tmp/tui-input.json`, then run from the CLI source:
+
+```sh
+WTC_RECORDING_INPUT=/tmp/tui-input.json WTC_RECORDING_OUTPUT=/tmp/tui-frames.json go test -tags recording ./cmd/wtc -run '^TestStatusRecordingFrames$' -count=1
+```
+
+Without those inputs the test skips; `go test -tags recording ./cmd/wtc -run
+'^TestStatusRecordingFrames$'` still compiles the adapter. This is an author-run
+recording check, not current CI coverage. It renders native ANSI frames, refuses
+unknown keys and any returned command, and never initializes the collector.
+The site's workflow turns these frames into casts, lossless PNG/video and paired
+replays; the adapter alone does not record a live terminal or gateway.
+
+Preparation for direct table actions is tracked in
+[the shared next-action issue](https://github.com/lcorneliussen/wtc-cli/issues/179).
+Resolve the selected collection/repository/worktree/action key, re-read through
+`statusNextCurrent`, and reuse ownership, busy and publication checks. Agent
+steps must target the verified owner/pane, never the focused terminal or a typed
+draft. Report handoff separately from completion. No direct mouse actions are
+added to the status TUI by this recording work.
+
+In the compact card, **Services** has a collection-level heading on the outer
+content margin and a light separator above it. The service rows name their owning
+repositories, but the section is not nested under the final repository row.
+Browser table labels use normal capitalization; the terminal keeps its uppercase
+headings. Visual review compares intended section regions with a separately
+recorded pixels-only grouping, rather than inferring hierarchy from the DOM alone.
