@@ -2267,6 +2267,9 @@ for (const kind of ["composer", "panel"]) test(`${kind}: Next publication has on
   failing.add("sessions.github.publish");
   await clickText(host,"Push");
   assert.ok([...host.all()].some(n=>n.tagName==="BUTTON"&&n.textContent==="Retry"),"failed Next preparation must leave a retry affordance");
+  const failureDetails=await mount("panel",data,undefined,context.props.sessionKey);
+  try {assert.match([...failureDetails.host.all()].find(n=>n.className==="wtc-activity-item").ariaLabel,/sessions.github.publish failed/,"the publisher error must replace generic route progress in details");}
+  finally {failureDetails.view.dispose();}
   failing.delete("sessions.github.publish");
   await clickText(host,"Retry");
   await clickText(host,"Cancel");
@@ -2274,6 +2277,7 @@ for (const kind of ["composer", "panel"]) test(`${kind}: Next publication has on
   const records=[...panel.host.all()].filter(n=>n.className==="wtc-activity-item");
   assert.equal(records.length,2,"one record for each of the failed and cancelled attempts");
   assert.match(readable(panel.host),/Failed/);assert.match(readable(panel.host),/Cancelled/);
+  assert.ok(records.some(n=>/publication cancelled/.test(n.ariaLabel)),"cancel details must not retain the initial Push progress");
   assert.doesNotMatch(readable(panel.host),/Awaiting confirm|Publication response received/);
  } finally {failing.delete("sessions.github.publish");panel?.view.dispose();view.dispose();personal=null;nextResult=undefined;}
 });
@@ -2289,7 +2293,7 @@ for(const kind of ["composer","panel"]) test(`${kind}: closing a prepared view c
   view.dispose();
   panel=await mount("panel",data,undefined,context.props.sessionKey);
   assert.match(readable(panel.host),/Cancelled/);assert.match(readable(panel.host),/view closed/);
-  assert.doesNotMatch(readable(panel.host),/Awaiting confirm/);
+  assert.doesNotMatch(readable(panel.host),/Awaiting confirm|confirm to push as/);
  }finally{panel?.view.dispose();view.dispose();personal=null;}
 });
 

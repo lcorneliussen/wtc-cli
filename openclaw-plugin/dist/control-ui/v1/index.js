@@ -786,7 +786,7 @@ function collectionTables(v) {
         switch (nextRoute(step)) {
           case "publish": {
             const outcome = await publish(fresh, conversationKey, () => true, false, logId);
-            if (outcome?.pending) recordActivity(logKey, logId, { state: "blocked", status: "Another publication is active or already prepared; inspect its result." });
+            if (outcome?.pending) recordActivity(logKey, logId, { state: "blocked", status: "Another publication is active or already prepared; inspect its result.", detail: undefined });
             break;
           }
           case "run": throw Error("The gateway did not execute this deterministic catch-up. Refresh or update its wtc plugin; no agent prompt was sent.");
@@ -915,9 +915,10 @@ function collectionTables(v) {
   function cancelPreparations(status) {
     const abandoned = [...confirming.values()];
     confirming.clear();
-    for (const prepared of abandoned) if (prepared.activityId) recordActivity(prepared.logKey, prepared.activityId, {
-      state: "cancelled", status, inFlight: false,
-    });
+    for (const prepared of abandoned) if (prepared.activityId) {
+      feedbackStore.set(prepared.logKey, { text: status, failed: false, action: null, activityId: prepared.activityId, at: Date.now() });
+      recordActivity(prepared.logKey, prepared.activityId, { state: "cancelled", status, inFlight: false });
+    }
   }
   function syncConversation() {
     if (batchKey === v.key()) return;
@@ -1228,7 +1229,7 @@ function collectionTables(v) {
     let lastFailed = false, lastText = "Preparing publication…", lastAction = null;
     const log = (state) => {
       if (!active(conversationKey) && state !== "running") feedbackStore.set(logKey, { text: lastText, failed: lastFailed, action: lastAction, activityId, at: Date.now() });
-      recordActivity(logKey, activityId, { repo: nameOf(r), repoSessionKey: r.sessionKey, action: "push", phase: confirmed ? "publishing" : "preparing", inFlight: true, state, status: lastText, followUp: lastAction });
+      recordActivity(logKey, activityId, { repo: nameOf(r), repoSessionKey: r.sessionKey, action: "push", phase: confirmed ? "publishing" : "preparing", inFlight: true, state, status: lastText, detail: undefined, followUp: lastAction });
     };
     const say = (text, failed = false, action = null) => {
       lastText = text; lastFailed = failed; lastAction = action;
