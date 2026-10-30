@@ -53,6 +53,10 @@ printf '{"number":7,"id":7,"state":"%s","title":"Synthetic reference","mergedAt"
 					segment = "pull-requests"
 				}
 				record := PRRecord{Repo: "reference", Number: "7", Branch: "topic", URL: "https://" + forge + "/example/widget/" + segment + "/7"}
+				if forge == "github.com" {
+					record.URL = strings.Replace(record.URL, "/example/widget/", "/Example/Widget/", 1)
+				}
+				record.URL += "?diff=split#discussion"
 				if _, err := c.EnlistPR(record); err != nil {
 					t.Fatal(err)
 				}
@@ -76,6 +80,9 @@ printf '{"number":7,"id":7,"state":"%s","title":"Synthetic reference","mergedAt"
 						t.Fatalf("URL-only reference: %+v, want %s", snapshot.PRs, want)
 					}
 					row := snapshot.PRs[0]
+					if row.URL == nil || *row.URL != "https://"+forge+"/example/widget/"+segment+"/7" {
+						t.Fatalf("noncanonical displayed URL: %+v", row.URL)
+					}
 					if row.Slug != "example/widget" || row.OnBranch || row.worktreeDir != "" {
 						t.Fatalf("wrong forge or checkout association: %+v", row)
 					}
@@ -213,6 +220,95 @@ func TestStatusPRReferenceInvalidURLIsNotQueriedOrRendered(t *testing.T) {
 			}
 			if strings.Contains(all, "synthetic-secret") || strings.Contains(all, tc.url) {
 				t.Fatal("diagnostic echoes untrusted URL")
+			}
+		})
+	}
+}
+
+func TestStatusPRReferenceRegisteredRowCanonicalURL(t *testing.T) {
+	c, _ := enlistedIdentityFixture(t, true)
+	record := PRRecord{Repo: "widget", Number: "7", Branch: "topic", URL: "https://github.com/Example/Widget/pull/7?diff=split#discussion"}
+	if _, err := c.EnlistPR(record); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	fixtureFile(t, filepath.Join(bin, "gh"), `#!/bin/sh
+if [ "$2" = list ]; then printf '[]\n'; else printf '%s\n' '{"number":7,"state":"OPEN","title":"Synthetic registered PR"}'; fi
+`, 0755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	snapshot, err := c.statusForgePreview(false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range snapshot.Repos {
+		if row.Dir == "ext.widget" {
+			found = true
+			if row.PR == nil || row.PR.URL != "https://github.com/example/widget/pull/7" {
+				t.Fatalf("registered row lost canonical link: %+v", row.PR)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("registered checkout missing")
+	}
+}
+
+func TestStatusPRReferenceRecordedFactsSurviveLookupRefusal(t *testing.T) {
+	for _, mode := range []string{"conflicting", "ambiguous", "invalid"} {
+		t.Run(mode, func(t *testing.T) {
+			c, path := enlistedIdentityFixture(t, true)
+			fixtureGit(t, "-C", path, "checkout", "--detach", "HEAD")
+			record := PRRecord{Repo: "widget", Number: "7", Branch: "topic", URL: "https://github.com/other/widget/pull/7", MergedOn: "2026-10-29T12:00:00Z", FinalChecks: "SUCCESS", MergeCommit: strings.Repeat("a", 40)}
+			if mode == "invalid" {
+				record.URL = "https://fixture:synthetic-secret@github.com/example/widget/pull/7"
+			}
+			if mode == "ambiguous" {
+				record.URL = "https://github.com/example/widget/pull/7"
+				other := filepath.Join(c.Collection, "widget")
+				enlistedIdentityGit(t, other, "https://github.com/example/widget.git")
+				fixtureGit(t, "-C", other, "checkout", "--detach", "HEAD")
+			}
+			fixtureFile(t, c.PRFile(), formatPR(record)+"\n# merged-pr widget 7 "+record.MergedOn+" SUCCESS\n# merged-commit widget 7 "+record.MergeCommit+" main\n", 0644)
+			snapshot, err := c.statusForgePreview(false, false)
+			if err != nil || len(snapshot.PRs) != 1 {
+				t.Fatalf("snapshot: %+v %v", snapshot.PRs, err)
+			}
+			row := snapshot.PRs[0]
+			if row.State != "MERGED" || row.MergedOn == nil || *row.MergedOn != record.MergedOn || row.MergeCommit != record.MergeCommit {
+				t.Fatalf("lookup refusal erased recorded facts: %+v", row)
+			}
+			if row.OnBranch || row.worktreeDir != "" || row.URL != nil {
+				t.Fatalf("refused URL acquired local authority/link: %+v", row)
+			}
+		})
+	}
+}
+
+func TestStatusPRReferenceRegisteredBrowserURLKeepsOpenBlocker(t *testing.T) {
+	for _, raw := range []string{"https://github.com/example/widget/pull/7/files", "http://github.com/example/widget/pull/7"} {
+		t.Run(raw, func(t *testing.T) {
+			c, path := enlistedIdentityFixture(t, true)
+			fixtureGit(t, "-C", path, "checkout", "--detach", "HEAD")
+			if _, err := c.EnlistPR(PRRecord{Repo: "widget", Number: "7", Branch: "topic", URL: raw}); err != nil {
+				t.Fatal(err)
+			}
+			bin := t.TempDir()
+			fixtureFile(t, filepath.Join(bin, "gh"), `#!/bin/sh
+if [ "$2" = list ]; then printf '[]\n'; else printf '%s\n' '{"number":7,"state":"OPEN","title":"Synthetic registered PR"}'; fi
+`, 0755)
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			snapshot, err := c.statusForgePreview(false, false)
+			if err != nil || len(snapshot.PRs) != 1 || snapshot.PRs[0].State != "OPEN" {
+				t.Fatalf("noncanonical registered URL hid PR: %+v %v", snapshot.PRs, err)
+			}
+			if snapshot.PRs[0].URL == nil || *snapshot.PRs[0].URL != "https://github.com/example/widget/pull/7" {
+				t.Fatal("browser URL not canonicalized")
+			}
+			snapshot.Retirement = []RetirementAssessment{{Collection: snapshot.Collection}}
+			statusRetirementFacts(&snapshot)
+			if !strings.Contains(strings.Join(snapshot.Retirement[0].Blockers, "\n"), "pull request #7 remains open in status") {
+				t.Fatal("open-PR retirement blocker disappeared")
 			}
 		})
 	}

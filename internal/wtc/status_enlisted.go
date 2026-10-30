@@ -259,9 +259,11 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 	for i, record := range records {
 		slug, forge, refErr := statusReadOnlyPRForge(repos, record)
 		if refErr != nil {
-			details[i] = statusUnknownDetail(record)
 			c.statusProgress(fmt.Sprintf("Cannot look up enlisted PR %s#%s: %v", record.Repo, record.Number, refErr))
-			continue
+			if record.MergedOn == "" {
+				details[i] = statusUnknownDetail(record)
+				continue
+			}
 		}
 		identities[i] = [2]string{slug, forge}
 		if record.MergedOn == "" {
