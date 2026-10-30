@@ -172,7 +172,7 @@ func TestStatusPRReferencePreservesCanonicalIdentity(t *testing.T) {
 		{"ambiguous-checkout", prRepositories{"widget": {&prRepository{remote: good.remote, dirs: []string{"widget", "ext.widget"}}}}, "https://github.com/example/widget/pull/7", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			slug, forge, err := statusReadOnlyPRForge(tc.repos, PRRecord{Repo: "widget", Number: "7", URL: tc.url})
+			slug, forge, err := (&Context{}).statusReadOnlyPRForge(tc.repos, PRRecord{Repo: "widget", Number: "7", URL: tc.url})
 			if (err == nil) != tc.want {
 				t.Fatalf("identity %s %s, error %v", slug, forge, err)
 			}
@@ -355,6 +355,67 @@ func TestStatusPRReferenceRecordedRefusalCannotReturnWorktree(t *testing.T) {
 			}
 			if fixtureGit(t, "-C", c.Harness, "rev-parse", "HEAD") != head {
 				t.Fatal("status changed commit")
+			}
+		})
+	}
+}
+
+func TestStatusPRReferenceForgeNamesAreNotLocalAliases(t *testing.T) {
+	for _, name := range []string{".github", "_template", "-tools", "standard"} {
+		for _, registered := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/registered=%v", name, registered), func(t *testing.T) {
+				t.Setenv("TMPDIR", t.TempDir())
+				c := newWorkspaceFixture(t)
+				record := PRRecord{Repo: "reference", Number: "7", Branch: "topic"}
+				if registered {
+					c.Registry.Repos = append(c.Registry.Repos, Repo{Name: "reference", Remote: "https://github.com/example/" + name + ".git"})
+				} else {
+					record.URL = "https://github.com/example/" + name + "/pull/7"
+				}
+				if _, err := c.EnlistPR(record); err != nil {
+					t.Fatal(err)
+				}
+				bin := t.TempDir()
+				fixtureFile(t, filepath.Join(bin, "gh"), `#!/bin/sh
+if [ "$2" = list ]; then printf '[]\n'; else printf '%s\n' '{"number":7,"state":"OPEN","title":"Synthetic forge name"}'; fi
+`, 0755)
+				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+				snapshot, err := c.statusForgePreview(false, false)
+				if err != nil || len(snapshot.PRs) != 1 || snapshot.PRs[0].State != "OPEN" {
+					t.Fatalf("valid forge name refused: %+v %v", snapshot.PRs, err)
+				}
+				row := snapshot.PRs[0]
+				if row.URL == nil || *row.URL != "https://github.com/example/"+name+"/pull/7" || row.OnBranch || row.worktreeDir != "" {
+					t.Fatalf("wrong canonical link or association: %+v", row)
+				}
+				snapshot.Retirement = []RetirementAssessment{{Collection: snapshot.Collection}}
+				statusRetirementFacts(&snapshot)
+				if !strings.Contains(strings.Join(snapshot.Retirement[0].Blockers, "\n"), "pull request #7 remains open in status") {
+					t.Fatal("open reference lost retirement blocker")
+				}
+			})
+		}
+	}
+}
+
+func TestStatusPRReferenceForgeNamesDoNotHideRegistryConflict(t *testing.T) {
+	for _, urlRepo := range []string{".github", "other"} {
+		t.Run(urlRepo, func(t *testing.T) {
+			c := newWorkspaceFixture(t)
+			c.Registry.Repos = append(c.Registry.Repos, Repo{Name: "reference", Remote: "https://github.com/example/.github.git"})
+			checkout := filepath.Join(c.Collection, "reference")
+			fixtureGit(t, "init", "-q", checkout)
+			fixtureGit(t, "-C", checkout, "remote", "add", "origin", "https://github.com/example/other.git")
+			repos := c.prRepositories("reference")
+			// Exercise the existing shared mapper fallback without granting it
+			// authority to replace a different raw canonical registry identity.
+			resolved, err := repos.resolve("reference")
+			if err != nil || resolved == nil || resolved.remote != "https://github.com/example/other.git" {
+				t.Fatalf("fixture did not expose remote fallback: %+v %v", resolved, err)
+			}
+			slug, forge, err := c.statusReadOnlyPRForge(repos, PRRecord{Repo: "reference", Number: "7", URL: "https://github.com/example/" + urlRepo + "/pull/7"})
+			if err == nil || slug != "" || forge != "" {
+				t.Fatalf("conflicting raw registry identity accepted: %s %s %v", slug, forge, err)
 			}
 		})
 	}

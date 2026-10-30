@@ -257,7 +257,7 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 		}
 	}
 	for i, record := range records {
-		slug, forge, refErr := statusReadOnlyPRForge(repos, record)
+		slug, forge, refErr := c.statusReadOnlyPRForge(repos, record)
 		if refErr != nil {
 			c.statusProgress(fmt.Sprintf("Cannot look up enlisted PR %s#%s: %v", record.Repo, record.Number, refErr))
 			if record.MergedOn == "" {
@@ -351,7 +351,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 	repos := c.prRepositories()
 	for i, record := range records {
 		localSlug, localForge := repos.forge(record.Repo)
-		slug, forge, refErr := statusReadOnlyPRForge(repos, record)
+		slug, forge, refErr := c.statusReadOnlyPRForge(repos, record)
 		detail := statusPredictBBMerge(details[i], localForge, localSlug, snapshot.Repos)
 		mergeHead, mergeBase := statusMergeProvenance(detail)
 		worktreeDir := ""
@@ -480,7 +480,7 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 		}
 	}
 	for i, record := range records {
-		if _, _, err := statusReadOnlyPRForge(repos, record); err != nil {
+		if _, _, err := c.statusReadOnlyPRForge(repos, record); err != nil {
 			continue
 		}
 		dir := worktreeDir(record.Repo)

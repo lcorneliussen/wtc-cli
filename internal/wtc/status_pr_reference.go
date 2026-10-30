@@ -9,7 +9,7 @@ import (
 // statusReadOnlyPRForge validates a supplied PR URL against any local identity,
 // or uses the existing repository forge when no URL is supplied. URL-only reads
 // never add a local identity or grant checkout/branch authority.
-func statusReadOnlyPRForge(repos prRepositories, record PRRecord) (slug, forge string, err error) {
+func (c *Context) statusReadOnlyPRForge(repos prRepositories, record PRRecord) (slug, forge string, err error) {
 	if record.URL == "" {
 		slug, forge = repos.forge(record.Repo)
 		return slug, forge, nil
@@ -21,15 +21,25 @@ func statusReadOnlyPRForge(repos prRepositories, record PRRecord) (slug, forge s
 	if repo == nil {
 		return statusParsePRURL(record.URL, record.Number)
 	}
-	identity := prForgeIdentity(repo.remote)
+	identity := statusPRForgeIdentity(repo.remote)
 	if identity == "" {
 		return "", "", fmt.Errorf("repository identity cannot be verified; configure a supported forge remote")
+	}
+	// The shared mapper can use an exact checkout origin when its local-alias
+	// validator cannot classify a registry remote. Recheck the raw registry
+	// identity here using forge path rules before accepting that fallback.
+	for _, registered := range c.Registry.Repos {
+		if registered.Name == repo.name {
+			if raw := statusPRForgeIdentity(registered.Remote); raw != "" && raw != identity {
+				return "", "", fmt.Errorf("registry and checkout repository identities disagree")
+			}
+		}
 	}
 	slug, forge, err = statusParsePRURLShape(record.URL, record.Number, true)
 	if err != nil {
 		return "", "", err
 	}
-	if identity != prForgeIdentity("https://"+forge+"/"+slug) {
+	if identity != statusPRForgeIdentity("https://"+forge+"/"+slug) {
 		return "", "", fmt.Errorf("PR URL does not match repository identity")
 	}
 	slug, forge = repos.forge(record.Repo)
@@ -60,12 +70,12 @@ func statusParsePRURLShape(raw, number string, local bool) (slug, forge string, 
 		return "", "", invalid
 	}
 	for _, part := range parts[1:3] {
-		if !prRepoName.MatchString(part) || part == "." || part == ".." {
+		if !statusPRForgePart(part) {
 			return "", "", invalid
 		}
 	}
 	for _, part := range parts[5:] {
-		if !prRepoName.MatchString(part) || part == "." || part == ".." {
+		if !statusPRForgePart(part) {
 			return "", "", invalid
 		}
 	}
@@ -77,4 +87,31 @@ func statusParsePRURLShape(raw, number string, local bool) (slug, forge string, 
 		slug = strings.ToLower(slug)
 	}
 	return slug, forge, nil
+}
+
+// Forge path components are not local repository aliases: names such as .github
+// are valid. Keep URL parsing bounded to literal ASCII components, excluding
+// traversal, separators and encoded/credential-bearing paths.
+func statusPRForgePart(part string) bool {
+	if part == "" || part == "." || part == ".." {
+		return false
+	}
+	for _, ch := range part {
+		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '.' || ch == '_' || ch == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func statusPRForgeIdentity(remote string) string {
+	slug, forge := catchUpForge(remote)
+	parts := strings.Split(slug, "/")
+	if forge == "" || len(parts) != 2 || !statusPRForgePart(parts[0]) || !statusPRForgePart(parts[1]) {
+		return ""
+	}
+	if forge == "github.com" {
+		slug = strings.ToLower(slug)
+	}
+	return forge + "/" + slug
 }
