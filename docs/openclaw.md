@@ -816,3 +816,10 @@ Resolve the selected collection/repository/worktree/action key, re-read through
 steps must target the verified owner/pane, never the focused terminal or a typed
 draft. Report handoff separately from completion. No direct mouse actions are
 added to the status TUI by this recording work.
+
+In the compact card, **Services** has a collection-level heading on the outer
+content margin and a light separator above it. The service rows name their owning
+repositories, but the section is not nested under the final repository row.
+Browser table labels use normal capitalization; the terminal keeps its uppercase
+headings. Visual review compares intended section regions with a separately
+recorded pixels-only grouping, rather than inferring hierarchy from the DOM alone.

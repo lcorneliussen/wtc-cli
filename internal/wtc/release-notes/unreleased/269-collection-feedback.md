@@ -19,3 +19,7 @@
   Pre-publication status responses are discarded and a fresh status is read
   before the row stops showing work in progress. Uncommitted-only rows offer
   Commit changes instead of an unnumbered push arrow.
+
+The browser card separates collection Services from repository rows with an
+outer-margin heading and divider. Browser table labels use normal capitalization;
+terminal headings keep their uppercase style.

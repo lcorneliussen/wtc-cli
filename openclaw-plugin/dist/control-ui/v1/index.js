@@ -1441,7 +1441,7 @@ function collectionTables(v) {
     grid.setAttribute("data-columns", shown.length);
     // Repository field names remain accessible without occupying a visible row.
     grid.append(...shown.map((i) => css(el("span", { title: columns[i].title ?? "" }, columns[i].head ?? ""),
-      `${blank ? "position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);" : ""}${align(columns[i])}font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted, #888);white-space:nowrap`)));
+      `${blank ? "position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);" : ""}${align(columns[i])}font-size:10.5px;letter-spacing:normal;color:var(--muted, #888);white-space:nowrap`)));
     for (const row of rows) {
       grid.append(...shown.map((i) => {
         const c = columns[i];
@@ -1988,7 +1988,7 @@ function mountComposer(container, context) {
         css(el("span", { ariaHidden: "true" }, controlIcon(card.open ? "⌃" : "⌄")), "display:inline-flex;align-items:center;justify-content:center;color:var(--muted,#888);padding:0 2px")), "margin-left:auto;flex:none;display:flex;align-items:baseline;justify-content:flex-end;gap:4px;white-space:nowrap"));
     tables.checkAccount(repos);
     detail.replaceChildren(...[tables.repoTable(repos, repoNarrow, entry.data.subSessions),
-      groups.length ? css(el("div", { className: "wtc-base-services" }, tables.serviceTable(groups, entry.data, narrow)), "min-width:0") : null].filter(Boolean));
+      groups.length ? css(el("section", { className: "wtc-base-services", ariaLabel: "Collection services" }, css(el("h3", { textContent: "Services" }), "margin:0 0 4px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-strong,inherit)"), tables.serviceTable(groups, entry.data, narrow)), "min-width:0;border-top:1px solid var(--border,rgba(128,128,128,.2));margin-top:4px;padding-top:8px") : null].filter(Boolean));
     const confirmations = tables.publicationConfirmations(repos);
     const temporary = [confirmations, tables.nextActions(repos), tables.notice()].filter(Boolean);
     extra.replaceChildren(...temporary);
@@ -2364,7 +2364,7 @@ function mountCollection(container, context) {
       ...(toolbar ? [css(el("div", {}, toolbar), "display:flex;min-width:0;margin-top:4px")] : []),
     );
 
-    const repoSection = css(el("div", {}, heading("Repositories")), "display:grid;gap:4px");
+    const repoSection = css(el("div", { className: "wtc-repo-section" }, heading("Repositories")), "display:grid;gap:4px");
     if (repos.length === 0 && !data.subSessions?.length) repoSection.append(muted("No repositories yet. Ask in the conversation, or add one below.", "font-size:13px"));
     const confirmations = tables.publicationConfirmations(repos);
     const nextActions = tables.nextActions(repos);
