@@ -297,38 +297,47 @@ test("panel: compact PR columns retain full names and numbers as hover text", as
 
 test("service names open read-only logs with refresh, empty, error and close states", async () => {
   const previous=serviceLogsResult;
+  serviceLogsResult={ok:true,result:{logs:'missing PORT\n<script>untrusted</script>',truncated:true}};
+  const {host,view}=await mount("panel",collection([repo("api")],[{group:"api/web",repo:"api",label:"Preview",kind:"service",state:"exited",exit_code:2}]));
   try {
-    for(const kind of ["composer","panel"]) {
-      serviceLogsResult={ok:true,result:{logs:'missing PORT\n<script>untrusted</script>',truncated:true}};
-      const {host,view}=await mount(kind,collection([repo("api")],[{group:"api/web",repo:"api",label:"Preview",kind:"service",state:"exited",exit_code:2}]));
-      try {
-        if(kind==="composer")[...host.all()].find(n=>n.className==="wtc-collection-card").open=true;
-        calls.length=0;await titled(host,"View logs for Preview").onclick();
-        const log=[...host.all()].find(n=>n.className==="wtc-service-log");assert.ok(log);
-        assert.ok(log.textContent.includes('<script>untrusted</script>'));assert.equal([...log.all()].some(n=>n.tagName==="SCRIPT"),false);
-        assert.ok(log.textContent.includes("Showing recent output only"));
-        assert.deepEqual(calls.filter(c=>c.actionId==="svc-logs").map(c=>c.payload),[{group:"api/web"}]);
-        assert.equal(calls.some(c=>c.actionId==="svc"),false);
-        if(kind==="composer")assert.equal(log.parentNode.className,"wtc-transient-actions");
-        else {
-          const services=[...host.all()].find(n=>n.className==="wtc-base-services");
-          assert.ok(log.parentNode.children.indexOf(log)>services.parentNode.children.indexOf(services));
-        }
-        serviceLogsResult={ok:false,error:"read refused"};await titled(host,"Refresh service logs").onclick();
-        assert.match(host.textContent,/Could not read logs: read refused/);
-        serviceLogsResult={ok:true,result:{logs:""}};await titled(host,"Refresh service logs").onclick();assert.match(host.textContent,/No logs recorded yet/);
-        titled(host,"Close service logs").onclick();assert.equal([...host.all()].some(n=>n.className==="wtc-service-log"),false);
-      } finally {view.dispose();}
-    }
-  } finally {serviceLogsResult=previous;}
+    calls.length=0;await titled(host,"View logs for Preview").onclick();
+    const log=[...host.all()].find(n=>n.className==="wtc-service-log");assert.ok(log);
+    assert.ok(log.textContent.includes('<script>untrusted</script>'));assert.equal([...log.all()].some(n=>n.tagName==="SCRIPT"),false);
+    assert.ok(log.textContent.includes("Showing recent output only"));
+    assert.deepEqual(calls.filter(c=>c.actionId==="svc-logs").map(c=>c.payload),[{group:"api/web"}]);
+    assert.equal(calls.some(c=>c.actionId==="svc"),false);
+    const services=[...host.all()].find(n=>n.className==="wtc-base-services");
+    assert.ok(log.parentNode.children.indexOf(log)>services.parentNode.children.indexOf(services));
+    serviceLogsResult={ok:false,error:"read refused"};await titled(host,"Refresh service logs").onclick();
+    assert.match(host.textContent,/Could not read logs: read refused/);
+    serviceLogsResult={ok:true,result:{logs:""}};await titled(host,"Refresh service logs").onclick();assert.match(host.textContent,/No logs recorded yet/);
+    titled(host,"Close service logs").onclick();assert.equal([...host.all()].some(n=>n.className==="wtc-service-log"),false);
+  } finally {view.dispose();serviceLogsResult=previous;}
+});
+
+test("composer service names open logs in the sidebar, including an already mounted panel", async () => {
+  const previous=serviceLogsResult;
+  const data=collection([repo("api")],[{group:"api/web",label:"Preview",kind:"service",state:"ready"}]);
+  serviceLogsResult={ok:true,result:{logs:"first log"}};
+  const composer=await mount("composer",data);let panel;
+  try {
+    await titled(composer.host,"View logs for Preview").onclick();
+    assert.equal(openedPanels.at(-1)[0],"collection");assert.equal(openedPanels.at(-1)[1].sessionKey,composer.context.props.sessionKey);
+    assert.equal([...composer.host.all()].some(n=>n.className==="wtc-service-log"),false);
+    panel=await mount("panel",data,undefined,composer.context.props.sessionKey);await settle();
+    assert.match(panel.host.textContent,/first log/);
+    serviceLogsResult={ok:true,result:{logs:"refreshed from composer"}};
+    await titled(composer.host,"View logs for Preview").onclick();await settle();
+    assert.match(panel.host.textContent,/refreshed from composer/);
+    assert.equal([...composer.host.all()].some(n=>n.className==="wtc-service-log"),false);
+  } finally {panel?.view.dispose();composer.view.dispose();serviceLogsResult=previous;}
 });
 
 test("closing service logs prevents an in-flight read from reopening them", async () => {
   const previous=serviceLogsResult;let finish;
   serviceLogsResult=new Promise(resolve=>{finish=resolve;});
-  const {host,view}=await mount("composer",collection([repo("api")],[{group:"api/web",label:"Preview",kind:"service",state:"ready"}]));
+  const {host,view}=await mount("panel",collection([repo("api")],[{group:"api/web",label:"Preview",kind:"service",state:"ready"}]));
   try {
-    [...host.all()].find(n=>n.className==="wtc-collection-card").open=true;
     const pending=titled(host,"View logs for Preview").onclick();
     assert.match(host.textContent,/Loading logs/);assert.equal(titled(host,"Refresh service logs").disabled,true);
     titled(host,"Close service logs").onclick();finish({ok:true,result:{logs:"late output"}});await pending;

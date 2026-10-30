@@ -498,8 +498,8 @@ the task as a whole:
   header of the services act on all of them, and collapsed, ↑, ↓ and the
   services' mark act on the whole collection. Click a service name to read its
   recent logs without starting or restarting it. The log pane has Refresh and
-  Close controls, appears above the composer card or below Services in the
-  sidebar, and clears on conversation changes. Logs require read access; service
+  Close controls, appears below Services in the sidebar, and clears on conversation
+  changes. A click in the composer card opens that sidebar pane. Logs require read access; service
   lifecycle controls still require write access. An aligned **All repos** row
   offers **↑** (push) and **↓** (catch up) over their per-repository arrow tracks. Hover or focus
   exposes the eligible scope; unavailable actions stay disabled in their slots.

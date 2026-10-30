@@ -606,6 +606,9 @@ const pullRequestRows = (repos) => {
 // It is UI feedback, not an executable plan or a durable completion receipt.
 const activityStore = new Map();
 const feedbackStore = new Map();
+// openPanel carries session identity, not arbitrary panel props. Hand off the
+// requested group locally; log output stays in the panel that fetched it.
+const serviceLogIntents = new Map(), serviceLogListeners = new Set();
 function recordActivity(collection, id, item) {
   const records = activityStore.get(collection) ?? new Map();
   records.set(id, { ...records.get(id), ...item, at: Date.now() });
@@ -715,6 +718,8 @@ function collectionTables(v) {
   let serviceLog = null, serviceLogRequest = 0;
   const clearServiceLogs = () => { serviceLog = null; serviceLogRequest++; };
   async function loadServiceLogs(group, label) {
+    if (v.alive?.() === false) return;
+    if (v.openServiceLogs) return v.openServiceLogs(group, label);
     const key = v.key(), request = ++serviceLogRequest;
     serviceLog = { key, group, label, loading: true };
     v.showServiceLogs?.();
@@ -1736,7 +1741,7 @@ function collectionTables(v) {
     for (const s of sub.filter((s) => !repos.some((r) => r.repo && r.repo === s.r.repo))) rows.push(subRow(s.w, s.r));
     return rows;
   }
-  return { table, checkAccount, notice, nextActions, actionToolbar, activityLog, publicationConfirmations, serviceLogs, clearServiceLogs,
+  return { table, checkAccount, notice, nextActions, actionToolbar, activityLog, publicationConfirmations, serviceLogs, clearServiceLogs, loadServiceLogs,
     dispose: () => { clearServiceLogs(); cancelPreparations("Preparation discarded when the view closed; nothing was pushed."); },
     repoTable: (repos, narrow, workers) => {
       syncConversation();
@@ -1879,6 +1884,12 @@ function mountComposer(container, context) {
   };
   const tables = collectionTables({
     collectionKey: () => entry?.data?.collection?.sessionKey ?? key,
+    openServiceLogs: (group, label) => {
+      serviceLogIntents.set(entry?.data?.collection?.sessionKey ?? key, { group, label });
+      if (serviceLogIntents.size > 128) serviceLogIntents.delete(serviceLogIntents.keys().next().value);
+      ctx.host.ui.openPanel("collection", { sessionKey: key, agentId: agentOf(ctx) });
+      for (const notify of serviceLogListeners) notify();
+    },
     publicationBesideCollapsedBar: true,
     get host() { return ctx.host; }, alive: () => !disposed && !ctx.signal?.aborted, key: () => key, agent: () => agentOf(ctx), svc, say,
     // What a push needs (the how-to of connecting GitHub) shows open.
@@ -2020,7 +2031,7 @@ function mountComposer(container, context) {
     detail.replaceChildren(...[tables.repoTable(repos, repoNarrow, entry.data.subSessions),
       groups.length ? css(el("section", { className: "wtc-base-services", ariaLabel: "Collection services" }, css(el("h3", { textContent: "Services" }), "margin:0 0 4px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-strong,inherit)"), tables.serviceTable(groups, entry.data, narrow)), "min-width:0;border-top:1px solid var(--border,rgba(128,128,128,.2));margin-top:4px;padding-top:8px") : null].filter(Boolean));
     const confirmations = tables.publicationConfirmations(repos);
-    const temporary = [tables.serviceLogs(), confirmations, tables.nextActions(repos), tables.notice()].filter(Boolean);
+    const temporary = [confirmations, tables.nextActions(repos), tables.notice()].filter(Boolean);
     extra.replaceChildren(...temporary);
     const showTemporary = temporary.length > 0 && (card.open || !!confirmations);
     card.style.marginTop = showTemporary ? "0" : "4px";
@@ -2035,6 +2046,7 @@ function mountComposer(container, context) {
   function follow(next) {
     const sessionKey = keyOf(next);
     if (sessionKey === key) return;
+    serviceLogIntents.delete(entry?.data?.collection?.sessionKey ?? key);
     tables.clearServiceLogs();
     watch?.dispose();
     watch = null;
@@ -2421,7 +2433,15 @@ function mountCollection(container, context) {
     if (focusSection) { const block = focusSection === "actions" || focusSection === "service-logs" ? "nearest" : "start"; focusSection = null; destination?.scrollIntoView?.({ block }); }
   }
 
-  const show = (next) => { if (!ctx.signal.aborted) { entry = next; render(); } };
+  const consumeServiceLogIntent = () => {
+    if (disposed || !entry?.data) return;
+    const key = sessionKeyOf(), intent = serviceLogIntents.get(key);
+    if (!intent) return;
+    serviceLogIntents.delete(key);
+    void tables.loadServiceLogs(intent.group, intent.label);
+  };
+  serviceLogListeners.add(consumeServiceLogIntent);
+  const show = (next) => { if (!ctx.signal.aborted) { entry = next; render(); consumeServiceLogIntent(); } };
   function follow() {
     tables.clearServiceLogs();
     watch?.dispose();
@@ -2443,10 +2463,11 @@ function mountCollection(container, context) {
       const changed = next.props?.sessionKey !== ctx.props?.sessionKey;
       ctx = next;
       if (changed || next.props?.focus) focusSection = next.props?.focus;
-      if (changed) follow(); else render();
+      if (changed) follow(); else { render(); consumeServiceLogIntent(); }
     },
     dispose() {
       disposed = true;
+      serviceLogListeners.delete(consumeServiceLogIntent);
       tables.dispose();
       clearInterval(tick);
       sized?.disconnect();
