@@ -1021,7 +1021,7 @@ test("composer: without a collection, the card suggests where the latest message
   assert.ok(card2());
   const change = [...card2().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "Change…");
   assert.ok(change, "Change… is offered");
-  await [...card2().all()].find((n) => n.tagName === "BUTTON" && n.textContent === "✕").onclick({ preventDefault() {}, stopPropagation() {} });
+  await [...card2().all()].find((n) => n.tagName === "BUTTON" && n.title === "Not now").onclick({ preventDefault() {}, stopPropagation() {} });
   assert.equal(card2(), undefined);
   again.view.dispose();
   // A Start that fails puts the card back, saying why.
@@ -1406,7 +1406,7 @@ test("batch stale targets fail independently and an unselected new repository st
       await chooseSteps(host); await clickText(host, "Select suggested");
       const tools = withChoices("tools");
       collections.set(sessionKey, collection([api, web, tools]));
-      await clickText(host, "↻");
+      await [...host.all()].find(n => n.tagName === "BUTTON" && (n.title === "Refresh" || /\. Refresh$/.test(n.title))).onclick({ preventDefault() {}, stopPropagation() {} });
       assert.match(readable(host), /tools/);
       calls.length = 0;
       nextResult = ({ payload }) => payload.ownerSessionKey === api.sessionKey ? { ok: false, error: "Head changed" } : { ok: true, result: { performed: false, repo: web } };
@@ -1585,7 +1585,7 @@ test("compact mixed recommendations preserve publication preview and exact captu
    assert.ok(buttons(host).includes("Confirm 2 actions"));
    assert.equal(calls.some(c => c.actionId === "next" || c.method === "sessions.send" || c.method === "sessions.github.publish"), false);
    collections.set(key, collection([api, docs, withChoices("extra")]));
-   await clickText(host, "↻");
+   await [...host.all()].find(n => n.tagName === "BUTTON" && (n.title === "Refresh" || /\. Refresh$/.test(n.title))).onclick({ preventDefault() {}, stopPropagation() {} });
    assert.ok(buttons(host).includes("Confirm 2 actions"));
    await clickText(host, "Back");
    await clickText(host, "Exit selection");
@@ -1676,12 +1676,33 @@ test("collapsed PR update uses the existing personal preparation and confirmatio
   const toolbar = () => [...card.all()].find(n => n.className === "wtc-action-toolbar");
   nextResult = { ok: true, result: { performed: false, repo: r } }; calls.length = 0;
   await clickText(toolbar(), "Update PR");
-  assert.equal(card.open, true, "a distinct publication confirmation is revealed");
+  assert.equal(card.open, false, "publication keeps the collapsed bar in place");
+  assert.ok([...host.all()].some(n => n.className === "wtc-publication-confirmations"), "the separate personal preview is visible above the collapsed bar");
   assert.equal(calls.filter(c => c.method === "sessions.github.publish").length, 1);
   assert.equal(calls.filter(c => c.method === "sessions.github.confirm").length, 0);
   await clickText(host, "Confirm push");
   assert.equal(calls.filter(c => c.method === "sessions.github.confirm").length, 1);
+  assert.equal(card.open, false, "confirmed publication also preserves the collapsed bar");
  } finally { view.dispose(); nextResult = undefined; personal = null; }
+});
+
+test("a collapsed legacy snapshot exposes publication without clipping it into summary facts", async () => {
+ personal = { state: "connected", account: { login: "demo" }, generation: "g1" };
+ const { host, view } = await mount("composer", collection([repo("api", { ahead: 2, unpublished: 2 })]));
+ try {
+  const card = [...host.all()].find(n => n.className === "wtc-collection-card"); card.open = false;
+  for (const fn of card.listeners.toggle) fn();
+  const toolbar = [...card.all()].find(n => n.className === "wtc-action-toolbar");
+  calls.length = 0;
+  await clickText(toolbar, "Push");
+  assert.equal(card.open, false);
+  assert.equal(calls.filter(c => c.method === "sessions.github.publish").length, 1);
+  assert.equal(calls.filter(c => c.method === "sessions.github.confirm").length, 0);
+  assert.ok([...host.all()].some(n => n.className === "wtc-publication-confirmations"));
+  await clickText(host, "Confirm push");
+  assert.equal(calls.filter(c => c.method === "sessions.github.confirm").length, 1);
+  assert.equal(card.open, false);
+ } finally { view.dispose(); personal = null; }
 });
 
 

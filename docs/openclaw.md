@@ -762,3 +762,20 @@ Catch up controls retain their slots and become disabled when no repository is
 eligible. Temporary publication reviews, choices and connection help extend
 above the composer card and below Services in the sidebar. The repository and
 service rows remain visible in their original positions.
+
+### Alignment and compact views
+
+The brand, repository names and service names share an icon rail and a text rail.
+Icons follow the adjacent text's cap-height middle; text of different sizes keeps
+its baseline. Bulk arrows use the same arrow slot as their counts, with tabular
+numbers aligned at the other edge. Narrow rows combine name and branch and use
+one fact line only when it has facts or a recorded result; catch-up rows do not
+reserve an empty PR lane. Repeated row actions use quiet surfaces.
+
+A publication started from the collapsed bar shows its personal preview above
+the bar, without opening the repository/service details. Confirm and Cancel remain
+separate controls. Local catch-up also retains the collapsed bar throughout.
+
+The recording workflow can emit separate alignment guides, hierarchy measurements,
+cropped action clips and a synchronized native-TUI renderer replay. The TUI already
+offers keyboard Next actions with `n`; direct table mouse actions are separate.

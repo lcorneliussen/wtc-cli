@@ -4,7 +4,9 @@
   summarizes progress and outcomes, with full details and recent results in the
   sidebar below Services. Selection augments the existing repository rows,
   an aligned All repos row offers bulk push/catch-up, and narrow layouts keep
-  action targets and fact positions stable. Bulk arrows share repository arrow
+  action targets and fact positions stable. Shared name/icon rails and compact
+  narrow rows reduce near-alignments and empty PR bands. A publication preview
+  can open above the collapsed bar while its repository details stay closed. Bulk arrows share repository arrow
   tracks; PR-history links and action-log result glyphs keep reserved slots. Text shares a baseline and secondary
   controls follow the host theme. Long branches can be expanded.
   Temporary controls extend above the composer card or below sidebar Services
