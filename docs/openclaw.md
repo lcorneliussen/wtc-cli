@@ -498,8 +498,8 @@ the task as a whole:
   services' mark act on the whole collection. An aligned **All repos** row
   offers **↑** (push) and **↓** (catch up) over their per-repository arrow tracks. Hover or focus
   exposes the eligible scope; unavailable actions stay disabled in their slots.
-  Current PR facts and history links keep separate fixed slots, including narrow
-  views. Action-log result markers also have a reserved glyph slot.
+  When PR facts or history are present, they keep separate fixed tracks. Narrow
+  rows omit empty fact bands. Action-log result markers also have a reserved glyph slot.
   Uncommitted-only rows offer **Commit changes** first.
 
   An open tunnel shows the first part of its address, links to it and closes
@@ -546,9 +546,9 @@ the task as a whole:
   tables with the same actions, wtc status's pull request table (**PR Repo
   State C M R Title**), and **Add repository**.
 
-When the fixed columns no longer fit, a repository's name and action share the
-first line, with its branch and aligned facts below. The smallest components
-reserve a dedicated PR facts line. Service layout has its own
+When the fixed columns no longer fit, name and branch share the first line,
+with the action alongside. Counts and any PR facts share one aligned second
+line; facts-free rows omit it. Service layout has its own
 520-pixel breakpoint. Long branches have a tap/keyboard expansion, and complete
 feedback is available from the header in the sidebar rather than clipped into
 an extra paragraph below the rows. Services precede the recent Action log.
@@ -779,3 +779,35 @@ separate controls. Local catch-up also retains the collapsed bar throughout.
 The recording workflow can emit separate alignment guides, hierarchy measurements,
 cropped action clips and a synchronized native-TUI renderer replay. The TUI already
 offers keyboard Next actions with `n`; direct table mouse actions are separate.
+
+The reusable recorder lives in the public
+[site recording workflow](https://github.com/lcorneliussen/wtc-site/blob/setup/openclaw-interaction-recordings/docs/recording-openclaw-interactions.md).
+Its recording-only adapter here accepts a JSON input with `columns`, `rows` and
+`frames`. Each frame contains `at`, `phase`, a `StatusSnapshot` in `snapshot`,
+one local-host `next.Facts` value per repository in `facts`, and optional
+selection-only `keys`. For example, an empty initialized view is:
+
+```json
+{"columns":96,"rows":24,"frames":[{"at":0,"phase":"idle","snapshot":{"schema":1,"collection":"demo","repos":[],"prs":[],"runtime":[]},"facts":[],"keys":[]}]}
+```
+
+Save this as `/tmp/tui-input.json`, then run from the CLI source:
+
+```sh
+WTC_RECORDING_INPUT=/tmp/tui-input.json WTC_RECORDING_OUTPUT=/tmp/tui-frames.json go test -tags recording ./cmd/wtc -run '^TestStatusRecordingFrames$' -count=1
+```
+
+Without those inputs the test skips; `go test -tags recording ./cmd/wtc -run
+'^TestStatusRecordingFrames$'` still compiles the adapter. This is an author-run
+recording check, not current CI coverage. It renders native ANSI frames, refuses
+unknown keys and any returned command, and never initializes the collector.
+The site's workflow turns these frames into casts, lossless PNG/video and paired
+replays; the adapter alone does not record a live terminal or gateway.
+
+Preparation for direct table actions is tracked in
+[the shared next-action issue](https://github.com/lcorneliussen/wtc-cli/issues/179).
+Resolve the selected collection/repository/worktree/action key, re-read through
+`statusNextCurrent`, and reuse ownership, busy and publication checks. Agent
+steps must target the verified owner/pane, never the focused terminal or a typed
+draft. Report handoff separately from completion. No direct mouse actions are
+added to the status TUI by this recording work.

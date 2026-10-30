@@ -642,11 +642,12 @@ async function trackedRefresh(watch, sessionKey, say, currentSession = () => ses
   }
 }
 
+const REPO_NEXT_WIDTH = 128, REPO_COLUMN_GAP = 10;
 const repositoryColumns = (narrow) => narrow
-  ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: "128px", align: "end" }]
-  : [{ head: "Repository", width: "minmax(76px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "164px" }, { head: "Next", width: "128px", align: "end" }];
+  ? [{ head: "Repository", width: "minmax(0,1fr)", overflow: true }, { head: "Next", width: `${REPO_NEXT_WIDTH}px`, align: "end" }]
+  : [{ head: "Repository", width: "minmax(76px,1.2fr)" }, { head: "Branch", width: "minmax(64px,1.8fr)" }, { head: "Changes", width: "108px" }, { head: "Pull request", width: "164px" }, { head: "Next", width: `${REPO_NEXT_WIDTH}px`, align: "end" }];
 const actionFeedback = () => el("style", { textContent: `
-.wtc-next-step { width:128px;justify-content:flex-start !important; }
+.wtc-next-step { width:${REPO_NEXT_WIDTH}px;justify-content:flex-start !important; }
 .wtc-next-step>:first-child { width:104px;flex:0 0 104px; }
 .wtc-next-step>:not(:first-child) { width:20px;flex:0 0 20px; }
 .wtc-step-status { width:104px;text-align:center; }
@@ -697,6 +698,16 @@ function collectionTables(v) {
   const catching = new Set();
   const acting = new Set();
   let authorSending = false;
+  const openDisclosures = new Set();
+  const keepDisclosure = (node, key) => {
+    key = JSON.stringify([v.collectionKey?.() ?? v.key(), key]);
+    node.open = openDisclosures.has(key);
+    node.ontoggle = () => {
+      if (node.open) { openDisclosures.add(key); if (openDisclosures.size > 200) openDisclosures.delete(openDisclosures.values().next().value); }
+      else openDisclosures.delete(key);
+    };
+    return node;
+  };
   const active = (conversation) => v.alive?.() !== false && v.key() === conversation;
   // Mirror browser-local publication progress; this is not a gateway lock.
   const sharedPushBusy = (r) => [...(activityStore.get(v.collectionKey?.() ?? v.key())?.values() ?? [])].some(item => item.action === "push" && item.repoSessionKey === r.sessionKey && item.inFlight);
@@ -895,7 +906,14 @@ function collectionTables(v) {
     }
   }
   function syncConversation() {
-    if (batchKey !== v.key()) { confirming.clear(); batchKey = v.key(); choosing = false; selection = new Map(); batchResults = new Map(); batchLabels = new Map(); batchKeys = new Map(); batchKinds = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true; }
+    if (batchKey === v.key()) return;
+    const abandoned = [...confirming.values()];
+    confirming.clear();
+    batchKey = v.key();
+    for (const prepared of abandoned) if (prepared.activityId) recordActivity(prepared.logKey, prepared.activityId, {
+      state: "cancelled", status: "Preparation discarded after conversation switch; nothing was pushed.", inFlight: false,
+    });
+    choosing = false; selection = new Map(); batchResults = new Map(); batchLabels = new Map(); batchKeys = new Map(); batchKinds = new Map(); batchPreview = null; dispatched = new Set(); batchCancelled = true;
   }
   function suggestedTargets(repos) {
     return repos.filter((r) => actionable(r) && r.next && !reserved(r) && !dispatched.has(handoffKey(r, r.next)) && choicesOf(r).some((a) => a.available && a.key === r.next.key)).map((repo) => ({ repo, step: repo.next }));
@@ -998,7 +1016,7 @@ function collectionTables(v) {
   const openActivity = () => v.host.ui.openPanel("collection", { sessionKey: v.key(), agentId: v.agent(), focus: "activity" });
   function activityLog() {
     const key = v.collectionKey?.() ?? v.key();
-    const records = [...(activityStore.get(key)?.values() ?? [])].sort((a, b) => b.at - a.at);
+    const records = [...(activityStore.get(key)?.entries() ?? [])].map(([id, item]) => ({ ...item, id })).sort((a, b) => b.at - a.at);
     const feedback = feedbackStore.get(key);
     const plain = feedback?.text.replace(/^[\w.-]+:\s*/, "");
     if (feedback?.text && !feedback.activityId && !records.some(item => item.status.includes(plain))) records.unshift({ repo: "Latest action", action: "", status: feedback.text, at: feedback.at, failed: feedback.failed, followUp: feedback.action });
@@ -1013,7 +1031,7 @@ function collectionTables(v) {
           css(el("span", { textContent: label }), `font-size:11px;color:${failed ? TONE.failure : "var(--muted,#888)"};white-space:nowrap`),
           css(el("span", { textContent: ago(item.at) }), "font-size:11px;color:var(--muted,#888);white-space:nowrap"), el("span", { textContent: "⌄", ariaHidden: "true" })), "display:grid;grid-template-columns:minmax(0,1fr) 96px 48px 12px;gap:8px;align-items:baseline;cursor:pointer;min-height:28px;list-style:none"),
         css(el("div", {}, el("span", { textContent: item.detail ?? item.status }), resultAction(item.followUp, v.say)), "padding:6px 0 8px;white-space:normal;overflow-wrap:anywhere;font-size:12px;color:var(--muted,#888)")), "font-size:12px;min-width:0");
-      return detail;
+      return keepDisclosure(detail, `activity:${item.id ?? item.at}`);
     }), records.length > 3 ? nextButton(showAllActivity ? "Show latest 3" : `Earlier activity (${records.length - 3})`, "Show or hide earlier activity", () => { showAllActivity = !showAllActivity; v.rerender(); }) : null), "display:grid;gap:4px;min-width:0");
   }
   function actionToolbar(repos, compact = false, feedback = null) {
@@ -1104,8 +1122,8 @@ function collectionTables(v) {
         css(el("div", { textContent: `${account} · ${snapshot.owner ?? ""}/${nameOf(r)}` }), "font-size:12px;overflow-wrap:anywhere"),
         css(el("div", { textContent: `${branch} → ${dest}${c.head ? ` · ${String(c.head).slice(0, 7)}` : ""}` }), "font-size:12px;overflow-wrap:anywhere;color:var(--muted,#888)"),
         css(el("div", { textContent: `${plural(count, "commit")}${snapshot.forge !== BITBUCKET && snapshot.dirty ? ` + ${plural(snapshot.dirty, "file")} to commit` : ""}${c.uncommitted ? `; ${plural(c.uncommitted, "uncommitted file")} left behind` : ""}. The gateway rechecks the captured request before publishing.` }), "font-size:11px;overflow-wrap:anywhere;color:var(--muted,#888)"),
-        commits.length ? css(el("details", {}, el("summary", { textContent: `Inspect ${commits.length} captured commits` }), ...commits.map(commit => el("div", { textContent: typeof commit === "string" ? commit : commit.subject ?? commit.title ?? commit.message ?? commit.sha ?? "Commit" }))), "font-size:11px;overflow-wrap:anywhere") : null,
-        proposal?.title || proposal?.body ? css(el("details", {}, el("summary", { textContent: "Proposed PR text" }), el("strong", { textContent: proposal.title ?? "" }), el("div", { textContent: "For new PRs; existing PR text is kept." }), css(el("div", { textContent: proposal.body ?? "" }), "white-space:pre-wrap;overflow-wrap:anywhere")), "font-size:11px") : null,
+        commits.length ? keepDisclosure(css(el("details", {}, el("summary", { textContent: `Inspect ${commits.length} captured commits` }), ...commits.map(commit => el("div", { textContent: typeof commit === "string" ? commit : commit.subject ?? commit.title ?? commit.message ?? commit.sha ?? "Commit" }))), "font-size:11px;overflow-wrap:anywhere"), `publication:${prepared.activityId}:commits`) : null,
+        proposal?.title || proposal?.body ? keepDisclosure(css(el("details", {}, el("summary", { textContent: "Proposed PR text" }), el("strong", { textContent: proposal.title ?? "" }), el("div", { textContent: "For new PRs; existing PR text is kept." }), css(el("div", { textContent: proposal.body ?? "" }), "white-space:pre-wrap;overflow-wrap:anywhere")), "font-size:11px"), `publication:${prepared.activityId}:proposal`) : null,
         css(el("div", {}, confirm,
           nextButton("Cancel", `Cancel preparation for ${nameOf(r)}; nothing will be pushed`, () => { if (!active(prepared.conversationKey) || confirming.get(r.sessionKey) !== prepared) return; confirming.delete(r.sessionKey); if (prepared.activityId) recordActivity(prepared.logKey, prepared.activityId, { state: "cancelled", status: `${nameOf(r)}: publication cancelled.` }); v.say(`${nameOf(r)}: publication cancelled.`); v.rerender(); }, reserved(r))), "display:flex;align-items:center;gap:8px;padding-top:4px")), "display:grid;gap:4px;padding:10px 12px;border:1px solid var(--border-strong,rgba(128,128,128,.35));border-radius:8px;background:var(--bg,transparent)");
     })), "display:grid;gap:8px;min-width:0");
@@ -1389,19 +1407,20 @@ function collectionTables(v) {
     return b;
   };
   const working = () => muted("…", "Working");
-  // columns: { head, title, width, align, under }. Narrow, an under column
-  // (the service's repository) folds below its preceding cell. Repository
-  // grouping is composed by repoTable. blank leaves unused cells empty, hides
-  // visual headings (retaining accessible names), and tightens the row gaps.
   // A fixed first-line reference keeps an empty fact from changing the row's
   // baseline when a count or action appears or disappears.
   const baselineStrut = () => css(el("span", { ariaHidden: "true" }), "display:inline-block;flex:0 0 0;width:0;height:calc(var(--wtc-control-height,20px) / 2 + 5px)");
   const factSlot = value => css(el("span", {}, baselineStrut(), value), "display:flex;align-items:baseline;min-width:0;min-height:calc(var(--wtc-control-height,20px) + 2px)");
+  // columns: { head, title, width, align, under, overflow }. Narrow, an under column
+  // (the service's repository) folds below its preceding cell. Repository
+  // grouping is composed by repoTable. overflow lets its narrow facts extend
+  // beneath Next by the action width plus the table column gap. blank leaves
+  // unused cells empty, hides visual headings (retaining accessible names), and tightens the row gaps.
   const table = (columns, rows, narrow = false, blank = false) => {
     const align = (c) => c.align ? `justify-self:${c.align};` : "";
     const shown = columns.map((c, i) => i).filter((i) => !(narrow && columns[i].under));
     const grid = css(el("div", { className: "wtc-table" }),
-      `display:grid;${blank ? "grid-auto-rows:minmax(var(--wtc-control-height,20px),auto);" : ""}grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${blank ? 10 : 6}px;row-gap:${blank ? 1 : narrow ? 6 : 4}px;align-items:baseline;font-size:12px;font-variant-numeric:tabular-nums`);
+      `display:grid;${blank ? "grid-auto-rows:minmax(var(--wtc-control-height,20px),auto);" : ""}grid-template-columns:${shown.map((i) => columns[i].width ?? "auto").join(" ")};column-gap:${blank ? REPO_COLUMN_GAP : 6}px;row-gap:${blank ? 1 : narrow ? 6 : 4}px;align-items:baseline;font-size:12px;font-variant-numeric:tabular-nums`);
     const empty = (value) => value == null || value === "" || value === 0;
     grid.setAttribute("data-columns", shown.length);
     // Repository field names remain accessible without occupying a visible row.
@@ -1691,7 +1710,7 @@ function collectionTables(v) {
         if (narrow && row[1]?.style) row[1].style.cssText += ";flex:1 1 0;min-width:32px;font-size:11px";
         const hasFacts = row.slice(2,9).some(Boolean) || !!row[10];
         const identity = css(el("div", {}, nameAndBranch,
-          narrow && hasFacts ? css(el("div", { className: "wtc-repo-facts" }, factSlot(changes), row[5] || row[6] || row[7] || row[8] || row[10] ? factSlot(pr) : null), "display:grid;grid-template-columns:96px minmax(0,1fr);width:calc(100% + 138px);min-width:0;column-gap:4px;align-items:baseline;box-sizing:border-box") : null), "min-width:0;padding:0;width:100%;flex:1 1 0");
+          narrow && hasFacts ? css(el("div", { className: "wtc-repo-facts" }, factSlot(changes), row[5] || row[6] || row[7] || row[8] || row[10] ? factSlot(pr) : null), `display:grid;grid-template-columns:96px minmax(0,1fr);width:calc(100% + ${REPO_NEXT_WIDTH + REPO_COLUMN_GAP}px);min-width:0;column-gap:4px;align-items:baseline;box-sizing:border-box`) : null), "min-width:0;padding:0;width:100%;flex:1 1 0");
         return narrow ? [identity, row[9]] : [row[0], row[1], changes, pr, row[9]];
       });
       return css(el("div", { className: "wtc-repositories" }, bulkActions(repos, narrow), table(columns, rows, false, true)), "min-width:0");

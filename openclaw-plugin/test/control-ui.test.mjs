@@ -103,6 +103,7 @@ let catchUpResult = { ok: true, result: { code: 0, json: { summary: "merged" } }
 let nextResult;
 let githubPublishResult = { status: "needs_confirmation", requestId: "req-1" };
 let githubConfirmResult;
+let githubStatusResult;
 let controlledSend;
 let portals = [];
 // The person's own GitHub connection, when a test gives them one.
@@ -131,7 +132,7 @@ const hostRequest = async (method, params) => {
   }
   if (method === "sessions.github.options" && controlledOptions) return controlledOptions;
   if (method === "sessions.github.options") return { personal, shared: { source: "system-detected", login: "octo-bot" } };
-  if (method === "sessions.github.status") return { confirmation: { generation: personal?.generation, account: personal?.account, requestDigest: "d1" } };
+  if (method === "sessions.github.status") return githubStatusResult ?? { confirmation: { generation: personal?.generation, account: personal?.account, requestDigest: "d1" } };
   if (method === "plugins.sessionAction" && params.actionId === "collection") {
     assert.equal(params.pluginId, "wtc", "visible branding must retain the installed plugin's action routing");
     if (controlledCollection) return controlledCollection(params);
@@ -2190,4 +2191,55 @@ test("a concurrent preparation is not named as the repository currently publishi
     releasePreparation?.({status:"needs_confirmation",requestId:"req-web"});releasePublication?.({status:"published",url:"https://github.com/octo/api/pull/7"});
     await Promise.allSettled([preparation,publication].filter(Boolean));githubPublishResult=previous;githubConfirmResult=undefined;personal=null;view.dispose();
   }
+});
+
+test("compact rows omit empty facts and do not reserve a PR lane for catch-up only", async () => {
+  const observers=[];
+  globalThis.ResizeObserver=class { constructor(fn){this.fn=fn;observers.push(this);} observe(){} disconnect(){} };
+  const {host,view}=await mount("panel",collection([repo("api"),repo("web",{behind:3})]));
+  try {
+    observers.forEach(o=>o.fn([{contentRect:{width:360}}]));
+    const identities=[...host.all()].filter(n=>n.className==="wtc-repo-identity");
+    assert.equal(identities.length,2);
+    assert.equal([...identities[0].parentNode.all()].some(n=>n.className==="wtc-repo-facts"),false);
+    const facts=[...identities[1].parentNode.all()].find(n=>n.className==="wtc-repo-facts");
+    assert.ok(facts); assert.match(facts.textContent,/↓ 3/);
+    assert.equal([...facts.all()].some(n=>n.className==="wtc-repo-pr-slots"),false);
+  } finally {view.dispose();delete globalThis.ResizeObserver;}
+});
+
+test("an opened action-log result survives an unrelated refresh", async () => {
+  const {host,view,context}=await mount("panel",collection([repo("api",{behind:3})]));
+  const previous=catchUpResult;
+  try {
+    catchUpResult={ok:true,result:{code:1,message:"Cannot fetch the remote"}};
+    await [...host.all()].find(n=>n.tagName==="BUTTON"&&/^3 new on main/.test(n.title)).onclick();
+    const opened=[...host.all()].find(n=>n.className==="wtc-activity-item");
+    opened.open=true;opened.ontoggle();
+    view.update(context);await settle();
+    const restored=[...host.all()].find(n=>n.className==="wtc-activity-item"&&n.ariaLabel===opened.ariaLabel);
+    assert.notEqual(restored,opened);assert.equal(restored.open,true);
+  } finally {view.dispose();catchUpResult=previous;}
+});
+
+test("publication disclosures survive rerender and navigation cancels their preparation record", async () => {
+  const previous=githubPublishResult;
+  githubPublishResult={status:"needs_confirmation",requestId:"disclosure-demo"};
+  githubStatusResult={confirmation:{account:{login:"demo"},commits:["Synthetic commit"]}};
+  personal={state:"connected",account:{login:"demo"},generation:"g1"};
+  const data=collection([repo("api",{unpublished:1,proposal:{title:"Synthetic change",body:"Synthetic description"}})]);
+  const {host,view,context}=await mount("composer",data);
+  try {
+    await [...host.all()].find(n=>n.tagName==="BUTTON"&&/^1 commit to push/.test(n.title)).onclick();
+    const disclosures=()=>[...host.all()].filter(n=>n.tagName==="DETAILS"&&/^Inspect|^Proposed PR text/.test(n.textContent));
+    assert.equal(disclosures().length,2);
+    for(const n of disclosures()){n.open=true;n.ontoggle();}
+    view.update(context);await settle();
+    assert.ok(disclosures().every(n=>n.open));
+    const nextKey=`agent:main:other:${++sessions}`;collections.set(nextKey,collection([repo("other")]));
+    view.update({...context,props:{sessionKey:nextKey,agentId:"main"}});await settle();
+    const panel=await mount("panel",data,undefined,context.props.sessionKey);
+    try {assert.match(readable(panel.host),/Cancelled/);assert.doesNotMatch(readable(panel.host),/Awaiting confirm/);assert.match(readable(panel.host),/nothing was pushed/);}
+    finally {panel.view.dispose();}
+  } finally {view.dispose();githubPublishResult=previous;githubStatusResult=undefined;personal=null;}
 });
