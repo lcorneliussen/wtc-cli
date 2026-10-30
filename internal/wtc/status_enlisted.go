@@ -247,6 +247,7 @@ func statusViewPR(record PRRecord, slug, forge string, bypassCache bool) statusP
 // fan-out so a large enlistment refreshes promptly without flooding a forge.
 func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]statusPRDetail, error) {
 	repos := c.prRepositories()
+	identities := make([][2]string, len(records))
 	details := make([]statusPRDetail, len(records))
 	pending := make([]int, 0, len(records))
 	recorded := 0
@@ -256,6 +257,15 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 		}
 	}
 	for i, record := range records {
+		slug, forge, refErr := c.statusReadOnlyPRForge(repos, record)
+		if refErr != nil {
+			c.statusProgress(fmt.Sprintf("Cannot look up enlisted PR %s#%s: %v", record.Repo, record.Number, refErr))
+			if record.MergedOn == "" {
+				details[i] = statusUnknownDetail(record)
+				continue
+			}
+		}
+		identities[i] = [2]string{slug, forge}
 		if record.MergedOn == "" {
 			pending = append(pending, i)
 			continue
@@ -288,7 +298,7 @@ func (c *Context) statusEnrichRecords(records []PRRecord, rows []StatusRepo) ([]
 			defer workers.Done()
 			limit <- struct{}{}
 			defer func() { <-limit }()
-			slug, forge := repos.forge(record.Repo)
+			slug, forge := identities[i][0], identities[i][1]
 			details[i] = statusEnrichRecord(record, slug, forge)
 			done <- struct{}{}
 		}()
@@ -340,11 +350,12 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 	}
 	repos := c.prRepositories()
 	for i, record := range records {
-		slug, forge := repos.forge(record.Repo)
-		detail := statusPredictBBMerge(details[i], forge, slug, snapshot.Repos)
+		localSlug, localForge := repos.forge(record.Repo)
+		slug, forge, refErr := c.statusReadOnlyPRForge(repos, record)
+		detail := statusPredictBBMerge(details[i], localForge, localSlug, snapshot.Repos)
 		mergeHead, mergeBase := statusMergeProvenance(detail)
 		worktreeDir := ""
-		if repo, err := repos.resolve(record.Repo); err == nil {
+		if repo, err := repos.resolve(record.Repo); err == nil && refErr == nil {
 			worktreeDir = repo.dir()
 		}
 		if record.Branch != "" && worktreeDir != "" {
@@ -360,10 +371,7 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 		if detail.State == "OPEN" || detail.State == "DRAFT" {
 			statusPRBase(&snapshot, branchRow, detail.Base)
 			if branchRow >= 0 && snapshot.Repos[branchRow].PR == nil {
-				prURL := record.URL
-				if prURL == "" && forge != "" {
-					prURL = prURLForStatus(forge, slug, record.Number)
-				}
+				prURL := prURLForStatus(forge, slug, record.Number)
 				snapshot.Repos[branchRow].PR = &StatusPRFacts{Number: detail.Number, Head: detail.HeadCommit, Checks: detail.Checks,
 					URL: prURL, Merge: detail.Merge, Review: detail.Review, Draft: detail.State == "DRAFT",
 					MergeConflicts: detail.MergeConflicts, MergeSource: detail.MergeSource, MergeHead: mergeHead, MergeBase: mergeBase}
@@ -375,9 +383,9 @@ func (c *Context) statusForgePreview(includeBuild, recordMerges bool) (StatusSna
 			}
 			continue
 		}
-		url := record.URL
-		if url == "" && forge != "" {
-			url = prURL("https://"+forge+"/"+slug, record.Number)
+		url := ""
+		if refErr == nil {
+			url = prURLForStatus(forge, slug, record.Number)
 		}
 		row := StatusPRRow{Repo: record.Repo, Number: detail.Number, State: detail.State, Checks: statusString(detail.Checks),
 			Merge: statusString(detail.Merge), Review: statusString(detail.Review), Title: detail.Title,
@@ -436,9 +444,9 @@ func (c *Context) statusReturnMergedEnabled() bool {
 	return c.Config.Status.ReturnMerged == nil || *c.Config.Status.ReturnMerged
 }
 
-// statusReturnMerged returns each clean worktree still on a branch whose PR is
-// merged to the development tip, as a single-worktree catch-up would, once
-// landing is established. Remaining branches keep their merged PR row,
+// statusReturnMerged returns eligible clean merged worktrees to the development
+// tip once landing is established. Refused PR URLs and ambiguous local identities
+// do not authorize a return. Remaining branches keep their merged PR row,
 // labelled by the observed landing state.
 func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecord, details []statusPRDetail) {
 	if !c.statusReturnMergedEnabled() || len(records) != len(details) {
@@ -472,6 +480,9 @@ func (c *Context) statusReturnMerged(snapshot *StatusSnapshot, records []PRRecor
 		}
 	}
 	for i, record := range records {
+		if _, _, err := c.statusReadOnlyPRForge(repos, record); err != nil {
+			continue
+		}
 		dir := worktreeDir(record.Repo)
 		if details[i].State != "MERGED" || record.Branch == "" || live[dir+"\x00"+record.Branch] {
 			continue
