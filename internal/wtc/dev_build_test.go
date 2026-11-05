@@ -43,6 +43,7 @@ func TestDevVersionSortsBetweenReleases(t *testing.T) {
 
 func writeDevBuild(t *testing.T, collection, version string, mode os.FileMode) string {
 	t.Helper()
+	fixtureFile(t, filepath.Join(collection, "harness", ".harness-repos.yml"), "repos: []\n", 0644)
 	dir := filepath.Join(collection, ".wtc", "dev")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
@@ -121,6 +122,7 @@ func TestInstallAndUninstallDevBuild(t *testing.T) {
 		t.Skip("checkout has no release tag (shallow clone)")
 	}
 	collection := t.TempDir()
+	fixtureFile(t, filepath.Join(collection, "harness", ".harness-repos.yml"), "repos: []\n", 0644)
 	fixtureFile(t, filepath.Join(collection, ".taba", "dev", "wtc"), "#!/bin/sh\n", 0755)
 	fixtureFile(t, filepath.Join(collection, ".taba", "dev", "version"), "0.1.40-dev.1+dev.gabc1234\n", 0644)
 	build, err := InstallDevBuild(collection, source)
@@ -131,8 +133,14 @@ func TestInstallAndUninstallDevBuild(t *testing.T) {
 	if read == nil || read.Version != build.Version || read.Source != source || !strings.Contains(build.Version, "dev") {
 		t.Fatalf("installed build not readable: %+v / %+v", build, read)
 	}
-	if build.Binary != filepath.Join(collection, ".wtc", "dev", "wtc") {
-		t.Fatalf("install changed the default namespace: %+v", build)
+	if filepath.Dir(filepath.Dir(build.Binary)) != filepath.Join(collection, ".wtc", "dev-generations") || !strings.HasPrefix(filepath.Base(filepath.Dir(build.Binary)), "oneshot-") || build.Generation != "" || build.FollowProtocol != 0 {
+		t.Fatalf("one-shot is not an immutable default-namespace artifact: %+v", build)
+	}
+	bridge, err := os.ReadFile(filepath.Join(collection, ".wtc", "dev", "wtc"))
+	artifact, artifactErr := os.ReadFile(build.Binary)
+	legacy, legacyErr := os.ReadFile(filepath.Join(collection, ".wtc", "dev", "version"))
+	if err != nil || artifactErr != nil || legacyErr != nil || string(bridge) != string(artifact) || string(legacy) != build.Version+"\n"+source+"\n" {
+		t.Fatal("legacy bootstrap bridge does not match the committed artifact")
 	}
 	if _, err := os.Stat(filepath.Join(collection, ".wtc", "dev", ".wtc.tmp")); !os.IsNotExist(err) {
 		t.Fatal("temporary binary left behind")
